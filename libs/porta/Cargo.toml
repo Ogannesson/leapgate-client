@@ -1,0 +1,8 @@
+[package]
+name = "porta"
+version = "0.1.0"
+edition = "2021"
+description = "Porta extensions to the RustDesk engine"
+
+[dependencies]
+hbb_common = { path = "../hbb_common" }

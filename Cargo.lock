@@ -6203,6 +6203,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "porta"
+version = "0.1.0"
+dependencies = [
+ "hbb_common",
+]
+
+[[package]]
 name = "portable-atomic"
 version = "1.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7139,6 +7146,7 @@ dependencies = [
  "percent-encoding",
  "piet",
  "piet-coregraphics",
+ "porta",
  "portable-pty",
  "qrcode-generator",
  "rdev",

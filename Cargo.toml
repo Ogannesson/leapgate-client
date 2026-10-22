@@ -9,7 +9,7 @@ default-run = "rustdesk"
 rust-version = "1.75"
 
 [lib]
-name = "librustdesk"
+name = "libporta"
 crate-type = ["cdylib", "staticlib", "rlib"]
 
 [[bin]]
@@ -54,6 +54,7 @@ async-trait = "0.1"
 scrap = { path = "libs/scrap", features = ["wayland"] }
 hbb_common = { path = "libs/hbb_common", features = ["webrtc"] }
 base = { path = "libs/base" }
+porta = { path = "libs/porta" }
 serde_derive = "1.0"
 serde = "1.0"
 serde_json = "1.0"
