@@ -33,6 +33,14 @@ pub fn default_api_server() -> String {
     }
 }
 
+/// `get_valid_subkey` (src/platform/windows.rs) checks the legacy Inno Setup uninstall key
+/// `{54E86BC2-…}_is1` before `Uninstall\<app>`. That key belongs to an old RustDesk install;
+/// if Porta picked it up, its install script would delete the key and RustDesk's install
+/// directory with admin rights. Porta only recognizes its own keys.
+pub fn skip_legacy_is1() -> bool {
+    true
+}
+
 /// Upstream treats "no custom rendezvous server" as using RustDesk's public server, which
 /// shows a tip linking to rustdesk.com/pricing, caps custom image quality and turns on
 /// register backoff. A Porta build never uses RustDesk's public server.
