@@ -6206,6 +6206,7 @@ dependencies = [
 name = "porta"
 version = "0.1.0"
 dependencies = [
+ "base",
  "hbb_common",
 ]
 

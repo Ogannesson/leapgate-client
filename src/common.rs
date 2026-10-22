@@ -1313,6 +1313,9 @@ pub fn get_local_option(key: &str) -> String {
     {
         if v.is_empty() {
             if !is_public(&Config::get_rendezvous_server()) {
+                if let Some(v) = porta::options::self_hosted_punch_default(key) {
+                    return v;
+                }
                 return "N".to_owned();
             }
         }

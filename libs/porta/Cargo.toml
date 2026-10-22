@@ -6,3 +6,4 @@ description = "Porta extensions to the RustDesk engine"
 
 [dependencies]
 hbb_common = { path = "../hbb_common" }
+base = { path = "../base" }
