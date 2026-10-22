@@ -1,5 +1,11 @@
 use hbb_common::config::{PORTA_API_SERVER, RENDEZVOUS_PORT, RENDEZVOUS_SERVERS};
 
+/// Privacy mode copies the system RuntimeBroker.exe under this name and installers kill it
+/// by name, so it must differ from stock RustDesk's `RuntimeBroker_rustdesk.exe` or the two
+/// would kill each other's process when installed side by side.
+/// libs/portable/src/main.rs repeats this name (it does not depend on this crate).
+pub const PRIVACY_BROKER_EXE: &str = "RuntimeBroker_porta.exe";
+
 /// Replaces the `https://admin.rustdesk.com` fallback of `get_api_server_`, reached when
 /// neither `api-server` nor a custom rendezvous server is configured.
 /// Uses `PORTA_API_SERVER`; without it, derives the address from the built-in rendezvous
