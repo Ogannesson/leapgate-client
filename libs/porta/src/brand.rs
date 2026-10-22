@@ -1,4 +1,11 @@
-use hbb_common::config::{PORTA_API_SERVER, RENDEZVOUS_PORT, RENDEZVOUS_SERVERS};
+use hbb_common::config::{RENDEZVOUS_PORT, RENDEZVOUS_SERVERS};
+
+/// Build-time API address. The rendezvous server and its key are injected in hbb_common
+/// (porta-cardo) because upstream code reads them there; the API fallback is Porta-only.
+const PORTA_API_SERVER: &str = match option_env!("PORTA_API_SERVER") {
+    Some(s) => s,
+    None => "",
+};
 
 /// Privacy mode copies the system RuntimeBroker.exe under this name and installers kill it
 /// by name, so it must differ from stock RustDesk's `RuntimeBroker_rustdesk.exe` or the two
