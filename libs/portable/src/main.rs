@@ -321,6 +321,7 @@ mod win {
 
     // Used for privacy mode(magnifier impl).
     pub const RUNTIME_BROKER_EXE: &'static str = "C:\\Windows\\System32\\RuntimeBroker.exe";
+    // Porta: must equal porta::brand::PRIVACY_BROKER_EXE (libs/porta); this crate does not depend on it.
     pub const WIN_TOPMOST_INJECTED_PROCESS_EXE: &'static str = "RuntimeBroker_porta.exe";
 
     pub(super) fn schedule_verified_update_cleanup() -> std::io::Result<()> {

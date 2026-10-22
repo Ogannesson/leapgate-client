@@ -13,6 +13,10 @@ const PORTA_API_SERVER: &str = match option_env!("PORTA_API_SERVER") {
 /// libs/portable/src/main.rs repeats this name (it does not depend on this crate).
 pub const PRIVACY_BROKER_EXE: &str = "RuntimeBroker_porta.exe";
 
+/// Issuer shown in authenticator apps for the 2FA TOTP (src/auth_2fa.rs `ISSUER`).
+/// Display only: changing it does not affect the codes.
+pub const TOTP_ISSUER: &str = "Porta";
+
 /// Replaces the `https://admin.rustdesk.com` fallback of `get_api_server_`, reached when
 /// neither `api-server` nor a custom rendezvous server is configured.
 /// Uses `PORTA_API_SERVER`; without it, derives the address from the built-in rendezvous
