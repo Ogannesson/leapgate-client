@@ -3,4 +3,5 @@
 
 pub mod brand;
 pub mod options;
+pub mod rendezvous;
 pub mod update;

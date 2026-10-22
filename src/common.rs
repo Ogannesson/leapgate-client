@@ -680,6 +680,7 @@ pub fn test_nat_type() {
 
         let mut i = 0;
         loop {
+            porta::rendezvous::wait_for_server_blocking();
             match test_nat_type_() {
                 Ok(true) => break,
                 Err(err) => {
