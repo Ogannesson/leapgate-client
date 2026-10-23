@@ -1,8 +1,8 @@
 use hbb_common::config::{RENDEZVOUS_PORT, RENDEZVOUS_SERVERS};
 
 /// Build-time API address. The rendezvous server and its key are injected in hbb_common
-/// (porta-cardo) because upstream code reads them there; the API fallback is Porta-only.
-const PORTA_API_SERVER: &str = match option_env!("PORTA_API_SERVER") {
+/// (leapgate-cardo) because upstream code reads them there; the API fallback is Leapgate-only.
+const LEAPGATE_API_SERVER: &str = match option_env!("LEAPGATE_API_SERVER") {
     Some(s) => s,
     None => "",
 };
@@ -11,20 +11,20 @@ const PORTA_API_SERVER: &str = match option_env!("PORTA_API_SERVER") {
 /// by name, so it must differ from stock RustDesk's `RuntimeBroker_rustdesk.exe` or the two
 /// would kill each other's process when installed side by side.
 /// libs/portable/src/main.rs repeats this name (it does not depend on this crate).
-pub const PRIVACY_BROKER_EXE: &str = "RuntimeBroker_porta.exe";
+pub const PRIVACY_BROKER_EXE: &str = "RuntimeBroker_leapgate.exe";
 
 /// Issuer shown in authenticator apps for the 2FA TOTP (src/auth_2fa.rs `ISSUER`).
 /// Display only: changing it does not affect the codes.
-pub const TOTP_ISSUER: &str = "Porta";
+pub const TOTP_ISSUER: &str = "Leapgate";
 
 /// Replaces the `https://admin.rustdesk.com` fallback of `get_api_server_`, reached when
 /// neither `api-server` nor a custom rendezvous server is configured.
-/// Uses `PORTA_API_SERVER`; without it, derives the address from the built-in rendezvous
+/// Uses `LEAPGATE_API_SERVER`; without it, derives the address from the built-in rendezvous
 /// server the same way upstream derives it from a custom one. Empty when the build set
 /// neither, which disables the API client.
 pub fn default_api_server() -> String {
-    if !PORTA_API_SERVER.is_empty() {
-        return PORTA_API_SERVER.to_owned();
+    if !LEAPGATE_API_SERVER.is_empty() {
+        return LEAPGATE_API_SERVER.to_owned();
     }
     let s0 = RENDEZVOUS_SERVERS[0];
     if s0.is_empty() {
@@ -50,15 +50,15 @@ pub(crate) fn api_from_rendezvous(s0: &str) -> String {
 
 /// `get_valid_subkey` (src/platform/windows.rs) checks the legacy Inno Setup uninstall key
 /// `{54E86BC2-…}_is1` before `Uninstall\<app>`. That key belongs to an old RustDesk install;
-/// if Porta picked it up, its install script would delete the key and RustDesk's install
-/// directory with admin rights. Porta only recognizes its own keys.
+/// if Leapgate picked it up, its install script would delete the key and RustDesk's install
+/// directory with admin rights. Leapgate only recognizes its own keys.
 pub fn skip_legacy_is1() -> bool {
     true
 }
 
 /// Upstream treats "no custom rendezvous server" as using RustDesk's public server, which
 /// shows a tip linking to rustdesk.com/pricing, caps custom image quality and turns on
-/// register backoff. A Porta build never uses RustDesk's public server.
+/// register backoff. A Leapgate build never uses RustDesk's public server.
 pub fn never_public_server() -> bool {
     true
 }

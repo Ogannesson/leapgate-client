@@ -1351,7 +1351,7 @@ fn get_valid_subkey() -> String {
     if !get_reg_of(&subkey, "InstallLocation").is_empty() {
         return subkey;
     }
-    if porta::brand::skip_legacy_is1() {
+    if leapgate::brand::skip_legacy_is1() {
         let subkey = get_subkey(&app_name, true);
         if !get_reg_of(&subkey, "InstallLocation").is_empty() {
             return subkey;

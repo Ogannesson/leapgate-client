@@ -163,7 +163,7 @@ pub fn listen_addr(candidates: &[SocketAddr], sock_local: SocketAddr) -> SocketA
     }
 }
 
-/// Candidates a Porta peer listed in an `is_local` response; empty otherwise. Only private
+/// Candidates a Leapgate peer listed in an `is_local` response; empty otherwise. Only private
 /// IPv4 addresses are LAN candidates; anything else the peer or server put there (loopback,
 /// multicast, public addresses) would have this side connect to it unbound.
 pub fn peer_candidates(ph: &PunchHoleResponse) -> Vec<SocketAddr> {
@@ -171,7 +171,7 @@ pub fn peer_candidates(ph: &PunchHoleResponse) -> Vec<SocketAddr> {
         return Vec::new();
     }
     let mut out = Vec::new();
-    for b in ph.porta_local_addrs.iter() {
+    for b in ph.leapgate_local_addrs.iter() {
         let addr = AddrMangle::decode(b);
         let private = matches!(addr.ip(), IpAddr::V4(ip) if ip.is_private());
         if private && addr.port() != 0 && !out.contains(&addr) {
@@ -533,13 +533,13 @@ mod tests {
     fn candidates_round_trip_through_punch_response() {
         let candidates = vec![addr("192.168.1.145:54996"), addr("10.0.0.7:54996")];
         let mut ph = PunchHoleResponse {
-            porta_local_addrs: encode(&candidates),
+            leapgate_local_addrs: encode(&candidates),
             ..Default::default()
         };
         ph.set_is_local(true);
         assert_eq!(peer_candidates(&ph), candidates);
         let not_local = PunchHoleResponse {
-            porta_local_addrs: encode(&candidates),
+            leapgate_local_addrs: encode(&candidates),
             ..Default::default()
         };
         assert!(peer_candidates(&not_local).is_empty());
@@ -561,7 +561,7 @@ mod tests {
         let mut sent: Vec<SocketAddr> = junk.iter().map(|s| addr(s)).collect();
         sent.push(lan);
         let mut ph = PunchHoleResponse {
-            porta_local_addrs: encode(&sent),
+            leapgate_local_addrs: encode(&sent),
             ..Default::default()
         };
         ph.set_is_local(true);

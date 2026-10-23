@@ -1,9 +1,9 @@
 //! Routing level two (contract 02). The service process measures the TCP connect time to every
-//! relay porta-server lists in the heartbeat's `routing` and reports the latest round in the
-//! next heartbeat's `probes`; porta-server then picks relays by measurement instead of GeoIP.
+//! relay leapgate-server lists in the heartbeat's `routing` and reports the latest round in the
+//! next heartbeat's `probes`; leapgate-server then picks relays by measurement instead of GeoIP.
 //! Upstream calls in from two hooks: `relay_preference` in `get_relay_server`, so the relay
-//! porta-server chose wins over the local `relay-server` option, and `self_id` in the punch hole
-//! request, so porta-server knows whose measurements to use for the requesting side.
+//! leapgate-server chose wins over the local `relay-server` option, and `self_id` in the punch hole
+//! request, so leapgate-server knows whose measurements to use for the requesting side.
 
 mod probe;
 
@@ -18,9 +18,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// porta-server lists at most this many; any beyond are not probed.
+/// leapgate-server lists at most this many; any beyond are not probed.
 const MAX_RELAYS: usize = 32;
-/// porta-server drops a round older than this, so it is not sent.
+/// leapgate-server drops a round older than this, so it is not sent.
 const MAX_AGE: Duration = Duration::from_secs(900);
 /// Probing pauses once no heartbeat has succeeded for this long.
 const CONFIRM_TTL: Duration = Duration::from_secs(900);
@@ -31,7 +31,7 @@ struct State {
     rev: i64,
     interval: Duration,
     relays: Vec<String>,
-    /// Last successful Porta heartbeat.
+    /// Last successful Leapgate heartbeat.
     confirmed_at: Instant,
     result: Option<ProbeResult>,
 }
@@ -83,17 +83,17 @@ pub fn on_heartbeat_ok(routing: Option<&Value>) {
     WAKE.notify_all();
 }
 
-/// Called when the API server changes or turns out not to be a Porta server.
+/// Called when the API server changes or turns out not to be a Leapgate server.
 pub fn reset() {
     *STATE.lock().unwrap() = None;
     WAKE.notify_all();
 }
 
-/// Hook in `get_relay_server`: with porta-server, the relay it chose (from the measurements, or
+/// Hook in `get_relay_server`: with leapgate-server, the relay it chose (from the measurements, or
 /// a relay pinned to this device) wins over the local `relay-server` option. Against an original
 /// hbbs, whose choice is round robin, the local option keeps winning as upstream has it.
 pub fn relay_preference(provided: &str) -> Option<String> {
-    prefer(provided, report::server_is_porta)
+    prefer(provided, report::server_is_leapgate)
 }
 
 /// This device's ID for the punch hole request. Not `Config::get_id()`, which generates and
@@ -103,8 +103,8 @@ pub fn self_id() -> String {
     Config::get_id_or(String::new())
 }
 
-fn prefer(provided: &str, is_porta: impl FnOnce() -> bool) -> Option<String> {
-    (!provided.is_empty() && is_porta()).then(|| provided.to_owned())
+fn prefer(provided: &str, is_leapgate: impl FnOnce() -> bool) -> Option<String> {
+    (!provided.is_empty() && is_leapgate()).then(|| provided.to_owned())
 }
 
 /// Takes in a successful heartbeat. Returns whether there are relays to probe.
@@ -262,7 +262,7 @@ mod tests {
     }
 
     #[test]
-    fn porta_server_relay_wins_only_when_given() {
+    fn leapgate_server_relay_wins_only_when_given() {
         let r = "relay1.example.com:21117";
         assert_eq!(prefer(r, || true), Some(r.to_owned()));
         assert_eq!(prefer(r, || false), None);

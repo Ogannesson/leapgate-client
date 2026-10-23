@@ -5,7 +5,7 @@ use std::time::Duration;
 // newly entered server without a restart.
 const POLL_INTERVAL: Duration = Duration::from_secs(1);
 
-/// A Porta build may ship without a default server (`PORTA_RENDEZVOUS_SERVER` unset), and
+/// A Leapgate build may ship without a default server (`LEAPGATE_RENDEZVOUS_SERVER` unset), and
 /// then the server list is `[""]`. Upstream never has an empty list, so it would keep
 /// connecting to `:21116` on its own address and log an error every few seconds.
 fn server_configured() -> bool {

@@ -1,10 +1,10 @@
-//! Reports to a Porta server over `/api/porta/v1/`: heartbeat with sysinfo, and the controlled
+//! Reports to a Leapgate server over `/api/leapgate/v1/`: heartbeat with sysinfo, and the controlled
 //! side's audits, each signed with the device key. Upstream calls in from two hooks, `tick` in
 //! the hbbs sync loop and `audit` in `post_audit_async`; when they return `false` / `None`,
 //! upstream's legacy reports run unchanged.
 //!
 //! Capability per API root: unknown, supported or unsupported (contract 01 §2.5). Only a 404 /
-//! 405, or a 2xx that is not a Porta answer, on a root not yet confirmed sends the reports back
+//! 405, or a 2xx that is not a Leapgate answer, on a root not yet confirmed sends the reports back
 //! to the legacy path: that path is unsigned, may accept invalid certificates and applies
 //! whatever options the heartbeat hands down, so nothing else may downgrade to it.
 
@@ -29,12 +29,12 @@ use std::{
 
 /// `<API root>\n<feature,feature,...>`, written by the service process only. A Config option
 /// rather than LocalConfig so the UI process gets it through the option sync.
-const CAPS_KEY: &str = "porta-api-caps";
+const CAPS_KEY: &str = "leapgate-api-caps";
 const RECHECK: Duration = Duration::from_secs(600);
 const LOG_INTERVAL: Duration = Duration::from_secs(60);
 /// A 2xx's `time` moves the clock only when it is this far off (seconds).
 const MAX_SKEW: i64 = 30;
-/// The 401 `error` codes porta-server sends (contract 01 §2.6).
+/// The 401 `error` codes leapgate-server sends (contract 01 §2.6).
 const AUTH_ERRORS: [&str; 5] = [
     "bad_auth",
     "stale_time",
@@ -84,13 +84,13 @@ pub async fn audit(url: &str, v: &Value) -> Option<ResultType<String>> {
     audit::send(&Live { root }, &CAP, root, typ, v).await
 }
 
-/// The current API root is a confirmed Porta server, or the address the build was configured
+/// The current API root is a confirmed Leapgate server, or the address the build was configured
 /// with. Reads the persisted record, so it holds in any process and right after start.
-pub fn server_is_porta() -> bool {
-    is_porta(&api_root(), &Config::get_option(CAPS_KEY), &default_root())
+pub fn server_is_leapgate() -> bool {
+    is_leapgate(&api_root(), &Config::get_option(CAPS_KEY), &default_root())
 }
 
-/// The current API root is a confirmed Porta server that announced `name`.
+/// The current API root is a confirmed Leapgate server that announced `name`.
 pub fn has_feature(name: &str) -> bool {
     feature_in(&api_root(), &Config::get_option(CAPS_KEY), name)
 }
@@ -166,7 +166,7 @@ fn checked_root<'a>(root: &'a str, api_root: &str) -> Option<&'a str> {
         throttled_log!(
             LOG_INTERVAL,
             warn,
-            "porta report: api root mismatch, using legacy reports"
+            "leapgate report: api root mismatch, using legacy reports"
         );
         return None;
     }
@@ -185,7 +185,7 @@ fn caps_value(root: &str, features: &[String]) -> String {
     format!("{root}\n{}", features.join(","))
 }
 
-fn is_porta(root: &str, caps: &str, default_root: &str) -> bool {
+fn is_leapgate(root: &str, caps: &str, default_root: &str) -> bool {
     !root.is_empty() && (root == default_root || parse_caps(caps).map_or(false, |(r, _)| r == root))
 }
 
@@ -266,7 +266,7 @@ fn select<E: Env>(env: &E, cap: &CapSlot, root: &str) {
     if slot.0 == root {
         return;
     }
-    let state = if is_porta(root, &env.caps(), &env.default_root()) {
+    let state = if is_leapgate(root, &env.caps(), &env.default_root()) {
         Cap::Supported
     } else {
         Cap::Unknown
@@ -305,7 +305,7 @@ fn mark_supported<E: Env>(env: &E, cap: &CapSlot, root: &str, features: Option<V
         throttled_log!(
             LOG_INTERVAL,
             info,
-            "porta report: {} supports Porta API, features [{}]",
+            "leapgate report: {} supports Leapgate API, features [{}]",
             root,
             features.join(",")
         );
@@ -326,7 +326,7 @@ fn mark_unsupported<E: Env>(env: &E, cap: &CapSlot, root: &str, status: u16) {
     throttled_log!(
         LOG_INTERVAL,
         info,
-        "porta report: {} has no Porta API ({}), using legacy reports",
+        "leapgate report: {} has no Leapgate API ({}), using legacy reports",
         root,
         status
     );
@@ -335,8 +335,8 @@ fn mark_unsupported<E: Env>(env: &E, cap: &CapSlot, root: &str, status: u16) {
 enum Reply {
     /// A 2xx JSON object with `api`, its signature verified when a key is configured.
     Ok(Map<String, Value>),
-    /// 404 / 405, or a 2xx that is not a Porta answer (a proxy's page for unknown paths). Not
-    /// signature-checked: it is as easy to forge as a 404. Means "no Porta API" only on a root
+    /// 404 / 405, or a 2xx that is not a Leapgate answer (a proxy's page for unknown paths). Not
+    /// signature-checked: it is as easy to forge as a 404. Means "no Leapgate API" only on a root
     /// not yet confirmed.
     NoApi(u16),
     /// 400 / 413: sending the same request again cannot help.
@@ -373,7 +373,7 @@ async fn exchange<E: Env>(env: &E, endpoint: &str, body: &[u8]) -> Reply {
                     throttled_log!(
                         LOG_INTERVAL,
                         warn,
-                        "porta report: server signature check failed"
+                        "leapgate report: server signature check failed"
                     );
                     return Reply::Failed("server signature check failed".to_owned());
                 }
@@ -403,7 +403,7 @@ async fn exchange<E: Env>(env: &E, endpoint: &str, body: &[u8]) -> Reply {
                         throttled_log!(
                             LOG_INTERVAL,
                             warn,
-                            "porta report: server signature check failed"
+                            "leapgate report: server signature check failed"
                         );
                     }
                     return Reply::Failed(format!("status 401 {code}"));
@@ -414,7 +414,7 @@ async fn exchange<E: Env>(env: &E, endpoint: &str, body: &[u8]) -> Reply {
                         throttled_log!(
                             LOG_INTERVAL,
                             info,
-                            "porta report: 401 {}, clock offset now {}s",
+                            "leapgate report: 401 {}, clock offset now {}s",
                             code,
                             sign::clock_offset()
                         );
@@ -438,7 +438,7 @@ mod tests {
     use hbb_common::anyhow::anyhow;
     use std::collections::VecDeque;
 
-    pub(super) const ROOT: &str = "http://porta.test:21114";
+    pub(super) const ROOT: &str = "http://leapgate.test:21114";
     pub(super) const REQ_SIG: [u8; 64] = [5; 64];
 
     #[derive(Default)]
@@ -554,36 +554,39 @@ mod tests {
     #[test]
     fn answers_from_persisted_record() {
         let caps = format!("{ROOT}\nudp-punch");
-        assert!(is_porta(ROOT, &caps, ""));
+        assert!(is_leapgate(ROOT, &caps, ""));
         assert!(feature_in(ROOT, &caps, "udp-punch"));
         assert!(!feature_in(ROOT, &caps, "other"));
         // The record is for another root.
-        assert!(!is_porta("http://other:21114", &caps, ""));
+        assert!(!is_leapgate("http://other:21114", &caps, ""));
         assert!(!feature_in("http://other:21114", &caps, "udp-punch"));
-        // Build-time address without a record yet: Porta, but no features known.
-        assert!(is_porta(ROOT, "", ROOT));
+        // Build-time address without a record yet: Leapgate, but no features known.
+        assert!(is_leapgate(ROOT, "", ROOT));
         assert!(!feature_in(ROOT, "", "udp-punch"));
-        assert!(!is_porta("", "", ""));
+        assert!(!is_leapgate("", "", ""));
     }
 
     #[test]
     fn hook_urls_split_against_api_root() {
-        let hb = "http://porta.test:21114/api/heartbeat";
+        let hb = "http://leapgate.test:21114/api/heartbeat";
         assert_eq!(heartbeat_root(hb, ROOT), Some(ROOT));
-        assert_eq!(heartbeat_root(hb, "https://porta.test"), None);
+        assert_eq!(heartbeat_root(hb, "https://leapgate.test"), None);
         assert_eq!(
-            heartbeat_root("http://porta.test:21114/api/sysinfo", ROOT),
+            heartbeat_root("http://leapgate.test:21114/api/sysinfo", ROOT),
             None
         );
-        let au = "http://porta.test:21114/api/audit/conn";
+        let au = "http://leapgate.test:21114/api/audit/conn";
         assert_eq!(audit_target(au, ROOT), Some((ROOT, "conn")));
         assert_eq!(
-            audit_target("https://porta.test/api/audit/alarm", "https://porta.test"),
-            Some(("https://porta.test", "alarm"))
+            audit_target(
+                "https://leapgate.test/api/audit/alarm",
+                "https://leapgate.test"
+            ),
+            Some(("https://leapgate.test", "alarm"))
         );
-        assert_eq!(audit_target(au, "https://porta.test"), None);
+        assert_eq!(audit_target(au, "https://leapgate.test"), None);
         assert_eq!(
-            audit_target("http://porta.test:21114/api/heartbeat", ROOT),
+            audit_target("http://leapgate.test:21114/api/heartbeat", ROOT),
             None
         );
     }

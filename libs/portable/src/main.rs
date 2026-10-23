@@ -321,8 +321,8 @@ mod win {
 
     // Used for privacy mode(magnifier impl).
     pub const RUNTIME_BROKER_EXE: &'static str = "C:\\Windows\\System32\\RuntimeBroker.exe";
-    // Porta: must equal porta::brand::PRIVACY_BROKER_EXE (libs/porta); this crate does not depend on it.
-    pub const WIN_TOPMOST_INJECTED_PROCESS_EXE: &'static str = "RuntimeBroker_porta.exe";
+    // Leapgate: must equal leapgate::brand::PRIVACY_BROKER_EXE (libs/leapgate); this crate does not depend on it.
+    pub const WIN_TOPMOST_INJECTED_PROCESS_EXE: &'static str = "RuntimeBroker_leapgate.exe";
 
     pub(super) fn schedule_verified_update_cleanup() -> std::io::Result<()> {
         use windows::{
@@ -365,7 +365,7 @@ mod win {
             }
         }
         let _allow_err = Command::new("taskkill")
-            .args(&["/F", "/IM", "RuntimeBroker_porta.exe"])
+            .args(&["/F", "/IM", "RuntimeBroker_leapgate.exe"])
             .creation_flags(winapi::um::winbase::CREATE_NO_WINDOW)
             .output();
         let _allow_err = std::fs::copy(src, &format!("{}\\{}", dir.to_string_lossy(), tgt));
