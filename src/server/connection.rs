@@ -1667,6 +1667,10 @@ impl Connection {
     }
 
     async fn post_audit_async(url: String, v: Value) -> ResultType<String> {
+        // porta: Porta servers get signed audits on /api/porta/v1/
+        if let Some(res) = porta::report::audit(&url, &v).await {
+            return res;
+        }
         // Audit records are compliance evidence; retry transport errors and
         // 5xx (e.g. a reverse proxy answering while the api server restarts)
         // so transient failures don't silently drop them. A 4xx is a

@@ -30,7 +30,11 @@ pub fn default_api_server() -> String {
     if s0.is_empty() {
         return "".to_owned();
     }
-    // Same rule as the custom-server branch of `get_api_server_` in src/common.rs.
+    api_from_rendezvous(s0)
+}
+
+/// Same rule as the custom-server branch of `get_api_server_` in src/common.rs.
+pub(crate) fn api_from_rendezvous(s0: &str) -> String {
     let s = hbb_common::socket_client::increase_port(s0, -2);
     if s == s0 {
         let s = if hbb_common::is_ipv6_str(&s) && !s.starts_with('[') {
