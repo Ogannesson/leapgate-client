@@ -19,7 +19,7 @@ use hbb_common::{
 };
 use std::{
     future::Future,
-    net::{IpAddr, Ipv4Addr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     time::{Duration, Instant},
 };
 
@@ -46,6 +46,9 @@ struct Nic {
     if_type: u32,
     up: bool,
     ipv4: Vec<Ipv4Addr>,
+    /// Preferred unicast addresses, without link-local ones.
+    ipv6: Vec<Ipv6Addr>,
+    /// An IPv4 default gateway.
     has_gateway: bool,
     /// Bits per second, 0 when unknown.
     speed: u64,
@@ -79,12 +82,27 @@ fn excluded_ip(ip: Ipv4Addr) -> bool {
 }
 
 /// Whether `ip` is an address of an up, physical adapter. A default gateway is not required:
-/// this only decides whether the socket's own address can stay first.
-fn is_physical(nics: &[Nic], ip: Ipv4Addr) -> bool {
-    !excluded_ip(ip)
-        && nics
+/// this only decides whether the socket's own address can stay first, or whether a connection
+/// left through a real adapter.
+fn is_physical(nics: &[Nic], ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => {
+            !excluded_ip(ip)
+                && nics
+                    .iter()
+                    .any(|n| n.up && !n.is_virtual() && n.ipv4.contains(&ip))
+        }
+        IpAddr::V6(ip) => nics
             .iter()
-            .any(|n| n.up && !n.is_virtual() && n.ipv4.contains(&ip))
+            .any(|n| n.up && !n.is_virtual() && n.ipv6.contains(&ip)),
+    }
+}
+
+/// Physical-adapter test for relay probes, over one adapter enumeration (blocking, 5~10 ms).
+/// An empty enumeration (non-Windows, or failure) trusts nothing.
+pub fn physical_snapshot() -> impl Fn(IpAddr) -> bool {
+    let nics = nics();
+    move |ip| is_physical(&nics, ip)
 }
 
 fn select_candidates(nics: &[Nic], sock_local: SocketAddr) -> Vec<SocketAddr> {
@@ -93,7 +111,7 @@ fn select_candidates(nics: &[Nic], sock_local: SocketAddr) -> Vec<SocketAddr> {
     };
     let port = sock_local.port();
     let mut out = Vec::new();
-    if is_physical(nics, *sock_v4.ip()) {
+    if is_physical(nics, IpAddr::V4(*sock_v4.ip())) {
         out.push(sock_local);
     }
     // A default gateway also rules out WSL / Hyper-V vEthernet and host-only adapters.
@@ -179,7 +197,7 @@ pub async fn controller_bind_addr(my_addr: SocketAddr, is_local: bool) -> Socket
     let ip = *v4.ip();
     let physical = tokio::task::spawn_blocking(move || {
         let nics = nics();
-        nics.is_empty() || is_physical(&nics, ip)
+        nics.is_empty() || is_physical(&nics, IpAddr::V4(ip))
     })
     .await
     .unwrap_or(true);
@@ -218,7 +236,9 @@ where
 /// IPv6 punch window. An empty adapter list proves nothing.
 fn handshake_timeout(nics: &[Nic], local: SocketAddr) -> Duration {
     match local.ip() {
-        IpAddr::V4(ip) if !nics.is_empty() && !is_physical(nics, ip) => VIRTUAL_HANDSHAKE_TIMEOUT,
+        IpAddr::V4(ip) if !nics.is_empty() && !is_physical(nics, IpAddr::V4(ip)) => {
+            VIRTUAL_HANDSHAKE_TIMEOUT
+        }
         _ => HANDSHAKE_TIMEOUT,
     }
 }
@@ -271,7 +291,10 @@ fn nics() -> Vec<Nic> {
             },
             Ndis::IfOperStatusUp,
         },
-        Networking::WinSock::{AF_INET, SOCKADDR_IN, SOCKET_ADDRESS},
+        Networking::WinSock::{
+            IpDadStatePreferred, AF_INET, AF_INET6, AF_UNSPEC, SOCKADDR_IN, SOCKADDR_IN6,
+            SOCKET_ADDRESS,
+        },
     };
 
     fn ipv4_of(sa: &SOCKET_ADDRESS) -> Option<Ipv4Addr> {
@@ -284,6 +307,18 @@ fn nics() -> Vec<Nic> {
             }
             let sin = &*(sa.lpSockaddr as *const SOCKADDR_IN);
             Some(Ipv4Addr::from(sin.sin_addr.S_un.S_addr.to_ne_bytes()))
+        }
+    }
+
+    fn ipv6_of(sa: &SOCKET_ADDRESS) -> Option<Ipv6Addr> {
+        // SAFETY: as in ipv4_of, read as SOCKADDR_IN6 only after the family check.
+        unsafe {
+            let p = sa.lpSockaddr.as_ref()?;
+            if p.sa_family != AF_INET6 {
+                return None;
+            }
+            let sin6 = &*(sa.lpSockaddr as *const SOCKADDR_IN6);
+            Some(Ipv6Addr::from(sin6.sin6_addr.u.Byte))
         }
     }
 
@@ -300,7 +335,7 @@ fn nics() -> Vec<Nic> {
         // SAFETY: buf holds `size` bytes, as passed.
         let ret = unsafe {
             GetAdaptersAddresses(
-                AF_INET.0 as u32,
+                AF_UNSPEC.0 as u32,
                 flags,
                 None,
                 Some(buf.as_mut_ptr() as *mut IP_ADAPTER_ADDRESSES_LH),
@@ -322,9 +357,13 @@ fn nics() -> Vec<Nic> {
     // SAFETY: a linked list inside buf, built by GetAdaptersAddresses.
     while let Some(a) = unsafe { cur.as_ref() } {
         let mut ipv4 = Vec::new();
+        let mut ipv6 = Vec::new();
         let mut u = a.FirstUnicastAddress;
         while let Some(ua) = unsafe { u.as_ref() } {
             ipv4.extend(ipv4_of(&ua.Address));
+            if ua.DadState == IpDadStatePreferred {
+                ipv6.extend(ipv6_of(&ua.Address).filter(|ip| !ip.is_unicast_link_local()));
+            }
             u = ua.Next;
         }
         let mut has_gateway = false;
@@ -338,6 +377,7 @@ fn nics() -> Vec<Nic> {
             if_type: a.IfType,
             up: a.OperStatus == IfOperStatusUp,
             ipv4,
+            ipv6,
             has_gateway,
             speed: if a.TransmitLinkSpeed == u64::MAX {
                 0
@@ -363,6 +403,7 @@ mod tests {
             if_type,
             up: true,
             ipv4: vec![ip.parse().unwrap()],
+            ipv6: Vec::new(),
             has_gateway: gateway,
             speed,
         }
@@ -548,6 +589,24 @@ mod tests {
         let lan_end = addr("192.168.1.145:13355");
         assert_eq!(handshake_timeout(&nics, lan_end), HANDSHAKE_TIMEOUT);
         assert_eq!(handshake_timeout(&[], tun_end), HANDSHAKE_TIMEOUT);
+    }
+
+    #[test]
+    fn physical_test_covers_both_families() {
+        let mut wired = nic("Ethernet", IF_TYPE_ETHERNET, "192.168.1.145", true, 0);
+        wired.ipv6 = vec!["2408:8256::10".parse().unwrap()];
+        let mut tun = tun();
+        tun.ipv6 = vec!["fdfe:dcba:9876::1".parse().unwrap()];
+        let nics = [tun, wired];
+        let ip = |s: &str| s.parse::<IpAddr>().unwrap();
+        assert!(is_physical(&nics, ip("192.168.1.145")));
+        assert!(is_physical(&nics, ip("2408:8256::10")));
+        assert!(!is_physical(&nics, ip("198.18.0.1")));
+        assert!(!is_physical(&nics, ip("fdfe:dcba:9876::1")));
+        assert!(!is_physical(&nics, ip("2408:8256::11")));
+        // No enumeration: nothing counts as physical.
+        assert!(!is_physical(&[], ip("192.168.1.145")));
+        assert!(!is_physical(&[], ip("2408:8256::10")));
     }
 
     #[hbb_common::tokio::test(crate = "hbb_common::tokio")]
