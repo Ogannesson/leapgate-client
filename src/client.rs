@@ -848,6 +848,8 @@ impl Client {
         let mut peer_nat_type = NatType::UNKNOWN_NAT;
         let my_nat_type = crate::get_nat_type(100).await;
         let mut is_local = false;
+        // porta: LAN candidates a Porta peer lists with is_local
+        let mut porta_lan_addrs = Vec::new();
         let mut feedback = 0;
         use hbb_common::protobuf::Enum;
         let nat_type = if interface.is_force_relay() {
@@ -1020,6 +1022,8 @@ impl Client {
                                 _ => bail!("other punch hole failure"),
                             }
                         } else {
+                            // porta: empty unless is_local and the peer is Porta
+                            porta_lan_addrs = porta::lan::peer_candidates(&ph);
                             peer_nat_type = ph.nat_type();
                             is_local = ph.is_local();
                             signed_id_pk = ph.pk.into();
@@ -1364,6 +1368,17 @@ impl Client {
                 format!("nat_type: {:?}", peer_nat_type)
             }
         );
+        // porta: race the peer's LAN candidates before upstream's connect()
+        let (tcp, relay) = (allow_tcp_punch, interface.is_force_relay());
+        let addrs = &mut porta_lan_addrs;
+        if let Some(conn) =
+            crate::porta_hooks::lan_connect(addrs, tcp, relay, &peer, &signed_id_pk, &key).await
+        {
+            return Ok((conn, (feedback, rendezvous_server), true));
+        }
+        // porta: after failed candidates relay without a TCP retry; never bind to a TUN address
+        let (my_addr, allow_tcp_punch) =
+            crate::porta_hooks::lan_fallback(addrs, peer_addr, is_local, my_addr, tcp).await;
         Ok((
             Self::connect(
                 my_addr,
@@ -1650,7 +1665,7 @@ impl Client {
     }
 
     /// Establish secure connection with the server.
-    async fn secure_connection(
+    pub(crate) async fn secure_connection(
         peer_id: &str,
         signed_id_pk: Vec<u8>,
         key: &str,

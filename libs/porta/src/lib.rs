@@ -2,6 +2,7 @@
 //! so merging upstream releases conflicts on those lines and nowhere else.
 
 pub mod brand;
+pub mod lan;
 pub mod options;
 pub mod rendezvous;
 pub mod update;
