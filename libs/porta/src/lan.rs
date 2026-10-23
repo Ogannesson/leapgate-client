@@ -9,6 +9,7 @@
 //! system sends them out of the physical adapter.
 
 use hbb_common::{
+    bail,
     bytes::Bytes,
     futures::future::select_ok,
     log,
@@ -132,10 +133,10 @@ pub fn encode(addrs: &[SocketAddr]) -> Vec<Bytes> {
         .collect()
 }
 
-/// Where the controlled side waits for the LAN connection. A candidate on another address
-/// than the socket's needs the wildcard; the port stays the one reported.
-pub async fn listen_addr(sock_local: SocketAddr) -> SocketAddr {
-    let candidates = local_candidates_async(sock_local).await;
+/// Where the controlled side waits for the LAN connection, from the candidates it reported for
+/// the socket at `sock_local`. A candidate on another address than the socket's needs the
+/// wildcard; the port stays the one reported.
+pub fn listen_addr(candidates: &[SocketAddr], sock_local: SocketAddr) -> SocketAddr {
     if candidates.iter().any(|c| c.ip() != sock_local.ip()) {
         SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), sock_local.port())
     } else {
@@ -143,7 +144,9 @@ pub async fn listen_addr(sock_local: SocketAddr) -> SocketAddr {
     }
 }
 
-/// Candidates a Porta peer listed in an `is_local` response; empty otherwise.
+/// Candidates a Porta peer listed in an `is_local` response; empty otherwise. Only private
+/// IPv4 addresses are LAN candidates; anything else the peer or server put there (loopback,
+/// multicast, public addresses) would have this side connect to it unbound.
 pub fn peer_candidates(ph: &PunchHoleResponse) -> Vec<SocketAddr> {
     if !ph.is_local() {
         return Vec::new();
@@ -151,7 +154,8 @@ pub fn peer_candidates(ph: &PunchHoleResponse) -> Vec<SocketAddr> {
     let mut out = Vec::new();
     for b in ph.porta_local_addrs.iter() {
         let addr = AddrMangle::decode(b);
-        if addr.is_ipv4() && addr.port() != 0 && !out.contains(&addr) {
+        let private = matches!(addr.ip(), IpAddr::V4(ip) if ip.is_private());
+        if private && addr.port() != 0 && !out.contains(&addr) {
             out.push(addr);
         }
         if out.len() >= MAX_CANDIDATES {
@@ -192,12 +196,30 @@ where
     H: Fn(Stream) -> F,
     F: Future<Output = ResultType<T>>,
 {
-    let handshake = &handshake;
+    if candidates.is_empty() {
+        return None;
+    }
+    let nics = tokio::task::spawn_blocking(nics).await.unwrap_or_default();
+    let (nics, handshake) = (&nics, &handshake);
     race(candidates, |addr| async move {
         let conn = connect_tcp_local(addr, None, CONNECT_TIMEOUT_MS).await?;
+        if !left_through_lan(nics, conn.local_addr()) {
+            bail!("routed into a local tunnel from {}", conn.local_addr());
+        }
         timeout(HANDSHAKE_TIMEOUT, handshake(conn)).await?
     })
     .await
+}
+
+/// A candidate outside this side's own LAN segments is routed into the TUN, whose stack
+/// completes the TCP handshake locally and then never answers. Its local end is then the
+/// virtual adapter's address, so it fails here at once instead of holding the handshake
+/// timeout, and the handshake bytes never reach the proxy. An empty adapter list proves nothing.
+fn left_through_lan(nics: &[Nic], local: SocketAddr) -> bool {
+    match local.ip() {
+        IpAddr::V4(ip) => nics.is_empty() || is_physical(nics, ip),
+        IpAddr::V6(_) => true,
+    }
 }
 
 async fn race<A, F, T>(candidates: &[SocketAddr], attempt: A) -> Option<T>
@@ -215,11 +237,7 @@ where
     });
     match select_ok(attempts).await {
         Ok(((addr, v), _)) => {
-            log::info!(
-                "LAN candidate {} connected and secured in {:?}",
-                addr,
-                start.elapsed()
-            );
+            log::info!("LAN candidate {} won in {:?}", addr, start.elapsed());
             Some(v)
         }
         Err(e) => {
@@ -483,6 +501,50 @@ mod tests {
             ..Default::default()
         };
         assert!(peer_candidates(&not_local).is_empty());
+    }
+
+    #[test]
+    fn peer_candidates_keep_only_private_ipv4() {
+        let lan = addr("192.168.1.145:54996");
+        let junk = [
+            "127.0.0.1:21118",
+            "224.0.0.1:80",
+            "255.255.255.255:80",
+            "0.0.0.1:80",
+            "8.8.8.8:53",
+            "169.254.1.1:80",
+            "198.18.0.1:80",
+            "192.168.1.146:0",
+        ];
+        let mut sent: Vec<SocketAddr> = junk.iter().map(|s| addr(s)).collect();
+        sent.push(lan);
+        let mut ph = PunchHoleResponse {
+            porta_local_addrs: encode(&sent),
+            ..Default::default()
+        };
+        ph.set_is_local(true);
+        assert_eq!(peer_candidates(&ph), vec![lan]);
+    }
+
+    #[test]
+    fn listen_on_wildcard_only_beyond_the_socket_address() {
+        let any = addr("0.0.0.0:54996");
+        let tun_sock = addr(TUN_SOCK);
+        let lan_sock = addr("192.168.1.145:54996");
+        assert_eq!(listen_addr(&[lan_sock], tun_sock), any);
+        assert_eq!(listen_addr(&[lan_sock], lan_sock), lan_sock);
+        assert_eq!(listen_addr(&[], tun_sock), tun_sock);
+    }
+
+    #[test]
+    fn connection_caught_by_local_tun_is_not_lan() {
+        let nics = [
+            tun(),
+            nic("Ethernet", IF_TYPE_ETHERNET, "192.168.1.145", true, 0),
+        ];
+        assert!(!left_through_lan(&nics, addr("198.18.0.1:13355")));
+        assert!(left_through_lan(&nics, addr("192.168.1.145:13355")));
+        assert!(left_through_lan(&[], addr("198.18.0.1:13355")));
     }
 
     #[hbb_common::tokio::test(crate = "hbb_common::tokio")]

@@ -1369,9 +1369,10 @@ impl Client {
             }
         );
         // porta: race the peer's LAN candidates before upstream's connect()
-        let (addrs, tcp) = (&porta_lan_addrs, allow_tcp_punch);
+        let (tcp, relay) = (allow_tcp_punch, interface.is_force_relay());
+        let addrs = &mut porta_lan_addrs;
         if let Some(conn) =
-            crate::porta_hooks::lan_connect(addrs, tcp, &peer, &signed_id_pk, &key).await
+            crate::porta_hooks::lan_connect(addrs, tcp, relay, &peer, &signed_id_pk, &key).await
         {
             return Ok((conn, (feedback, rendezvous_server), true));
         }

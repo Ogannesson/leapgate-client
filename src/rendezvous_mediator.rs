@@ -835,8 +835,8 @@ impl RendezvousMediator {
         let local_addr: SocketAddr =
             format!("{}:{}", local_addr.ip(), local_addr.port()).parse()?;
         // porta: report physical adapters' addresses, not a TUN adapter's; none found keeps upstream's
-        let porta_lan = porta::lan::local_candidates_async(local_addr).await;
-        let local_addr = porta_lan.first().copied().unwrap_or(local_addr);
+        let lan = porta::lan::local_candidates_async(local_addr).await;
+        let local_addr = lan.first().copied().unwrap_or(local_addr);
         let mut msg_out = Message::new();
         msg_out.set_local_addr(LocalAddr {
             id: Config::get_id(),
@@ -846,12 +846,13 @@ impl RendezvousMediator {
             version: crate::VERSION.to_owned(),
             socket_addr_v6,
             // porta: every LAN candidate, for a Porta controller to try at once
-            porta_local_addrs: porta::lan::encode(&porta_lan),
+            porta_local_addrs: porta::lan::encode(&lan),
             ..Default::default()
         });
         let bytes = msg_out.write_to_bytes()?;
         socket.send_raw(bytes).await?;
-        crate::accept_connection(server.clone(), socket, peer_addr, true, meta, slot).await;
+        // porta: the candidates decide the listen address there, without enumerating adapters again
+        crate::accept_connection(server.clone(), socket, peer_addr, true, meta, slot, lan).await;
         Ok(())
     }
 
