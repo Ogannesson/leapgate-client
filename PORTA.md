@@ -12,7 +12,9 @@
 
 ## 2. 已有的挂钩（第二期）
 
-`libs/porta/src/`：`brand.rs`（名字、默认服务器构建时注入、`default_api_server()`）、`options.rs`（自建服务器时 IPv6 打洞默认开等默认值）、`rendezvous.rs`（没配会合服务器时等用户填好再连）、`update.rs`（关掉官方更新检查）。具体挂钩位置用 `git grep -n "porta::"` 查。
+`libs/porta/src/`：`brand.rs`（名字、默认服务器构建时注入、`default_api_server()`）、`options.rs`（自建服务器时 IPv6 打洞默认开等默认值）、`rendezvous.rs`（没配会合服务器时等用户填好再连）、`update.rs`（关掉官方更新检查）、`lan.rs`（第三期：局域网多候选地址，§3）。具体挂钩位置用 `git grep -n "porta::\|porta_hooks"` 查。
+
+主 crate 的 `src/porta_hooks.rs` 放需要调用上游私有函数的胶水代码（例如传进 `libs/porta` 的握手闭包）：`libs/porta` 调不到主 crate 的私有函数，又不想把闭包组装写在热点文件的调用处。上游文件里的挂钩只调用 `porta::…` 或 `crate::porta_hooks::…`。不要建 `src/porta.rs`，会和外部 crate `porta` 撞名。
 
 ## 3. 局域网直连：多候选地址（第三期第一项）
 
@@ -34,14 +36,14 @@
   - 只取 IPv4。候选来自物理网卡：排除虚拟/隧道网卡（Windows `IfType` 53/131/23/24，Wintun 是 53；接口名 `utun*`、`tun*`、`Mihomo`、`wintun` 一类）、`198.18.0.0/15`、`100.64.0.0/10`、回环、`169.254.0.0/16`；要求网卡有默认网关（顺带排除 WSL/Hyper-V 的 vEthernet）。
   - 排序：有线在前，再按链路速度；去重；最多 8 个。端口都用 `sock_local` 的端口。
   - `sock_local` 本身不是虚拟地址时，它排第一（和上游行为一致），后面再跟其他物理网卡地址。
-  - 网卡枚举先用 `default-net 0.14`（不能用 `get_default_interface()`，开 TUN 时它选中的正是 TUN）。笔记 04 提到它在 Windows 上会对每个网关调 `SendARP`、可能卡住：先实测耗时，超过 200 ms 就改用 `GetAdaptersAddresses` 自己枚举，汇报里写实测数。
+  - 网卡枚举用 `GetAdaptersAddresses`（`windows` crate，和主 crate 同版本）。实测（2026-10-23，维护者台式机）：`default-net 0.14.1` 的 `get_interfaces()` 每次 4.2~5.3 秒，原因是它对一块断开但配了静态网关的网卡发 `SendARP` 等到超时，而且整个跳过 IfType 53 的网卡；`GetAdaptersAddresses` 每次 5~10 ms，还能读到在线状态、借此排除断开的网卡。不能用 `default_net::get_default_interface()`：开 TUN 时它选中的正是 TUN。
 - 挂钩：组 `LocalAddr` 时，`local_addr` 改成候选的第一个（`sock_local` 是物理地址时就是它自己，不变），`porta_local_addrs` 填全部候选。
 - 监听：被控端随后在 `local_addr` 的 IP:端口上开 18 秒、只收一条的监听（上游 `src/server.rs` `accept_connection_`）。候选里有和 `sock_local` 不同的 IP 时，改为监听 `0.0.0.0:同一端口`，否则照上游。注意端口复用（上游丢掉连 hbbs 的 socket 后在同一端口上监听），Windows 上要实测 `0.0.0.0` 能不能绑上同一端口。
 - 没有任何物理候选时，一切照上游。
 
 ### 3.4 控制端（收到 `is_local` 的 `PunchHoleResponse`）
 
-- `porta_local_addrs` 非空时：对全部候选并发发起 TCP 连接，不绑定源地址（局域网网段的路由比 TUN 的更具体，自然从物理网卡出去；依据见笔记 04），总等待时间和上游局域网的 1 秒一致；第一个完成 TCP 连接**并且**完成安全握手的胜出，其余丢弃。
+- `porta_local_addrs` 非空时：对全部候选并发发起 TCP 连接，不绑定源地址（局域网网段的路由比 TUN 的更具体，自然从物理网卡出去；依据见笔记 04），TCP 连接的等待和上游局域网的 1 秒一致；第一个完成 TCP 连接**并且**完成安全握手的胜出，其余丢弃。握手另有 3 秒上限（维护者 2026-10-23 同意）：被控端的监听只收一条连接，其余连上的候选会排在队列里永远等不到握手回应，没有上限就要等上游的 `READ_TIMEOUT` 才回落中继。
 - 全部失败（包括 TCP 连上了但握手失败）时，必须和上游超时一样回落中继，不能直接报错。笔记 04 指出上游"连上了但握手失败"会直接报错、不回落：在 Porta 路径里要兜住。
 - `porta_local_addrs` 为空（被控端是原版，或服务端是原版 hbbs）时：照上游，只是自己连 hbbs 的 socket 本地地址是虚拟地址时不绑定源地址。
 - 改动放 `libs/porta/src/lan.rs`，`src/client.rs` 里只留挂钩。
