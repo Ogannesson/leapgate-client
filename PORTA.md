@@ -133,9 +133,11 @@
 - 测的条件：有非空列表、15 分钟内有成功的心跳。新列表（rev 变了）先等 10~30 秒随机时间再测第一轮，之后每轮间隔 `interval × (0.9~1.1)`；状态变了用 `Condvar` 唤醒重算。
 - 每轮开头：开了代理（`Config::is_proxy()`）、开了 WebSocket（`use_ws()`）或没配 Key 时不测，并清掉旧结果；然后取一次网卡快照 `lan::physical_snapshot()`。
 - 各中继并发（每台一个线程，测完即退）：`check_port(host, 21117)` 后系统解析一次（不计时），按返回顺序逐个试、取第一个连上的；每台测 3 次、间隔 200 毫秒，`connect_timeout` 3 秒，连上立刻关。成功的取最小值，毫秒向上取整、至少 1；3 次都失败进 `down`。
-- 两条作废规则（纯函数 `summarize`），任一命中整轮作废、不上报、清掉旧结果：
+- 三条作废规则（纯函数 `summarize`），任一命中整轮作废、不上报、清掉旧结果：
   - 本地地址不在物理网卡上（挡本机 TUN：TUN 在本机完成握手，本地地址是 TUN 的）。
-  - 对端是公网地址的中继任一次快于 2 毫秒（挡路由器透明代理当场回 SYN-ACK）。"公网"指不是私网、回环、链路本地、`100.64.0.0/10`、IPv6 ULA；`198.18.0.0/15` 算公网（路由器 fake-ip 会把中继解析到这里）。
+  - 对端地址在 `198.18.0.0/15`，不看耗时（RFC 2544 基准测试段，不分配给互联网主机；中继解析到这里说明是代理的 fake-ip，答话的一定是代理。路由器 fake-ip 加 Wi-Fi 时代答常在 2 毫秒以上，第三条拦不住）。
+  - 对端是公网地址的中继任一次快于 2 毫秒（挡路由器透明代理当场回 SYN-ACK）。"公网"指不是私网、回环、链路本地、`100.64.0.0/10`、IPv6 ULA。
+- 起不了测速子线程时这一轮作废，打一条 warn（`porta route: probe round dropped, cannot start a probe thread: …`）。
 - 一轮测完时列表已经换了：结果照写，`probes()` 按 rev 不发它。
 
 ### 5.4 `lan.rs` 的双地址族（为测速做，03 块其余部分没做）
@@ -150,7 +152,8 @@
 每种每分钟最多一条，文字固定，端到端测试按此查找：
 
 - `porta route: probe round dropped, local address {ip} not on a physical adapter`
-- `porta route: probe round dropped, {host} answered in {us}us (proxy?)`
+- `porta route: probe round dropped, {host} answered in {us}us (proxy?)`（fake-ip 和 2 毫秒两条规则共用）
+- `porta route: probe round dropped, cannot start a probe thread: {error}`（warn）
 
 ### 5.6 不配也能用：自动降级与可选优化
 

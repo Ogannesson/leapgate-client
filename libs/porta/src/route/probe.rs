@@ -102,6 +102,14 @@ fn round(rev: i64, relays: &[String]) -> Option<ProbeResult> {
             .map(|h| {
                 thread::Builder::new()
                     .spawn_scoped(s, move || probe(h))
+                    .map_err(|e| {
+                        throttled_log!(
+                            LOG_INTERVAL,
+                            warn,
+                            "porta route: probe round dropped, cannot start a probe thread: {}",
+                            e
+                        )
+                    })
                     .ok()
             })
             .collect();
@@ -109,8 +117,9 @@ fn round(rev: i64, relays: &[String]) -> Option<ProbeResult> {
             .into_iter()
             .zip(relays)
             .map(|(j, h)| Some((h.clone(), j?.join().ok()?)))
-            .collect::<Option<Vec<_>>>()
-    })?;
+            .collect::<Vec<_>>()
+    });
+    let attempts = attempts.into_iter().collect::<Option<Vec<_>>>()?;
     summarize(rev, &attempts, physical)
 }
 
@@ -146,8 +155,8 @@ fn connect_first(addrs: &[SocketAddr]) -> Option<Attempt> {
 
 /// The fastest try per relay, or `down` when every try failed. The whole round is dropped when
 /// any try was answered by a proxy rather than the relay: a local address off the physical
-/// adapters (a TUN completed the handshake on this machine), or a public relay faster than
-/// `PROXY_RTT` (a router did).
+/// adapters (a TUN completed the handshake on this machine), a relay resolved into the fake-ip
+/// range, or a public relay faster than `PROXY_RTT` (a router did).
 fn summarize(
     rev: i64,
     attempts: &[(String, Vec<Option<Attempt>>)],
@@ -166,7 +175,7 @@ fn summarize(
                 );
                 return None;
             }
-            if is_public(a.remote) && a.elapsed < PROXY_RTT {
+            if fake_ip(a.remote) || (is_public(a.remote) && a.elapsed < PROXY_RTT) {
                 throttled_log!(
                     LOG_INTERVAL,
                     info,
@@ -191,7 +200,12 @@ fn summarize(
     })
 }
 
-/// `198.18.0.0/15` counts as public: a router's fake-ip DNS resolves the relay into it.
+/// `198.18.0.0/15` is the benchmarking range (RFC 2544), assigned to no Internet host; a relay
+/// there was resolved by a proxy's fake-ip DNS, and whoever answers is the proxy, at any speed.
+fn fake_ip(ip: IpAddr) -> bool {
+    matches!(ip, IpAddr::V4(ip) if ip.octets()[0] == 198 && (ip.octets()[1] & 0xfe) == 18)
+}
+
 fn is_public(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(ip) => {
@@ -294,5 +308,14 @@ mod tests {
         // A public relay at 2 ms is believed.
         let attempts = [host("b", vec![ok(2_000, "8.8.8.8")])];
         assert!(summarize(7, &attempts, on_lan).is_some());
+    }
+
+    #[test]
+    fn fake_ip_relay_drops_round_at_any_speed() {
+        let attempts = [
+            host("a", vec![ok(23_000, "1.1.1.1")]),
+            host("b", vec![ok(5_000, "198.18.0.5")]),
+        ];
+        assert_eq!(summarize(7, &attempts, on_lan), None);
     }
 }
