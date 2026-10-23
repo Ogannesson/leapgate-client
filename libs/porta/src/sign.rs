@@ -77,6 +77,11 @@ pub(crate) fn clock_offset() -> i64 {
     CLOCK_OFFSET.load(Ordering::Relaxed)
 }
 
+/// How far server time `t` is from the time requests are currently stamped with.
+pub(crate) fn clock_skew(t: i64) -> i64 {
+    t - (get_time() / 1000 + clock_offset())
+}
+
 /// The rendezvous server's public key: the `key` option, else the built-in key, as upstream
 /// `get_key(true)` picks it (without the Windows license-in-exe-name branch).
 /// `Ok(None)`: no key configured. `Err`: a key is configured but invalid, so every response

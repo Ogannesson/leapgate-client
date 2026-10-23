@@ -7,7 +7,7 @@ use hbb_common::{
     anyhow::anyhow,
     log,
     serde_json::{self, Value},
-    tokio, ResultType,
+    ResultType,
 };
 use std::time::{Duration, Instant};
 
@@ -51,6 +51,10 @@ pub(super) async fn send<E: Env>(
                 mark_unsupported(env, cap, root, status);
                 return None;
             }
+            // On a confirmed root a 2xx without `api` is a proxy's maintenance page: try again.
+            Reply::NoApi(status) if (200..300).contains(&status) => {
+                (true, format!("status {status} without api"))
+            }
             Reply::NoApi(status) | Reply::Rejected(status) => (false, format!("status {status}")),
             Reply::Failed(e) => (true, e),
         };
@@ -65,7 +69,8 @@ pub(super) async fn send<E: Env>(
             return Some(Err(anyhow!(err)));
         }
         log::warn!("Porta audit post failed (attempt {}): {}", attempt, err);
-        tokio::time::sleep(Duration::from_secs(RETRY_BACKOFF_SECS[attempt - 1])).await;
+        env.sleep(Duration::from_secs(RETRY_BACKOFF_SECS[attempt - 1]))
+            .await;
         if started.elapsed() >= RETRY_DEADLINE {
             log::error!(
                 "Porta audit post dropped (attempt {}, deadline passed during backoff): {}",
@@ -140,5 +145,48 @@ mod tests {
             assert!(matches!(res, Some(Err(_))));
             assert_eq!(fake.sent.lock().unwrap().len(), 1);
         }
+    }
+
+    fn confirmed() -> Fake {
+        Fake {
+            default_root: ROOT.to_owned(),
+            ..Default::default()
+        }
+    }
+
+    #[hbb_common::tokio::test(crate = "hbb_common::tokio")]
+    async fn confirmed_root_retries_maintenance_page() {
+        let fake = confirmed().script(vec![
+            unsigned(200, "<html>maintenance</html>"),
+            signed(200, r#"{"api":1}"#),
+        ]);
+        let cap = slot("", Cap::Unknown);
+        let res = send(&fake, &cap, ROOT, "conn", &record()).await;
+        assert_eq!(res.map(|r| r.ok()), Some(Some(String::new())));
+        assert_eq!(fake.sent.lock().unwrap().len(), 2);
+        assert_eq!(cap.lock().unwrap().1, Cap::Supported);
+    }
+
+    #[hbb_common::tokio::test(crate = "hbb_common::tokio")]
+    async fn retries_follow_upstream_table() {
+        let fake = confirmed().script(vec![
+            unsigned(503, ""),
+            unsigned(503, ""),
+            unsigned(503, ""),
+        ]);
+        let cap = slot("", Cap::Unknown);
+        let res = send(&fake, &cap, ROOT, "conn", &record()).await;
+        assert!(matches!(res, Some(Err(_))));
+        assert_eq!(fake.sent.lock().unwrap().len(), 3);
+        assert_eq!(
+            *fake.sleeps.lock().unwrap(),
+            [Duration::from_secs(10), Duration::from_secs(30)]
+        );
+
+        let fake = confirmed().script(vec![unsigned(503, ""), signed(200, r#"{"api":1}"#)]);
+        let cap = slot("", Cap::Unknown);
+        let res = send(&fake, &cap, ROOT, "conn", &record()).await;
+        assert_eq!(res.map(|r| r.ok()), Some(Some(String::new())));
+        assert_eq!(*fake.sleeps.lock().unwrap(), [Duration::from_secs(10)]);
     }
 }

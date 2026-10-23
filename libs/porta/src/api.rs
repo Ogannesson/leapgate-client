@@ -7,15 +7,15 @@
 use crate::sign;
 use hbb_common::{
     config::Config,
-    log,
     proxy::{Proxy, ProxyScheme},
-    ResultType,
+    throttled_log, ResultType,
 };
-use reqwest::{Client, ClientBuilder};
+use reqwest::{redirect, Client, ClientBuilder};
 use std::time::Duration;
 
 /// Per attempt, connect and TLS handshake included; same as upstream's API requests.
 const TIMEOUT: Duration = Duration::from_secs(12);
+const LOG_INTERVAL: Duration = Duration::from_secs(60);
 
 pub(crate) struct Resp {
     pub status: u16,
@@ -57,9 +57,16 @@ pub(crate) async fn post(
 }
 
 fn builder() -> ClientBuilder {
-    // System proxies are ignored as upstream does (rustdesk#11569); certificates are checked
-    // against the system store.
-    Client::builder().no_proxy().use_rustls_tls()
+    // System proxies are ignored as upstream does (rustdesk#11569).
+    // Certificates are checked against the system store only: the root crate turns on reqwest's
+    // `rustls-tls`, which would also trust the bundled webpki roots.
+    // Redirects are not followed: a 3xx comes back as is and counts as a failed request, never
+    // as "no Porta API" and never as a hop to another host.
+    Client::builder()
+        .no_proxy()
+        .use_rustls_tls()
+        .tls_built_in_webpki_certs(false)
+        .redirect(redirect::Policy::none())
 }
 
 /// The proxy part follows upstream's `configure_http_client!`, including falling back to a
@@ -71,7 +78,7 @@ fn client() -> ResultType<Client> {
     let proxy = match Proxy::from_conf(&conf, None) {
         Ok(proxy) => proxy,
         Err(e) => {
-            log::info!("Failed to configure proxy: {}", e);
+            throttled_log!(LOG_INTERVAL, info, "Failed to configure proxy: {}", e);
             return Ok(builder().build()?);
         }
     };
@@ -83,7 +90,7 @@ fn client() -> ResultType<Client> {
     let mut p = match proxy_setup {
         Ok(p) => p,
         Err(e) => {
-            log::info!("Failed to set up proxy: {}", e);
+            throttled_log!(LOG_INTERVAL, info, "Failed to set up proxy: {}", e);
             return Ok(builder().build()?);
         }
     };
@@ -95,8 +102,50 @@ fn client() -> ResultType<Client> {
     match builder().proxy(p).build() {
         Ok(client) => Ok(client),
         Err(e) => {
-            log::info!("Failed to create a proxied client: {}", e);
+            throttled_log!(
+                LOG_INTERVAL,
+                info,
+                "Failed to create a proxied client: {}",
+                e
+            );
             Ok(builder().build()?)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hbb_common::tokio::{
+        self,
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+    };
+
+    #[hbb_common::tokio::test(crate = "hbb_common::tokio")]
+    async fn redirect_is_not_followed() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            // Answers every connection with a redirect back to itself.
+            while let Ok((mut s, _)) = listener.accept().await {
+                // Read the request first: closing with it unread would reset the connection.
+                let mut buf = [0u8; 4096];
+                let _ = s.read(&mut buf).await;
+                let resp = format!(
+                    "HTTP/1.1 302 Found\r\nLocation: http://{addr}/elsewhere\r\n\
+                     Content-Length: 0\r\nConnection: close\r\n\r\n"
+                );
+                let _ = s.write_all(resp.as_bytes()).await;
+            }
+        });
+        let resp = builder()
+            .build()
+            .unwrap()
+            .post(format!("http://{addr}/api/porta/v1/heartbeat"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status().as_u16(), 302);
     }
 }

@@ -20,7 +20,7 @@ use hbb_common::{
     config::{self, Config},
     serde_json::{self, Map, Value},
     sodiumoxide::crypto::sign::PublicKey,
-    throttled_log, ResultType,
+    throttled_log, tokio, ResultType,
 };
 use std::{
     sync::Mutex,
@@ -32,6 +32,16 @@ use std::{
 const CAPS_KEY: &str = "porta-api-caps";
 const RECHECK: Duration = Duration::from_secs(600);
 const LOG_INTERVAL: Duration = Duration::from_secs(60);
+/// A 2xx's `time` moves the clock only when it is this far off (seconds).
+const MAX_SKEW: i64 = 30;
+/// The 401 `error` codes porta-server sends (contract 01 §2.6).
+const AUTH_ERRORS: [&str; 5] = [
+    "bad_auth",
+    "stale_time",
+    "replay",
+    "unknown_device",
+    "bad_signature",
+];
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Cap {
@@ -54,7 +64,7 @@ pub async fn tick(
     alive_conns: fn() -> Vec<i32>,
     version: &str,
 ) -> bool {
-    let Some(root) = checked_root(url.strip_suffix("/api/heartbeat"), &api_root()) else {
+    let Some(root) = heartbeat_root(url, &api_root()) else {
         return false;
     };
     heartbeat::tick(
@@ -70,8 +80,7 @@ pub async fn tick(
 
 /// Hook at the top of `post_audit_async`. `None`: send it the legacy way.
 pub async fn audit(url: &str, v: &Value) -> Option<ResultType<String>> {
-    let (root, typ) = url.rsplit_once("/api/audit/")?;
-    let root = checked_root(Some(root), &api_root())?;
+    let (root, typ) = audit_target(url, &api_root())?;
     audit::send(&Live { root }, &CAP, root, typ, v).await
 }
 
@@ -139,10 +148,20 @@ fn default_root() -> String {
     normalize(brand::default_api_server(), allow_https_21114())
 }
 
-/// The root the hook's URL names, provided it is the one `api_root` computes: the capability
-/// record is read against `api_root`, so both sides must mean the same address.
-fn checked_root<'a>(root: Option<&'a str>, api_root: &str) -> Option<&'a str> {
-    let root = root?;
+/// The API root in upstream's heartbeat URL (`{root}/api/heartbeat`).
+fn heartbeat_root<'a>(url: &'a str, api_root: &str) -> Option<&'a str> {
+    checked_root(url.strip_suffix("/api/heartbeat")?, api_root)
+}
+
+/// The API root and record type in upstream's audit URL (`{root}/api/audit/{typ}`).
+fn audit_target<'a>(url: &'a str, api_root: &str) -> Option<(&'a str, &'a str)> {
+    let (root, typ) = url.rsplit_once("/api/audit/")?;
+    Some((checked_root(root, api_root)?, typ))
+}
+
+/// `root`, provided it is the one `api_root` computes: the capability record is read against
+/// `api_root`, so both sides must mean the same address.
+fn checked_root<'a>(root: &'a str, api_root: &str) -> Option<&'a str> {
     if root != api_root {
         throttled_log!(
             LOG_INTERVAL,
@@ -185,6 +204,9 @@ trait Env {
     fn route_reset(&self);
     fn route_heartbeat_ok(&self, routing: Option<&Value>);
     fn apply_strategy(&self, rev: i64, options: &Map<String, Value>);
+    fn clock_skew(&self, t: i64) -> i64;
+    fn set_server_time(&self, t: i64);
+    async fn sleep(&self, d: Duration);
 }
 
 struct Live<'a> {
@@ -222,6 +244,18 @@ impl Env for Live<'_> {
 
     fn apply_strategy(&self, rev: i64, options: &Map<String, Value>) {
         heartbeat::apply_strategy(rev, options);
+    }
+
+    fn clock_skew(&self, t: i64) -> i64 {
+        sign::clock_skew(t)
+    }
+
+    fn set_server_time(&self, t: i64) {
+        sign::set_server_time(t);
+    }
+
+    async fn sleep(&self, d: Duration) {
+        tokio::time::sleep(d).await;
     }
 }
 
@@ -302,11 +336,12 @@ enum Reply {
     /// A 2xx JSON object with `api`, its signature verified when a key is configured.
     Ok(Map<String, Value>),
     /// 404 / 405, or a 2xx that is not a Porta answer (a proxy's page for unknown paths). Not
-    /// signature-checked: it is as easy to forge as a 404.
+    /// signature-checked: it is as easy to forge as a 404. Means "no Porta API" only on a root
+    /// not yet confirmed.
     NoApi(u16),
     /// 400 / 413: sending the same request again cannot help.
     Rejected(u16),
-    /// Transport or TLS error, 401, 429, 5xx, failed signature check.
+    /// Transport or TLS error, 3xx, 401, 429, 5xx, failed signature check.
     Failed(String),
 }
 
@@ -342,23 +377,39 @@ async fn exchange<E: Env>(env: &E, endpoint: &str, body: &[u8]) -> Reply {
                     );
                     return Reply::Failed("server signature check failed".to_owned());
                 }
+                // Only a real skew moves the clock. Following every response would let the
+                // stamps drift back and forth by the request latency, and the server's replay
+                // check accepts a device's stamps only down to 30 s below the newest it saw.
                 if let Some(t) = map.get("time").and_then(Value::as_i64) {
-                    sign::set_server_time(t);
+                    if env.clock_skew(t).abs() > MAX_SKEW {
+                        env.set_server_time(t);
+                    }
                 }
                 return Reply::Ok(map);
             }
             401 => {
                 let v = serde_json::from_slice::<Value>(&resp.body).ok();
-                let code: String = v
+                // Only a code from the fixed set reaches the log, signed or not.
+                let code = v
                     .as_ref()
                     .and_then(|v| v.get("error")?.as_str())
-                    .unwrap_or_default()
-                    .chars()
-                    .take(64)
-                    .collect();
-                let time = v.as_ref().and_then(|v| v.get("time")?.as_i64());
-                if let (true, Some(t)) = (verified, time) {
-                    sign::set_server_time(t);
+                    .and_then(|c| AUTH_ERRORS.iter().find(|&&e| e == c))
+                    .copied()
+                    .unwrap_or("other");
+                if !verified {
+                    // `bad_auth` is never signed: the server could not parse the request's
+                    // signature to bind its own to.
+                    if code != "bad_auth" {
+                        throttled_log!(
+                            LOG_INTERVAL,
+                            warn,
+                            "porta report: server signature check failed"
+                        );
+                    }
+                    return Reply::Failed(format!("status 401 {code}"));
+                }
+                if let Some(t) = v.as_ref().and_then(|v| v.get("time")?.as_i64()) {
+                    env.set_server_time(t);
                     if !resent {
                         throttled_log!(
                             LOG_INTERVAL,
@@ -395,11 +446,17 @@ mod tests {
         pub replies: Mutex<VecDeque<ResultType<(Resp, [u8; 64])>>>,
         pub sent: Mutex<Vec<(String, Vec<u8>)>>,
         pub keyless: bool,
+        /// A key is configured but is not a valid public key.
+        pub bad_key: bool,
         pub caps: Mutex<String>,
         pub default_root: String,
         pub resets: Mutex<usize>,
         pub heartbeat_ok: Mutex<Vec<Option<Value>>>,
         pub strategies: Mutex<Vec<(i64, Map<String, Value>)>>,
+        /// The time requests are stamped with.
+        pub clock: Mutex<i64>,
+        pub times_set: Mutex<Vec<i64>>,
+        pub sleeps: Mutex<Vec<Duration>>,
     }
 
     impl Fake {
@@ -422,6 +479,9 @@ mod tests {
                 .unwrap_or_else(|| Err(anyhow!("no reply scripted")))
         }
         fn server_pk(&self) -> Result<Option<PublicKey>, ()> {
+            if self.bad_key {
+                return Err(());
+            }
             Ok((!self.keyless).then(|| server_keys().0))
         }
         fn caps(&self) -> String {
@@ -441,6 +501,16 @@ mod tests {
         }
         fn apply_strategy(&self, rev: i64, options: &Map<String, Value>) {
             self.strategies.lock().unwrap().push((rev, options.clone()));
+        }
+        fn clock_skew(&self, t: i64) -> i64 {
+            t - *self.clock.lock().unwrap()
+        }
+        fn set_server_time(&self, t: i64) {
+            *self.clock.lock().unwrap() = t;
+            self.times_set.lock().unwrap().push(t);
+        }
+        async fn sleep(&self, d: Duration) {
+            self.sleeps.lock().unwrap().push(d);
         }
     }
 
@@ -497,12 +567,55 @@ mod tests {
     }
 
     #[test]
-    fn hook_url_must_match_api_root() {
-        assert_eq!(checked_root(Some(ROOT), ROOT), Some(ROOT));
-        assert_eq!(checked_root(Some(ROOT), "http://other:21114"), None);
-        assert_eq!(checked_root(None, ROOT), None);
-        let url = format!("{ROOT}/api/audit/conn");
-        assert_eq!(url.rsplit_once("/api/audit/"), Some((ROOT, "conn")));
+    fn hook_urls_split_against_api_root() {
+        let hb = "http://porta.test:21114/api/heartbeat";
+        assert_eq!(heartbeat_root(hb, ROOT), Some(ROOT));
+        assert_eq!(heartbeat_root(hb, "https://porta.test"), None);
+        assert_eq!(
+            heartbeat_root("http://porta.test:21114/api/sysinfo", ROOT),
+            None
+        );
+        let au = "http://porta.test:21114/api/audit/conn";
+        assert_eq!(audit_target(au, ROOT), Some((ROOT, "conn")));
+        assert_eq!(
+            audit_target("https://porta.test/api/audit/alarm", "https://porta.test"),
+            Some(("https://porta.test", "alarm"))
+        );
+        assert_eq!(audit_target(au, "https://porta.test"), None);
+        assert_eq!(
+            audit_target("http://porta.test:21114/api/heartbeat", ROOT),
+            None
+        );
+    }
+
+    #[hbb_common::tokio::test(crate = "hbb_common::tokio")]
+    async fn clock_follows_verified_times_only() {
+        let stale = r#"{"error":"stale_time","message":"","time":1761200000}"#;
+        let ok_at = |t: i64| format!(r#"{{"api":1,"features":[],"time":{t}}}"#);
+
+        // A signed 401 sets the clock and the request goes again; the 2xx after it agrees.
+        let fake =
+            Fake::default().script(vec![signed(401, stale), signed(200, &ok_at(1761200000))]);
+        assert!(matches!(
+            exchange(&fake, "heartbeat", b"{}").await,
+            Reply::Ok(_)
+        ));
+        assert_eq!(*fake.times_set.lock().unwrap(), [1761200000]);
+        assert_eq!(fake.sent.lock().unwrap().len(), 2);
+
+        // Unsigned 401, and an unsigned 2xx while a key is configured: ignored.
+        for reply in [unsigned(401, stale), unsigned(200, &ok_at(1761200000))] {
+            let fake = Fake::default().script(vec![reply]);
+            exchange(&fake, "heartbeat", b"{}").await;
+            assert!(fake.times_set.lock().unwrap().is_empty());
+        }
+
+        // A signed 2xx moves the clock only when more than 30 s off.
+        let fake = Fake::default().script(vec![signed(200, &ok_at(30)), signed(200, &ok_at(-31))]);
+        exchange(&fake, "heartbeat", b"{}").await;
+        assert!(fake.times_set.lock().unwrap().is_empty());
+        exchange(&fake, "heartbeat", b"{}").await;
+        assert_eq!(*fake.times_set.lock().unwrap(), [-31]);
     }
 
     /// Expected values worked out by hand from upstream `get_api_server` / `get_api_server_`.

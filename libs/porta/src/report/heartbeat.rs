@@ -373,8 +373,12 @@ mod tests {
     async fn unknown_then_404_goes_legacy_and_rechecks() {
         let fake = Fake::default().script(vec![unsigned(404, ""), unsigned(404, "")]);
         let (cap, hb) = (slot("", Cap::Unknown), Mutex::new(Hb::default()));
+        let before = Instant::now();
         assert!(!run(&fake, &cap, &hb).await);
-        assert!(matches!(cap.lock().unwrap().1, Cap::Unsupported { .. }));
+        let Cap::Unsupported { recheck_at } = cap.lock().unwrap().1 else {
+            panic!("not unsupported");
+        };
+        assert!(recheck_at >= before + Duration::from_secs(599));
         // select + mark_unsupported
         assert_eq!(fake.resets(), 2);
         // Before the recheck time nothing is sent.
@@ -487,5 +491,65 @@ mod tests {
         // Not due yet: handled (no legacy reports), nothing sent.
         assert!(run(&fake, &cap, &hb).await);
         assert_eq!(fake.sent.lock().unwrap().len(), 1);
+    }
+
+    fn last_attempt_ago(hb: &Mutex<Hb>, secs: u64) {
+        hb.lock().unwrap().last_attempt = Some(Instant::now() - Duration::from_secs(secs));
+    }
+
+    #[hbb_common::tokio::test(crate = "hbb_common::tokio")]
+    async fn backoff_is_wired_into_tick() {
+        let ok = r#"{"api":1,"features":[],"time":1}"#;
+        let fake = Fake::default().script(vec![unsigned(503, ""), signed(200, ok)]);
+        let (cap, hb) = (slot("", Cap::Unknown), Mutex::new(Hb::default()));
+        assert!(run(&fake, &cap, &hb).await);
+        assert!(fake.heartbeat_ok.lock().unwrap().is_empty());
+        // One failure: the next try is 3 s later, not the idle 15 s.
+        last_attempt_ago(&hb, 2);
+        assert!(run(&fake, &cap, &hb).await);
+        assert_eq!(fake.sent.lock().unwrap().len(), 1);
+        last_attempt_ago(&hb, 4);
+        assert!(run(&fake, &cap, &hb).await);
+        assert_eq!(fake.sent.lock().unwrap().len(), 2);
+        assert_eq!(hb.lock().unwrap().failures, 0);
+        assert_eq!(fake.heartbeat_ok.lock().unwrap().len(), 1);
+    }
+
+    #[hbb_common::tokio::test(crate = "hbb_common::tokio")]
+    async fn new_root_clears_heartbeat_state() {
+        let ok = r#"{"api":1,"features":[],"time":1}"#;
+        let fake =
+            Fake::default().script(vec![signed(200, ok), unsigned(503, ""), signed(200, ok)]);
+        let (cap, hb) = (slot("", Cap::Unknown), Mutex::new(Hb::default()));
+        assert!(run(&fake, &cap, &hb).await);
+        due(&hb);
+        assert!(run(&fake, &cap, &hb).await);
+        assert_eq!(hb.lock().unwrap().failures, 1);
+        assert!(!hb.lock().unwrap().confirmed_hash.is_empty());
+        // Another root goes out at once, with sysinfo, and without the old failure count.
+        let other = "http://other.test:21114";
+        assert!(tick(&fake, &cap, &hb, other, vec![], payload).await);
+        assert_eq!(fake.sent.lock().unwrap().len(), 3);
+        assert!(sent_json(&fake, 2).get("sysinfo").is_some());
+        assert_eq!(hb.lock().unwrap().failures, 0);
+    }
+
+    #[hbb_common::tokio::test(crate = "hbb_common::tokio")]
+    async fn invalid_key_fails_closed() {
+        let ok = r#"{"api":1,"features":["udp-punch"],"time":1,
+            "strategy":{"rev":9,"options":{"relay-server":""}},"routing":{"rev":2}}"#;
+        let fake = Fake {
+            bad_key: true,
+            ..Default::default()
+        }
+        .script(vec![signed(200, ok)]);
+        let (cap, hb) = (slot("", Cap::Unknown), Mutex::new(Hb::default()));
+        assert!(run(&fake, &cap, &hb).await);
+        assert_eq!(cap.lock().unwrap().1, Cap::Unknown);
+        assert_eq!(hb.lock().unwrap().failures, 1);
+        assert_eq!(fake.caps(), "");
+        assert!(fake.strategies.lock().unwrap().is_empty());
+        assert!(fake.heartbeat_ok.lock().unwrap().is_empty());
+        assert!(fake.times_set.lock().unwrap().is_empty());
     }
 }
