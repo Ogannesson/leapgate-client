@@ -1378,7 +1378,7 @@ impl Client {
         }
         // porta: after failed candidates relay without a TCP retry; never bind to a TUN address
         let (my_addr, allow_tcp_punch) =
-            crate::porta_hooks::lan_fallback(addrs, is_local, my_addr, tcp).await;
+            crate::porta_hooks::lan_fallback(addrs, peer_addr, is_local, my_addr, tcp).await;
         Ok((
             Self::connect(
                 my_addr,

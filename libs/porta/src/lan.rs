@@ -9,7 +9,6 @@
 //! system sends them out of the physical adapter.
 
 use hbb_common::{
-    bail,
     bytes::Bytes,
     futures::future::select_ok,
     log,
@@ -30,6 +29,8 @@ const CONNECT_TIMEOUT_MS: u64 = 1000;
 /// Upstream bounds the handshake only by `READ_TIMEOUT`. A candidate that the peer's listener
 /// queued but never accepted (it takes one connection) would hold the race that long.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(3);
+/// For a connection whose local end is not a physical adapter (see `handshake_timeout`).
+const VIRTUAL_HANDSHAKE_TIMEOUT: Duration = Duration::from_millis(800);
 
 // Windows `IfType` values of virtual adapters: Wintun (mihomo, sing-box, WireGuard, Tailscale)
 // and the newer TAP drivers report 53.
@@ -203,22 +204,22 @@ where
     let (nics, handshake) = (&nics, &handshake);
     race(candidates, |addr| async move {
         let conn = connect_tcp_local(addr, None, CONNECT_TIMEOUT_MS).await?;
-        if !left_through_lan(nics, conn.local_addr()) {
-            bail!("routed into a local tunnel from {}", conn.local_addr());
-        }
-        timeout(HANDSHAKE_TIMEOUT, handshake(conn)).await?
+        let limit = handshake_timeout(nics, conn.local_addr());
+        timeout(limit, handshake(conn)).await?
     })
     .await
 }
 
 /// A candidate outside this side's own LAN segments is routed into the TUN, whose stack
-/// completes the TCP handshake locally and then never answers. Its local end is then the
-/// virtual adapter's address, so it fails here at once instead of holding the handshake
-/// timeout, and the handshake bytes never reach the proxy. An empty adapter list proves nothing.
-fn left_through_lan(nics: &[Nic], local: SocketAddr) -> bool {
+/// completes the TCP handshake locally and then never answers; its local end is the virtual
+/// adapter's address. So is a real path through a VPN adapter (WireGuard, Tailscale), where the
+/// peer sends its `SignedId` as soon as it accepts and the handshake takes one round trip. Such
+/// a connection gets the short limit, which keeps a TUN-caught candidate inside the peer's 3 s
+/// IPv6 punch window. An empty adapter list proves nothing.
+fn handshake_timeout(nics: &[Nic], local: SocketAddr) -> Duration {
     match local.ip() {
-        IpAddr::V4(ip) => nics.is_empty() || is_physical(nics, ip),
-        IpAddr::V6(_) => true,
+        IpAddr::V4(ip) if !nics.is_empty() && !is_physical(nics, ip) => VIRTUAL_HANDSHAKE_TIMEOUT,
+        _ => HANDSHAKE_TIMEOUT,
     }
 }
 
@@ -537,14 +538,16 @@ mod tests {
     }
 
     #[test]
-    fn connection_caught_by_local_tun_is_not_lan() {
+    fn connection_off_physical_adapters_gets_short_handshake() {
         let nics = [
             tun(),
             nic("Ethernet", IF_TYPE_ETHERNET, "192.168.1.145", true, 0),
         ];
-        assert!(!left_through_lan(&nics, addr("198.18.0.1:13355")));
-        assert!(left_through_lan(&nics, addr("192.168.1.145:13355")));
-        assert!(left_through_lan(&[], addr("198.18.0.1:13355")));
+        let tun_end = addr("198.18.0.1:13355");
+        assert_eq!(handshake_timeout(&nics, tun_end), VIRTUAL_HANDSHAKE_TIMEOUT);
+        let lan_end = addr("192.168.1.145:13355");
+        assert_eq!(handshake_timeout(&nics, lan_end), HANDSHAKE_TIMEOUT);
+        assert_eq!(handshake_timeout(&[], tun_end), HANDSHAKE_TIMEOUT);
     }
 
     #[hbb_common::tokio::test(crate = "hbb_common::tokio")]
