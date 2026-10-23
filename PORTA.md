@@ -12,7 +12,7 @@
 
 ## 2. 已有的挂钩（第二期）
 
-`libs/porta/src/`：`brand.rs`（名字、默认服务器构建时注入、`default_api_server()`）、`options.rs`（自建服务器时 IPv6 打洞默认开等默认值）、`rendezvous.rs`（没配会合服务器时等用户填好再连）、`update.rs`（关掉官方更新检查）、`lan.rs`（第三期：局域网多候选地址，§3）、`api.rs`、`sign.rs`、`report/`（第三期：上报与认证，§4）、`route/`（路由第二级，现在是 `report` 调用的空函数，契约 02 换成实现）。具体挂钩位置用 `git grep -n "porta::\|porta_hooks"` 查。
+`libs/porta/src/`：`brand.rs`（名字、默认服务器构建时注入、`default_api_server()`）、`options.rs`（自建服务器时 IPv6 打洞默认开等默认值）、`rendezvous.rs`（没配会合服务器时等用户填好再连）、`update.rs`（关掉官方更新检查）、`lan.rs`（第三期：局域网多候选地址，§3）、`api.rs`、`sign.rs`、`report/`（第三期：上报与认证，§4）、`route/`（第三期：路由第二级，`relay_preference`、`self_id`、测速线程，§5）。具体挂钩位置用 `git grep -n "porta::\|porta_hooks"` 查。
 
 主 crate 的 `src/porta_hooks.rs` 放需要调用上游私有函数的胶水代码（例如传进 `libs/porta` 的握手闭包）：`libs/porta` 调不到主 crate 的私有函数，又不想把闭包组装写在热点文件的调用处。上游文件里的挂钩只调用 `porta::…` 或 `crate::porta_hooks::…`。不要建 `src/porta.rs`，会和外部 crate `porta` 撞名。
 
@@ -110,3 +110,72 @@
 - `porta report: 401 {error}, clock offset now {offset}s`
 - `porta report: server signature check failed`
 - `porta report: api root mismatch, using legacy reports`
+
+## 5. 路由第二级（第三期 02）
+
+依据：总仓库 `docs/第三期实施契约/02-路由第二级.md`（协议、服务端整端替换的选路规则、取舍都在里面）。Porta 客户端在服务进程里测到每台候选中继的 TCP 建连耗时，随 Porta 心跳上报；porta-server 选中继时用实测代替 GeoIP 估计。被控端连 porta-server 时照用服务端选的中继，本地 `relay-server` 不再生效。下面和契约原文有出入的地方以本文（即代码）为准。
+
+### 5.1 挂钩（上游文件 2 处、6 行）
+
+- `src/rendezvous_mediator.rs` `get_relay_server` 开头：`porta::route::relay_preference(&provided)` 返回 `Some` 就直接用它。条件是服务端给了中继并且 `report::server_is_porta()` 为真（按持久化的能力记录现算，进程重启后、心跳被限速时都成立）；连原版 hbbs 时它给的是轮询结果，本地 `relay-server` 照上游优先。`get_relay_server` 只有 `handle_intranet`、`handle_punch_hole` 两个调用点，被控端主动发起中继也用它们的结果。
+- `src/client.rs` `_start_inner` 的 `PunchHoleRequest` 字面量：`porta_from_id: porta::route::self_id()`。`self_id()` 用 `Config::get_id_or(String::new())`，不用 `Config::get_id()`（本进程没有 id 时它会就地生成并落盘，界面进程会造出和服务进程不一致的 id）；拿不到就发空串，服务端按估计值算。`PunchHoleRequest` 全仓库只在这里构造。
+- proto：`PunchHoleRequest.porta_from_id = 1000`（string，porta-cardo 客户端线 `26f9b75`），`rendezvous.proto` 文件头注明 Porta 字段占 1000~1999。
+
+### 5.2 心跳里的字段
+
+- 请求：`routing_rev`（手里那份候选列表的 rev，没有为 0）；`probes`（最近一轮有效测量，没有就省略）：`{ routing_rev, age_s, rtt: { 原串: 毫秒 }, down: [原串] }`。只有这一轮的 rev 等于当前列表、并且结束不超过 900 秒才发。
+- 响应：`routing`（`{ rev, probe_interval_secs, relays }`，服务端只在请求的 `routing_rev` 和它的不同时下发）。`on_heartbeat_ok` 每次成功的心跳都调：没配 Key（`sign::server_pk()` 不是 `Ok(Some(_))`）时什么都不做，不采用 `routing`、不刷新确认时间，防明文 HTTP 上的中间人往 `relays` 里塞任意地址、把设备当端口扫描器；配了 Key 时刷新确认时间，`routing` 解析失败整个忽略，`probe_interval_secs` 限在 60~3600，`relays` 截到 32 台；rev 变了就换列表、清掉旧结果，第一次拿到非空列表时起测速线程。
+- `reset()`（API 根地址变了、能力判为不支持时由 `report` 调）清空状态。
+
+### 5.3 测速线程（`route/probe.rs`）
+
+- 进程内一个专用 `std::thread`（`Once`），阻塞的 `std::net`，不用 tokio：心跳跑在 `sync.rs` 的单线程运行时上，那里每个 tick 还会同步调阻塞函数，计时会被拉长。
+- 测的条件：有非空列表、15 分钟内有成功的心跳。新列表（rev 变了）先等 10~30 秒随机时间再测第一轮，之后每轮间隔 `interval × (0.9~1.1)`；状态变了用 `Condvar` 唤醒重算。
+- 每轮开头：开了代理（`Config::is_proxy()`）、开了 WebSocket（`use_ws()`）或没配 Key 时不测，并清掉旧结果；然后取一次网卡快照 `lan::physical_snapshot()`。
+- 各中继并发（每台一个线程，测完即退）：`check_port(host, 21117)` 后系统解析一次（不计时），按返回顺序逐个试、取第一个连上的；每台测 3 次、间隔 200 毫秒，`connect_timeout` 3 秒，连上立刻关。成功的取最小值，毫秒向上取整、至少 1；3 次都失败进 `down`。
+- 三条作废规则（纯函数 `summarize`），任一命中整轮作废、不上报、清掉旧结果：
+  - 本地地址不在物理网卡上（挡本机 TUN：TUN 在本机完成握手，本地地址是 TUN 的）。
+  - 对端地址在 `198.18.0.0/15`，不看耗时（RFC 2544 基准测试段，不分配给互联网主机；中继解析到这里说明是代理的 fake-ip，答话的一定是代理。路由器 fake-ip 加 Wi-Fi 时代答常在 2 毫秒以上，第三条拦不住）。
+  - 对端是公网地址的中继任一次快于 2 毫秒（挡路由器透明代理当场回 SYN-ACK）。"公网"指不是私网、回环、链路本地、`100.64.0.0/10`、IPv6 ULA。
+- 起不了测速子线程时这一轮作废，打一条 warn（`porta route: probe round dropped, cannot start a probe thread: …`）。
+- 一轮测完时列表已经换了：结果照写，`probes()` 按 rev 不发它。
+
+### 5.4 `lan.rs` 的双地址族（为测速做，03 块其余部分没做）
+
+- 网卡枚举改成 `AF_UNSPEC`，`Nic` 多一个 `ipv6`（只收 `DadState` 为 Preferred 的单播地址，丢掉链路本地）。网关判断只看 IPv4，和以前一样。
+- `is_physical` 参数改成 `IpAddr`：IPv6 地址在某块在线、非虚拟网卡的 `ipv6` 里就算物理。
+- 局域网候选（§3）的行为不变：被控端候选、控制端收候选、`handshake_timeout`、`controller_bind_addr` 都还只看 IPv4。契约 03 的 IPv6 候选、网卡描述关键字、`has_gateway` 拆分、`listen_dual` 没做。
+- 非 Windows 上枚举为空，测量全部作废（第一阶段只做 Windows）。
+
+### 5.5 固定日志
+
+每种每分钟最多一条，文字固定，端到端测试按此查找：
+
+- `porta route: probe round dropped, local address {ip} not on a physical adapter`
+- `porta route: probe round dropped, {host} answered in {us}us (proxy?)`（fake-ip 和 2 毫秒两条规则共用）
+- `porta route: probe round dropped, cannot start a probe thread: {error}`（warn）
+
+### 5.6 不配也能用：自动降级与可选优化
+
+Porta 不要求用户配置任何代理规则。测量被本机 TUN 或路由器透明代理接住时会被自动识别（本地地址不在物理网卡上、公网中继快于 2 毫秒），整轮作废，服务端按估计值选路。可选优化：本机开 TUN 代理时把中继的地址排除在 TUN 之外、中继域名放进 fake-ip 过滤名单；路由器透明代理只代理 TCP 时把到中继的 TCP 设成直连。配了的机器才有第二级实测。
+
+### 5.7 兼容
+
+| 情况 | 结果 |
+|---|---|
+| Porta ↔ Porta，服务端 porta-server | 两端都有实测时服务端按实测选；被控端照用服务端选的中继 |
+| Porta 控制端 → 原版被控端 | 控制端一段实测；被控端仍按上游优先用本地 `relay-server` |
+| 原版控制端 → Porta 被控端 | 没有 `porta_from_id`，控制端一段估计；被控端一段实测、照用服务端选的中继 |
+| 服务端是原版 hbbs | Porta 心跳 404 → 不测速，`relay_preference` 返回 `None`，和上游一样；`porta_from_id` 被忽略 |
+| porta-server 只有 01、没有 02 | 响应不带 `routing`，不测速；`relay_preference` 照常生效 |
+| 没配 Key | 不采用 `routing`、不测速；`relay_preference` 照常生效 |
+| 开了代理或 WebSocket | 不测、不报；`relay_preference` 照常生效 |
+
+### 5.8 已知限制
+
+- 测的是 SYSTEM 服务进程的网络路径，用户会话走分用户 VPN、按应用分流的代理时可能和实际连接不同。
+- 经全隧道 VPN（WireGuard 全局、Tailscale 出口节点）上网的设备测量其实是真的，也被作废（Wintun 网卡不算物理）。
+- 系统 DNS 解析没有超时，某台中继解析卡住时这一轮推迟（只在测速线程里）。
+- IPv4 字面量中继在只有 IPv6 的网络里会进 `down`（真实连接走 `nip.io` NAT64，测速不做这一步）。
+- 路由器代答落在 2 毫秒以上时拦不住；验收时如果一律看到 2~3 毫秒，把阈值提到 5 毫秒。
+- `relay_preference` 只看 API 根地址是不是 porta-server，不看被控端实际连的会合服务器；两者指向不同服务器的配置下可能选错中继。

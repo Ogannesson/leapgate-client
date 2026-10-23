@@ -967,6 +967,8 @@ impl Client {
             // pure ws), telling the controlled side its answer may gather every candidate
             // type despite force_relay instead of requiring TURN.
             webrtc_sdp_offer,
+            // porta: our own id, so porta-server can use this device's relay measurements
+            porta_from_id: porta::route::self_id(),
             ..Default::default()
         });
         let webrtc_session_key = webrtc_offerer

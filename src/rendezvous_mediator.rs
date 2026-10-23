@@ -1326,6 +1326,10 @@ impl RendezvousMediator {
     }
 
     fn get_relay_server(&self, provided_by_rendezvous_server: String) -> String {
+        // porta: with porta-server its relay choice wins over the local relay-server option
+        if let Some(r) = porta::route::relay_preference(&provided_by_rendezvous_server) {
+            return r;
+        }
         let mut relay_server = Config::get_option("relay-server");
         if relay_server.is_empty() {
             relay_server = provided_by_rendezvous_server;
