@@ -1,0 +1,69 @@
+# Porta 客户端实施契约
+
+`porta-client` 是 `rustdesk/rustdesk` 的 fork。本文是 Porta 在上游之上做的改动的约定，写代码的人先读本文，再读总仓库的 `AGENTS.md` 和 `docs/architecture.md` §3.3。仓库里的 `AGENTS.md`、`CLAUDE.md` 是上游自带的，不改（合并上游时会冲突）。服务端的对应契约在总仓库 `server/PORTA.md`。
+
+## 1. 改动纪律
+
+- Porta 的逻辑放在 `libs/porta`（crate 名 `porta`），上游文件里只加挂钩：一两行调用 `porta::…`，前面一行注释写 `// porta: <一句话>`，方便合并上游时一眼认出。
+- 挂钩不改上游语句的结构，不挪动上游代码；能在调用点之前或之后插入的，不改调用点本身。
+- 热点文件（`src/client.rs`、`src/client/io_loop.rs`、`src/server/connection.rs`、`src/server/port_forward_mux.rs`、`src/rendezvous_mediator.rs`、`src/common.rs`）每处挂钩不超过几行。
+- 共用库 `libs/hbb_common` 是 `porta-cardo`（hbb_common 的 fork），客户端用它的 `porta/client` 分支；proto 新字段的字段号从 1000 起，避开上游以后可能用到的号段。proto 改动做成只含 proto 的提交，服务端那条线（`porta/lan-candidates` 等）和客户端那条线各放一份，内容一致。
+- 构建：Windows 用总仓库 `scripts/windows/`（`env.ps1`、`setup-toolchain.ps1`、`build-client.ps1`），工具链在 `C:\porta-build\`。子模块工作区用 LF（`core.eol=lf`、`core.autocrlf=false`）。
+
+## 2. 已有的挂钩（第二期）
+
+`libs/porta/src/`：`brand.rs`（名字、默认服务器构建时注入、`default_api_server()`）、`options.rs`（自建服务器时 IPv6 打洞默认开等默认值）、`rendezvous.rs`（没配会合服务器时等用户填好再连）、`update.rs`（关掉官方更新检查）。具体挂钩位置用 `git grep -n "porta::"` 查。
+
+## 3. 局域网直连：多候选地址（第三期第一项）
+
+依据：总仓库 `docs/research/第三期/04-TUN下的局域网直连.md`（读码结论、mihomo/sing-tun 的路由行为、选网卡规则都在里面，动手前先读）。维护者 2026-10-23 定：先单独做这一项；一步到位做多候选地址（改 proto 和服务端转发）。
+
+### 3.1 问题
+
+局域网路径（服务端发现两端公网出口相同 → `FetchLocalAddr` → 被控端回 `LocalAddr` → 服务端转成 `PunchHoleResponse{is_local}` 给控制端）里，被控端报的 `local_addr` 是它连 hbbs 那条 socket 的本地地址，控制端连的时候也把源地址绑在自己连 hbbs 那条 socket 的本地地址上。开 TUN 代理（Clash Verge / mihomo 等）的机器上，这两个地址都是虚拟网卡的（例如 `198.18.0.1`），直连必然失败、1 秒后退回中继。
+
+### 3.2 协议（已改，porta-cardo `1a46681` / `df76a0c`）
+
+- `LocalAddr.porta_local_addrs = 1000`（`repeated bytes`）：被控端的局域网候选地址，`AddrMangle::encode` 编码（和 `local_addr` 同一种编码），最好的在前，端口都等于 `local_addr` 的端口。
+- `PunchHoleResponse.porta_local_addrs = 1000`：服务端在 `is_local` 的响应里原样带给控制端。
+- 原版 hbbs、原版客户端遇到这两个字段直接忽略。
+
+### 3.3 被控端（`handle_intranet`）
+
+- 新增 `libs/porta/src/lan.rs`，提供 `local_candidates(sock_local: SocketAddr) -> Vec<SocketAddr>`：
+  - 只取 IPv4。候选来自物理网卡：排除虚拟/隧道网卡（Windows `IfType` 53/131/23/24，Wintun 是 53；接口名 `utun*`、`tun*`、`Mihomo`、`wintun` 一类）、`198.18.0.0/15`、`100.64.0.0/10`、回环、`169.254.0.0/16`；要求网卡有默认网关（顺带排除 WSL/Hyper-V 的 vEthernet）。
+  - 排序：有线在前，再按链路速度；去重；最多 8 个。端口都用 `sock_local` 的端口。
+  - `sock_local` 本身不是虚拟地址时，它排第一（和上游行为一致），后面再跟其他物理网卡地址。
+  - 网卡枚举先用 `default-net 0.14`（不能用 `get_default_interface()`，开 TUN 时它选中的正是 TUN）。笔记 04 提到它在 Windows 上会对每个网关调 `SendARP`、可能卡住：先实测耗时，超过 200 ms 就改用 `GetAdaptersAddresses` 自己枚举，汇报里写实测数。
+- 挂钩：组 `LocalAddr` 时，`local_addr` 改成候选的第一个（`sock_local` 是物理地址时就是它自己，不变），`porta_local_addrs` 填全部候选。
+- 监听：被控端随后在 `local_addr` 的 IP:端口上开 18 秒、只收一条的监听（上游 `src/server.rs` `accept_connection_`）。候选里有和 `sock_local` 不同的 IP 时，改为监听 `0.0.0.0:同一端口`，否则照上游。注意端口复用（上游丢掉连 hbbs 的 socket 后在同一端口上监听），Windows 上要实测 `0.0.0.0` 能不能绑上同一端口。
+- 没有任何物理候选时，一切照上游。
+
+### 3.4 控制端（收到 `is_local` 的 `PunchHoleResponse`）
+
+- `porta_local_addrs` 非空时：对全部候选并发发起 TCP 连接，不绑定源地址（局域网网段的路由比 TUN 的更具体，自然从物理网卡出去；依据见笔记 04），总等待时间和上游局域网的 1 秒一致；第一个完成 TCP 连接**并且**完成安全握手的胜出，其余丢弃。
+- 全部失败（包括 TCP 连上了但握手失败）时，必须和上游超时一样回落中继，不能直接报错。笔记 04 指出上游"连上了但握手失败"会直接报错、不回落：在 Porta 路径里要兜住。
+- `porta_local_addrs` 为空（被控端是原版，或服务端是原版 hbbs）时：照上游，只是自己连 hbbs 的 socket 本地地址是虚拟地址时不绑定源地址。
+- 改动放 `libs/porta/src/lan.rs`，`src/client.rs` 里只留挂钩。
+
+### 3.5 兼容
+
+| 控制端 | 被控端 | 结果 |
+|---|---|---|
+| Porta | Porta | 修好：被控端报物理地址并监听 `0.0.0.0`，控制端不绑源地址、并发试候选 |
+| Porta | 原版 | 被控端没开 TUN 时照常；开了 TUN 修不了（原版监听绑在虚拟地址上），用户只能在 TUN 里排除服务端地址 |
+| 原版 | Porta | `local_addr` 已是物理地址；控制端没开 TUN 时能连上 |
+| 任意 | 任意，服务端是原版 hbbs | 新字段被丢掉；`local_addr` 仍是物理地址，行为不比上游差 |
+
+### 3.6 测试
+
+- `libs/porta` 单元测试：候选选择（用可注入的网卡列表模拟：TUN 加有线、TUN 加无线、有线加无线、只有虚拟网卡、WSL vEthernet）、编码往返。
+- 控制端并发连候选、握手失败回落中继的逻辑要能在不起真实 Porta 的情况下单测（把"连接 + 握手"抽成可注入的函数）。
+- Windows 构建通过（`scripts/windows/build-client.ps1`）。
+- 端到端由维护者测：两台 Windows（都开 Clash Verge TUN、都装 Porta），连同一个 porta-server；期望服务端 `conn_attempt.outcome = direct_lan`，控制端日志里连的是物理网卡地址。
+
+### 3.7 不做
+
+- IPv6 候选（IPv6 直连另有打洞路径）、UDP。
+- 把连 hbbs 的 socket 绑到物理网卡（会绕过代理；服务端用域名而代理开 fake-ip 时必然失败）。
+- macOS 客户端（第一阶段只做 Windows）。
