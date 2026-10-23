@@ -187,6 +187,8 @@ async fn accept_connection_(
     slot: crate::rendezvous_mediator::PunchSlot,
 ) -> ResultType<()> {
     let local_addr = socket.local_addr();
+    // porta: listen on every adapter when the reported LAN candidates go beyond this address
+    let local_addr = porta::lan::listen_addr(local_addr).await;
     drop(socket);
     // even we drop socket, below still may fail if not use reuse_addr,
     // there is TIME_WAIT before socket really released, so sometimes we

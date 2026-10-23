@@ -834,6 +834,9 @@ impl RendezvousMediator {
         // we saw invalid local_addr while using proxy, local_addr.ip() == "::1"
         let local_addr: SocketAddr =
             format!("{}:{}", local_addr.ip(), local_addr.port()).parse()?;
+        // porta: report physical adapters' addresses, not a TUN adapter's; none found keeps upstream's
+        let porta_lan = porta::lan::local_candidates_async(local_addr).await;
+        let local_addr = porta_lan.first().copied().unwrap_or(local_addr);
         let mut msg_out = Message::new();
         msg_out.set_local_addr(LocalAddr {
             id: Config::get_id(),
@@ -842,6 +845,8 @@ impl RendezvousMediator {
             relay_server,
             version: crate::VERSION.to_owned(),
             socket_addr_v6,
+            // porta: every LAN candidate, for a Porta controller to try at once
+            porta_local_addrs: porta::lan::encode(&porta_lan),
             ..Default::default()
         });
         let bytes = msg_out.write_to_bytes()?;

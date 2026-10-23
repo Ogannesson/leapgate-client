@@ -7,3 +7,11 @@ description = "Porta extensions to the RustDesk engine"
 [dependencies]
 hbb_common = { path = "../hbb_common" }
 base = { path = "../base" }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_Ndis",
+    "Win32_Networking_WinSock",
+] }
