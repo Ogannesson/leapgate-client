@@ -1,12 +1,16 @@
 [package]
 name = "porta"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2021"
 description = "Porta extensions to the RustDesk engine"
 
 [dependencies]
 hbb_common = { path = "../hbb_common" }
 base = { path = "../base" }
+# No default features: 0.12's defaults pull in h2 and encoding_rs, which the lock file does not
+# have. The root crate already enables these.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "rustls-tls-native-roots", "socks"] }
+serde = { version = "1.0", features = ["derive"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.61", features = [

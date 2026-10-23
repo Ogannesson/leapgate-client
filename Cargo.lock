@@ -6204,10 +6204,12 @@ dependencies = [
 
 [[package]]
 name = "porta"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "base",
  "hbb_common",
+ "reqwest",
+ "serde 1.0.228",
  "windows 0.61.1",
 ]
 
