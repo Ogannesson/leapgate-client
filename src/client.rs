@@ -1368,23 +1368,16 @@ impl Client {
                 format!("nat_type: {:?}", peer_nat_type)
             }
         );
-        // porta: race the peer's LAN candidates unbound; if all fail, connect() skips its TCP attempt and relays
-        if allow_tcp_punch && !porta_lan_addrs.is_empty() {
-            let (peer, signed_id_pk, key) = (&peer, &signed_id_pk, &key);
-            let secure = |mut conn: Stream| async move {
-                let pk =
-                    Self::secure_connection(peer, signed_id_pk.clone(), key, &mut conn).await?;
-                Ok::<_, hbb_common::anyhow::Error>((conn, pk))
-            };
-            if let Some((conn, pk)) = porta::lan::connect_candidates(&porta_lan_addrs, secure).await
-            {
-                let conn = (conn, true, pk, None, "TCP");
-                return Ok((conn, (feedback, rendezvous_server), true));
-            }
+        // porta: race the peer's LAN candidates before upstream's connect()
+        let (addrs, tcp) = (&porta_lan_addrs, allow_tcp_punch);
+        if let Some(conn) =
+            crate::porta_hooks::lan_connect(addrs, tcp, &peer, &signed_id_pk, &key).await
+        {
+            return Ok((conn, (feedback, rendezvous_server), true));
         }
-        let allow_tcp_punch = allow_tcp_punch && porta_lan_addrs.is_empty();
-        // porta: upstream's own LAN attempt must not bind to a TUN address
-        let my_addr = porta::lan::controller_bind_addr(my_addr, is_local).await;
+        // porta: after failed candidates relay without a TCP retry; never bind to a TUN address
+        let (my_addr, allow_tcp_punch) =
+            crate::porta_hooks::lan_fallback(addrs, is_local, my_addr, tcp).await;
         Ok((
             Self::connect(
                 my_addr,
@@ -1671,7 +1664,7 @@ impl Client {
     }
 
     /// Establish secure connection with the server.
-    async fn secure_connection(
+    pub(crate) async fn secure_connection(
         peer_id: &str,
         signed_id_pk: Vec<u8>,
         key: &str,
