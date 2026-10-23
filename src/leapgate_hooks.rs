@@ -1,11 +1,11 @@
-//! Porta glue that needs upstream's crate-private items, so it cannot live in `libs/porta`.
-//! Upstream files call in here through one-line hooks; the logic itself stays in `libs/porta`.
+//! Leapgate glue that needs upstream's crate-private items, so it cannot live in `libs/leapgate`.
+//! Upstream files call in here through one-line hooks; the logic itself stays in `libs/leapgate`.
 
 use crate::{client::Client, kcp_stream::KcpStream};
 use hbb_common::{anyhow, bail, config, Stream};
 use std::net::SocketAddr;
 
-/// Races the LAN candidates a Porta peer listed in its `is_local` response, each secured with
+/// Races the LAN candidates a Leapgate peer listed in its `is_local` response, each secured with
 /// upstream's handshake, and returns what `Client::connect` returns on success. `None` when
 /// they all fail; when they are not tried at all (TCP punching off, relay forced, no peer key
 /// that verifies under the server's key) it also empties them, so `lan_fallback` keeps
@@ -43,7 +43,7 @@ pub(crate) async fn lan_connect(
         }
         Ok::<_, anyhow::Error>((conn, pk))
     };
-    let (conn, pk) = porta::lan::connect_candidates(candidates, secure).await?;
+    let (conn, pk) = leapgate::lan::connect_candidates(candidates, secure).await?;
     Some((conn, true, pk, None, "TCP"))
 }
 
@@ -79,7 +79,7 @@ pub(crate) async fn lan_fallback(
         return (my_addr, tcp);
     }
     (
-        porta::lan::controller_bind_addr(my_addr, is_local).await,
+        leapgate::lan::controller_bind_addr(my_addr, is_local).await,
         tcp,
     )
 }

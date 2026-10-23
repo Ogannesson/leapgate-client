@@ -4344,6 +4344,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
 
 [[package]]
+name = "leapgate"
+version = "0.3.0"
+dependencies = [
+ "base",
+ "hbb_common",
+ "reqwest",
+ "serde 1.0.228",
+ "windows 0.61.1",
+]
+
+[[package]]
 name = "lebe"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6203,17 +6214,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "porta"
-version = "0.3.0"
-dependencies = [
- "base",
- "hbb_common",
- "reqwest",
- "serde 1.0.228",
- "windows 0.61.1",
-]
-
-[[package]]
 name = "portable-atomic"
 version = "1.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7133,6 +7133,7 @@ dependencies = [
  "kcp-sys",
  "keepawake",
  "lazy_static",
+ "leapgate",
  "libpulse-binding",
  "libpulse-simple-binding",
  "libsamplerate-sys",
@@ -7150,7 +7151,6 @@ dependencies = [
  "percent-encoding",
  "piet",
  "piet-coregraphics",
- "porta",
  "portable-pty",
  "qrcode-generator",
  "rdev",

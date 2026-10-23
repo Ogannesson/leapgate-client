@@ -36,10 +36,10 @@ pub(super) fn start() {
     static ONCE: Once = Once::new();
     ONCE.call_once(|| {
         if let Err(e) = thread::Builder::new()
-            .name("porta-route-probe".to_owned())
+            .name("leapgate-route-probe".to_owned())
             .spawn(run)
         {
-            log::error!("porta route: cannot start the probe thread: {}", e);
+            log::error!("leapgate route: cannot start the probe thread: {}", e);
         }
     });
 }
@@ -106,7 +106,7 @@ fn round(rev: i64, relays: &[String]) -> Option<ProbeResult> {
                         throttled_log!(
                             LOG_INTERVAL,
                             warn,
-                            "porta route: probe round dropped, cannot start a probe thread: {}",
+                            "leapgate route: probe round dropped, cannot start a probe thread: {}",
                             e
                         )
                     })
@@ -170,7 +170,7 @@ fn summarize(
                 throttled_log!(
                     LOG_INTERVAL,
                     info,
-                    "porta route: probe round dropped, local address {} not on a physical adapter",
+                    "leapgate route: probe round dropped, local address {} not on a physical adapter",
                     a.local
                 );
                 return None;
@@ -179,7 +179,7 @@ fn summarize(
                 throttled_log!(
                     LOG_INTERVAL,
                     info,
-                    "porta route: probe round dropped, {} answered in {}us (proxy?)",
+                    "leapgate route: probe round dropped, {} answered in {}us (proxy?)",
                     host,
                     a.elapsed.as_micros()
                 );

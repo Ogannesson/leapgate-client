@@ -1,4 +1,4 @@
-//! `POST /api/porta/v1/audit/{conn,file,alarm}`: the controlled side's audit records.
+//! `POST /api/leapgate/v1/audit/{conn,file,alarm}`: the controlled side's audit records.
 
 use super::{
     exchange, is_supported, mark_supported, mark_unsupported, select, Cap, CapSlot, Env, Reply,
@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 const RETRY_DEADLINE: Duration = Duration::from_secs(120);
 const RETRY_BACKOFF_SECS: [u64; 2] = [10, 30];
 
-/// `None`: the server has no Porta API, send this record the legacy way.
+/// `None`: the server has no Leapgate API, send this record the legacy way.
 pub(super) async fn send<E: Env>(
     env: &E,
     cap: &CapSlot,
@@ -61,19 +61,19 @@ pub(super) async fn send<E: Env>(
         let elapsed = started.elapsed();
         if !retryable || attempt > RETRY_BACKOFF_SECS.len() || elapsed >= RETRY_DEADLINE {
             log::error!(
-                "Porta audit post dropped (attempt {}, {:?} elapsed): {}",
+                "Leapgate audit post dropped (attempt {}, {:?} elapsed): {}",
                 attempt,
                 elapsed,
                 err
             );
             return Some(Err(anyhow!(err)));
         }
-        log::warn!("Porta audit post failed (attempt {}): {}", attempt, err);
+        log::warn!("Leapgate audit post failed (attempt {}): {}", attempt, err);
         env.sleep(Duration::from_secs(RETRY_BACKOFF_SECS[attempt - 1]))
             .await;
         if started.elapsed() >= RETRY_DEADLINE {
             log::error!(
-                "Porta audit post dropped (attempt {}, deadline passed during backoff): {}",
+                "Leapgate audit post dropped (attempt {}, deadline passed during backoff): {}",
                 attempt,
                 err
             );

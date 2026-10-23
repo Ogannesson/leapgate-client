@@ -104,8 +104,8 @@ async fn start_hbbs_sync_async() {
                 if config::option2bool("stop-service", &Config::get_option("stop-service")) {
                     continue;
                 }
-                // porta: Porta servers get signed reports on /api/porta/v1/
-                if porta::report::tick(&url, crate::get_sysinfo, Connection::alive_conns, crate::VERSION).await {
+                // leapgate: Leapgate servers get signed reports on /api/leapgate/v1/
+                if leapgate::report::tick(&url, crate::get_sysinfo, Connection::alive_conns, crate::VERSION).await {
                     continue;
                 }
                 let conns = Connection::alive_conns();

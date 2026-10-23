@@ -185,12 +185,12 @@ async fn accept_connection_(
     secure: bool,
     meta: ConnectionMeta,
     slot: crate::rendezvous_mediator::PunchSlot,
-    // porta: the LAN candidates handle_intranet_ reported, so the adapters are not enumerated again
-    porta_lan: Vec<SocketAddr>,
+    // leapgate: the LAN candidates handle_intranet_ reported, so the adapters are not enumerated again
+    leapgate_lan: Vec<SocketAddr>,
 ) -> ResultType<()> {
     let local_addr = socket.local_addr();
-    // porta: listen on every adapter when the reported LAN candidates go beyond this address
-    let local_addr = porta::lan::listen_addr(&porta_lan, local_addr);
+    // leapgate: listen on every adapter when the reported LAN candidates go beyond this address
+    let local_addr = leapgate::lan::listen_addr(&leapgate_lan, local_addr);
     drop(socket);
     // even we drop socket, below still may fail if not use reuse_addr,
     // there is TIME_WAIT before socket really released, so sometimes we
@@ -364,10 +364,10 @@ pub(crate) async fn accept_connection(
     secure: bool,
     meta: ConnectionMeta,
     slot: crate::rendezvous_mediator::PunchSlot,
-    // porta: LAN candidates, passed through to accept_connection_
-    porta_lan: Vec<SocketAddr>,
+    // leapgate: LAN candidates, passed through to accept_connection_
+    leapgate_lan: Vec<SocketAddr>,
 ) {
-    if let Err(err) = accept_connection_(server, socket, secure, meta, slot, porta_lan).await {
+    if let Err(err) = accept_connection_(server, socket, secure, meta, slot, leapgate_lan).await {
         log::warn!("Failed to accept connection from {}: {}", peer_addr, err);
     }
 }

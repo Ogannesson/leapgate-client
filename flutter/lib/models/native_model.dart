@@ -142,7 +142,7 @@ class PlatformFFI {
         : isLinux
             ? _openLinuxCoreLib()
             : isWindows
-                ? DynamicLibrary.open('libporta.dll')
+                ? DynamicLibrary.open('libleapgate.dll')
                 :
                 // Use executable itself as the dynamic library for MacOS.
                 // Multiple dylib instances will cause some global instances to be invalid.

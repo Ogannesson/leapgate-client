@@ -1,4 +1,4 @@
-//! HTTP client for the Porta API (`/api/porta/v1/`).
+//! HTTP client for the Leapgate API (`/api/leapgate/v1/`).
 //!
 //! Unlike upstream's `post_request`, there is no fallback that weakens transport security: no
 //! accepting invalid certificates, no native-tls retry, no TCP-proxy or WebSocket relay. The
@@ -23,7 +23,7 @@ pub(crate) struct Resp {
     pub server_sig: Option<String>,
 }
 
-/// Signs and posts `body` to `{base}/api/porta/v1/{endpoint}`. Returns the response and the
+/// Signs and posts `body` to `{base}/api/leapgate/v1/{endpoint}`. Returns the response and the
 /// request's signature, which the response signature is bound to.
 pub(crate) async fn post(
     base: &str,
@@ -32,7 +32,7 @@ pub(crate) async fn post(
 ) -> ResultType<(Resp, [u8; 64])> {
     let (auth, req_sig) = sign::device_auth("POST", endpoint, &body)?;
     let resp = client()?
-        .post(format!("{base}/api/porta/v1/{endpoint}"))
+        .post(format!("{base}/api/leapgate/v1/{endpoint}"))
         .header("Content-Type", "application/json")
         .header(sign::AUTH_HEADER, auth)
         .body(body)
@@ -63,7 +63,7 @@ fn builder() -> ClientBuilder {
     // it, rustls reads just the local store, so a fresh install may lack the API's root (e.g.
     // ISRG Root X1).
     // Redirects are not followed: a 3xx comes back as is and counts as a failed request, never
-    // as "no Porta API" and never as a hop to another host.
+    // as "no Leapgate API" and never as a hop to another host.
     Client::builder()
         .no_proxy()
         .use_rustls_tls()
@@ -143,7 +143,7 @@ mod tests {
         let resp = builder()
             .build()
             .unwrap()
-            .post(format!("http://{addr}/api/porta/v1/heartbeat"))
+            .post(format!("http://{addr}/api/leapgate/v1/heartbeat"))
             .send()
             .await
             .unwrap();

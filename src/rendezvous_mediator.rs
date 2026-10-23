@@ -304,7 +304,7 @@ impl RendezvousMediator {
         scrap::codec::test_av1();
         *LAST_NOT_DEPLOYED_REGISTER.lock().await = None;
         loop {
-            porta::rendezvous::wait_for_server().await;
+            leapgate::rendezvous::wait_for_server().await;
             let timeout = Arc::new(RwLock::new(CONNECT_TIMEOUT));
             let conn_start_time = Instant::now();
             *SOLVING_PK_MISMATCH.lock().await = "".to_owned();
@@ -834,8 +834,8 @@ impl RendezvousMediator {
         // we saw invalid local_addr while using proxy, local_addr.ip() == "::1"
         let local_addr: SocketAddr =
             format!("{}:{}", local_addr.ip(), local_addr.port()).parse()?;
-        // porta: report physical adapters' addresses, not a TUN adapter's; none found keeps upstream's
-        let lan = porta::lan::local_candidates_async(local_addr).await;
+        // leapgate: report physical adapters' addresses, not a TUN adapter's; none found keeps upstream's
+        let lan = leapgate::lan::local_candidates_async(local_addr).await;
         let local_addr = lan.first().copied().unwrap_or(local_addr);
         let mut msg_out = Message::new();
         msg_out.set_local_addr(LocalAddr {
@@ -845,13 +845,13 @@ impl RendezvousMediator {
             relay_server,
             version: crate::VERSION.to_owned(),
             socket_addr_v6,
-            // porta: every LAN candidate, for a Porta controller to try at once
-            porta_local_addrs: porta::lan::encode(&lan),
+            // leapgate: every LAN candidate, for a Leapgate controller to try at once
+            leapgate_local_addrs: leapgate::lan::encode(&lan),
             ..Default::default()
         });
         let bytes = msg_out.write_to_bytes()?;
         socket.send_raw(bytes).await?;
-        // porta: the candidates decide the listen address there, without enumerating adapters again
+        // leapgate: the candidates decide the listen address there, without enumerating adapters again
         crate::accept_connection(server.clone(), socket, peer_addr, true, meta, slot, lan).await;
         Ok(())
     }
@@ -1326,8 +1326,8 @@ impl RendezvousMediator {
     }
 
     fn get_relay_server(&self, provided_by_rendezvous_server: String) -> String {
-        // porta: with porta-server its relay choice wins over the local relay-server option
-        if let Some(r) = porta::route::relay_preference(&provided_by_rendezvous_server) {
+        // leapgate: with leapgate-server its relay choice wins over the local relay-server option
+        if let Some(r) = leapgate::route::relay_preference(&provided_by_rendezvous_server) {
             return r;
         }
         let mut relay_server = Config::get_option("relay-server");

@@ -680,7 +680,7 @@ pub fn test_nat_type() {
 
         let mut i = 0;
         loop {
-            porta::rendezvous::wait_for_server_blocking();
+            leapgate::rendezvous::wait_for_server_blocking();
             match test_nat_type_() {
                 Ok(true) => break,
                 Err(err) => {
@@ -1262,7 +1262,7 @@ fn get_api_server_(api: String, custom: String) -> String {
             return format!("http://{}", s);
         }
     }
-    porta::brand::default_api_server()
+    leapgate::brand::default_api_server()
 }
 
 #[inline]
@@ -1314,7 +1314,7 @@ pub fn get_local_option(key: &str) -> String {
     {
         if v.is_empty() {
             if !is_public(&Config::get_rendezvous_server()) {
-                if let Some(v) = porta::options::self_hosted_punch_default(key) {
+                if let Some(v) = leapgate::options::self_hosted_punch_default(key) {
                     return v;
                 }
                 return "N".to_owned();
@@ -2414,7 +2414,7 @@ pub fn create_symmetric_key_msg(their_pk_b: [u8; 32]) -> (Bytes, Bytes, secretbo
 
 #[inline]
 pub fn using_public_server() -> bool {
-    if porta::brand::never_public_server() {
+    if leapgate::brand::never_public_server() {
         return false;
     }
     crate::get_custom_rendezvous_server(get_option("custom-rendezvous-server")).is_empty()

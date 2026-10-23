@@ -1,4 +1,4 @@
-//! `POST /api/porta/v1/heartbeat`: the heartbeat with sysinfo folded in, strategy handed down.
+//! `POST /api/leapgate/v1/heartbeat`: the heartbeat with sysinfo folded in, strategy handed down.
 
 use super::{
     exchange, is_supported, mark_supported, mark_unsupported, select, Cap, CapSlot, Env, Reply,
@@ -57,7 +57,7 @@ pub(super) struct Payload {
 struct Req<'a> {
     uuid: &'a str,
     ver: i64,
-    porta: &'static str,
+    leapgate: &'static str,
     #[serde(skip_serializing_if = "<[i32]>::is_empty")]
     conns: &'a [i32],
     strategy_rev: i64,
@@ -140,7 +140,7 @@ fn body(p: &Payload, conns: &[i32], hash: &str, sysinfo: Option<&Value>) -> Vec<
     let req = Req {
         uuid: &p.uuid,
         ver: p.ver,
-        porta: env!("CARGO_PKG_VERSION"),
+        leapgate: env!("CARGO_PKG_VERSION"),
         conns,
         strategy_rev: p.strategy_rev,
         routing_rev: route::routing_rev(),
@@ -195,7 +195,7 @@ fn on_ok<E: Env>(
 
 fn fail(hb: &Mutex<Hb>, err: &str) -> bool {
     hb.lock().unwrap().failures += 1;
-    throttled_log!(LOG_INTERVAL, warn, "Porta heartbeat failed: {}", err);
+    throttled_log!(LOG_INTERVAL, warn, "Leapgate heartbeat failed: {}", err);
     true
 }
 
@@ -264,11 +264,11 @@ pub(super) fn apply_strategy(rev: i64, options: &Map<String, Value>) {
     }
     Config::set_options(current);
     LocalConfig::set_option(STRATEGY_TIMESTAMP.to_owned(), rev.to_string());
-    log::info!("Porta strategy updated (rev {})", rev);
+    log::info!("Leapgate strategy updated (rev {})", rev);
 }
 
 /// Upstream `handle_config_options` (src/hbbs_http/sync.rs), except that keys starting with
-/// `porta-` are Porta's own state and never taken from the server.
+/// `leapgate-` are Leapgate's own state and never taken from the server.
 fn merge_strategy(
     options: &mut HashMap<String, String>,
     defaults: &HashMap<String, String>,
@@ -278,7 +278,7 @@ fn merge_strategy(
         let Some(v) = v.as_str() else {
             continue;
         };
-        if k.starts_with("porta-") {
+        if k.starts_with("leapgate-") {
             continue;
         }
         // Priority: user config > default advanced options. Only when the default is also
@@ -332,7 +332,7 @@ mod tests {
         let v: Value = serde_json::from_str(&whole).unwrap();
         assert_eq!(v["sysinfo_hash"], json!(hash));
         assert_eq!(v["conns"], json!([3]));
-        assert_eq!(v["porta"], json!(env!("CARGO_PKG_VERSION")));
+        assert_eq!(v["leapgate"], json!(env!("CARGO_PKG_VERSION")));
         assert!(v.get("id").is_none() && v.get("probes").is_none());
         let without = body(&p, &[], &hash, None);
         let v: Value = serde_json::from_slice(&without).unwrap();
@@ -353,10 +353,11 @@ mod tests {
         let mut options = HashMap::from([
             ("a".to_owned(), "1".to_owned()),
             ("b".to_owned(), "1".to_owned()),
-            ("porta-api-caps".to_owned(), "keep".to_owned()),
+            ("leapgate-api-caps".to_owned(), "keep".to_owned()),
         ]);
         let defaults = HashMap::from([("b".to_owned(), "Y".to_owned())]);
-        let incoming = json!({"a": "", "b": "", "c": "3", "porta-api-caps": "", "porta-x": "1"});
+        let incoming =
+            json!({"a": "", "b": "", "c": "3", "leapgate-api-caps": "", "leapgate-x": "1"});
         merge_strategy(&mut options, &defaults, incoming.as_object().unwrap());
         assert_eq!(
             options,
@@ -364,7 +365,7 @@ mod tests {
                 // Empty with an empty default: removed. Empty over a default: kept as "".
                 ("b".to_owned(), "".to_owned()),
                 ("c".to_owned(), "3".to_owned()),
-                ("porta-api-caps".to_owned(), "keep".to_owned()),
+                ("leapgate-api-caps".to_owned(), "keep".to_owned()),
             ])
         );
     }

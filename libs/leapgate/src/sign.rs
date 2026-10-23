@@ -1,4 +1,4 @@
-//! Device signatures on Porta API requests and the server's signature on the responses.
+//! Device signatures on Leapgate API requests and the server's signature on the responses.
 
 use hbb_common::{
     anyhow::anyhow,
@@ -17,15 +17,15 @@ use std::{
     time::Duration,
 };
 
-pub(crate) const AUTH_HEADER: &str = "Porta-Device-Auth";
-pub(crate) const SIG_HEADER: &str = "Porta-Server-Sig";
-const DEVICE_CONTEXT: &[u8] = b"porta-device-v1\0";
-const SERVER_CONTEXT: &[u8] = b"porta-server-v1\0";
+pub(crate) const AUTH_HEADER: &str = "Leapgate-Device-Auth";
+pub(crate) const SIG_HEADER: &str = "Leapgate-Server-Sig";
+const DEVICE_CONTEXT: &[u8] = b"leapgate-device-v1\0";
+const SERVER_CONTEXT: &[u8] = b"leapgate-server-v1\0";
 
 /// Server time minus local time, in seconds, from the last verified response.
 static CLOCK_OFFSET: AtomicI64 = AtomicI64::new(0);
 
-/// The `Porta-Device-Auth` header value for one request, and the signature in it (the server
+/// The `Leapgate-Device-Auth` header value for one request, and the signature in it (the server
 /// binds its response signature to it). Signs with the key pair registered with the rendezvous
 /// server: `get_key_pair` caches it per process, and the reports run in the service process,
 /// the same one that registers it.
@@ -96,7 +96,7 @@ pub fn server_pk() -> Result<Option<sign::PublicKey>, ()> {
         throttled_log!(
             Duration::from_secs(60),
             warn,
-            "porta: the configured key is not a valid public key, rejecting all API responses"
+            "leapgate: the configured key is not a valid public key, rejecting all API responses"
         );
     }
     pk
@@ -110,7 +110,7 @@ fn parse_server_pk(key: &str) -> Result<Option<sign::PublicKey>, ()> {
     sign::PublicKey::from_slice(&bytes).map(Some).ok_or(())
 }
 
-/// Checks a `Porta-Server-Sig` header against the request's own signature and the response body.
+/// Checks a `Leapgate-Server-Sig` header against the request's own signature and the response body.
 /// There is deliberately no form for an empty request signature (see contract 01 §2.2).
 pub fn verify_server_sig(
     server_pk: &sign::PublicKey,
@@ -141,12 +141,12 @@ pub(crate) mod tests {
     pub(crate) const T: i64 = 1761200000;
     pub(crate) const BODY: &[u8] = br#"{"uuid":"dGVzdA==","ver":1005010}"#;
     const HEADER: &str = "v1 id=MTIzNDU2Nzg5, t=1761200000, \
-        s=yx-Mzyt9ynHD1FCErdyWCz_Kx_iNzF7b4ZfZfJfCQaL2vH3VLHVBadR5BYSAbk5fdqXUHU7ImS9W2Wy46mw9Aw";
+        s=wnN1NCsqJK0GqftKsoijUTZ_6qG7lHvOKBIpRVkcePzp7S0I8ix9B6XyYStSzy4ZHFkVdV9wJ8m0fDFeJORBBQ";
     pub(crate) const SERVER_SEED: [u8; 32] = [9; 32];
     const SERVER_PK: &str = "/RckOFqgx1tk+3jNYC+h2ZH96/drE8WO1wLqyDXp9hg=";
     const RESP_BODY: &[u8] = br#"{"api":1,"features":[],"time":1761200000}"#;
     const RESP_SIG: &str =
-        "zATBKIx6xPyFbAQVV7koFw0iuqmyvNQwuufqcxG-NNKjaI6BUx0uJiHThezCfpTmtYgZZmR2ApOOgEPNMKdsDA";
+        "aFgYDDXBlXs2_mGlZO8inNUyWobzQXawooaM6RVRxjgGbpjWkNY1ZyGdhEAr14B3d4x4SJfjFJs6Z4WZxsBTDQ";
 
     pub(crate) fn device_sk() -> sign::SecretKey {
         sign::keypair_from_seed(&sign::Seed(DEVICE_SEED)).1
@@ -156,7 +156,7 @@ pub(crate) mod tests {
         sign::keypair_from_seed(&sign::Seed(SERVER_SEED))
     }
 
-    /// Signs a response the way porta-server does.
+    /// Signs a response the way leapgate-server does.
     pub(crate) fn server_sign(req_sig: &[u8; 64], body: &[u8]) -> String {
         let mut msg = SERVER_CONTEXT.to_vec();
         msg.extend_from_slice(req_sig);

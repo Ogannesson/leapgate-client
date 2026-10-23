@@ -1,8 +1,8 @@
 [package]
-name = "porta"
+name = "leapgate"
 version = "0.3.0"
 edition = "2021"
-description = "Porta extensions to the RustDesk engine"
+description = "Leapgate extensions to the RustDesk engine"
 
 [dependencies]
 hbb_common = { path = "../hbb_common" }
