@@ -12,7 +12,7 @@
 
 ## 2. 已有的挂钩（第二期）
 
-`libs/porta/src/`：`brand.rs`（名字、默认服务器构建时注入、`default_api_server()`）、`options.rs`（自建服务器时 IPv6 打洞默认开等默认值）、`rendezvous.rs`（没配会合服务器时等用户填好再连）、`update.rs`（关掉官方更新检查）、`lan.rs`（第三期：局域网多候选地址，§3）。具体挂钩位置用 `git grep -n "porta::\|porta_hooks"` 查。
+`libs/porta/src/`：`brand.rs`（名字、默认服务器构建时注入、`default_api_server()`）、`options.rs`（自建服务器时 IPv6 打洞默认开等默认值）、`rendezvous.rs`（没配会合服务器时等用户填好再连）、`update.rs`（关掉官方更新检查）、`lan.rs`（第三期：局域网多候选地址，§3）、`api.rs`、`sign.rs`、`report/`（第三期：上报与认证，§4）、`route/`（路由第二级，现在是 `report` 调用的空函数，契约 02 换成实现）。具体挂钩位置用 `git grep -n "porta::\|porta_hooks"` 查。
 
 主 crate 的 `src/porta_hooks.rs` 放需要调用上游私有函数的胶水代码（例如传进 `libs/porta` 的握手闭包）：`libs/porta` 调不到主 crate 的私有函数，又不想把闭包组装写在热点文件的调用处。上游文件里的挂钩只调用 `porta::…` 或 `crate::porta_hooks::…`。不要建 `src/porta.rs`，会和外部 crate `porta` 撞名。
 
@@ -75,3 +75,38 @@
 - IPv6 候选（IPv6 直连另有打洞路径）、UDP。
 - 把连 hbbs 的 socket 绑到物理网卡（会绕过代理；服务端用域名而代理开 fake-ip 时必然失败）。
 - macOS 客户端（第一阶段只做 Windows）。
+
+## 4. 上报与认证（第三期 01）
+
+依据：总仓库 `docs/第三期实施契约/01-上报与认证.md`（协议、服务端行为、取舍都在里面）。连的是 Porta 服务端时，心跳、sysinfo、被控端审计改走 `/api/porta/v1/`，每个请求用设备的 Ed25519 私钥（注册时上报的那把）签名；连原版服务端时照上游走旧接口。下面和契约原文有出入的地方以本文（即代码）为准。
+
+### 4.1 挂钩
+
+- `src/hbbs_http/sync.rs` `start_hbbs_sync_async`：`stop-service` 检查之后调 `porta::report::tick(...)`，返回 `true` 就 `continue`，本轮不发上游的心跳和 sysinfo（发过了，或在退避中）。
+- `src/server/connection.rs` `post_audit_async` 第一行调 `porta::report::audit(&url, &v)`，返回 `Some` 就直接用它的结果，`None` 走上游。
+- 两处都从上游传进来的 URL 拆出 API 根地址，和 `report::api_root()` 不同时走上游（打 `api root mismatch`）。
+- 合并上游后：`git grep -n get_audit_server` 确认没有绕过 `post_audit_async` 的新审计出口；`common.rs` 的 `get_api_server` 有改动时同步 `report::api_root()`，`get_key` 有改动时同步 `sign::server_pk()`（都是重算，不含 Windows 按 exe 文件名取授权那一支）。
+
+### 4.2 能力缓存
+
+- 持久键：Config 选项 `porta-api-caps`，值 `<API 根地址>\n<feature,feature,...>`。只由服务进程写（第一次确认支持时、之后每次成功心跳，整个值变了才写）；界面进程经上游的选项同步读到，`server_is_porta()`、`has_feature()` 每次按 `api_root()` 现算、和持久值比，不依赖心跳跑过。心跳下发的策略合并时跳过 `porta-` 开头的键。
+- 进程内状态按根地址记：未知 / 支持 / 不支持（10 分钟后重探）。持久值里的根地址和构建时注入的默认地址直接算支持。
+- 只有未确认的根地址回 404/405，或回 2xx 但不是 Porta 应答（没有 `api`），才判不支持、退回上游；已确认的根地址遇到这些按失败处理，不降级（旧接口不签名、可能接受无效证书）。
+
+### 4.3 传输和验签
+
+- 每次请求新建 reqwest 客户端：不用系统代理，按 `Config::get_socks()` 配代理（照上游 `configure_http_client!`）；rustls，同时信系统证书库和 reqwest 内置的 webpki 根证书（Windows 缺的根证书要等系统自己的验证用到时才从微软下载，rustls 只读本地已有的，新装系统可能缺 API 证书的根；系统证书库留着认用户导入的私有 CA）；没有不安全回退，`allow-insecure-tls-fallback` 不起作用；不跟随重定向，3xx 算失败；每次尝试 12 秒。
+- 配了 Key 时响应必须验签通过（`Porta-Server-Sig`），Key 无效则全部失败。
+- 时钟：验过签的 401 带 `time` 时采信、重签后立即重试一次；2xx 的 `time` 只在和当前偏差超过 30 秒时采信（每次都跟会让时间戳随延迟来回抖，撞上服务端的防重放下限）。
+- 401 的 `error` 只取固定集合（`bad_auth`、`stale_time`、`replay`、`unknown_device`、`bad_signature`），其余记成 `other`；未签名的 401 不采信时间、不重试，除 `bad_auth`（服务端本来就不签）外都按验签失败记日志。
+- 心跳失败退避 3、6、12、24、48、60 秒；审计照上游重试表（间隔 10、30 秒，总时限 120 秒），400/413 不重试。
+
+### 4.4 固定日志
+
+每种每分钟最多一条（`throttled_log!`），文字固定，端到端测试按此查找：
+
+- `porta report: {root} supports Porta API, features [{features}]`
+- `porta report: {root} has no Porta API ({status}), using legacy reports`
+- `porta report: 401 {error}, clock offset now {offset}s`
+- `porta report: server signature check failed`
+- `porta report: api root mismatch, using legacy reports`

@@ -58,14 +58,15 @@ pub(crate) async fn post(
 
 fn builder() -> ClientBuilder {
     // System proxies are ignored as upstream does (rustdesk#11569).
-    // Certificates are checked against the system store only: the root crate turns on reqwest's
-    // `rustls-tls`, which would also trust the bundled webpki roots.
+    // Both the system store (for privately imported CAs) and the bundled webpki roots are
+    // trusted: Windows downloads a missing root from Microsoft only when its own verifier needs
+    // it, rustls reads just the local store, so a fresh install may lack the API's root (e.g.
+    // ISRG Root X1).
     // Redirects are not followed: a 3xx comes back as is and counts as a failed request, never
     // as "no Porta API" and never as a hop to another host.
     Client::builder()
         .no_proxy()
         .use_rustls_tls()
-        .tls_built_in_webpki_certs(false)
         .redirect(redirect::Policy::none())
 }
 
