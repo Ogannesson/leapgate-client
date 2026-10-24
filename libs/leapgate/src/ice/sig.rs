@@ -14,7 +14,8 @@ use std::{
     sync::Mutex,
 };
 
-pub(super) const ICE_VER: u32 = 1;
+/// `LeapgateIce.ver`.
+pub const ICE_VER: u32 = 1;
 pub(super) const SESSION_LEN: usize = 16;
 const OFFER_DOMAIN: &[u8] = b"leapgate-ice-offer-v1\0";
 const OFFER_TS_WINDOW_SECS: i64 = 40;

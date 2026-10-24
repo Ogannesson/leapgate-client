@@ -582,6 +582,10 @@ impl RendezvousMediator {
                     _ => {}
                 }
             }
+            // leapgate: a FORWARD of Leapgate's ICE signaling, handled in a spawned task
+            Some(rendezvous_message::Union::LeapgateIce(ice)) => {
+                crate::leapgate_hooks::on_ice_offer(ice, self.host.clone(), server.clone())
+            }
             _ => {}
         }
         Ok(())

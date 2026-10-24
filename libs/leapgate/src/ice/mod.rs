@@ -7,7 +7,7 @@ mod gather;
 mod sig;
 mod stun;
 
-pub use sig::{open_forward, AnswerParams, Bad, Opened};
+pub use sig::{open_forward, AnswerParams, Bad, Opened, ICE_VER};
 
 use crate::lan;
 use check::{Base, Check, Kernel, Outcome, Packet, Remote, Reply, Transmit};
