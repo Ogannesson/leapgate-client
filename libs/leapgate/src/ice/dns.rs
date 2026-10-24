@@ -24,7 +24,6 @@ use std::{
 /// 200 ms, with 200 ms for the answer to that.
 pub(super) const RESOLVE_WAIT: Duration = Duration::from_millis(200);
 const MAX_SERVERS: usize = 2;
-const MAX_RECORDS: u16 = 32;
 const TYPE_A: u16 = 1;
 const TYPE_AAAA: u16 = 28;
 
@@ -69,11 +68,8 @@ async fn resolve_via(
         }
         let asks = servers
             .iter()
-            .map(|&(bind, server)| Box::pin(ask(bind, server, host, port)));
-        match tokio::time::timeout_at(deadline.into(), select_ok(asks)).await {
-            Ok(Ok((addrs, _))) => addrs,
-            _ => Vec::new(),
-        }
+            .map(|&(bind, server)| Box::pin(ask(bind, server, host, port, deadline)));
+        select_ok(asks).await.map(|(addrs, _)| addrs).unwrap_or_default()
     });
     let system = pin!(async {
         match tokio::time::timeout_at(deadline.into(), tokio::net::lookup_host(rendezvous)).await {
@@ -103,13 +99,14 @@ fn reachable(addrs: impl IntoIterator<Item = SocketAddr>) -> Vec<SocketAddr> {
         .collect()
 }
 
-/// `server`'s A and AAAA answers for `host`, from a socket of its own on `bind`; `Err` when it
-/// gives no address.
+/// `server`'s A and AAAA answers for `host` that came by `deadline`, from a socket of its own on
+/// `bind`; `Err` when it gives no address. One answer is enough: a server may never answer AAAA.
 async fn ask(
     bind: IpAddr,
     server: SocketAddr,
     host: &str,
     port: u16,
+    deadline: Instant,
 ) -> Result<Vec<SocketAddr>, ()> {
     let fail = |e: &dyn std::fmt::Display| {
         log::trace!("leapgate ice: DNS {} from {}: {}", host, server, e);
@@ -129,7 +126,11 @@ async fn ask(
     let mut ips = Vec::new();
     let mut buf = [0u8; RECV_BUF];
     while !queries.is_empty() {
-        let (n, from) = sock.recv_from(&mut buf).await.map_err(|e| fail(&e))?;
+        let Ok(got) = tokio::time::timeout_at(deadline.into(), sock.recv_from(&mut buf)).await
+        else {
+            break;
+        };
+        let (n, from) = got.map_err(|e| fail(&e))?;
         if from != server {
             continue;
         }
@@ -189,7 +190,7 @@ fn answers(resp: &[u8], query: &[u8]) -> Option<Vec<IpAddr>> {
     let count = u16::from_be_bytes([resp[6], resp[7]]);
     let mut at = query.len();
     let mut out = Vec::new();
-    for _ in 0..count.min(MAX_RECORDS) {
+    for _ in 0..count {
         at = skip_name(resp, at)?;
         let rr = resp.get(at..at + 10)?;
         let len = u16::from_be_bytes([rr[8], rr[9]]) as usize;
@@ -210,8 +211,7 @@ fn answers(resp: &[u8], query: &[u8]) -> Option<Vec<IpAddr>> {
 
 /// Past the name at `at`. A compression pointer ends it and is not followed.
 fn skip_name(b: &[u8], mut at: usize) -> Option<usize> {
-    // A name of at most 255 bytes has at most 127 labels.
-    for _ in 0..128 {
+    loop {
         let len = *b.get(at)? as usize;
         match len & 0xc0 {
             0xc0 => return (at + 2 <= b.len()).then_some(at + 2),
@@ -220,7 +220,6 @@ fn skip_name(b: &[u8], mut at: usize) -> Option<usize> {
             _ => return None,
         }
     }
-    None
 }
 
 #[cfg(test)]
@@ -350,9 +349,10 @@ mod tests {
         }
     }
 
-    /// Answers A questions with `a` and AAAA ones with no record, under `rcode`, each after a
-    /// forged reply from another port that only the source check turns away.
-    async fn fake_server(rcode: u8, a: [u8; 4]) -> SocketAddr {
+    /// Answers A questions with `a` and AAAA ones with no record (or not at all without `aaaa`),
+    /// under `rcode`, each after a forged reply from another port that only the source check
+    /// turns away.
+    async fn fake_server(rcode: u8, a: [u8; 4], aaaa: bool) -> SocketAddr {
         let s = UdpSocket::bind("127.0.0.1:0").await.unwrap();
         let forger = UdpSocket::bind("127.0.0.1:0").await.unwrap();
         let at = s.local_addr().unwrap();
@@ -361,8 +361,11 @@ mod tests {
             loop {
                 let (n, from) = s.recv_from(&mut buf).await.unwrap();
                 let q = &buf[..n];
+                let is_a = q[n - 4..n - 2] == TYPE_A.to_be_bytes();
+                if !is_a && !aaaa {
+                    continue;
+                }
                 let rec = |ip: [u8; 4]| {
-                    let is_a = q[n - 4..n - 2] == TYPE_A.to_be_bytes();
                     is_a.then(|| record(&PTR, TYPE_A, &ip))
                         .into_iter()
                         .collect::<Vec<_>>()
@@ -380,11 +383,14 @@ mod tests {
     async fn the_adapters_answer_wins_and_the_system_one_is_kept_only_if_reachable() {
         let lo = IpAddr::from(Ipv4Addr::LOCALHOST);
         let deadline = || Instant::now() + RESOLVE_WAIT;
-        let answering = fake_server(0, [203, 0, 113, 9]).await;
-        let failing = fake_server(2, [203, 0, 113, 9]).await;
-        let fake_ip = fake_server(0, [198, 18, 0, 19]).await;
+        let answering = fake_server(0, [203, 0, 113, 9], true).await;
+        let no_aaaa = fake_server(0, [203, 0, 113, 9], false).await;
+        let failing = fake_server(2, [203, 0, 113, 9], true).await;
+        let fake_ip = fake_server(0, [198, 18, 0, 19], true).await;
         let name = "203.0.113.5:21116";
         let got = resolve_via(&[(lo, answering)], name, deadline()).await;
+        assert_eq!(got, [sa("203.0.113.9:21116")]);
+        let got = resolve_via(&[(lo, no_aaaa)], name, deadline()).await;
         assert_eq!(got, [sa("203.0.113.9:21116")]);
         let got = resolve_via(&[(lo, failing)], name, deadline()).await;
         assert_eq!(got, [sa("203.0.113.5:21116")]);
