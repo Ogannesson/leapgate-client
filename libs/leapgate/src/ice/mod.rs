@@ -342,25 +342,16 @@ impl Driver {
         match [buf[0], buf[1]] {
             [0x00, 0x01] => {
                 if let Some(r) = self.creds.read_request(buf) {
-                    let role = match self.creds.role {
-                        Role::Controlling => Role::Controlled,
-                        Role::Controlled => Role::Controlling,
-                    };
                     let check = Check {
                         txid: r.txid,
                         priority: r.priority,
                         use_candidate: r.nominate,
-                        role,
                     };
                     self.kernel.on_request(now, i, from, &check);
                 }
             }
             [0x01, 0x01] => {
-                let kernel = &self.kernel;
-                if let Some((txid, mapped)) = self
-                    .creds
-                    .read_response(buf, from, |t| kernel.sent_to(i, t))
-                {
+                if let Some((txid, mapped)) = self.creds.read_response(buf) {
                     self.kernel
                         .on_response(now, i, from, &Reply { txid, mapped });
                 }
@@ -449,6 +440,9 @@ mod tests {
         let offer = Offer::new(gather_on(&loopback(0), &[]).await);
         let agent = Agent::new(gather_on(&loopback(0), &[]).await, answer(offer.params()));
         let b = answer(agent.params());
+        // A SYN B gets first, from no nominated pair, must not take the handover.
+        let intruder = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        intruder.send_to(&SYN, b.candidates[0].addr).unwrap();
         let s = hand_over(offer, agent, b).await;
         // §2.10: IPv4 ranks above IPv6 on the same adapter.
         assert_eq!(s.family, 4);

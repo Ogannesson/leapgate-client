@@ -278,15 +278,9 @@ impl Creds {
         })
     }
 
-    /// The peer's response to one of our checks: its transaction id and the mapped address.
-    /// `sent_to` gives where the pending check `txid` on this socket went; the response must
-    /// come from there.
-    pub(super) fn read_response(
-        &self,
-        buf: &[u8],
-        from: SocketAddr,
-        sent_to: impl FnOnce(&TxId) -> Option<SocketAddr>,
-    ) -> Option<(TxId, SocketAddr)> {
+    /// The peer's response to a check: its transaction id and the mapped address. Whether it
+    /// answers a pending check, and came from where that check went, is the kernel's to tell.
+    pub(super) fn read_response(&self, buf: &[u8]) -> Option<(TxId, SocketAddr)> {
         let msg = decode(buf)?;
         if msg.class() != MessageClass::SuccessResponse || msg.method() != BINDING {
             return None;
@@ -297,11 +291,10 @@ impl Creds {
         else {
             return None;
         };
-        let txid = *msg.transaction_id().as_bytes();
-        if sent_to(&txid)? != from || !integrity_ok(&msg, &self.remote_pwd) {
+        if !integrity_ok(&msg, &self.remote_pwd) {
             return None;
         }
-        Some((txid, mapped.address()))
+        Some((*msg.transaction_id().as_bytes(), mapped.address()))
     }
 }
 
@@ -553,14 +546,9 @@ mod tests {
 
         let response = hex(CHECK_RESPONSE);
         let a_addr = addr("192.168.1.10:50000");
-        let b_addr = addr("192.168.1.20:50000");
         assert_eq!(b.response(&id, a_addr).unwrap(), response);
-        let sent = |t: &TxId| (*t == id).then_some(b_addr);
-        assert_eq!(a.read_response(&response, b_addr, sent), Some((id, a_addr)));
-        // From another address than the check went to, or for no pending check.
-        assert_eq!(a.read_response(&response, a_addr, sent), None);
-        assert_eq!(a.read_response(&response, b_addr, |_| None), None);
-        assert_eq!(b.read_response(&response, b_addr, sent), None);
+        assert_eq!(a.read_response(&response), Some((id, a_addr)));
+        assert_eq!(b.read_response(&response), None);
     }
 
     /// A's check, assembled from `attrs` and closed with MESSAGE-INTEGRITY under B's password
@@ -696,7 +684,7 @@ mod tests {
             let _ = read_binding_response(buf, &id, local);
             let _ = a.read_request(buf);
             let _ = b.read_request(buf);
-            let _ = a.read_response(buf, local, |_| Some(local));
+            let _ = a.read_response(buf);
         };
         for valid in [
             hex(CHECK_REQUEST),

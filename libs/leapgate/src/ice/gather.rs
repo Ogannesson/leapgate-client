@@ -406,7 +406,18 @@ mod tests {
         let internal = nic(IF_TYPE_ETHERNET, &["172.20.0.1"], false, &[], false);
         let mut vmware = nic(IF_TYPE_ETHERNET, &["192.168.50.1"], true, &[], false);
         vmware.description = "VMware Virtual Ethernet Adapter for VMnet8".to_owned();
-        let got = select(&[wlan, v6_only, internal, vmware, eth]);
+        // Its second /64 would be a fifth IPv6 address.
+        let more_v6 = nic(
+            0,
+            &[],
+            false,
+            &[
+                ("2001:db8:2::1", Suffix::Other),
+                ("2001:db8:3::1", Suffix::Other),
+            ],
+            true,
+        );
+        let got = select(&[wlan, v6_only, internal, vmware, eth, more_v6]);
         let want = [
             ("192.168.1.10", 0),
             ("10.0.0.1", 0),
@@ -415,6 +426,7 @@ mod tests {
             ("2408:8256::abcd", 0),
             ("fd00::1", 0),
             ("2001:db8:1::5", 50),
+            ("2001:db8:2::1", 50),
         ]
         .map(|(a, cost)| LocalAddr::new(ip(a), cost));
         assert_eq!(got, want);
@@ -445,20 +457,30 @@ mod tests {
         .map(|(kind, pref, addr)| Candidate { kind, pref, addr });
         assert_eq!(got, want);
 
-        let v6: Vec<_> = (1..=4)
-            .map(|i| {
-                let a = SocketAddr::new(ip(&format!("2408:8256:{i}::1")), 5000);
-                (LocalAddr::new(a.ip(), 0), a)
-            })
-            .collect();
-        let mapped: Vec<_> = (1..=4)
-            .map(|i| Some(SocketAddr::new(ip(&format!("2001:db8::{i}")), 7000)))
-            .collect();
-        let (got, _) = assemble(&v6, &mapped);
-        assert_eq!(
-            got.iter().filter(|c| c.kind == Kind::Srflx).count(),
-            MAX_SRFLX_V6
-        );
+        // Five sockets, each mapped to an address of its own.
+        let srflx = |host: &dyn Fn(i32) -> String, map: &dyn Fn(i32) -> String| {
+            let bound: Vec<_> = (1..=5)
+                .map(|i| {
+                    let a = SocketAddr::new(ip(&host(i)), 5000);
+                    (LocalAddr::new(a.ip(), 0), a)
+                })
+                .collect();
+            let mapped: Vec<_> = (1..=5)
+                .map(|i| Some(SocketAddr::new(ip(&map(i)), 7000)))
+                .collect();
+            let (got, _) = assemble(&bound, &mapped);
+            got.iter().filter(|c| c.kind == Kind::Srflx).count()
+        };
+        let v4 = srflx(&|i| format!("192.168.{i}.1"), &|i| format!("203.0.113.{i}"));
+        let v6 = srflx(&|i| format!("2408:8256:{i}::1"), &|i| format!("2001:db8::{i}"));
+        assert_eq!((v4, v6), (4, 2));
+    }
+
+    #[hbb_common::tokio::test(crate = "hbb_common::tokio")]
+    async fn at_most_eight_sockets() {
+        let local = [LocalAddr::new(ip("127.0.0.1"), 0); 9];
+        let g = super::super::gather_on(&local, &[]).await;
+        assert_eq!(g.bases.len(), 8);
     }
 
     /// S drops the first Binding request and answers the resend.
@@ -504,8 +526,11 @@ mod tests {
         let local = [LocalAddr::new(ip("127.0.0.1"), 0)];
         let t0 = Instant::now();
         let stun = [to];
-        let (g, seen) = tokio::join!(super::super::gather_on(&local, &stun), answer);
-        assert_eq!(seen, 2);
+        let (g, seen) = tokio::join!(
+            super::super::gather_on(&local, &stun),
+            tokio::time::timeout(GATHER_WAIT * 2, answer)
+        );
+        assert_eq!(seen.expect("the Binding request was not resent"), 2);
         assert!(t0.elapsed() < GATHER_WAIT);
         assert!(g
             .candidates
@@ -527,5 +552,20 @@ mod tests {
         let mut buf = [0u8; 16];
         let r = tokio::time::timeout(Duration::from_millis(200), s.recv_from(&mut buf)).await;
         assert!(r.is_err(), "recv_from returned {:?}", r);
+    }
+
+    /// WSAEMSGSIZE for a datagram longer than `RECV_BUF`, then a good one on the same socket.
+    #[cfg(windows)]
+    #[hbb_common::tokio::test(crate = "hbb_common::tokio")]
+    async fn a_receive_error_does_not_stop_the_socket() {
+        let (s, at) = bind(sa("127.0.0.1:0")).await.unwrap();
+        let mut socks = Socks::new(vec![(s, at)]);
+        let peer = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        peer.send_to(&[0u8; RECV_BUF + 100], at).unwrap();
+        peer.send_to(b"ok", at).unwrap();
+        let mut buf = [0u8; RECV_BUF];
+        let deadline = Instant::now() + Duration::from_millis(500);
+        let got = socks.recv(&mut buf, deadline).await;
+        assert_eq!(got.map(|(i, n, _)| (i, n)), Some((0, 2)));
     }
 }

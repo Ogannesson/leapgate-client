@@ -469,6 +469,21 @@ mod tests {
             assert!(excluded_v6(v6(ip)), "{ip}");
         }
         assert!(!excluded_v6(v6("fdfe:dcba:9877::1")));
+        // Both ends of 198.18/15 and 100.64/10, the TUN address of note 06 §9.1, a Tailscale
+        // address, and the neighbours just outside.
+        let v4 = |s: &str| IpAddr::V4(s.parse().unwrap());
+        for ip in [
+            "198.18.0.1",
+            "198.19.255.255",
+            "100.64.0.1",
+            "100.127.255.255",
+            "100.101.2.3",
+        ] {
+            assert_eq!(classify(v4(ip)), Class::Drop, "{ip}");
+        }
+        for ip in ["198.17.255.255", "198.20.0.0", "100.63.255.255", "100.128.0.0"] {
+            assert_eq!(classify(v4(ip)), Class::PublicV4, "{ip}");
+        }
     }
 
     #[test]

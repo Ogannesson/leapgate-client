@@ -80,14 +80,12 @@ pub(crate) struct Remote {
     pub addr: SocketAddr,
 }
 
-/// A check request, received or to send. `role` is the sender's: ICE-CONTROLLING or
-/// ICE-CONTROLLED.
+/// A check request, received or to send.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Check {
     pub txid: [u8; 12],
     pub priority: u32,
     pub use_candidate: bool,
-    pub role: Role,
 }
 
 /// A check success response, received or to send.
@@ -315,24 +313,6 @@ impl Kernel {
         self.nominated.contains(&(socket, from))
     }
 
-    /// Where the check `txid` still awaiting a response on `socket` went, so a response from
-    /// anywhere else is refused before its MESSAGE-INTEGRITY is computed.
-    pub(crate) fn sent_to(&self, socket: usize, txid: &[u8; 12]) -> Option<SocketAddr> {
-        let nominating = self.nominating.iter().map(|(i, tx)| (*i, tx));
-        let checking = self
-            .pairs
-            .iter()
-            .enumerate()
-            .filter_map(|(i, p)| match &p.state {
-                State::InProgress(tx) => Some((i, tx)),
-                _ => None,
-            });
-        nominating
-            .chain(checking)
-            .find(|(i, tx)| self.pairs[*i].socket == socket && tx.txid == *txid)
-            .map(|(i, _)| self.pairs[i].remote)
-    }
-
     pub(crate) fn poll_transmit(&mut self) -> Option<Transmit> {
         self.out.pop_front()
     }
@@ -374,7 +354,7 @@ impl Kernel {
         from: SocketAddr,
         check: &Check,
     ) {
-        if self.outcome.is_some() || check.role == self.role {
+        if self.outcome.is_some() {
             return;
         }
         self.out.push_back(Transmit {
@@ -520,7 +500,6 @@ impl Kernel {
                 // §2.9.4: the base host candidate's priority as if it were prflx.
                 priority: candidate_priority(Kind::Prflx, self.bases[p.socket].pref),
                 use_candidate,
-                role: self.role,
             }),
         });
     }
@@ -1155,7 +1134,6 @@ mod tests {
             txid: [n; 12],
             priority: 0x6EFF_FFFF,
             use_candidate: false,
-            role: Role::Controlling,
         };
         let mut sent = Vec::new();
         for n in 0..50u8 {
@@ -1250,5 +1228,42 @@ mod tests {
                 }))
             );
         }
+    }
+
+    /// RFC 8445 §7.2.5.2.1, for a check and for the nomination.
+    #[test]
+    fn a_response_from_elsewhere_than_the_check_went_is_ignored() {
+        let t0 = Instant::now();
+        let base = sa("192.168.1.10:5000");
+        let peer = sa("198.51.100.2:40000");
+        let elsewhere = sa("198.51.100.2:40001");
+        let mut k = Kernel::controlling(
+            vec![Base {
+                addr: base,
+                pref: 0xFFFF,
+            }],
+            Vec::new(),
+            &[srflx(peer, 0xFFFF)],
+            t0,
+        );
+        k.handle_timeout(t0);
+        for nominate in [false, true] {
+            let Some(Transmit {
+                packet: Packet::Check(c),
+                ..
+            }) = k.poll_transmit()
+            else {
+                panic!("no check sent");
+            };
+            assert_eq!(c.use_candidate, nominate);
+            let reply = Reply {
+                txid: c.txid,
+                mapped: base,
+            };
+            k.on_response(t0, 0, elsewhere, &reply);
+            assert_eq!((k.poll_transmit(), k.outcome()), (None, None));
+            k.on_response(t0, 0, peer, &reply);
+        }
+        assert!(matches!(k.outcome(), Some(Outcome::Selected(_))));
     }
 }

@@ -21,7 +21,6 @@ use hbb_common::{
         LeapgateIceReject, LeapgateIceResult, RendezvousMessage,
     },
     socket_client::connect_tcp,
-    sodiumoxide::crypto::sign,
     tokio::{self, time::timeout},
     ResultType, Stream,
 };
@@ -81,17 +80,13 @@ fn peer_key_verifies(peer: &str, signed_id_pk: &[u8], key: &str) -> bool {
     if signed_id_pk.is_empty() {
         return false;
     }
-    trusted_rs_pk(key).is_some_and(|rs_pk| {
-        crate::common::decode_id_pk(signed_id_pk, &rs_pk).is_ok_and(|(id, _)| id == peer)
-    })
-}
-
-/// The server key `secure_connection` trusts for `key`.
-fn trusted_rs_pk(key: &str) -> Option<sign::PublicKey> {
-    crate::common::get_rs_pk(if key.is_empty() {
+    let rs_pk = crate::common::get_rs_pk(if key.is_empty() {
         config::RS_PUB_KEY
     } else {
         key
+    });
+    rs_pk.is_some_and(|rs_pk| {
+        crate::common::decode_id_pk(signed_id_pk, &rs_pk).is_ok_and(|(id, _)| id == peer)
     })
 }
 
@@ -175,7 +170,8 @@ fn ice_enabled(peer: &str, key: &str, interface: &impl Interface) -> bool {
         && interface.get_lch().read().unwrap().other_server.is_none()
         && !interface.is_force_relay()
         && !crate::is_udp_disabled()
-        && trusted_rs_pk(key).is_some()
+        && crate::common::get_rs_pk(if key.is_empty() { config::RS_PUB_KEY } else { key })
+            .is_some()
         && leapgate::report::has_feature("ice")
 }
 
@@ -660,7 +656,7 @@ impl Drop for AgentSlot {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hbb_common::{rendezvous_proto::IdPk, tokio};
+    use hbb_common::{rendezvous_proto::IdPk, sodiumoxide::crypto::sign, tokio};
 
     const PEER: &str = "123456789";
 
@@ -760,6 +756,8 @@ mod tests {
         let got = race(ok_after(60_000, "ice"), ok_after(10, RELAY), 100).await;
         assert_eq!(got.unwrap(), "relay");
         assert!(start.elapsed() < Duration::from_secs(5));
+        let got = race(err_after(50, "ICE: no_pair"), ok_after(10, RELAY), 60_000).await;
+        assert_eq!(got.unwrap(), "relay");
     }
 
     #[tokio::test]
