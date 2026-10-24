@@ -75,7 +75,9 @@ async fn run(args: &[String]) -> ResultType<()> {
                     let ms = t0.elapsed().as_millis();
                     s.socket.connect(s.remote).await?;
                     for _ in 0..3 {
-                        s.socket.send(&SYN).await?;
+                        // B exits at the first SYN, so a later one draws a port unreachable and
+                        // this send fails with ECONNREFUSED.
+                        s.socket.send(&SYN).await.ok();
                         tokio::time::sleep(Duration::from_millis(100)).await;
                     }
                     let family = if s.family == 4 { "v4" } else { "v6" };
