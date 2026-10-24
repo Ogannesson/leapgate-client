@@ -2,6 +2,8 @@
 //! signaling relayed by leapgate-server, STUN connectivity checks, then upstream's KCP on the
 //! selected pair. The protocol constants and wire formats are those of contract 05 §2.
 
+#[allow(dead_code)] // driven by this module once the driver lands
+mod check;
 mod sig;
 mod stun;
 
