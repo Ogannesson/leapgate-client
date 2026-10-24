@@ -3,6 +3,7 @@
 //! selected pair. The protocol constants and wire formats are those of contract 05 §2.
 
 mod check;
+mod dns;
 mod gather;
 mod sig;
 mod stun;
@@ -33,11 +34,17 @@ use stun::{Creds, Role};
 pub struct LocalAddr {
     ip: IpAddr,
     net_cost: u8,
+    /// Up to two of its adapter's DNS servers, of its family (`dns::resolve`).
+    dns: [Option<IpAddr>; 2],
 }
 
 impl LocalAddr {
     pub fn new(addr: IpAddr, net_cost: u8) -> Self {
-        LocalAddr { ip: addr, net_cost }
+        LocalAddr {
+            ip: addr,
+            net_cost,
+            dns: [None; 2],
+        }
     }
 }
 
@@ -88,16 +95,11 @@ pub async fn local_addrs() -> Vec<LocalAddr> {
 }
 
 /// A socket on each of `local` (§4.3), asking the rendezvous server `rendezvous` (`host:port`)
-/// for srflx candidates, for at most `GATHER_WAIT` including the name lookup.
+/// for srflx candidates, for at most `GATHER_WAIT` including the name lookup (`dns::resolve`).
 pub async fn gather(local: &[LocalAddr], rendezvous: &str) -> Gathered {
     let started = Instant::now();
-    let deadline = started + GATHER_WAIT;
-    let stun =
-        match tokio::time::timeout_at(deadline.into(), tokio::net::lookup_host(rendezvous)).await {
-            Ok(Ok(addrs)) => addrs.collect(),
-            _ => Vec::new(),
-        };
-    gather::gather_until(local, &stun, started, deadline).await
+    let stun = dns::resolve(local, rendezvous, started + dns::RESOLVE_WAIT).await;
+    gather::gather_until(local, &stun, started, started + GATHER_WAIT).await
 }
 
 /// `gather` with the STUN addresses given: an IPv4 socket asks the first IPv4 one, an IPv6

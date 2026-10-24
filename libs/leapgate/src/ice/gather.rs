@@ -54,23 +54,33 @@ pub(super) fn select(nics: &[Nic]) -> Vec<LocalAddr> {
     let mut usable: Vec<&Nic> = nics.iter().filter(|n| n.can_gather()).collect();
     usable.sort_by_key(|n| (net_cost(n.if_type), Reverse(n.speed)));
     let (mut v4, mut v6) = (Vec::new(), Vec::new());
-    let add = |list: &mut Vec<LocalAddr>, ip: IpAddr, cost: u8, cap: usize| {
+    let add = |list: &mut Vec<LocalAddr>, ip: IpAddr, n: &Nic, cap: usize| {
         if list.len() < cap && !list.iter().any(|a| a.ip == ip) {
-            list.push(LocalAddr::new(ip, cost));
+            // The Drop class covers link-local servers, Windows' `fec0:0:0:ffff::` placeholders
+            // and a fake-ip `198.18/15` one.
+            let mut servers = n
+                .dns
+                .iter()
+                .filter(|d| d.is_ipv4() == ip.is_ipv4() && classify(**d) != Class::Drop);
+            let dns = [servers.next().copied(), servers.next().copied()];
+            list.push(LocalAddr {
+                ip,
+                net_cost: net_cost(n.if_type),
+                dns,
+            });
         }
     };
     for n in usable {
-        let cost = net_cost(n.if_type);
         if n.has_gateway_v4 {
             for &ip in &n.ipv4 {
                 if matches!(classify(ip.into()), Class::PrivateV4 | Class::PublicV4) {
-                    add(&mut v4, ip.into(), cost, MAX_HOST_V4);
+                    add(&mut v4, ip.into(), n, MAX_HOST_V4);
                 }
             }
         }
         for ip in one_per_prefix(&n.ipv6) {
             if matches!(classify(ip.into()), Class::GlobalV6 | Class::Ula) {
-                add(&mut v6, ip.into(), cost, MAX_HOST_V6);
+                add(&mut v6, ip.into(), n, MAX_HOST_V6);
             }
         }
     }
@@ -431,6 +441,37 @@ mod tests {
         .map(|(a, cost)| LocalAddr::new(ip(a), cost));
         assert_eq!(got, want);
         assert_eq!(select(&[]), vec![]);
+    }
+
+    #[test]
+    fn each_address_takes_two_of_its_adapters_dns_servers_of_its_family() {
+        let mut eth = nic(
+            IF_TYPE_ETHERNET,
+            &["192.168.1.10"],
+            true,
+            &[("2408:8256::10", Suffix::Other)],
+            true,
+        );
+        eth.dns = [
+            "198.18.0.2",
+            "fe80::1",
+            "192.168.1.1",
+            "fec0:0:0:ffff::1",
+            "2408:8256::1",
+            "223.5.5.5",
+            "114.114.114.114",
+        ]
+        .map(ip)
+        .to_vec();
+        let dns: Vec<_> = select(&[eth]).iter().map(|a| a.dns).collect();
+        let some = |s| Some(ip(s));
+        assert_eq!(
+            dns,
+            [
+                [some("192.168.1.1"), some("223.5.5.5")],
+                [some("2408:8256::1"), None]
+            ]
+        );
     }
 
     #[test]

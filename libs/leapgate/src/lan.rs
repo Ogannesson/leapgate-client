@@ -87,6 +87,8 @@ pub(crate) struct Nic {
     pub(crate) has_gateway_v6: bool,
     /// Bits per second, 0 when unknown.
     pub(crate) speed: u64,
+    /// The adapter's own DNS servers, in its order.
+    pub(crate) dns: Vec<IpAddr>,
 }
 
 impl Nic {
@@ -357,7 +359,7 @@ pub(crate) fn nics() -> Vec<Nic> {
         NetworkManagement::{
             IpHelper::{
                 GetAdaptersAddresses, GAA_FLAG_INCLUDE_GATEWAYS, GAA_FLAG_SKIP_ANYCAST,
-                GAA_FLAG_SKIP_DNS_SERVER, GAA_FLAG_SKIP_MULTICAST, IP_ADAPTER_ADDRESSES_LH,
+                GAA_FLAG_SKIP_MULTICAST, IP_ADAPTER_ADDRESSES_LH,
             },
             Ndis::IfOperStatusUp,
         },
@@ -392,10 +394,7 @@ pub(crate) fn nics() -> Vec<Nic> {
         }
     }
 
-    let flags = GAA_FLAG_INCLUDE_GATEWAYS
-        | GAA_FLAG_SKIP_ANYCAST
-        | GAA_FLAG_SKIP_MULTICAST
-        | GAA_FLAG_SKIP_DNS_SERVER;
+    let flags = GAA_FLAG_INCLUDE_GATEWAYS | GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST;
     let mut size: u32 = 16 * 1024;
     // u64 elements keep the buffer aligned for IP_ADAPTER_ADDRESSES_LH.
     let mut buf: Vec<u64>;
@@ -454,6 +453,16 @@ pub(crate) fn nics() -> Vec<Nic> {
             has_gateway_v6 |= ipv6_of(&ga.Address).is_some_and(|ip| !ip.is_unspecified());
             g = ga.Next;
         }
+        let mut dns = Vec::new();
+        let mut d = a.FirstDnsServerAddress;
+        while let Some(da) = unsafe { d.as_ref() } {
+            dns.extend(
+                ipv4_of(&da.Address)
+                    .map(IpAddr::V4)
+                    .or_else(|| ipv6_of(&da.Address).map(IpAddr::V6)),
+            );
+            d = da.Next;
+        }
         out.push(Nic {
             name: unsafe { a.FriendlyName.to_string() }.unwrap_or_default(),
             description: unsafe { a.Description.to_string() }.unwrap_or_default(),
@@ -468,6 +477,7 @@ pub(crate) fn nics() -> Vec<Nic> {
             } else {
                 a.TransmitLinkSpeed
             },
+            dns,
         });
         cur = a.Next;
     }
