@@ -162,7 +162,8 @@ where
 }
 
 /// Only the plain path: no `id@server?key=`, no direct IP, no forced relay (which covers `/r`, a
-/// proxy and WebSocket), UDP allowed, a trusted key, and a server that announces `ice`.
+/// proxy and WebSocket), UDP allowed, UDP or IPv6 punching on, a trusted key, and a server that
+/// announces `ice`.
 fn ice_enabled(peer: &str, key: &str, interface: &impl Interface) -> bool {
     !config::is_incoming_only()
         && !hbb_common::is_ip_str(peer)
@@ -170,6 +171,7 @@ fn ice_enabled(peer: &str, key: &str, interface: &impl Interface) -> bool {
         && interface.get_lch().read().unwrap().other_server.is_none()
         && !interface.is_force_relay()
         && !crate::is_udp_disabled()
+        && (crate::get_udp_punch_enabled() || crate::get_ipv6_punch_enabled())
         && crate::common::get_rs_pk(if key.is_empty() { config::RS_PUB_KEY } else { key })
             .is_some()
         && leapgate::report::has_feature("ice")
