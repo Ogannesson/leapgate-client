@@ -38,7 +38,7 @@ const IF_TYPE_PPP: u32 = 23;
 const IF_TYPE_LOOPBACK: u32 = 24;
 const IF_TYPE_PROP_VIRTUAL: u32 = 53;
 const IF_TYPE_TUNNEL: u32 = 131;
-const IF_TYPE_ETHERNET: u32 = 6;
+pub(crate) const IF_TYPE_ETHERNET: u32 = 6;
 pub(crate) const IF_TYPE_IEEE80211: u32 = 71;
 
 /// ZeroTier, VMware, VirtualBox host-only and Wi-Fi Direct adapters report `IfType` 6 or 71, so

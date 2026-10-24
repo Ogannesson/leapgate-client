@@ -3,7 +3,7 @@
 //! socket, when to wake next and which pair was selected; the driver owns the sockets. Roles are
 //! fixed (A controlling, B controlled), one component, no freezing, no trickle.
 
-use hbb_common::rand;
+use super::stun::{new_txid, Role};
 use std::{
     collections::VecDeque,
     net::SocketAddr,
@@ -55,12 +55,6 @@ pub(crate) fn candidate_priority(kind: Kind, local_pref: u16) -> u32 {
 /// §2.10, RFC 8445 §6.1.2.3: `g` is the controlling side's candidate, `d` the controlled side's.
 pub(crate) fn pair_priority(g: u32, d: u32) -> u64 {
     (1u64 << 32) * g.min(d) as u64 + 2 * g.max(d) as u64 + (g > d) as u64
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Role {
-    Controlling,
-    Controlled,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -146,11 +140,8 @@ enum Step {
 
 impl Tx {
     fn new(now: Instant) -> Self {
-        let mut txid: [u8; 12] = rand::random();
-        // §2.9.5: packet offset 12 is KCP's flag byte; zero keeps late checks inert there.
-        txid[4] = 0;
         Tx {
-            txid,
+            txid: new_txid(),
             first: now,
             sent: 1,
         }
@@ -322,6 +313,24 @@ impl Kernel {
     /// B: whether a KCP SYN on `socket` from `from` comes up a nominated pair (§2.9.5).
     pub(crate) fn nominated(&self, socket: usize, from: SocketAddr) -> bool {
         self.nominated.contains(&(socket, from))
+    }
+
+    /// Where the check `txid` still awaiting a response on `socket` went, so a response from
+    /// anywhere else is refused before its MESSAGE-INTEGRITY is computed.
+    pub(crate) fn sent_to(&self, socket: usize, txid: &[u8; 12]) -> Option<SocketAddr> {
+        let nominating = self.nominating.iter().map(|(i, tx)| (*i, tx));
+        let checking = self
+            .pairs
+            .iter()
+            .enumerate()
+            .filter_map(|(i, p)| match &p.state {
+                State::InProgress(tx) => Some((i, tx)),
+                _ => None,
+            });
+        nominating
+            .chain(checking)
+            .find(|(i, tx)| self.pairs[*i].socket == socket && tx.txid == *txid)
+            .map(|(i, _)| self.pairs[i].remote)
     }
 
     pub(crate) fn poll_transmit(&mut self) -> Option<Transmit> {
@@ -599,7 +608,6 @@ mod tests {
     enum Nat {
         Open,
         FullCone,
-        PortRestricted,
         Symmetric,
     }
 
@@ -607,7 +615,6 @@ mod tests {
         inner: SocketAddr,
         dst: Option<SocketAddr>,
         port: u16,
-        sent_to: Vec<SocketAddr>,
     }
 
     struct Site {
@@ -631,12 +638,10 @@ mod tests {
                         inner,
                         dst: sym.then_some(dst),
                         port,
-                        sent_to: Vec::new(),
                     });
                     self.maps.len() - 1
                 }
             };
-            self.maps[i].sent_to.push(dst);
             SocketAddr::new(self.public, self.maps[i].port)
         }
 
@@ -644,7 +649,6 @@ mod tests {
             let m = self.maps.iter().find(|m| m.port == dst.port())?;
             let ok = match self.nat {
                 Nat::FullCone => true,
-                Nat::PortRestricted => m.sent_to.contains(&src),
                 Nat::Symmetric => m.dst == Some(src),
                 Nat::Open => false,
             };
