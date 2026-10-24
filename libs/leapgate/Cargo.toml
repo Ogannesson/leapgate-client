@@ -1,6 +1,6 @@
 [package]
 name = "leapgate"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 description = "Leapgate extensions to the RustDesk engine"
 
@@ -11,6 +11,9 @@ base = { path = "../base" }
 # have. The root crate already enables these.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "rustls-tls-native-roots", "socks"] }
 serde = { version = "1.0", features = ["derive"] }
+stun_codec = "0.3"
+# define_attribute_enums! expands to ::bytecodec paths, and stun_codec does not re-export it.
+bytecodec = "0.4"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.61", features = [
@@ -18,4 +21,5 @@ windows = { version = "0.61", features = [
     "Win32_NetworkManagement_IpHelper",
     "Win32_NetworkManagement_Ndis",
     "Win32_Networking_WinSock",
+    "Win32_System_IO",
 ] }

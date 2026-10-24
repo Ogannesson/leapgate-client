@@ -39,23 +39,58 @@ const IF_TYPE_LOOPBACK: u32 = 24;
 const IF_TYPE_PROP_VIRTUAL: u32 = 53;
 const IF_TYPE_TUNNEL: u32 = 131;
 const IF_TYPE_ETHERNET: u32 = 6;
+pub(crate) const IF_TYPE_IEEE80211: u32 = 71;
+
+/// ZeroTier, VMware, VirtualBox host-only and Wi-Fi Direct adapters report `IfType` 6 or 71, so
+/// only their description gives them away. No `hyper-v` / `vethernet`: behind a Hyper-V external
+/// switch the host's real uplink is a `vEthernet` adapter; internal ones have no default gateway.
+const VIRTUAL_KEYWORDS: &[&str] = &[
+    "meta tunnel",
+    "wintun",
+    "wireguard",
+    "tailscale",
+    "zerotier",
+    "tap-windows",
+    "openvpn",
+    "vpn",
+    "vmware virtual ethernet",
+    "vmnet",
+    "virtualbox host-only",
+    "wi-fi direct",
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Suffix {
+    /// A privacy (temporary) address.
+    Temporary,
+    /// Assigned by DHCPv6; Windows reports it as a `/128`.
+    Dhcp,
+    Other,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct V6 {
+    pub(crate) ip: Ipv6Addr,
+    pub(crate) suffix: Suffix,
+}
 
 #[derive(Debug, Clone, Default)]
-struct Nic {
-    name: String,
-    if_type: u32,
-    up: bool,
-    ipv4: Vec<Ipv4Addr>,
+pub(crate) struct Nic {
+    pub(crate) name: String,
+    pub(crate) description: String,
+    pub(crate) if_type: u32,
+    pub(crate) up: bool,
+    pub(crate) ipv4: Vec<Ipv4Addr>,
     /// Preferred unicast addresses, without link-local ones.
-    ipv6: Vec<Ipv6Addr>,
-    /// An IPv4 default gateway.
-    has_gateway: bool,
+    pub(crate) ipv6: Vec<V6>,
+    pub(crate) has_gateway_v4: bool,
+    pub(crate) has_gateway_v6: bool,
     /// Bits per second, 0 when unknown.
-    speed: u64,
+    pub(crate) speed: u64,
 }
 
 impl Nic {
-    fn is_virtual(&self) -> bool {
+    pub(crate) fn is_virtual(&self) -> bool {
         if matches!(
             self.if_type,
             IF_TYPE_PPP | IF_TYPE_LOOPBACK | IF_TYPE_PROP_VIRTUAL | IF_TYPE_TUNNEL
@@ -63,16 +98,51 @@ impl Nic {
             return true;
         }
         let name = self.name.to_lowercase();
+        let description = self.description.to_lowercase();
         name.starts_with("tun")
             || name.starts_with("utun")
             || name.contains("mihomo")
             || name.contains("wintun")
+            || VIRTUAL_KEYWORDS
+                .iter()
+                .any(|k| name.contains(k) || description.contains(k))
     }
+
+    /// Whether ICE takes candidates from this adapter. The default gateway rules out Hyper-V
+    /// internal switches, WSL's `vEthernet` and host-only adapters.
+    pub(crate) fn can_gather(&self) -> bool {
+        self.up && !self.is_virtual() && (self.has_gateway_v4 || self.has_gateway_v6)
+    }
+}
+
+/// Network cost of a physical adapter's link (contract 05 §2.10).
+pub(crate) fn net_cost(if_type: u32) -> u8 {
+    match if_type {
+        IF_TYPE_ETHERNET => 0,
+        IF_TYPE_IEEE80211 => 10,
+        _ => 50,
+    }
+}
+
+/// One address per /64, the temporary one where the /64 has one, in first-seen order. Keyed on
+/// the address's top 64 bits: Windows reports `OnLinkPrefixLength` 128 for temporary and DHCPv6
+/// addresses.
+pub(crate) fn one_per_prefix(addrs: &[V6]) -> Vec<Ipv6Addr> {
+    let prefix = |ip: Ipv6Addr| u128::from(ip) >> 64;
+    let mut out: Vec<V6> = Vec::new();
+    for &a in addrs {
+        match out.iter_mut().find(|o| prefix(o.ip) == prefix(a.ip)) {
+            Some(o) if o.suffix != Suffix::Temporary && a.suffix == Suffix::Temporary => *o = a,
+            Some(_) => {}
+            None => out.push(a),
+        }
+    }
+    out.into_iter().map(|a| a.ip).collect()
 }
 
 /// TUN adapters and fake-ip pools of mihomo / sing-box sit in `198.18.0.0/15`; Tailscale and
 /// carrier-grade NAT use `100.64.0.0/10`. Neither is a LAN address.
-fn excluded_ip(ip: Ipv4Addr) -> bool {
+pub(crate) fn excluded_ip(ip: Ipv4Addr) -> bool {
     let o = ip.octets();
     ip.is_loopback()
         || ip.is_link_local()
@@ -84,7 +154,7 @@ fn excluded_ip(ip: Ipv4Addr) -> bool {
 /// Whether `ip` is an address of an up, physical adapter. A default gateway is not required:
 /// this only decides whether the socket's own address can stay first, or whether a connection
 /// left through a real adapter.
-fn is_physical(nics: &[Nic], ip: IpAddr) -> bool {
+pub(crate) fn is_physical(nics: &[Nic], ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(ip) => {
             !excluded_ip(ip)
@@ -94,7 +164,7 @@ fn is_physical(nics: &[Nic], ip: IpAddr) -> bool {
         }
         IpAddr::V6(ip) => nics
             .iter()
-            .any(|n| n.up && !n.is_virtual() && n.ipv6.contains(&ip)),
+            .any(|n| n.up && !n.is_virtual() && n.ipv6.iter().any(|a| a.ip == ip)),
     }
 }
 
@@ -117,7 +187,7 @@ fn select_candidates(nics: &[Nic], sock_local: SocketAddr) -> Vec<SocketAddr> {
     // A default gateway also rules out WSL / Hyper-V vEthernet and host-only adapters.
     let mut usable: Vec<&Nic> = nics
         .iter()
-        .filter(|n| n.up && n.has_gateway && !n.is_virtual())
+        .filter(|n| n.up && n.has_gateway_v4 && !n.is_virtual())
         .collect();
     usable.sort_by_key(|n| (n.if_type != IF_TYPE_ETHERNET, std::cmp::Reverse(n.speed)));
     for ip in usable.iter().flat_map(|n| n.ipv4.iter()) {
@@ -274,14 +344,14 @@ where
 }
 
 #[cfg(not(windows))]
-fn nics() -> Vec<Nic> {
+pub(crate) fn nics() -> Vec<Nic> {
     Vec::new()
 }
 
 /// `GetAdaptersAddresses` directly rather than `default-net`, which calls `SendARP` for every
 /// adapter with a gateway and took over 4 s on a machine with a disconnected one.
 #[cfg(windows)]
-fn nics() -> Vec<Nic> {
+pub(crate) fn nics() -> Vec<Nic> {
     use windows::Win32::{
         Foundation::{ERROR_BUFFER_OVERFLOW, NO_ERROR},
         NetworkManagement::{
@@ -292,8 +362,8 @@ fn nics() -> Vec<Nic> {
             Ndis::IfOperStatusUp,
         },
         Networking::WinSock::{
-            IpDadStatePreferred, AF_INET, AF_INET6, AF_UNSPEC, SOCKADDR_IN, SOCKADDR_IN6,
-            SOCKET_ADDRESS,
+            IpDadStatePreferred, IpSuffixOriginDhcp, IpSuffixOriginRandom, AF_INET, AF_INET6,
+            AF_UNSPEC, SOCKADDR_IN, SOCKADDR_IN6, SOCKET_ADDRESS,
         },
     };
 
@@ -362,23 +432,37 @@ fn nics() -> Vec<Nic> {
         while let Some(ua) = unsafe { u.as_ref() } {
             ipv4.extend(ipv4_of(&ua.Address));
             if ua.DadState == IpDadStatePreferred {
-                ipv6.extend(ipv6_of(&ua.Address).filter(|ip| !ip.is_unicast_link_local()));
+                let suffix = if ua.SuffixOrigin == IpSuffixOriginRandom {
+                    Suffix::Temporary
+                } else if ua.SuffixOrigin == IpSuffixOriginDhcp {
+                    Suffix::Dhcp
+                } else {
+                    Suffix::Other
+                };
+                ipv6.extend(
+                    ipv6_of(&ua.Address)
+                        .filter(|ip| !ip.is_unicast_link_local())
+                        .map(|ip| V6 { ip, suffix }),
+                );
             }
             u = ua.Next;
         }
-        let mut has_gateway = false;
+        let (mut has_gateway_v4, mut has_gateway_v6) = (false, false);
         let mut g = a.FirstGatewayAddress;
         while let Some(ga) = unsafe { g.as_ref() } {
-            has_gateway |= ipv4_of(&ga.Address).is_some_and(|ip| !ip.is_unspecified());
+            has_gateway_v4 |= ipv4_of(&ga.Address).is_some_and(|ip| !ip.is_unspecified());
+            has_gateway_v6 |= ipv6_of(&ga.Address).is_some_and(|ip| !ip.is_unspecified());
             g = ga.Next;
         }
         out.push(Nic {
             name: unsafe { a.FriendlyName.to_string() }.unwrap_or_default(),
+            description: unsafe { a.Description.to_string() }.unwrap_or_default(),
             if_type: a.IfType,
             up: a.OperStatus == IfOperStatusUp,
             ipv4,
             ipv6,
-            has_gateway,
+            has_gateway_v4,
+            has_gateway_v6,
             speed: if a.TransmitLinkSpeed == u64::MAX {
                 0
             } else {
@@ -403,9 +487,16 @@ mod tests {
             if_type,
             up: true,
             ipv4: vec![ip.parse().unwrap()],
-            ipv6: Vec::new(),
-            has_gateway: gateway,
+            has_gateway_v4: gateway,
             speed,
+            ..Default::default()
+        }
+    }
+
+    fn v6(ip: &str, suffix: Suffix) -> V6 {
+        V6 {
+            ip: ip.parse().unwrap(),
+            suffix,
         }
     }
 
@@ -594,9 +685,9 @@ mod tests {
     #[test]
     fn physical_test_covers_both_families() {
         let mut wired = nic("Ethernet", IF_TYPE_ETHERNET, "192.168.1.145", true, 0);
-        wired.ipv6 = vec!["2408:8256::10".parse().unwrap()];
+        wired.ipv6 = vec![v6("2408:8256::10", Suffix::Other)];
         let mut tun = tun();
-        tun.ipv6 = vec!["fdfe:dcba:9876::1".parse().unwrap()];
+        tun.ipv6 = vec![v6("fdfe:dcba:9876::1", Suffix::Other)];
         let nics = [tun, wired];
         let ip = |s: &str| s.parse::<IpAddr>().unwrap();
         assert!(is_physical(&nics, ip("192.168.1.145")));
@@ -607,6 +698,91 @@ mod tests {
         // No enumeration: nothing counts as physical.
         assert!(!is_physical(&[], ip("192.168.1.145")));
         assert!(!is_physical(&[], ip("2408:8256::10")));
+    }
+
+    // Contract 05 §4.7: the keyword rule also tightens the merged LAN candidates and the relay
+    // probes' physical test, on purpose.
+    #[test]
+    fn keyword_adapters_are_virtual_for_every_user() {
+        let described = |name: &str, description: &str, if_type: u32, ip: &str| {
+            let mut n = nic(name, if_type, ip, true, 1_000_000_000);
+            n.description = description.to_owned();
+            n
+        };
+        let virtuals = [
+            described(
+                "ZeroTier One [8056c2e21c000001]",
+                "ZeroTier Virtual Port",
+                IF_TYPE_ETHERNET,
+                "10.147.17.5",
+            ),
+            described(
+                "VMware Network Adapter VMnet8",
+                "VMware Virtual Ethernet Adapter for VMnet8",
+                IF_TYPE_ETHERNET,
+                "192.168.80.1",
+            ),
+            described(
+                "Local Area Connection* 2",
+                "Microsoft Wi-Fi Direct Virtual Adapter #2",
+                IF_TYPE_IEEE80211,
+                "192.168.137.1",
+            ),
+        ];
+        let uplink = described(
+            "vEthernet (External)",
+            "Hyper-V Virtual Ethernet Adapter",
+            IF_TYPE_ETHERNET,
+            "192.168.1.145",
+        );
+        let mut nics = virtuals.to_vec();
+        nics.push(uplink.clone());
+        assert_eq!(
+            select_candidates(&nics, addr(TUN_SOCK)),
+            vec![addr("192.168.1.145:54996")]
+        );
+        for n in &virtuals {
+            assert!(!is_physical(&nics, IpAddr::V4(n.ipv4[0])), "{}", n.name);
+            assert!(!n.can_gather(), "{}", n.name);
+        }
+        assert!(is_physical(&nics, IpAddr::V4(uplink.ipv4[0])));
+        assert!(uplink.can_gather());
+    }
+
+    #[test]
+    fn every_ipv6_address_stays_physical_and_ice_keeps_one_per_prefix() {
+        let temporary = v6("2408:8256:1:2:a5b0:1c2d:3e4f:5061", Suffix::Temporary);
+        let stable = v6("2408:8256:1:2::10", Suffix::Other);
+        let dhcp = v6("2408:8256:1:2::abcd", Suffix::Dhcp);
+        let ula = v6("fd00:1:2:3::10", Suffix::Other);
+        let mut wired = nic("Ethernet", IF_TYPE_ETHERNET, "192.168.1.145", true, 0);
+        wired.ipv6 = vec![stable, dhcp, temporary, ula];
+        let nics = [wired];
+        for a in &nics[0].ipv6 {
+            assert!(is_physical(&nics, IpAddr::V6(a.ip)));
+        }
+        assert_eq!(one_per_prefix(&nics[0].ipv6), vec![temporary.ip, ula.ip]);
+        assert_eq!(one_per_prefix(&[dhcp, stable]), vec![dhcp.ip]);
+    }
+
+    #[test]
+    fn a_gateway_of_either_family_lets_an_adapter_gather() {
+        let mut v6_only = nic("Ethernet", IF_TYPE_ETHERNET, "192.168.1.145", false, 0);
+        v6_only.has_gateway_v6 = true;
+        assert!(v6_only.can_gather());
+        let none = nic("Ethernet 2", IF_TYPE_ETHERNET, "172.20.80.1", false, 0);
+        assert!(!none.can_gather());
+        let mut down = v6_only.clone();
+        down.up = false;
+        assert!(!down.can_gather());
+        assert!(!tun().can_gather());
+    }
+
+    #[test]
+    fn net_cost_tiers() {
+        assert_eq!(net_cost(IF_TYPE_ETHERNET), 0);
+        assert_eq!(net_cost(IF_TYPE_IEEE80211), 10);
+        assert_eq!(net_cost(IF_TYPE_PPP), 50);
     }
 
     #[hbb_common::tokio::test(crate = "hbb_common::tokio")]
