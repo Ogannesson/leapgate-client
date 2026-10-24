@@ -83,3 +83,61 @@ pub(crate) async fn lan_fallback(
         tcp,
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hbb_common::{
+        protobuf::Message as _, rendezvous_proto::IdPk, sodiumoxide::crypto::sign, tokio,
+    };
+
+    const PEER: &str = "123456789";
+
+    /// A server key and `PEER`'s key signed under it, as the server hands them out.
+    fn server_signed_peer() -> (String, Vec<u8>) {
+        let (rs_pk, rs_sk) = sign::gen_keypair();
+        let (peer_pk, _) = sign::gen_keypair();
+        let id_pk = IdPk {
+            id: PEER.to_owned(),
+            pk: peer_pk.0.to_vec().into(),
+            ..Default::default()
+        }
+        .write_to_bytes()
+        .unwrap();
+        (crate::common::encode64(rs_pk.0), sign::sign(&id_pk, &rs_sk))
+    }
+
+    #[test]
+    fn peer_key_verifies_only_for_the_signed_id() {
+        let (key, signed) = server_signed_peer();
+        assert!(peer_key_verifies(PEER, &signed, &key));
+        assert!(!peer_key_verifies("987654321", &signed, &key));
+    }
+
+    #[tokio::test]
+    async fn unverified_peer_key_keeps_upstream_tcp() {
+        let (_, signed) = server_signed_peer();
+        let (other_key, _) = server_signed_peer();
+        let peer_addr: SocketAddr = "192.168.1.2:21118".parse().unwrap();
+        let mut candidates = vec![peer_addr];
+        let res = lan_connect(&mut candidates, true, false, PEER, &signed, &other_key).await;
+        assert!(res.is_none());
+        assert!(candidates.is_empty());
+        let my_addr = "192.168.1.3:0".parse().unwrap();
+        let (_, tcp) = lan_fallback(&candidates, peer_addr, true, my_addr, true).await;
+        assert!(tcp);
+    }
+
+    #[tokio::test]
+    async fn lan_fallback_skips_upstream_tcp_only_after_trying_peer_addr() {
+        let peer_addr: SocketAddr = "192.168.1.2:21118".parse().unwrap();
+        let other: SocketAddr = "10.0.0.2:21118".parse().unwrap();
+        let my_addr: SocketAddr = "192.168.1.3:0".parse().unwrap();
+        assert_eq!(
+            lan_fallback(&[other, peer_addr], peer_addr, true, my_addr, true).await,
+            (my_addr, false)
+        );
+        let (_, tcp) = lan_fallback(&[other], peer_addr, true, my_addr, true).await;
+        assert!(tcp);
+    }
+}
