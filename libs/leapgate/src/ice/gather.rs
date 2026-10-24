@@ -457,23 +457,30 @@ mod tests {
         .map(|(kind, pref, addr)| Candidate { kind, pref, addr });
         assert_eq!(got, want);
 
-        // Five sockets, each mapped to an address of its own.
-        let srflx = |host: &dyn Fn(i32) -> String, map: &dyn Fn(i32) -> String| {
-            let bound: Vec<_> = (1..=5)
-                .map(|i| {
-                    let a = SocketAddr::new(ip(&host(i)), 5000);
-                    (LocalAddr::new(a.ip(), 0), a)
-                })
-                .collect();
-            let mapped: Vec<_> = (1..=5)
-                .map(|i| Some(SocketAddr::new(ip(&map(i)), 7000)))
-                .collect();
-            let (got, _) = assemble(&bound, &mapped);
-            got.iter().filter(|c| c.kind == Kind::Srflx).count()
+        // Five sockets per family, IPv4 first as `select` orders them, each mapped to an
+        // address of its own.
+        let pairs: Vec<_> = (1..=5)
+            .map(|i| (format!("192.168.{i}.1"), format!("203.0.113.{i}")))
+            .chain((1..=5).map(|i| (format!("2408:8256:{i}::1"), format!("2001:db8::{i}"))))
+            .collect();
+        let bound: Vec<_> = pairs
+            .iter()
+            .map(|(h, _)| {
+                let a = SocketAddr::new(ip(h), 5000);
+                (LocalAddr::new(a.ip(), 0), a)
+            })
+            .collect();
+        let mapped: Vec<_> = pairs
+            .iter()
+            .map(|(_, m)| Some(SocketAddr::new(ip(m), 7000)))
+            .collect();
+        let (got, _) = assemble(&bound, &mapped);
+        let srflx = |v4: bool| {
+            got.iter()
+                .filter(|c| c.kind == Kind::Srflx && c.addr.is_ipv4() == v4)
+                .count()
         };
-        let v4 = srflx(&|i| format!("192.168.{i}.1"), &|i| format!("203.0.113.{i}"));
-        let v6 = srflx(&|i| format!("2408:8256:{i}::1"), &|i| format!("2001:db8::{i}"));
-        assert_eq!((v4, v6), (4, 2));
+        assert_eq!((srflx(true), srflx(false)), (4, 2));
     }
 
     #[hbb_common::tokio::test(crate = "hbb_common::tokio")]
