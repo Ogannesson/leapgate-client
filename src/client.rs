@@ -388,7 +388,9 @@ impl Client {
         debug_assert!(peer == interface.get_id());
         interface.update_direct(None);
         interface.update_received(false);
-        match Self::_start(peer, key, token, conn_type, interface.clone()).await {
+        let upstream = Self::_start(peer, key, token, conn_type, interface.clone());
+        // leapgate: race Leapgate's ICE beside upstream's paths
+        match crate::leapgate_hooks::race_ice(peer, key, &interface, upstream).await {
             Err(err) => {
                 let err_str = err.to_string();
                 if err_str.starts_with("Failed") {

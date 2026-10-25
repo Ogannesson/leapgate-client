@@ -3,6 +3,7 @@
 
 pub mod api;
 pub mod brand;
+pub mod ice;
 pub mod lan;
 pub mod options;
 pub mod rendezvous;
