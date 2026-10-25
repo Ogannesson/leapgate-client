@@ -170,13 +170,6 @@ pub(crate) fn is_physical(nics: &[Nic], ip: IpAddr) -> bool {
     }
 }
 
-/// Physical-adapter test for relay probes, over one adapter enumeration (blocking, 5~10 ms).
-/// An empty enumeration (non-Windows, or failure) trusts nothing.
-pub fn physical_snapshot() -> impl Fn(IpAddr) -> bool {
-    let nics = nics();
-    move |ip| is_physical(&nics, ip)
-}
-
 fn select_candidates(nics: &[Nic], sock_local: SocketAddr) -> Vec<SocketAddr> {
     let SocketAddr::V4(sock_v4) = sock_local else {
         return Vec::new();
