@@ -320,13 +320,23 @@ mod tests {
         // hbbr: reads the first frame, not a RequestRelay, and returns.
         let hbbr = server(|mut s| s.read_exact(&mut [0u8; 1]).unwrap());
         assert_eq!(try_relay(&[hbbr], settle).unwrap().remote, ip("127.0.0.1"));
-        // A proxy that cannot reach the relay closes before the frame.
-        assert!(try_relay(&[server(drop)], settle).is_none());
-        // Whatever speaks first is not hbbr.
+        // A proxy that cannot reach the relay closes before the frame. Still reading, so the
+        // frame is not reset and only the look before sending tells this from hbbr.
+        let gave_up = server(|mut s| {
+            s.shutdown(std::net::Shutdown::Write).unwrap();
+            let _ = s.read(&mut [0u8; 1]);
+        });
+        assert!(try_relay(&[gave_up], settle).is_none());
+        // Whatever speaks, first or in answer to the frame, is not hbbr.
         let chatty = server(|mut s| {
             s.write_all(b"x").unwrap();
             let _ = s.read(&mut [0u8; 1]);
         });
         assert!(try_relay(&[chatty], settle).is_none());
+        let answering = server(|mut s| {
+            s.read_exact(&mut [0u8; 1]).unwrap();
+            s.write_all(b"x").unwrap();
+        });
+        assert!(try_relay(&[answering], settle).is_none());
     }
 }
