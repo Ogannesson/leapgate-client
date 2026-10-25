@@ -196,6 +196,7 @@ async fn race_legs<A, B>(
     window_ms: u64,
     is_direct: impl Fn(&B) -> bool,
 ) -> ResultType<Either<A, B>> {
+    let started = Instant::now();
     tokio::pin!(ice, upstream);
     tokio::select! {
         r = &mut ice => match r {
@@ -206,7 +207,16 @@ async fn race_legs<A, B>(
             Ok(b) if is_direct(&b) => Ok(Either::Right(b)),
             Ok(b) => match timeout(Duration::from_millis(window_ms), ice).await {
                 Ok(Ok(a)) => Ok(Either::Left(a)),
-                _ => Ok(Either::Right(b)),
+                Ok(Err(_)) => Ok(Either::Right(b)),
+                // The ICE leg logs its own failures; only a leg still running here would leave
+                // the controller's log silent.
+                Err(_) => {
+                    log::info!(
+                        "leapgate ice: lost the relay window after {} ms",
+                        started.elapsed().as_millis()
+                    );
+                    Ok(Either::Right(b))
+                }
             },
             Err(e) => match ice.await {
                 Ok(a) => Ok(Either::Left(a)),
