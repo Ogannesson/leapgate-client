@@ -27,6 +27,8 @@ import 'package:url_launcher/url_launcher_string.dart';
 
 import '../../common/widgets/dialog.dart';
 import '../../common/widgets/login.dart';
+// leapgate: the exit node settings card (phase 4)
+part '../../leapgate/exit_settings.dart';
 
 const double _kTabWidth = 200;
 const double _kTabHeight = 42;
@@ -1038,6 +1040,8 @@ class _SafetyState extends State<_Safety> with AutomaticKeepAliveClientMixin {
               block: locked,
               child: Column(children: [
                 permissions(context),
+                // leapgate: its own card, outside the access mode's permissions
+                if (isWindows) buildLeapgateExitSettings(context, enabled: !locked),
                 password(context),
                 _Card(title: '2FA', children: [tfa()]),
                 if (!isChangeIdDisabled())
