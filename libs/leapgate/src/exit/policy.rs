@@ -555,6 +555,15 @@ mod tests {
             check("2408:8256:1:3::1", false, &local, &AllowNets::default()),
             Ok(())
         );
+        assert_eq!(
+            check(
+                "2408:8256:1:2::1",
+                false,
+                &local,
+                &parse_allow_nets("2408:8256:1:2::/64").unwrap()
+            ),
+            Ok(())
+        );
     }
 
     #[test]
@@ -577,6 +586,9 @@ mod tests {
         assert_eq!(check("93.184.216.8", false, &local, &none), Ok(()));
         // A length over 32 is no network; nothing is guessed.
         assert_eq!(check("45.1.1.2", false, &local, &none), Ok(()));
+        let allow = parse_allow_nets("93.184.216.0/29").unwrap();
+        assert_eq!(check("93.184.216.1", false, &local, &allow), Ok(()));
+        assert_eq!(check("93.184.216.2", false, &local, &allow), Err(Local));
     }
 
     #[test]

@@ -590,6 +590,17 @@ mod tests {
             }],
             ..Default::default()
         };
+        let offline = Nic {
+            name: "Ethernet 3".to_owned(),
+            if_type: lan::IF_TYPE_ETHERNET,
+            up: false,
+            speed: 10_000_000_000,
+            ipv4: vec![Ipv4Addr::new(203, 0, 114, 7)],
+            ipv4_prefixes: vec![(Ipv4Addr::new(203, 0, 114, 7), 24)],
+            has_gateway_v4: true,
+            dns: ips(&["203.0.114.1"]),
+            ..Default::default()
+        };
         let cellular = Nic {
             name: "Cellular".to_owned(),
             if_type: lan::IF_TYPE_ETHERNET,
@@ -603,7 +614,7 @@ mod tests {
             source_for(ip("8.8.8.8"), &sources(&[cellular])),
             Some(ip("100.64.5.6"))
         );
-        let sources = sources(&[tun, wifi, wired, vpn, no_gateway]);
+        let sources = sources(&[tun, wifi, wired, vpn, no_gateway, offline]);
         assert_eq!(
             source_for(ip("8.8.8.8"), &sources),
             Some(ip("192.168.1.145"))
