@@ -21,6 +21,8 @@ import '../../common/widgets/chat_page.dart';
 import '../../models/file_model.dart';
 import '../../models/platform_model.dart';
 import '../../models/server_model.dart';
+// leapgate: the exit sentinel's address
+import '../../leapgate/exit_tunnel.dart';
 
 /// Set only by this window's own close control, and only once the user has confirmed. Any other
 /// way the window can go - a session logout closing every window, the window manager, a native
@@ -524,7 +526,10 @@ class _CmHeaderState extends State<_CmHeader>
                 if (client.portForward.isNotEmpty)
                   FittedBox(
                     child: Text(
-                      "Port Forward: ${client.portForward}",
+                      // leapgate: the sentinel names an exit session in the connection manager
+                      isLeapgateExitAddress(client.portForward)
+                          ? translate('Acting as an exit node')
+                          : "Port Forward: ${client.portForward}",
                       style: TextStyle(color: Colors.white70, fontSize: 12),
                     ),
                   ),

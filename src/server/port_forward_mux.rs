@@ -38,6 +38,8 @@ pub struct PortForwardMux {
     /// Raised once, by `close_all`, for the channels its `clear` cannot reach:
     /// one parked on its target socket is not on the inbound queue.
     teardown: watch::Sender<bool>,
+    // leapgate: the controller's self-reported ID on an exit tunnel, `None` otherwise
+    pub(super) leapgate_exit: Option<String>,
 }
 
 impl PortForwardMux {
@@ -47,6 +49,8 @@ impl PortForwardMux {
             tx,
             login_target,
             teardown: watch::channel(false).0,
+            // leapgate: set by connection.rs after an exit login
+            leapgate_exit: None,
         }
     }
 
@@ -105,6 +109,12 @@ impl PortForwardMux {
     fn on_open(&mut self, open: PortForwardOpen, permitted: bool) {
         let id = open.channel_id;
         self.channels.retain(|_, e| !e.inbound.is_closed());
+        // leapgate: exit channels use the live exit switch, not enable-tunnel
+        if self.leapgate_exit.is_some() && !leapgate::exit::allowed() {
+            self.reply(opened_msg(id, false, leapgate::exit::MSG_NOT_ENABLED, 0));
+            return;
+        }
+        let permitted = permitted || self.leapgate_exit.is_some();
         if !permitted {
             self.reply(opened_msg(id, false, "No permission of IP tunneling", 0));
             return;
@@ -122,10 +132,12 @@ impl PortForwardMux {
             port: open.port,
             ..Default::default()
         };
-        let (addr, is_rdp) = Connection::normalize_port_forward_target(&mut pf);
+        // leapgate: preserve exit targets for address filtering in dial
+        let (addr, is_rdp) = if self.leapgate_exit.is_some() { (String::new(), false) } else { Connection::normalize_port_forward_target(&mut pf) };
         // Approval and permission checks saw the login's target; a tunnel
         // serves that one target and nothing else.
-        if addr != self.login_target {
+        // leapgate: only ordinary forwarding is restricted to the login target
+        if self.leapgate_exit.is_none() && addr != self.login_target {
             log::warn!(
                 "port forward channel {} asked for {} on a tunnel logged in for {}",
                 id,
@@ -146,6 +158,8 @@ impl PortForwardMux {
                 window: window.clone(),
             },
         );
+        // leapgate: carry the untouched target and controller ID into the channel task
+        let exit_target = self.leapgate_exit.as_ref().map(|controller_id| leapgate::exit::dial::Target { host: pf.host.clone(), port: pf.port, controller_id: controller_id.clone() });
         tokio::spawn(run_controlled_channel(
             id,
             addr,
@@ -155,6 +169,8 @@ impl PortForwardMux {
             inbound_rx,
             FrameSink::Direct(self.tx.clone()),
             self.teardown.subscribe(),
+            // leapgate: the exit destination, dialed by leapgate::exit::dial
+            exit_target,
         ));
     }
 
@@ -191,10 +207,19 @@ async fn run_controlled_channel(
     mut inbound: mpsc::UnboundedReceiver<Inbound>,
     sink: FrameSink,
     teardown: watch::Receiver<bool>,
+    // leapgate: `Some` on an exit tunnel
+    exit_target: Option<leapgate::exit::dial::Target>,
 ) {
     let mut pending: Vec<Bytes> = Vec::new();
     let mut pending_len = 0usize;
-    let connect = timeout(CONNECT_TIMEOUT_MS, TcpStream::connect(&addr));
+    // leapgate: exit dialing owns its deadlines; ordinary forwarding keeps three seconds
+    let connect = async {
+        if let Some(target) = exit_target.as_ref() {
+            Ok(leapgate::exit::dial::connect(target).await)
+        } else {
+            timeout(CONNECT_TIMEOUT_MS, TcpStream::connect(&addr)).await
+        }
+    };
     tokio::pin!(connect);
     let socket = loop {
         tokio::select! {
@@ -219,6 +244,13 @@ async fn run_controlled_channel(
                 }
             },
             res = &mut connect => {
+                // leapgate: exit failures have fixed messages and their own private logging
+                if exit_target.is_some() {
+                    if let Some(message) = leapgate::exit::dial::failure_message(&res) {
+                        sink.send_ordered(opened_msg(id, false, message, 0)).await.ok();
+                        return;
+                    }
+                }
                 let err = match res {
                     Ok(Ok(s)) => break s,
                     Ok(Err(e)) => e.to_string(),

@@ -1180,6 +1180,11 @@ impl Connection {
                     conn.update_supported_encoding();
                 }
                 _ = test_delay_timer.tick() => {
+                    // leapgate: disabling the exit closes all channels of its session
+                    if conn.port_forward_mux.as_ref().is_some_and(|m| m.leapgate_exit.is_some()) && !leapgate::exit::allowed() {
+                        conn.on_close("Exit node disabled", true).await;
+                        break;
+                    }
                     if last_recv_time.elapsed() >= SEC30 {
                         conn.on_close("Timeout", true).await;
                         break;
@@ -1813,6 +1818,8 @@ impl Connection {
             self.port_forward_mux = self.inner.tx.clone().map(|tx| {
                 super::port_forward_mux::PortForwardMux::new(tx, self.port_forward_address.clone())
             });
+            // leapgate: latch exit mode and the controller ID on the existing mux
+            if leapgate::exit::is_exit_target(&pf.host, pf.port) { if let Some(mux) = self.port_forward_mux.as_mut() { mux.leapgate_exit = Some(self.lr.my_id.clone()); } }
             return self.port_forward_mux.is_some();
         }
         let mut pf = pf.clone();
@@ -2027,6 +2034,8 @@ impl Connection {
         if self.is_port_forward() {
             pi.features = Some(Features {
                 port_forward_mux: self.port_forward_mux.is_some(),
+                // leapgate: this build understands exit logins, independently of the switch
+                leapgate_exit: true,
                 ..Default::default()
             })
             .into();
@@ -2966,9 +2975,24 @@ impl Connection {
                     }
                     self.terminal_service_id = terminal.service_id;
                 }
+                // leapgate: an exit login passes the exit gate, not enable-tunnel (phase 4 A5, A11)
+                Some(login_request::Union::PortForward(mut pf)) if leapgate::exit::is_exit_target(&pf.host, pf.port) => {
+                    (self.port_forward_address, _) = Self::normalize_port_forward_target(&mut pf);
+                    if let Some(err) = leapgate::exit::login_refusal(pf.multiplex, self.stream.is_secured()) {
+                        self.send_login_error(err).await;
+                        sleep(1.).await;
+                        return false;
+                    }
+                }
                 Some(login_request::Union::PortForward(mut pf)) => {
                     if !Self::permission(keys::OPTION_ENABLE_TUNNEL, &self.control_permissions) {
                         self.send_login_error("No permission of IP tunneling").await;
+                        sleep(1.).await;
+                        return false;
+                    }
+                    // leapgate: every port forward must use multiplexing before approval
+                    if !pf.multiplex {
+                        self.send_login_error(leapgate::exit::MSG_NEED_MUX).await;
                         sleep(1.).await;
                         return false;
                     }

@@ -3,6 +3,7 @@
 
 pub mod api;
 pub mod brand;
+pub(crate) mod dns;
 pub mod exit;
 pub mod ice;
 pub mod lan;

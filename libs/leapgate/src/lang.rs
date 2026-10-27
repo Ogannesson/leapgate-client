@@ -61,7 +61,37 @@ pub fn get(lang: &str, key: &str) -> Option<&'static str> {
         .map(|(_, v)| *v)
 }
 
-static CONTROLLED: &[(&str, &str)] = &[];
+static CONTROLLED: &[(&str, &str)] = &[
+    ("Exit node settings", "出口节点"),
+    ("Allow this device to act as an exit node", "允许作为出口"),
+    ("Acting as an exit node", "作为出口"),
+    ("Allowed destination networks", "放行网段"),
+    (
+        "Enter IP addresses or CIDR networks, separated by commas, spaces or newlines. Hard-blocked addresses cannot be allowed.",
+        "输入 IP 或 CIDR 网段，用逗号、空白或换行分隔。硬拒地址无法放行。",
+    ),
+    ("Invalid IP address or CIDR network", "IP 地址或 CIDR 网段无效"),
+    (
+        "Exit traffic leaves through this device's physical network adapter, bypassing its proxy and VPN.",
+        "出口流量从本机网卡直接出去，不经过本机的代理或 VPN。",
+    ),
+    (
+        "For an unattended exit, set a permanent password and choose \"Accept sessions via password\".",
+        "无人值守的出口请设固定密码，审批方式选“只允许密码访问”。",
+    ),
+    (
+        "To keep exit users off the local network, also turn off \"Enable TCP tunneling\".",
+        "要让出口用户碰不到局域网，请同时关掉“允许建立 TCP 隧道”。",
+    ),
+    (
+        "Only refused destination IP addresses are logged, at most one entry per minute; successful destinations and domain names are not logged.",
+        "只记录被拒绝的目标 IP，每分钟最多一条；不记录成功访问的目标和域名。",
+    ),
+    (
+        "This switch is independent of the access mode, including Screen Share.",
+        "此开关独立于访问模式，选择“仅共享屏幕”也不会关闭出口。",
+    ),
+];
 
 #[cfg(test)]
 mod tests {

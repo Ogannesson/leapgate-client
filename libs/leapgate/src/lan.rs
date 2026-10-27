@@ -89,6 +89,10 @@ pub(crate) struct Nic {
     pub(crate) speed: u64,
     /// The adapter's own DNS servers, in its order.
     pub(crate) dns: Vec<IpAddr>,
+    /// Each IPv4 address with its `OnLinkPrefixLength`.
+    pub(crate) ipv4_prefixes: Vec<(Ipv4Addr, u8)>,
+    /// Every IPv6 unicast address whatever its DAD state, deprecated temporary ones included.
+    pub(crate) all_ipv6: Vec<Ipv6Addr>,
 }
 
 impl Nic {
@@ -420,9 +424,13 @@ pub(crate) fn nics() -> Vec<Nic> {
     while let Some(a) = unsafe { cur.as_ref() } {
         let mut ipv4 = Vec::new();
         let mut ipv6 = Vec::new();
+        let mut ipv4_prefixes = Vec::new();
+        let mut all_ipv6 = Vec::new();
         let mut u = a.FirstUnicastAddress;
         while let Some(ua) = unsafe { u.as_ref() } {
             ipv4.extend(ipv4_of(&ua.Address));
+            ipv4_prefixes.extend(ipv4_of(&ua.Address).map(|ip| (ip, ua.OnLinkPrefixLength)));
+            all_ipv6.extend(ipv6_of(&ua.Address));
             if ua.DadState == IpDadStatePreferred {
                 let suffix = if ua.SuffixOrigin == IpSuffixOriginRandom {
                     Suffix::Temporary
@@ -471,6 +479,8 @@ pub(crate) fn nics() -> Vec<Nic> {
                 a.TransmitLinkSpeed
             },
             dns,
+            ipv4_prefixes,
+            all_ipv6,
         });
         cur = a.Next;
     }
