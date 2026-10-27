@@ -858,4 +858,40 @@ mod tests {
         .expect("the session outlived its silent peer");
         assert!(start.elapsed() >= Duration::from_secs(2));
     }
+
+    #[tokio::test]
+    async fn a_session_over_kcp_that_ends_delivers_its_tail() {
+        use hbb_common::bytes::Bytes;
+        use std::sync::Arc;
+        use tokio::net::UdpSocket;
+        let a = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let b = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        a.connect(b.local_addr().unwrap()).await.unwrap();
+        b.connect(a.local_addr().unwrap()).await.unwrap();
+        let (ours, theirs) = tokio::join!(
+            KcpStream::accept(Arc::new(b), Duration::from_secs(5), None),
+            KcpStream::connect(Arc::new(a), Duration::from_secs(5)),
+        );
+        let (guard, mut stream) = ours.unwrap();
+        let (_peer_guard, mut peer_stream) = theirs.unwrap();
+        const N: usize = 50;
+        let payload = vec![7u8; 32 * 1024];
+        let sent = payload.clone();
+        let session = async move {
+            for _ in 0..N {
+                stream.send_bytes(Bytes::from(sent.clone())).await.unwrap();
+            }
+            drop(stream);
+        };
+        serve_over_kcp(guard, KCP_PEER_SILENCE_LIMIT, session).await;
+        let mut got = 0;
+        while let Some(Ok(data)) = timeout(Duration::from_secs(5), peer_stream.next())
+            .await
+            .expect("the stream never ended")
+        {
+            assert_eq!(&data[..], &payload[..]);
+            got += 1;
+        }
+        assert_eq!(got, N);
+    }
 }
