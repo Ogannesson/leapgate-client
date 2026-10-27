@@ -849,8 +849,9 @@ mod tests {
         drop(peer_guard);
         let session = async move { while let Some(Ok(_)) = stream.next().await {} };
         let start = Instant::now();
+        // The 2 s limit, one 1 s tick and margin: a slower check fails here.
         timeout(
-            Duration::from_secs(10),
+            Duration::from_secs(5),
             serve_over_kcp(guard, Duration::from_secs(2), session),
         )
         .await
