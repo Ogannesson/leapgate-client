@@ -125,12 +125,12 @@ pub async fn listen(
                     Ok(Some((stream, kcp))) => {
                         let interface = interface.clone();
                         tokio::spawn(async move {
-                            // leapgate: dropping the KCP guard stops its UDP loop, so keep it for the whole forward.
-                            let _kcp = kcp;
                             if let Err(err) = run_forward(forward, stream).await {
                                 interface.msgbox("error", "Error", &err.to_string(), "");
                             }
                             log::info!("connection from {:?} closed", addr);
+                            // leapgate: keep the KCP guard past the forward so the tail and the FIN still go out.
+                            release_kcp(kcp).await;
                        });
                     }
                     _ if close_port_forward => {
@@ -532,8 +532,6 @@ fn run_legacy(
     // leapgate: keep the KCP guard for the whole forward.
     let kcp = outcome.kcp;
     tokio::spawn(async move {
-        // leapgate: dropping the KCP guard stops its UDP loop.
-        let _kcp = kcp;
         stream.set_raw();
         if !prebuf.is_empty() {
             allow_err!(stream.send_bytes(prebuf.into()).await);
@@ -542,7 +540,22 @@ fn run_legacy(
             interface.msgbox("error", "Error", &err.to_string(), "");
         }
         log::info!("connection from {:?} closed", addr);
+        // leapgate: keep the KCP guard past the forward so the tail and the FIN still go out.
+        release_kcp(kcp).await;
     });
+}
+
+// leapgate: dropping a KCP guard aborts its endpoint at once, losing unsent data and the FIN; call this after the stream is gone.
+pub(crate) async fn release_kcp(kcp: Option<crate::kcp_stream::KcpStream>) {
+    let Some(kcp) = kcp else {
+        return;
+    };
+    // The endpoint forgets a connection some seconds after it closes; the peer
+    // may never answer our FIN, so the bound is usually what ends the wait.
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    while kcp.peer_silent_for().is_some() && tokio::time::Instant::now() < deadline {
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
 }
 
 struct LoginOutcome {
@@ -760,6 +773,53 @@ mod login_tests {
             let (mut a, mut a_peer) = loopback().await;
             assert!(login_with_hash(&ui, "pw", hash("a"), "a", 1, true, &mut a).await);
             assert!(login_at(&mut a_peer).await.port_forward().multiplex);
+        });
+    }
+}
+
+// leapgate: a forward over KCP that closes right after its last write still delivers it.
+#[cfg(test)]
+mod kcp_release_tests {
+    use super::*;
+    use crate::kcp_stream::KcpStream;
+    use hbb_common::{bytes::Bytes, tokio::net::UdpSocket};
+    use std::time::Duration;
+
+    #[test]
+    fn a_closed_forward_over_kcp_delivers_its_tail() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let a = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+            let b = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+            a.connect(b.local_addr().unwrap()).await.unwrap();
+            b.connect(a.local_addr().unwrap()).await.unwrap();
+            let (ours, theirs) = tokio::join!(
+                KcpStream::connect(Arc::new(a), Duration::from_secs(5)),
+                KcpStream::accept(Arc::new(b), Duration::from_secs(5), None),
+            );
+            let (guard, mut tx) = ours.unwrap();
+            let (_peer_guard, mut rx) = theirs.unwrap();
+            const N: usize = 50;
+            let payload = vec![7u8; 32 * 1024];
+            for _ in 0..N {
+                tx.send_bytes(Bytes::from(payload.clone())).await.unwrap();
+            }
+            tokio::spawn(async move {
+                drop(tx);
+                release_kcp(Some(guard)).await;
+            });
+            let mut got = 0;
+            while let Some(Ok(data)) = timeout(10_000, rx.next())
+                .await
+                .expect("the stream never ended")
+            {
+                assert_eq!(&data[..], &payload[..]);
+                got += 1;
+            }
+            assert_eq!(got, N);
         });
     }
 }

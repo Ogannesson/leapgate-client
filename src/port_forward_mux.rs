@@ -491,9 +491,8 @@ mod tunnel {
             // state, a later publish here would pin it at Muxed with a dead
             // handle and the listener could never re-establish.
             self.state.send_replace(TunnelState::Muxed(handle.clone()));
-            tokio::spawn(tunnel_loop(
-                // leapgate: the loop owns the KCP guard.
-                kcp,
+            // leapgate: hold the KCP guard until the tunnel ends, then a bounded while longer so the tail and the FIN go out.
+            let lp = tunnel_loop(
                 stream,
                 handle.clone(),
                 data_rx,
@@ -501,7 +500,11 @@ mod tunnel {
                 interface,
                 state,
                 self.lifetime.subscribe(),
-            ));
+            );
+            tokio::spawn(async move {
+                lp.await;
+                crate::port_forward::release_kcp(kcp).await;
+            });
             handle
         }
 
@@ -698,8 +701,6 @@ mod tunnel {
     /// across the queues: `open`, `data` and `close` share the data queue and
     /// the control queue carries `window_update` alone.
     async fn tunnel_loop(
-        // leapgate: dropping the KCP guard stops its UDP loop, so hold it until the tunnel ends; first, so it drops after the stream.
-        _kcp: Option<crate::kcp_stream::KcpStream>,
         mut stream: Stream,
         handle: Arc<TunnelHandle>,
         mut data_rx: mpsc::Receiver<Message>,
