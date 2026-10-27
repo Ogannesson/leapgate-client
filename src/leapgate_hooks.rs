@@ -139,9 +139,11 @@ const MAX_AGENTS: usize = 8;
 /// rather than made visible.
 const RELAY_FALLBACK_DELAY_MS: u64 = 2500;
 const DROP_LOG_INTERVAL: Duration = Duration::from_secs(60);
-/// Upstream's `KCP_PEER_SILENCE_LIMIT` in `src/client/io_loop.rs`, the controller's half of the
-/// same check, copied rather than made visible: both sides give up on a silent peer alike.
-const KCP_PEER_SILENCE_LIMIT: Duration = Duration::from_secs(8);
+/// Well past the controller's own 8 s (`KCP_PEER_SILENCE_LIMIT` in `src/client/io_loop.rs`): a
+/// controller reconnecting after a link drop has to log in again before this connection closes,
+/// or "lock after session end" locks a session that has resumed; and an idle mux or exit tunnel,
+/// which its controller gives up on after an 18 s read timeout, is not closed any sooner here.
+const ICE_PEER_SILENCE_CLOSE: Duration = Duration::from_secs(20);
 
 /// Races Leapgate's ICE (contract 05 §4.8.1) against upstream's `_start` (`upstream`) and returns
 /// the winner in `_start`'s shape. ICE never fails a connection: when it loses or fails, the
@@ -608,7 +610,7 @@ async fn on_ice_offer_(ice: LeapgateIce, host: String, server: ServerPtr) {
     allow_err!(
         serve_over_kcp(
             kcp,
-            KCP_PEER_SILENCE_LIMIT,
+            ICE_PEER_SILENCE_CLOSE,
             crate::server::create_tcp_connection(
                 server,
                 stream,
@@ -883,7 +885,7 @@ mod tests {
             }
             drop(stream);
         };
-        serve_over_kcp(guard, KCP_PEER_SILENCE_LIMIT, session).await;
+        serve_over_kcp(guard, ICE_PEER_SILENCE_CLOSE, session).await;
         let mut got = 0;
         while let Some(Ok(data)) = timeout(Duration::from_secs(5), peer_stream.next())
             .await
