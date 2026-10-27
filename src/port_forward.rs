@@ -378,6 +378,12 @@ async fn establish_tunnel(
             }
         }
         Ok(Some(outcome)) => {
+            // leapgate: no raw pipe to a peer without multiplexing (architecture §3.9)
+            if leapgate::exit::CONTROLLER_MUX_ONLY {
+                tunnel.set_failed();
+                interface.on_error(leapgate::exit::PEER_TOO_OLD);
+                return true;
+            }
             tunnel.set_legacy();
             if outcome.local_eof {
                 log::debug!("legacy peer and local {:?} already gone", addr);
@@ -404,7 +410,8 @@ async fn establish_tunnel(
 /// reports what the peer answered rather than a raw stream, because the
 /// caller's next step depends on it. The login itself is the raw pipe's,
 /// told to ask for the tunnel.
-async fn connect_and_login_mux(
+// leapgate: pub(crate) for the exit listener (src/leapgate_hooks/exit.rs).
+pub(crate) async fn connect_and_login_mux(
     id: &str,
     password: &str,
     ui_receiver: &mut mpsc::UnboundedReceiver<Data>,
@@ -558,13 +565,14 @@ pub(crate) async fn release_kcp(kcp: Option<crate::kcp_stream::KcpStream>) {
     }
 }
 
-struct LoginOutcome {
-    stream: Stream,
-    mux: bool,
-    prebuf: Vec<u8>,
-    local_eof: bool,
+// leapgate: pub(crate) for the exit listener (src/leapgate_hooks/exit.rs).
+pub(crate) struct LoginOutcome {
+    pub(crate) stream: Stream,
+    pub(crate) mux: bool,
+    pub(crate) prebuf: Vec<u8>,
+    pub(crate) local_eof: bool,
     // leapgate: the KCP endpoint stops when this is dropped; `None` off KCP.
-    kcp: Option<crate::kcp_stream::KcpStream>,
+    pub(crate) kcp: Option<crate::kcp_stream::KcpStream>,
 }
 
 fn peer_supports_mux(pi: &PeerInfo) -> bool {
@@ -572,7 +580,8 @@ fn peer_supports_mux(pi: &PeerInfo) -> bool {
 }
 
 /// `into_inner()` would drop bytes the codec pulled but never yielded.
-fn take_socket(forward: Framed<TcpStream, BytesCodec>, mut prebuf: Vec<u8>) -> (TcpStream, Vec<u8>) {
+// leapgate: pub(crate) for the exit listener (src/leapgate_hooks/exit.rs).
+pub(crate) fn take_socket(forward: Framed<TcpStream, BytesCodec>, mut prebuf: Vec<u8>) -> (TcpStream, Vec<u8>) {
     let parts = forward.into_parts();
     prebuf.extend_from_slice(&parts.read_buf);
     (parts.io, prebuf)
@@ -580,6 +589,10 @@ fn take_socket(forward: Framed<TcpStream, BytesCodec>, mut prebuf: Vec<u8>) -> (
 
 /// The controlling side's `enable-port-forward-mux`: on unless set to `N`.
 pub fn mux_enabled() -> bool {
+    // leapgate: Leapgate controllers only open multiplexed tunnels (architecture §3.9)
+    if leapgate::exit::CONTROLLER_MUX_ONLY {
+        return true;
+    }
     use hbb_common::config::{option2bool, LocalConfig};
     use base::config::keys;
     option2bool(

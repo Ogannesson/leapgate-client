@@ -56,6 +56,19 @@ pub(crate) async fn post(
     ))
 }
 
+/// `GET {base}/api/leapgate/user/v1/{path}` as the logged-in user; unsigned. Returns the status
+/// and the body.
+pub(crate) async fn get_user(base: &str, path: &str, token: &str) -> ResultType<(u16, Vec<u8>)> {
+    let resp = client()?
+        .get(format!("{base}/api/leapgate/user/v1/{path}"))
+        .bearer_auth(token)
+        .timeout(TIMEOUT)
+        .send()
+        .await?;
+    let status = resp.status().as_u16();
+    Ok((status, resp.bytes().await?.to_vec()))
+}
+
 fn builder() -> ClientBuilder {
     // System proxies are ignored as upstream does (rustdesk#11569).
     // Both the system store (for privately imported CAs) and the bundled webpki roots are

@@ -20,6 +20,8 @@ import '../../common/widgets/peer_tab_page.dart';
 import '../../common/widgets/autocomplete.dart';
 import '../../models/platform_model.dart';
 import '../../desktop/widgets/material_mod_popup_menu.dart' as mod_menu;
+// leapgate: the exit node directory (phase 4)
+import '../../leapgate/exit_nodes.dart';
 
 class OnlineStatusWidget extends StatefulWidget {
   const OnlineStatusWidget({Key? key, this.onSvcStatusChanged})
@@ -577,6 +579,12 @@ class _ConnectionPageState extends State<ConnectionPage>
                                       (
                                         'TCP tunneling',
                                         () => onConnect(isTcpTunneling: true)
+                                      ),
+                                    // leapgate: the exit node directory (phase 4)
+                                    if (isDesktop)
+                                      (
+                                        'Exit nodes',
+                                        () => showLeapgateExitNodes(context)
                                       ),
                                   ]
                                       .map((e) => MenuEntryButton<String>(
