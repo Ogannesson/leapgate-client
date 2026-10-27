@@ -2085,6 +2085,10 @@ async fn start_one_port_forward<T: InvokeUiSession>(
     key: &str,
     token: &str,
 ) {
+    // leapgate: the exit mapping runs a local SOCKS5/HTTP CONNECT proxy, not a port forward
+    if leapgate::exit::is_exit_target(&remote_host, remote_port) {
+        return crate::leapgate_hooks::exit::run(handler, port, receiver, key, token).await;
+    }
     if let Err(err) = crate::port_forward::listen(
         handler.get_id(),
         handler.password.clone(),

@@ -23,6 +23,31 @@ static CONTROLLER: &[(&str, &str)] = &[
         "目标是本机代理软件分配的 fake-ip 地址，请在程序的代理设置里改用远程 DNS（socks5h）",
     ),
     (exit::PEER_TOO_OLD, "对方版本过旧，无法做端口转发"),
+    (exit::NOT_SUPPORTED, "对方设备不支持作为出口"),
+    ("Add exit node", "添加出口"),
+    ("Exit node", "出口"),
+    ("Exit nodes", "出口节点"),
+    ("Local proxy port", "本地代理端口"),
+    ("Connects on first use", "首次使用时连接"),
+    ("Copy SOCKS5 address", "复制 SOCKS5 地址"),
+    ("Copy HTTP address", "复制 HTTP 地址"),
+    (
+        "Only TCP. Only programs set to use this proxy go through the exit node. Firefox: Settings, Network Settings, Manual proxy configuration, SOCKS Host 127.0.0.1 and the port of this row, SOCKS v5, and tick \"Proxy DNS when using SOCKS v5\". Chrome and Edge: use a proxy extension such as SwitchyOmega, or start them with the parameter below. Sites you visit see the remote network's address; the remote device logs only refused destinations.",
+        "只支持 TCP，只有设置了这个代理的程序才走出口。Firefox：设置 → 网络设置 → 手动配置代理，SOCKS 主机填 127.0.0.1、端口填本行的端口，选 SOCKS v5，并勾选\"使用 SOCKS v5 时代理 DNS 查询\"。Chrome 和 Edge：用 SwitchyOmega 这类代理扩展，或者带下面的参数启动。你访问的网站看到的是对方网络的地址；对方设备只记录被拒绝的目标地址。",
+    ),
+    ("Log in to see the exit nodes you can use", "登录后才能看到你能用的出口"),
+    (
+        "The current server does not provide an exit node directory",
+        "当前服务器不提供出口目录",
+    ),
+    ("No exit node is available right now", "目前没有可用的出口"),
+    ("Failed to load the exit node list", "无法获取出口列表"),
+    (
+        "You can also enter a device ID, open TCP tunneling and add an exit node",
+        "也可以输入设备 ID，打开 TCP 隧道后添加出口",
+    ),
+    ("Use", "使用"),
+    ("Mine", "我的"),
 ];
 
 pub fn get(lang: &str, key: &str) -> Option<&'static str> {

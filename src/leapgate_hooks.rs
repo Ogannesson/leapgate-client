@@ -1,6 +1,8 @@
 //! Leapgate glue that needs upstream's crate-private items, so it cannot live in `libs/leapgate`.
 //! Upstream files call in here through one-line hooks; the logic itself stays in `libs/leapgate`.
 
+pub(crate) mod exit;
+
 use crate::{
     client::{Client, Interface},
     kcp_stream::KcpStream,

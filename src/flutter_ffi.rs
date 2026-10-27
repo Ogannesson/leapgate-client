@@ -2694,6 +2694,10 @@ pub fn main_get_printer_names() -> SyncReturn<String> {
 }
 
 pub fn main_get_common(key: String) -> String {
+    // leapgate: keys Leapgate answers itself (exit node directory)
+    if let Some(v) = crate::leapgate_hooks::exit::get_common(&key) {
+        return v;
+    }
     if key == "is-printer-installed" {
         #[cfg(target_os = "windows")]
         {
