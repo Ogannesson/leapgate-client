@@ -162,6 +162,11 @@ async fn serve<T: InvokeUiSession>(
                     (handle, socket, prebuf)
                 }
                 Next::Stop(msg) => {
+                    // As K0: the KCP guard outlives the refused session so its close reaches the peer.
+                    if let Ok(Some(o)) = res {
+                        drop(o.stream);
+                        tokio::spawn(crate::port_forward::release_kcp(o.kcp));
+                    }
                     refuse(forward.get_mut(), req.kind, ready).await;
                     if let Some(msg) = msg {
                         handler.on_error(msg);
