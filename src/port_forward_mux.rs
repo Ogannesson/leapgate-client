@@ -474,7 +474,8 @@ mod tunnel {
             }
         }
 
-        pub fn set_muxed(&self, mut stream: Stream, interface: impl Interface) -> Arc<TunnelHandle> {
+        // leapgate: take the stream's KCP guard so the tunnel loop can keep it alive.
+        pub fn set_muxed(&self, mut stream: Stream, interface: impl Interface, kcp: Option<crate::kcp_stream::KcpStream>) -> Arc<TunnelHandle> {
             cap_packet_size(&mut stream);
             let (data_tx, data_rx) = mpsc::channel(DATA_QUEUE_FRAMES);
             let (control_tx, control_rx) = mpsc::unbounded_channel();
@@ -491,6 +492,8 @@ mod tunnel {
             // handle and the listener could never re-establish.
             self.state.send_replace(TunnelState::Muxed(handle.clone()));
             tokio::spawn(tunnel_loop(
+                // leapgate: the loop owns the KCP guard.
+                kcp,
                 stream,
                 handle.clone(),
                 data_rx,
@@ -695,6 +698,8 @@ mod tunnel {
     /// across the queues: `open`, `data` and `close` share the data queue and
     /// the control queue carries `window_update` alone.
     async fn tunnel_loop(
+        // leapgate: dropping the KCP guard stops its UDP loop, so hold it until the tunnel ends; first, so it drops after the stream.
+        _kcp: Option<crate::kcp_stream::KcpStream>,
         mut stream: Stream,
         handle: Arc<TunnelHandle>,
         mut data_rx: mpsc::Receiver<Message>,
@@ -983,7 +988,8 @@ mod tests {
                 let addr = ours.peer_addr().unwrap();
                 let t = Tunnel::new();
                 t.claim();
-                let _h = t.set_muxed(Stream::Tcp(FramedStream::from(ours, addr)), NoUi::default());
+                // leapgate: no KCP guard over a TCP pair.
+                let _h = t.set_muxed(Stream::Tcp(FramedStream::from(ours, addr)), NoUi::default(), None);
                 assert!(matches!(t.claim(), Claim::Muxed(_)));
                 // The codec's three-byte header form, declaring one byte more
                 // than the cap, and nothing behind it: an uncapped codec waits
@@ -1004,7 +1010,8 @@ mod tests {
                 let (ours, mut peer) = stream_pair().await;
                 let t = Tunnel::new();
                 assert!(matches!(t.claim(), Claim::Claimed));
-                let h = t.set_muxed(ours, NoUi::default());
+                // leapgate: no KCP guard over a TCP pair.
+                let h = t.set_muxed(ours, NoUi::default(), None);
                 let (mut app, sock) = local_pair().await;
                 h.open("localhost", 80, sock, b"GET / HTTP/1.0\r\n\r\n".to_vec()).unwrap();
                 let open = recv_frame(&mut peer).await;
@@ -1036,7 +1043,8 @@ mod tests {
                 let (ours, mut peer) = stream_pair().await;
                 let t = Tunnel::new();
                 assert!(matches!(t.claim(), Claim::Claimed));
-                let h = t.set_muxed(ours, NoUi::default());
+                // leapgate: no KCP guard over a TCP pair.
+                let h = t.set_muxed(ours, NoUi::default(), None);
                 let (app, sock) = local_pair().await;
                 h.open("localhost", 80, sock, Vec::new()).unwrap();
                 let id = match recv_frame(&mut peer).await.union {
@@ -1058,6 +1066,37 @@ mod tests {
             });
         }
 
+        // leapgate: a tunnel over KCP keeps working once the caller lets go of the endpoint guard.
+        #[test]
+        fn a_tunnel_over_kcp_keeps_its_endpoint_running() {
+            rt().block_on(async {
+                use crate::kcp_stream::KcpStream;
+                use hbb_common::tokio::net::UdpSocket;
+                use std::time::Duration;
+                let a = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+                let b = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+                a.connect(b.local_addr().unwrap()).await.unwrap();
+                b.connect(a.local_addr().unwrap()).await.unwrap();
+                let (ours, theirs) = tokio::join!(
+                    KcpStream::connect(Arc::new(a), Duration::from_secs(5)),
+                    KcpStream::accept(Arc::new(b), Duration::from_secs(5), None),
+                );
+                let (guard, ours) = ours.unwrap();
+                let (_peer_guard, mut peer) = theirs.unwrap();
+                let t = Tunnel::new();
+                t.claim();
+                let h = t.set_muxed(ours, NoUi::default(), Some(guard));
+                // Long enough for a dropped guard's stop signal to end the UDP loop.
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                let (_app, sock) = local_pair().await;
+                h.open("localhost", 80, sock, Vec::new()).unwrap();
+                let open = hbb_common::timeout(5000, recv_frame(&mut peer))
+                    .await
+                    .expect("the tunnel's KCP endpoint stopped");
+                assert!(matches!(open.union, Some(port_forward_channel::Union::Open(_))));
+            });
+        }
+
         #[test]
         fn a_refused_channel_is_reported_once_per_reason() {
             rt().block_on(async {
@@ -1065,7 +1104,8 @@ mod tests {
                 let t = Tunnel::new();
                 assert!(matches!(t.claim(), Claim::Claimed));
                 let ui = NoUi::default();
-                let h = t.set_muxed(ours, ui.clone());
+                // leapgate: no KCP guard over a TCP pair.
+                let h = t.set_muxed(ours, ui.clone(), None);
                 for reason in ["unreachable", "unreachable", "no permission"] {
                     let (mut app, sock) = local_pair().await;
                     h.open("localhost", 1, sock, vec![]).unwrap();
@@ -1092,7 +1132,8 @@ mod tests {
                 let (ours, mut peer) = stream_pair().await;
                 let t = Tunnel::new();
                 t.claim();
-                let h = t.set_muxed(ours, NoUi::default());
+                // leapgate: no KCP guard over a TCP pair.
+                let h = t.set_muxed(ours, NoUi::default(), None);
                 let (_app, sock) = local_pair().await;
                 h.open("localhost", 1, sock, vec![]).unwrap();
                 let id = match recv_frame(&mut peer).await.union {
@@ -1120,7 +1161,8 @@ mod tests {
                 let (ours, peer) = stream_pair().await;
                 let t = Tunnel::new();
                 t.claim();
-                let h = t.set_muxed(ours, NoUi::default());
+                // leapgate: no KCP guard over a TCP pair.
+                let h = t.set_muxed(ours, NoUi::default(), None);
                 let (mut app_a, sock_a) = local_pair().await;
                 let (mut app_b, sock_b) = local_pair().await;
                 h.open("localhost", 1, sock_a, vec![]).unwrap();
@@ -1135,7 +1177,8 @@ mod tests {
                 // The next accept establishes again on the same `Tunnel`.
                 assert!(matches!(t.claim(), Claim::Claimed));
                 let (ours, mut peer) = stream_pair().await;
-                let h = t.set_muxed(ours, NoUi::default());
+                // leapgate: no KCP guard over a TCP pair.
+                let h = t.set_muxed(ours, NoUi::default(), None);
                 let (_app_c, sock_c) = local_pair().await;
                 h.open("localhost", 1, sock_c, vec![]).unwrap();
                 assert!(matches!(
@@ -1243,7 +1286,8 @@ mod tests {
             fake_controlled(theirs, format!("127.0.0.1:{}", port));
             let t = Tunnel::new();
             t.claim();
-            let h = t.set_muxed(ours, NoUi::default());
+            // leapgate: no KCP guard over a TCP pair.
+            let h = t.set_muxed(ours, NoUi::default(), None);
             (t, h, port)
         }
 

@@ -121,9 +121,12 @@ pub async fn listen(
                 let mut forward = Framed::new(forward, BytesCodec::new());
                 let mut close_port_forward = false;
                 match connect_and_login(&id, &password, &mut ui_receiver, interface.clone(), &mut forward, key, token, is_rdp, &mut close_port_forward, &remote_host, remote_port).await {
-                    Ok(Some(stream)) => {
+                    // leapgate: take the KCP guard along with the stream.
+                    Ok(Some((stream, kcp))) => {
                         let interface = interface.clone();
                         tokio::spawn(async move {
+                            // leapgate: dropping the KCP guard stops its UDP loop, so keep it for the whole forward.
+                            let _kcp = kcp;
                             if let Err(err) = run_forward(forward, stream).await {
                                 interface.msgbox("error", "Error", &err.to_string(), "");
                             }
@@ -168,13 +171,15 @@ async fn connect_and_login(
     close_port_forward: &mut bool,
     remote_host: &str,
     remote_port: i32,
-) -> ResultType<Option<Stream>> {
+    // leapgate: also return the KCP guard, which must outlive the login.
+) -> ResultType<Option<(Stream, Option<crate::kcp_stream::KcpStream>)>> {
     let conn_type = if is_rdp {
         ConnType::RDP
     } else {
         ConnType::PORT_FORWARD
     };
-    let ((mut stream, direct, _pk, _kcp, _stream_type), (feedback, rendezvous_server)) =
+    // leapgate: keep the KCP guard instead of dropping it on return.
+    let ((mut stream, direct, _pk, kcp, _stream_type), (feedback, rendezvous_server)) =
         Client::start(id, key, token, conn_type, interface.clone()).await?;
     interface.update_direct(Some(direct));
     if !stream.is_secured() && !crate::common::is_direct_ip_access(id) {
@@ -259,7 +264,8 @@ async fn connect_and_login(
     if !buffer.is_empty() {
         allow_err!(stream.send_bytes(buffer.into()).await);
     }
-    Ok(Some(stream))
+    // leapgate: hand the KCP guard to the caller.
+    Ok(Some((stream, kcp)))
 }
 
 
@@ -362,7 +368,8 @@ async fn establish_tunnel(
     let mut close_port_forward = false;
     match connect_and_login_mux(id, password, ui_receiver, interface.clone(), &mut forward, key, token, is_rdp, &mut close_port_forward, remote_host, remote_port).await {
         Ok(Some(outcome)) if outcome.mux => {
-            let handle = tunnel.set_muxed(outcome.stream, interface.clone());
+            // leapgate: the tunnel loop holds the KCP guard until the tunnel ends.
+            let handle = tunnel.set_muxed(outcome.stream, interface.clone(), outcome.kcp);
             if !outcome.local_eof {
                 let (socket, prebuf) = take_socket(forward, outcome.prebuf);
                 if let Err(e) = handle.open(remote_host, remote_port, socket, prebuf) {
@@ -415,7 +422,8 @@ async fn connect_and_login_mux(
     } else {
         ConnType::PORT_FORWARD
     };
-    let ((mut stream, direct, _pk, _kcp, _stream_type), (feedback, rendezvous_server)) =
+    // leapgate: keep the KCP guard instead of dropping it on return.
+    let ((mut stream, direct, _pk, kcp, _stream_type), (feedback, rendezvous_server)) =
         Client::start(id, key, token, conn_type, interface.clone()).await?;
     interface.update_direct(Some(direct));
     if !stream.is_secured() && !crate::common::is_direct_ip_access(id) {
@@ -507,6 +515,8 @@ async fn connect_and_login_mux(
         mux,
         prebuf: buffer,
         local_eof,
+        // leapgate: hand the KCP guard to the caller.
+        kcp,
     }))
 }
 
@@ -519,7 +529,11 @@ fn run_legacy(
 ) {
     let mut stream = outcome.stream;
     let prebuf = outcome.prebuf;
+    // leapgate: keep the KCP guard for the whole forward.
+    let kcp = outcome.kcp;
     tokio::spawn(async move {
+        // leapgate: dropping the KCP guard stops its UDP loop.
+        let _kcp = kcp;
         stream.set_raw();
         if !prebuf.is_empty() {
             allow_err!(stream.send_bytes(prebuf.into()).await);
@@ -536,6 +550,8 @@ struct LoginOutcome {
     mux: bool,
     prebuf: Vec<u8>,
     local_eof: bool,
+    // leapgate: the KCP endpoint stops when this is dropped; `None` off KCP.
+    kcp: Option<crate::kcp_stream::KcpStream>,
 }
 
 fn peer_supports_mux(pi: &PeerInfo) -> bool {
