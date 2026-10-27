@@ -284,6 +284,10 @@ pub fn translate_locale(name: String, locale: &str) -> String {
             return replace(v);
         }
     }
+    // leapgate: Leapgate's own strings (libs/leapgate/src/lang.rs)
+    if let Some(v) = leapgate::lang::get(&lang, &name) {
+        return replace(&v);
+    }
     if lang != "en" {
         if let Some(v) = en::T.get(&name as &str) {
             if !v.is_empty() {

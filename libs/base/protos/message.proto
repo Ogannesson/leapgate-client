@@ -101,6 +101,8 @@ message Features {
   bool privacy_mode = 1;
   bool terminal = 2;
   bool port_forward_mux = 3;
+  // Leapgate fields use 1000-1999.
+  bool leapgate_exit = 1000;
 }
 
 message CodecAbility {
