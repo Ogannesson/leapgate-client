@@ -139,6 +139,9 @@ const MAX_AGENTS: usize = 8;
 /// rather than made visible.
 const RELAY_FALLBACK_DELAY_MS: u64 = 2500;
 const DROP_LOG_INTERVAL: Duration = Duration::from_secs(60);
+/// Upstream's `KCP_PEER_SILENCE_LIMIT` in `src/client/io_loop.rs`, the controller's half of the
+/// same check, copied rather than made visible: both sides give up on a silent peer alike.
+const KCP_PEER_SILENCE_LIMIT: Duration = Duration::from_secs(8);
 
 /// Races Leapgate's ICE (contract 05 §4.8.1) against upstream's `_start` (`upstream`) and returns
 /// the winner in `_start`'s shape. ICE never fails a connection: when it loses or fails, the
@@ -593,7 +596,7 @@ async fn on_ice_offer_(ice: LeapgateIce, host: String, server: ServerPtr) {
         socket.connect(remote).await?;
         KcpStream::accept(socket, KCP_HANDOFF_TIMEOUT, Some(init_packet)).await
     };
-    let (_kcp, stream) = match kcp.await {
+    let (kcp, stream) = match kcp.await {
         Ok(k) => k,
         Err(e) => {
             log::trace!("leapgate ice: KCP handoff failed: {}", e);
@@ -603,15 +606,44 @@ async fn on_ice_offer_(ice: LeapgateIce, host: String, server: ServerPtr) {
     drop(slot);
     // The address ICE actually selected, as a LAN TCP accept would see it.
     allow_err!(
-        crate::server::create_tcp_connection(
-            server,
-            stream,
-            remote,
-            true,
-            ConnectionMeta::default()
+        serve_over_kcp(
+            kcp,
+            KCP_PEER_SILENCE_LIMIT,
+            crate::server::create_tcp_connection(
+                server,
+                stream,
+                remote,
+                true,
+                ConnectionMeta::default()
+            )
         )
         .await
     );
+}
+
+/// Runs `session` over the stream `kcp` guards. Without this a controller that crashed or lost
+/// its network is only noticed by the session's own 30 s timeout, where a relay closes at once.
+/// A peer silent for `limit` loses its guard: the endpoint stops, the stream's read fails, and
+/// the session closes on that error as it would on a reset connection, cleanup included. A
+/// session that ends first keeps the guard until its tail and FIN are out.
+async fn serve_over_kcp<F: Future>(kcp: KcpStream, limit: Duration, session: F) -> F::Output {
+    tokio::pin!(session);
+    let mut kcp = Some(kcp);
+    let mut tick = tokio::time::interval(Duration::from_secs(1));
+    let out = loop {
+        tokio::select! {
+            out = &mut session => break out,
+            _ = tick.tick(), if kcp.is_some() => {
+                let silent = kcp.as_ref().and_then(|k| k.peer_silent_for());
+                if let Some(s) = silent.filter(|s| *s >= limit) {
+                    log::info!("leapgate ice: peer silent for {:?}, closing the session", s);
+                    kcp = None;
+                }
+            }
+        }
+    };
+    tokio::spawn(crate::port_forward::release_kcp(kcp));
+    out
 }
 
 fn dropped_offer() {
@@ -797,5 +829,32 @@ mod tests {
         assert!(!whitelist_restricts("192.168.1.0/24,0.0.0.0"));
         assert!(whitelist_restricts("192.168.1.0/24"));
         assert!(whitelist_restricts("10.0.0.1,"));
+    }
+
+    #[tokio::test]
+    async fn a_session_over_kcp_ends_soon_after_its_peer_goes_silent() {
+        use std::sync::Arc;
+        use tokio::net::UdpSocket;
+        let a = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let b = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        a.connect(b.local_addr().unwrap()).await.unwrap();
+        b.connect(a.local_addr().unwrap()).await.unwrap();
+        let (ours, theirs) = tokio::join!(
+            KcpStream::accept(Arc::new(b), Duration::from_secs(5), None),
+            KcpStream::connect(Arc::new(a), Duration::from_secs(5)),
+        );
+        let (guard, mut stream) = ours.unwrap();
+        let (peer_guard, _peer_stream) = theirs.unwrap();
+        // A crashed peer: its endpoint stops with no FIN, and nothing more reaches us.
+        drop(peer_guard);
+        let session = async move { while let Some(Ok(_)) = stream.next().await {} };
+        let start = Instant::now();
+        timeout(
+            Duration::from_secs(10),
+            serve_over_kcp(guard, Duration::from_secs(2), session),
+        )
+        .await
+        .expect("the session outlived its silent peer");
+        assert!(start.elapsed() >= Duration::from_secs(2));
     }
 }
