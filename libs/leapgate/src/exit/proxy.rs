@@ -359,6 +359,7 @@ mod tests {
             b"CONNECT [example.com]:443 HTTP/1.1\r\n\r\n",
             b"CONNECT example.com:0 HTTP/1.1\r\n\r\n",
             b"CONNECT example.com:65536 HTTP/1.1\r\n\r\n",
+            b"CONNECT example.com:443 HTTP/2.0\r\n\r\n",
         ] {
             let (out, res) = handshake_with(head).await;
             assert_eq!((out, res), (bad_request.to_vec(), Err(Refused::BadRequest)));
