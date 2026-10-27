@@ -348,7 +348,10 @@ mod tests {
             b"GET http://example.com/ HTTP/1.1\r\n\r\n",
         ] {
             let (out, res) = handshake_with(head).await;
-            assert_eq!((out, res), (not_implemented.to_vec(), Err(Refused::NotConnect)));
+            assert_eq!(
+                (out, res),
+                (not_implemented.to_vec(), Err(Refused::NotConnect))
+            );
         }
         for head in [
             &b"CONNECT example.com HTTP/1.1\r\n\r\n"[..],

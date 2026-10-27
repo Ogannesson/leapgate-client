@@ -35,7 +35,11 @@ pub const NOT_SUPPORTED: &str = "The remote device does not support acting as an
 
 /// How `connect_and_login_mux` ended, as the hook maps it.
 pub enum LoginEnd {
-    Peer { mux: bool, exit: bool, secured: bool },
+    Peer {
+        mux: bool,
+        exit: bool,
+        secured: bool,
+    },
     /// Refused, or the user closed the insecure-connection prompt; upstream has said so.
     Refused,
     /// Offline, timed out, relay failed, dropped mid-login.
@@ -132,7 +136,11 @@ mod tests {
     fn a_tunnel_is_used_only_from_a_secured_multiplexed_exit() {
         let peer = |mux, exit, secured| after_login(LoginEnd::Peer { mux, exit, secured });
         assert_eq!(peer(true, true, true), Next::Use);
-        for (mux, exit, secured) in [(false, true, true), (true, false, true), (true, true, false)] {
+        for (mux, exit, secured) in [
+            (false, true, true),
+            (true, false, true),
+            (true, true, false),
+        ] {
             assert_eq!(peer(mux, exit, secured), Next::Stop(Some(NOT_SUPPORTED)));
         }
         assert_eq!(after_login(LoginEnd::Refused), Next::Stop(None));

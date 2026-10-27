@@ -112,7 +112,11 @@ async fn serve<T: InvokeUiSession>(
             let mut socket = socket;
             if cooldown.map_or(false, |until| Instant::now() < until) {
                 let _ = proxy::reply(&mut socket, req.kind, false).await;
-                throttled_log!(LOG_INTERVAL, info, "leapgate exit: local connection refused, retrying after cooldown");
+                throttled_log!(
+                    LOG_INTERVAL,
+                    info,
+                    "leapgate exit: local connection refused, retrying after cooldown"
+                );
                 return true;
             }
             let mut forward = Framed::new(socket, BytesCodec::new());
@@ -146,7 +150,10 @@ async fn serve<T: InvokeUiSession>(
                     let direct = handler.lc.read().unwrap().direct == Some(true);
                     // F4: the row shows direct or relayed. The stream type label is gone by now.
                     handler.set_connection_type(true, direct, "");
-                    log::info!("leapgate exit: tunnel up ({})", if direct { "direct" } else { "relayed" });
+                    log::info!(
+                        "leapgate exit: tunnel up ({})",
+                        if direct { "direct" } else { "relayed" }
+                    );
                     let handle = tunnel.set_muxed(o.stream, handler.clone(), o.kcp);
                     if o.local_eof {
                         return true;
@@ -166,7 +173,12 @@ async fn serve<T: InvokeUiSession>(
                     refuse(forward.get_mut(), req.kind, ready).await;
                     *cooldown = Some(Instant::now() + exit::RETRY_COOLDOWN);
                     let err = res.err().map(|e| e.to_string()).unwrap_or_default();
-                    throttled_log!(LOG_INTERVAL, info, "leapgate exit: tunnel failed, retrying after cooldown: {}", err);
+                    throttled_log!(
+                        LOG_INTERVAL,
+                        info,
+                        "leapgate exit: tunnel failed, retrying after cooldown: {}",
+                        err
+                    );
                     handler.on_establish_connection_error(err);
                     return true;
                 }
@@ -175,9 +187,15 @@ async fn serve<T: InvokeUiSession>(
     };
     // C5 (A): the local program hears success first; a refusal by the exit closes the channel.
     if proxy::reply(&mut socket, req.kind, true).await.is_ok()
-        && handle.open(&req.host, i32::from(req.port), socket, prebuf).is_err()
+        && handle
+            .open(&req.host, i32::from(req.port), socket, prebuf)
+            .is_err()
     {
-        throttled_log!(LOG_INTERVAL, info, "leapgate exit: local connection dropped, tunnel unavailable");
+        throttled_log!(
+            LOG_INTERVAL,
+            info,
+            "leapgate exit: local connection dropped, tunnel unavailable"
+        );
     }
     true
 }
