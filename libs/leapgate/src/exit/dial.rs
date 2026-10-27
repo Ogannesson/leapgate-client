@@ -236,7 +236,7 @@ fn sources(nics: &[Nic]) -> Vec<Source> {
         };
         if n.has_gateway_v4 {
             for &(ip, bits) in &n.ipv4_prefixes {
-                if !lan::excluded_ip(ip) {
+                if bindable_v4(ip) {
                     v4.push(Source {
                         ip: ip.into(),
                         bits,
@@ -258,6 +258,15 @@ fn sources(nics: &[Nic]) -> Vec<Source> {
     v6.sort_by_key(|s| !matches!(s.ip, IpAddr::V6(ip) if ip.segments()[0] & 0xe000 == 0x2000));
     v4.extend(v6);
     v4
+}
+
+/// Unlike ICE's `excluded_ip`, keeps `100.64.0.0/10`: some ISPs hand it to the PC itself.
+fn bindable_v4(ip: Ipv4Addr) -> bool {
+    let o = ip.octets();
+    !ip.is_loopback()
+        && !ip.is_link_local()
+        && !ip.is_unspecified()
+        && !(o[0] == 198 && (o[1] & 0xfe) == 18)
 }
 
 /// Not loopback, link-local, `fec0::/10` (Windows fills `fec0:0:0:ffff::1~3` in on adapters
@@ -429,8 +438,8 @@ async fn public_v4(nics: &[Nic]) -> Vec<Ipv4Addr> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dns::{record, reply, TYPE_A};
-    use hbb_common::tokio::net::{TcpListener, UdpSocket};
+    use crate::dns::{a_record, reply, serve};
+    use hbb_common::tokio::net::TcpListener;
 
     fn ip(s: &str) -> IpAddr {
         s.parse().unwrap()
@@ -560,12 +569,54 @@ mod tests {
             dns: ips(&["10.0.0.1"]),
             ..Default::default()
         };
-        let sources = sources(&[tun, wifi, wired]);
+        let vpn = Nic {
+            name: "WireGuard".to_owned(),
+            if_type: 53,
+            up: true,
+            ipv4: vec![Ipv4Addr::new(10, 8, 0, 2)],
+            ipv4_prefixes: vec![(Ipv4Addr::new(10, 8, 0, 2), 24)],
+            has_gateway_v4: true,
+            ..Default::default()
+        };
+        let no_gateway = Nic {
+            name: "Ethernet 2".to_owned(),
+            if_type: lan::IF_TYPE_ETHERNET,
+            up: true,
+            ipv4: vec![Ipv4Addr::new(172, 17, 0, 1)],
+            ipv4_prefixes: vec![(Ipv4Addr::new(172, 17, 0, 1), 20)],
+            ipv6: vec![lan::V6 {
+                ip: "2408:8256:1:2::99".parse().unwrap(),
+                suffix: lan::Suffix::Other,
+            }],
+            ..Default::default()
+        };
+        let cellular = Nic {
+            name: "Cellular".to_owned(),
+            if_type: lan::IF_TYPE_ETHERNET,
+            up: true,
+            ipv4: vec![Ipv4Addr::new(100, 64, 5, 6)],
+            ipv4_prefixes: vec![(Ipv4Addr::new(100, 64, 5, 6), 10)],
+            has_gateway_v4: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            source_for(ip("8.8.8.8"), &sources(&[cellular])),
+            Some(ip("100.64.5.6"))
+        );
+        let sources = sources(&[tun, wifi, wired, vpn, no_gateway]);
         assert_eq!(
             source_for(ip("8.8.8.8"), &sources),
             Some(ip("192.168.1.145"))
         );
         assert_eq!(source_for(ip("10.0.0.20"), &sources), Some(ip("10.0.0.7")));
+        assert_eq!(
+            source_for(ip("10.8.0.5"), &sources),
+            Some(ip("192.168.1.145"))
+        );
+        assert_eq!(
+            source_for(ip("172.17.0.5"), &sources),
+            Some(ip("192.168.1.145"))
+        );
         assert_eq!(source_for(ip("2606:4700::1"), &sources), None);
         assert_eq!(
             dns_servers(&sources),
@@ -574,32 +625,10 @@ mod tests {
                 (ip("192.168.1.145"), SocketAddr::new(ip("223.5.5.5"), 53)),
             ]
         );
+        assert!(!usable_dns(ip("fec0:0:0:ffff::1")));
+        assert!(!usable_dns(ip("fe80::1")));
+        assert!(usable_dns(ip("2001:4860:4860::8888")));
         assert_eq!(source_for(ip("8.8.8.8"), &[]), None);
-    }
-
-    /// Sends each A question `a` (or NXDOMAIN when `None`) and AAAA ones no record, or nothing
-    /// at all when `answer` is false.
-    async fn server(answer: bool, a: Option<[u8; 4]>, rcode: u8) -> SocketAddr {
-        let s = UdpSocket::bind("127.0.0.1:0").await.unwrap();
-        let at = s.local_addr().unwrap();
-        tokio::spawn(async move {
-            let mut buf = [0u8; 512];
-            loop {
-                let (n, from) = s.recv_from(&mut buf).await.unwrap();
-                let q = &buf[..n];
-                if !answer {
-                    continue;
-                }
-                let is_a = q[n - 4..n - 2] == TYPE_A.to_be_bytes();
-                let records: Vec<Vec<u8>> = match a {
-                    Some(ip) if is_a => vec![record(&[0xc0, 0x0c], TYPE_A, &ip)],
-                    _ => Vec::new(),
-                };
-                let rcode = if a.is_none() { 3 } else { rcode };
-                s.send_to(&reply(q, rcode, &records), from).await.unwrap();
-            }
-        });
-        at
     }
 
     /// `localhost` has a system answer offline; the adapters' addresses or negative answer win
@@ -607,10 +636,10 @@ mod tests {
     #[hbb_common::tokio::test(crate = "hbb_common::tokio")]
     async fn the_system_answer_is_taken_only_when_the_adapters_say_nothing() {
         let lo = ip("127.0.0.1");
-        let answering = server(true, Some([203, 0, 113, 9]), 0).await;
+        let answering = serve(|q, is_a| a_record(q, is_a).or_else(|| Some(reply(q, 0, &[])))).await;
         let got = resolve("localhost", 80, &[(lo, answering)]).await;
         assert_eq!(got, Ok(ips(&["203.0.113.9"])));
-        let nxdomain = server(true, None, 3).await;
+        let nxdomain = serve(|q, _| Some(reply(q, 3, &[]))).await;
         assert_eq!(
             resolve("localhost", 80, &[(lo, nxdomain)]).await,
             Err(Reason::Nxdomain)
@@ -618,7 +647,7 @@ mod tests {
         // One server's addresses win over the other's negative.
         let got = resolve("localhost", 80, &[(lo, nxdomain), (lo, answering)]).await;
         assert_eq!(got, Ok(ips(&["203.0.113.9"])));
-        let failing = server(true, Some([203, 0, 113, 9]), 2).await;
+        let failing = serve(|q, _| Some(reply(q, 2, &[]))).await;
         for servers in [vec![(lo, failing)], vec![]] {
             let got = resolve("localhost", 80, &servers).await.unwrap();
             assert!(

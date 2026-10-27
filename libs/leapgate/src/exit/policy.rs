@@ -474,6 +474,9 @@ mod tests {
             ("64:ff9b::100.100.100.200", Err(LinkLocal)),
             ("64:ff9b::198.18.0.1", Err(FakeIp)),
             ("64:ff9b::8.8.8.8", Ok(())),
+            // Just outside the /96, with 8.8.8.8 in the low 32 bits.
+            ("64:ff9b::1:808:808", Err(Reserved)),
+            ("64:ff9b:0:0:1::808:808", Err(Reserved)),
             // Deprecated IPv4-compatible addresses are not taken apart.
             ("::127.0.0.1", Err(Reserved)),
         ];

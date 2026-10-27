@@ -393,13 +393,28 @@ mod tests {
         assert_eq!(options.get("a").map(String::as_str), Some("1"));
     }
 
-    /// The switch is not set where tests run: no `exit` key, and the allowed networks are
-    /// never reported.
+    /// The switch is not set where tests run: no `exit` key, and nothing beyond these fields
+    /// (the allowed networks are never reported). `probes` depends on the process-wide routing
+    /// state, so it is left out of the comparison.
     #[test]
     fn heartbeat_without_the_exit_switch_has_no_exit_key() {
         let v: Value = serde_json::from_slice(&body(&payload(), &[], "h", None)).unwrap();
-        assert!(v.get("exit").is_none(), "{v}");
-        assert!(!v.to_string().contains("allow-nets"), "{v}");
+        let keys: std::collections::BTreeSet<&str> = v
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .filter(|k| *k != "probes")
+            .collect();
+        let expected = [
+            "leapgate",
+            "routing_rev",
+            "strategy_rev",
+            "sysinfo_hash",
+            "uuid",
+            "ver",
+        ];
+        assert_eq!(keys, expected.into_iter().collect(), "{v}");
     }
 
     #[hbb_common::tokio::test(crate = "hbb_common::tokio")]

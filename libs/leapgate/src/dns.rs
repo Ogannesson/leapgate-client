@@ -210,10 +210,45 @@ pub(crate) fn reply(q: &[u8], rcode: u8, records: &[Vec<u8>]) -> Vec<u8> {
 }
 
 #[cfg(test)]
+const PTR: [u8; 2] = [0xc0, 0x0c];
+
+/// A server on loopback that sends each query what `respond` makes of it (`true` for an A
+/// question), after a forged reply with an address from another port.
+#[cfg(test)]
+pub(crate) async fn serve(respond: fn(&[u8], bool) -> Option<Vec<u8>>) -> SocketAddr {
+    let s = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let forger = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let at = s.local_addr().unwrap();
+    tokio::spawn(async move {
+        let mut buf = [0u8; 512];
+        loop {
+            let (n, from) = s.recv_from(&mut buf).await.unwrap();
+            let q = &buf[..n];
+            let is_a = q[n - 4..n - 2] == TYPE_A.to_be_bytes();
+            let forged = if is_a {
+                record(&PTR, TYPE_A, &[203, 0, 113, 66])
+            } else {
+                record(&PTR, TYPE_AAAA, &[0x20; 16])
+            };
+            forger.send_to(&reply(q, 0, &[forged]), from).await.unwrap();
+            if let Some(r) = respond(q, is_a) {
+                s.send_to(&r, from).await.unwrap();
+            }
+        }
+    });
+    at
+}
+
+/// `203.0.113.9` for an A question, nothing for the rest.
+#[cfg(test)]
+pub(crate) fn a_record(q: &[u8], is_a: bool) -> Option<Vec<u8>> {
+    is_a.then(|| reply(q, 0, &[record(&PTR, TYPE_A, &[203, 0, 113, 9])]))
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
-    const PTR: [u8; 2] = [0xc0, 0x0c];
     const TYPE_CNAME: u16 = 5;
 
     fn hex(s: &str) -> Vec<u8> {
@@ -327,36 +362,6 @@ mod tests {
             junk.extend((0..tail).map(|_| next() as u8));
             answers(&junk, &q);
         }
-    }
-
-    /// A server on loopback that sends each query what `respond` makes of it (`true` for an A
-    /// question), after a forged reply with an address from another port.
-    async fn serve(respond: fn(&[u8], bool) -> Option<Vec<u8>>) -> SocketAddr {
-        let s = UdpSocket::bind("127.0.0.1:0").await.unwrap();
-        let forger = UdpSocket::bind("127.0.0.1:0").await.unwrap();
-        let at = s.local_addr().unwrap();
-        tokio::spawn(async move {
-            let mut buf = [0u8; 512];
-            loop {
-                let (n, from) = s.recv_from(&mut buf).await.unwrap();
-                let q = &buf[..n];
-                let is_a = q[n - 4..n - 2] == TYPE_A.to_be_bytes();
-                let forged = if is_a {
-                    record(&PTR, TYPE_A, &[203, 0, 113, 66])
-                } else {
-                    record(&PTR, TYPE_AAAA, &[0x20; 16])
-                };
-                forger.send_to(&reply(q, 0, &[forged]), from).await.unwrap();
-                if let Some(r) = respond(q, is_a) {
-                    s.send_to(&r, from).await.unwrap();
-                }
-            }
-        });
-        at
-    }
-
-    fn a_record(q: &[u8], is_a: bool) -> Option<Vec<u8>> {
-        is_a.then(|| reply(q, 0, &[record(&PTR, TYPE_A, &[203, 0, 113, 9])]))
     }
 
     async fn ask_of(respond: fn(&[u8], bool) -> Option<Vec<u8>>) -> Answer {
