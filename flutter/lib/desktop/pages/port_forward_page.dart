@@ -7,6 +7,8 @@ import 'package:flutter_hbb/desktop/widgets/tabbar_widget.dart';
 import 'package:flutter_hbb/models/model.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:get/get.dart';
+// leapgate: the exit mapping (phase 4)
+import 'package:flutter_hbb/leapgate/exit_tunnel.dart';
 
 const double _kColumn1Width = 30;
 const double _kColumn4Width = 100;
@@ -74,6 +76,8 @@ class _PortForwardPageState extends State<PortForwardPage>
         connToken: widget.connToken,
         isRdp: widget.isRDP);
     Get.put<FFI>(_ffi, tag: 'pf_${widget.id}');
+    // leapgate: the exit row shows the tunnel's connection type
+    leapgateExitAttach(widget.id);
     debugPrint("Port forward page init success with id ${widget.id}");
     // Call onSelected in post frame callback, since we cannot guarantee that the callback will not call setState.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -86,6 +90,8 @@ class _PortForwardPageState extends State<PortForwardPage>
     _ffi.close();
     _ffi.dialogManager.dismissAll();
     Get.delete<FFI>(tag: 'pf_${widget.id}');
+    // leapgate: the exit row shows the tunnel's connection type
+    leapgateExitDetach(widget.id);
     super.dispose();
   }
 
@@ -229,6 +235,11 @@ class _PortForwardPageState extends State<PortForwardPage>
             translate('Add'),
           ),
         ).marginSymmetric(horizontal: 10),
+        // leapgate: add the exit mapping (phase 4)
+        LeapgateAddExitButton(
+            ffi: _ffi,
+            hasExit: pfs.any((e) => isLeapgateExit(e.remoteHost, e.remotePort)),
+            onAdded: refreshTunnelConfig),
       ]),
     );
   }
@@ -250,6 +261,15 @@ class _PortForwardPageState extends State<PortForwardPage>
   }
 
   Widget buildTunnelDataRow(BuildContext context, _PortForward pf, int index) {
+    // leapgate: the exit mapping has its own row (phase 4)
+    if (isLeapgateExit(pf.remoteHost, pf.remotePort)) {
+      return LeapgateExitRow(
+          id: widget.id,
+          ffi: _ffi,
+          localPort: pf.localPort,
+          index: index,
+          onRemoved: refreshTunnelConfig);
+    }
     text(String label) => Expanded(
         child: Text(label, style: const TextStyle(fontSize: 20))
             .marginOnly(left: _kTextLeftMargin));
