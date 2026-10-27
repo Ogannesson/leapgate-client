@@ -71,8 +71,7 @@ class LeapgateAddExitButton extends StatelessWidget {
         content: TextField(
           controller: controller,
           autofocus: true,
-          decoration:
-              InputDecoration(labelText: translate('Local proxy port')),
+          decoration: InputDecoration(labelText: translate('Local proxy port')),
           // The ordinary add row's pattern without 0: a 0 port mapping is skipped at start.
           inputFormatters: [
             FilteringTextInputFormatter.allow(RegExp(
@@ -119,9 +118,9 @@ class LeapgateExitRow extends StatelessWidget {
               : Theme.of(context).colorScheme.background),
       child: Row(children: [
         Expanded(
-            child: Text(localPort.toString(),
-                    style: const TextStyle(fontSize: 20))
-                .marginOnly(left: 20)),
+            child:
+                Text(localPort.toString(), style: const TextStyle(fontSize: 20))
+                    .marginOnly(left: 20)),
         const SizedBox(width: 30, child: Icon(Icons.arrow_forward_sharp)),
         Expanded(
           child: Column(
