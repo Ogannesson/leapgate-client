@@ -378,6 +378,12 @@ async fn establish_tunnel(
             }
         }
         Ok(Some(outcome)) => {
+            // leapgate: no raw pipe to a peer without multiplexing (architecture §3.9)
+            if leapgate::exit::CONTROLLER_MUX_ONLY {
+                tunnel.set_failed();
+                interface.on_error(leapgate::exit::PEER_TOO_OLD);
+                return true;
+            }
             tunnel.set_legacy();
             if outcome.local_eof {
                 log::debug!("legacy peer and local {:?} already gone", addr);
@@ -580,6 +586,10 @@ fn take_socket(forward: Framed<TcpStream, BytesCodec>, mut prebuf: Vec<u8>) -> (
 
 /// The controlling side's `enable-port-forward-mux`: on unless set to `N`.
 pub fn mux_enabled() -> bool {
+    // leapgate: Leapgate controllers only open multiplexed tunnels (architecture §3.9)
+    if leapgate::exit::CONTROLLER_MUX_ONLY {
+        return true;
+    }
     use hbb_common::config::{option2bool, LocalConfig};
     use base::config::keys;
     option2bool(

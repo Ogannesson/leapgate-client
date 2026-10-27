@@ -22,6 +22,7 @@ static CONTROLLER: &[(&str, &str)] = &[
         exit::MSG_FAKE_IP_LITERAL,
         "目标是本机代理软件分配的 fake-ip 地址，请在程序的代理设置里改用远程 DNS（socks5h）",
     ),
+    (exit::PEER_TOO_OLD, "对方版本过旧，无法做端口转发"),
 ];
 
 pub fn get(lang: &str, key: &str) -> Option<&'static str> {

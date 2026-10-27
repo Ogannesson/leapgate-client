@@ -24,6 +24,11 @@ pub const MSG_NEED_ENCRYPTION: &str = "The exit node only accepts encrypted conn
 pub const MSG_BLOCKED: &str = "The exit node blocked this destination: it is on the remote device's local network or is the device itself, or the remote network's DNS returned a fake-ip address";
 pub const MSG_FAKE_IP_LITERAL: &str = "The destination is a fake-ip address from this computer's proxy software. Set the program to resolve names through the proxy (socks5h)";
 
+/// C11. A constant rather than a bare `return true` so upstream's lines after the hook stay
+/// reachable to the compiler (no unreachable_code warning, nothing modified).
+pub const CONTROLLER_MUX_ONLY: bool = true;
+pub const PEER_TOO_OLD: &str = "The remote device is too old for port forwarding";
+
 /// Exact match only: another case, a trailing dot or another port is an ordinary port forward.
 pub fn is_exit_target(host: &str, port: i32) -> bool {
     host == SENTINEL_HOST && port == SENTINEL_PORT
