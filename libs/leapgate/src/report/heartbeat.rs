@@ -67,6 +67,8 @@ struct Req<'a> {
     sysinfo: Option<&'a Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     probes: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    exit: Option<bool>,
 }
 
 pub(super) async fn tick<E: Env>(
@@ -147,6 +149,7 @@ fn body(p: &Payload, conns: &[i32], hash: &str, sysinfo: Option<&Value>) -> Vec<
         sysinfo_hash: hash,
         sysinfo,
         probes: route::probes(),
+        exit: crate::exit::allowed().then_some(true),
     };
     serde_json::to_vec(&req).unwrap_or_default()
 }
@@ -278,7 +281,7 @@ fn merge_strategy(
         let Some(v) = v.as_str() else {
             continue;
         };
-        if k.starts_with("leapgate-") {
+        if crate::options::is_leapgate_local_option(k) {
             continue;
         }
         // Priority: user config > default advanced options. Only when the default is also
@@ -368,6 +371,35 @@ mod tests {
                 ("leapgate-api-caps".to_owned(), "keep".to_owned()),
             ])
         );
+    }
+
+    #[test]
+    fn strategies_cannot_write_the_exit_options() {
+        let exit_keys = [crate::exit::OPTION_ALLOW_EXIT, crate::exit::OPTION_ALLOW_NETS];
+        let mut options = HashMap::from([
+            (exit_keys[0].to_owned(), "N".to_owned()),
+            (exit_keys[1].to_owned(), "192.168.1.0/24".to_owned()),
+        ]);
+        let before = options.clone();
+        let defaults = HashMap::new();
+        for incoming in [
+            json!({exit_keys[0]: "Y", exit_keys[1]: "0.0.0.0/0"}),
+            json!({exit_keys[0]: "", exit_keys[1]: ""}),
+        ] {
+            merge_strategy(&mut options, &defaults, incoming.as_object().unwrap());
+            assert_eq!(options, before);
+        }
+        merge_strategy(&mut options, &defaults, json!({"a": "1"}).as_object().unwrap());
+        assert_eq!(options.get("a").map(String::as_str), Some("1"));
+    }
+
+    /// The switch is not set where tests run: no `exit` key, and the allowed networks are
+    /// never reported.
+    #[test]
+    fn heartbeat_without_the_exit_switch_has_no_exit_key() {
+        let v: Value = serde_json::from_slice(&body(&payload(), &[], "h", None)).unwrap();
+        assert!(v.get("exit").is_none(), "{v}");
+        assert!(!v.to_string().contains("allow-nets"), "{v}");
     }
 
     #[hbb_common::tokio::test(crate = "hbb_common::tokio")]

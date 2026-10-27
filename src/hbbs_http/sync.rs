@@ -294,6 +294,8 @@ fn heartbeat_url() -> String {
 }
 
 fn handle_config_options(config_options: HashMap<String, String>) {
+    // leapgate: server strategies cannot write local Leapgate options
+    let config_options: HashMap<_, _> = config_options.into_iter().filter(|(k, _)| !leapgate::options::is_leapgate_local_option(k)).collect();
     let mut options = Config::get_options();
     let default_settings = config::DEFAULT_SETTINGS.read().unwrap().clone();
     config_options

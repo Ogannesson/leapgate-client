@@ -12,3 +12,23 @@ pub fn self_hosted_punch_default(key: &str) -> Option<String> {
     }
     None
 }
+
+/// Keys starting with `leapgate-` are this device's own state; no server strategy writes them.
+pub fn is_leapgate_local_option(key: &str) -> bool {
+    key.starts_with("leapgate-")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_leapgate_prefixed_keys_are_local() {
+        for key in ["leapgate-allow-exit", "leapgate-exit-allow-nets", "leapgate-api-caps"] {
+            assert!(is_leapgate_local_option(key), "{key}");
+        }
+        for key in ["allow-exit", "enable-tunnel", "Leapgate-allow-exit", "x-leapgate-"] {
+            assert!(!is_leapgate_local_option(key), "{key}");
+        }
+    }
+}
