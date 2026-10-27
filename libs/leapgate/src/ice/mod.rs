@@ -23,7 +23,7 @@ use hbb_common::{
 };
 use sig::{Candidate, SESSION_LEN};
 use std::{
-    net::{IpAddr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, SocketAddr},
     sync::Arc,
     time::Instant,
 };
@@ -107,6 +107,39 @@ pub async fn gather(local: &[LocalAddr], rendezvous: &str) -> Gathered {
 pub async fn gather_on(local: &[LocalAddr], stun: &[SocketAddr]) -> Gathered {
     let started = Instant::now();
     gather::gather_until(local, stun, started, started + GATHER_WAIT).await
+}
+
+/// Phase 4 B11: the IPv4 mappings the rendezvous server `rendezvous` (`host:port`) reports
+/// for the physical IPv4 addresses, within `GATHER_WAIT` including the name lookup. Not
+/// `gather`, whose candidate assembly drops a mapping equal to a host address.
+pub(crate) async fn public_v4(nics: &[lan::Nic], rendezvous: &str) -> Vec<Ipv4Addr> {
+    let started = Instant::now();
+    let local: Vec<LocalAddr> = gather::select(nics)
+        .into_iter()
+        .filter(|l| l.ip.is_ipv4())
+        .collect();
+    let stun = dns::resolve(&local, rendezvous, started + dns::RESOLVE_WAIT).await;
+    let Some(&server) = stun.iter().find(|s| s.is_ipv4()) else {
+        return Vec::new();
+    };
+    let mut bound = Vec::new();
+    for l in &local {
+        if let Ok(s) = gather::bind(SocketAddr::new(l.ip, 0)).await {
+            bound.push(s);
+        }
+    }
+    let targets = vec![Some(server); bound.len()];
+    let mut socks = Socks::new(bound);
+    socks
+        .ask(&targets, started + GATHER_WAIT)
+        .await
+        .into_iter()
+        .flatten()
+        .filter_map(|m| match m.addr.ip() {
+            IpAddr::V4(ip) => Some(ip),
+            IpAddr::V6(_) => None,
+        })
+        .collect()
 }
 
 /// The NAT self-test of `examples/ice_peer`: the mapping each of `servers` reports for one
