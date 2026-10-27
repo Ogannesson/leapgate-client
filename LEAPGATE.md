@@ -14,7 +14,7 @@
 
 `libs/leapgate/src/`：`brand.rs`（名字、默认服务器构建时注入、`default_api_server()`）、`options.rs`（自建服务器时 IPv6 打洞默认开等默认值）、`rendezvous.rs`（没配会合服务器时等用户填好再连）、`update.rs`（关掉官方更新检查）、`lan.rs`（第三期：局域网多候选地址，§3；05 加了网卡描述、`has_gateway_v6`、IPv6 地址属性、地址分类、网络代价，§7）、`api.rs`、`sign.rs`、`report/`（第三期：上报与认证，§4）、`route/`（第三期：路由第二级，`relay_preference`、`self_id`、测速线程，§5）、`ice/`（第三期 05：自研 ICE，`mod`、`gather`、`check`、`stun`、`sig`、`dns`，§7）、`dns.rs`（第四期：向一台 DNS 服务器问 A、AAAA 的报文和单服务器查询 `ask`，ICE 解析会合服务器、出口解析目标共用；ICE 怎么挑服务器、怎么回落系统解析仍在 `ice/dns.rs`）、`exit/`（第四期：应用出口，§9；`mod` 放哨兵、两个选项名、固定文案、被控端的登录关口和控制端登录后的判断，`policy` 是被控端的地址策略，`dial` 是被控端的解析、过滤和连接，`proxy` 是控制端本地 SOCKS5/HTTP CONNECT 握手，`directory` 是控制端取出口目录）、`lang.rs`（第四期：Leapgate 自己界面文案的中文，`CONTROLLER`、`CONTROLLED` 两张表，上游查表之后才查，不会盖掉上游已有的译文）。具体挂钩位置用 `git grep -n "leapgate::\|leapgate_hooks"` 查。
 
-主 crate 的 `src/leapgate_hooks.rs` 放需要调用上游私有函数的胶水代码（例如传进 `libs/leapgate` 的握手闭包）：`libs/leapgate` 调不到主 crate 的私有函数，又不想把闭包组装写在热点文件的调用处。上游文件里的挂钩只调用 `leapgate::…` 或 `crate::leapgate_hooks::…`。不要建 `src/leapgate.rs`，会和外部 crate `leapgate` 撞名。05 在这里加了 `race_ice`（控制端：启用条件、到会合服务器的信令 TCP、验 S 签过的被控端 IdPk、检查、KCP connect、`secure_connection`、和上游路径竞速）和 `on_ice_offer`（被控端：spawn、验签解密去重、名额、回 ANSWER、KCP accept、`create_tcp_connection` 用 ICE 选中的远端地址），见 §7。第四期加了子模块 `src/leapgate_hooks/exit.rs`：控制端的出口监听循环 `run`（本地代理握手、第一个本地连接到来时建隧道、登录后按 `exit::after_login` 决定用、停还是冷却）和出口目录的 `get_common`，见 §9。
+主 crate 的 `src/leapgate_hooks.rs` 放需要调用上游私有函数的胶水代码（例如传进 `libs/leapgate` 的握手闭包）：`libs/leapgate` 调不到主 crate 的私有函数，又不想把闭包组装写在热点文件的调用处。上游文件里的挂钩只调用 `leapgate::…` 或 `crate::leapgate_hooks::…`。不要建 `src/leapgate.rs`，会和外部 crate `leapgate` 撞名。05 在这里加了 `race_ice`（控制端：启用条件、到会合服务器的信令 TCP、验 S 签过的被控端 IdPk、检查、KCP connect、`secure_connection`、和上游路径竞速）和 `on_ice_offer`（被控端：spawn、验签解密去重、名额、回 ANSWER、KCP accept、`create_tcp_connection` 用 ICE 选中的远端地址、会话期间看 KCP 静默），见 §7。第四期加了子模块 `src/leapgate_hooks/exit.rs`：控制端的出口监听循环 `run`（本地代理握手、第一个本地连接到来时建隧道、登录后按 `exit::after_login` 决定用、停还是冷却）和出口目录的 `get_common`，见 §9。
 
 ## 3. 局域网直连：多候选地址（第三期第一项）
 
@@ -232,6 +232,7 @@
 - 顺序：`leapgate::ice::open_forward` 验签、时间窗（±40 秒）、去重（1024 条）、解密，不过就静默丢弃；再占进程内 8 个名额之一（满了静默丢弃，不回 `BUSY`）；内层格式不对回 `REJECT{BAD}`；开了代理、WebSocket、`disable-udp`，配了 IP 白名单（非空、不含 `0.0.0.0`），或没有物理网卡候选时回 `REJECT{UNSUPPORTED}`。
 - 配了白名单不做 ICE：白名单按交给 `create_tcp_connection` 的地址判，ICE 选中的可能是私网地址、IPv6 或另一个 UDP 映射，以前经中继能连上的会被拒，而 ICE 胜出后不再回落。
 - 能做时并行收集和建回 ANSWER 用的加密 TCP（整段 3 秒，建不起来就收摊），然后同时发 ANSWER（发完断开）和跑检查；收到提名过的对上来的 KCP SYN 后 `socket.connect`、`KcpStream::accept`（3 秒），还名额，再 `create_tcp_connection(server, 流, ICE 选中的远端地址, true, ConnectionMeta::default())`。`AGENT_TTL` 10 秒从开始收集算（紧接着接受 FORWARD）。
+- 会话期间（`serve_over_kcp`）每秒看一次 `peer_silent_for()`，控制端静默满 8 秒（和控制端 `io_loop` 的 `KCP_PEER_SILENCE_LIMIT` 同值）就丢掉 KCP 守卫：端点停掉，Connection 读流当场报错，按上游断线的正常流程关会话（`on_close`、停服务、通知 CM、还会话名额），日志 `leapgate ice: peer silent for …, closing the session`。所以控制端崩溃或断网后，被控端约 8~9 秒关会话，不再等 Connection 的 30 秒超时（以前实测 30~50 秒）。会话正常结束时守卫交给 `release_kcp`（spawn，最多 10 秒），收尾数据和 FIN 照常发出，控制端当场看到断开，不再靠它的 8 秒静默检测。
 - REJECT 和 ANSWER 都新开一条到会合服务器的加密 TCP，发完断开；回 REJECT 也占名额，所以被控端为 ICE 开出的 TCP 同时最多 8 条。
 
 ### 7.6 事务号和 KCP 交接
@@ -253,7 +254,7 @@
 - `leapgate ice: signaling failed, falling back`
 - `leapgate ice: lost the relay window after <N> ms`（上游先给中继、等满窗口 ICE 还没选中；N 从竞速开始算；服务端这一次记 `abandoned`）
 
-上游直连先赢、ICE 被取消，以及没有物理网卡候选时不打。被控端丢弃 FORWARD（任一步校验不过、名额满）只打 `leapgate ice: dropped a forwarded offer`，每分钟最多一条；检查收发、STUN 校验失败、agent 超时、KCP 交接失败只用 `trace`。名字：类型 `host`/`srflx`/`prflx`，地址族 `v4`/`v6`，网卡 `ethernet`/`wlan`/`other`，结果 `no_answer`/`bad_answer`/`no_pair`/`kcp_failed`/`secure_failed`，原因 `bad`/`offline`/`unsupported`/`relay`/`busy`。
+上游直连先赢、ICE 被取消，以及没有物理网卡候选时不打。被控端丢弃 FORWARD（任一步校验不过、名额满）打 `leapgate ice: dropped a forwarded offer`，每分钟最多一条；ICE 会话期间控制端在 KCP 上静默满 8 秒时打 `leapgate ice: peer silent for <时长>, closing the session`（`info`，每次 ICE 会话最多一条；时长是 Rust `Duration` 的 Debug 写法，例如 `8.734512345s`，按每秒检查一次落在 8 秒到 9 秒多）；检查收发、STUN 校验失败、agent 超时、KCP 交接失败只用 `trace`。名字：类型 `host`/`srflx`/`prflx`，地址族 `v4`/`v6`，网卡 `ethernet`/`wlan`/`other`，结果 `no_answer`/`bad_answer`/`no_pair`/`kcp_failed`/`secure_failed`，原因 `bad`/`offline`/`unsupported`/`relay`/`busy`。
 
 ### 7.9 兼容
 
@@ -282,6 +283,9 @@
 - 路由器自己做 fake-ip（例如 OpenClash 的 fake-ip 模式）时，物理网卡 DNS 的答案也是假地址：两边都被丢弃，没有 srflx，只剩 host 和 prflx，干净回落到上游路径和中继。
 - 会合服务器 21116/UDP 的回包源地址必须是客户端发往的那个；多地址主机上发往次地址的 Binding 请求从主地址回包，端口受限和对称 NAT 后面的客户端拿不到 srflx 和证明。
 - 选中后不换路径：选中的地址失效（ULA、临时地址过期、换网）时 KCP 静默 8 秒后整次重连。
+- 被控端的静默判断是 8 秒、没有 consent 保活：控制端还在、但链路断了 8 秒以上（换 Wi-Fi、睡眠唤醒）时，被控端照样关会话，上游给控制端的关闭原因发不出去。后果按会话类型不同：
+  - 远程桌面这类走 `io_loop` 的会话：控制端按同一个 8 秒阈值重连，会话照样恢复。但对方要求了"会话结束后锁屏"时，被控端在 8~9 秒关旧连接，这时重连还没登录上，上游 #16124 的 `session_reconnected` 找不到替代它的连接，屏幕会被锁，控制端重连后看到的是锁屏。以前旧连接要等 30 秒超时，那时重连早已登录，不锁；走中继时也是 30 秒，不锁。挂钩读不到 `lock_after_session_end`，不改上游文件修不了，留给维护者定。
+  - 端口转发和出口隧道：控制端登录后不看 KCP 静默，不会在 8 秒重连。以前 mux 和出口隧道能扛过 18 秒以内的断链（控制端 `tunnel_loop` 的 `READ_TIMEOUT`），旧式端口转发能扛过约 60 秒（两端 kcp-sys 的静默回收）；现在断满 8 秒被控端就关，控制端要等到自己的读超时（空闲的 mux、出口隧道 18 秒）或 kcp-sys 约 60~70 秒的回收（旧式端口转发，或一直有本地流量时）才发现，期间本地连接挂着。给这两条路径的控制端加静默检测要改上游或别的文件，不在本分支做，留给维护者定。
 - UDP 被封的网络，以及两端都是对称 NAT、端口受限对对称 NAT 又没有 IPv6 时打不通，走上游路径和中继。
 - 被控端的 ICE 可以被人占满：知道它的 ID 和服务端 Key 的人能让服务端不断转发 FORWARD，占满 8 个名额或去重表，这段时间 ICE 不可用、走上游路径。
 - 隐私面：任何知道被控端 ID、服务端 Key、被控端又在线的人，都能拿到它物理网卡上的私网 IPv4、ULA、每个 /64 一个临时全局 IPv6 和 srflx（跨网时也给）；链路上看不到，只有服务端看得到。ICE 有意不经系统的 VPN/TUN，开着全隧道 VPN 时，两端物理网卡的公网出口（srflx 或全局 IPv6）和局域网地址照样交给服务端和对端；上游走 VPN 时对端只看得到 VPN 的出口。
