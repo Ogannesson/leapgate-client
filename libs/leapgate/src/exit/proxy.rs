@@ -196,9 +196,13 @@ fn parse_connect(head: &[u8]) -> Result<(String, u16), Refused> {
         return Err(Refused::BadRequest);
     }
     let (host, port) = match authority.strip_prefix('[') {
-        Some(rest) => rest
-            .split_once("]:")
-            .ok_or(Refused::BadRequest)?,
+        Some(rest) => {
+            let (host, port) = rest.split_once("]:").ok_or(Refused::BadRequest)?;
+            if host.parse::<Ipv6Addr>().is_err() {
+                return Err(Refused::BadRequest);
+            }
+            (host, port)
+        }
         None => match authority.rsplit_once(':') {
             Some((host, port)) if !host.contains(':') => (host, port),
             _ => return Err(Refused::BadRequest),
@@ -349,6 +353,7 @@ mod tests {
         for head in [
             &b"CONNECT example.com HTTP/1.1\r\n\r\n"[..],
             b"CONNECT 2001:db8::1:443 HTTP/1.1\r\n\r\n",
+            b"CONNECT [example.com]:443 HTTP/1.1\r\n\r\n",
             b"CONNECT example.com:0 HTTP/1.1\r\n\r\n",
             b"CONNECT example.com:65536 HTTP/1.1\r\n\r\n",
         ] {

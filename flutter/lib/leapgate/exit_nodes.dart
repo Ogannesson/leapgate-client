@@ -23,7 +23,11 @@ void showLeapgateExitNodes(BuildContext context) {
               if (snapshot.connectionState != ConnectionState.done) {
                 return const LinearProgressIndicator();
               }
-              return _body(context, close, snapshot.data ?? '');
+              if (snapshot.hasError) {
+                return Text(translate('Failed to load the exit node list'));
+              }
+              return _body(context, close,
+                  jsonDecode(snapshot.data!) as Map<String, dynamic>);
             },
           ),
           const SizedBox(height: 12),
@@ -38,14 +42,8 @@ void showLeapgateExitNodes(BuildContext context) {
   }, clickMaskDismiss: true, backDismiss: true);
 }
 
-Widget _body(BuildContext context, VoidCallback close, String json) {
-  Map<String, dynamic> m;
-  try {
-    m = jsonDecode(json) as Map<String, dynamic>;
-  } catch (_) {
-    m = const {};
-  }
-  final list = m['exits'] is List ? m['exits'] as List : const [];
+Widget _body(BuildContext context, VoidCallback close, Map<String, dynamic> m) {
+  final list = m['exits'] as List? ?? const [];
   final String? message = switch (m['state']) {
     'unsupported' =>
       'The current server does not provide an exit node directory',
@@ -60,10 +58,10 @@ Widget _body(BuildContext context, VoidCallback close, String json) {
     child: ListView(
       shrinkWrap: true,
       children: list.map((e) {
-        final id = e['id'] as String? ?? '';
-        final hostname = e['hostname'] as String? ?? '';
-        final owner = e['owner'] as String? ?? '';
-        final own = e['own'] == true;
+        final id = e['id'] as String;
+        final hostname = e['hostname'] as String;
+        final owner = e['owner'] as String;
+        final own = e['own'] as bool;
         final subtitle = [
           id,
           if (own) translate('Mine') else if (owner.isNotEmpty) owner,
