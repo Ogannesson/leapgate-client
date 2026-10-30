@@ -5,6 +5,7 @@ import '../../icons/lg_icon.dart';
 import '../../l10n/app_localizations.dart';
 import '../../shell/navigation.dart';
 import '../../theme/lg_tokens.dart';
+import '../../widgets/lg_button.dart';
 import '../../widgets/lg_pressable.dart';
 import '../../widgets/lg_status.dart';
 import 'devices_page.dart';
@@ -172,19 +173,22 @@ class _SideColumn extends StatelessWidget {
                   children: [
                     status.id.isEmpty
                         ? _IdGenerating(text: l10n.idGenerating)
-                        // Double-click the ID or "Copy" beside it (01 P1 block A).
-                        : Row(
+                        // Double-click the ID or "Copy" under it (01 P1 block A), the same
+                        // button as the password's.
+                        : Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Expanded(
-                                child: GestureDetector(
-                                  onDoubleTap: () => copyWithToast(status.id),
-                                  child: _IdGroups(status.id),
-                                ),
+                              GestureDetector(
+                                onDoubleTap: () => copyWithToast(status.id),
+                                child: _IdGroups(status.id),
                               ),
-                              CopyButton(
+                              const SizedBox(height: LgSpace.s2),
+                              LgButton(
                                 label: l10n.homeCopy,
                                 semanticLabel: l10n.homeCopyId,
-                                text: status.id,
+                                icon: LgIcons.copy,
+                                kind: LgButtonKind.primary,
+                                onPressed: () => copyWithToast(status.id),
                               ),
                             ],
                           ),

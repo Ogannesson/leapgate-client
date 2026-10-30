@@ -1,6 +1,9 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/connect_box.dart';
 import 'package:flutter_hbb/leapgate/local_status.dart';
@@ -8,14 +11,12 @@ import 'package:flutter_hbb/leapgate/recent_peers.dart';
 import 'package:flutter_hbb/models/peer_model.dart';
 import 'package:window_manager/window_manager.dart';
 
-import '../../icons/lg_icon.dart';
 import '../../l10n/app_localizations.dart';
 import '../../shell/navigation.dart';
 import '../../theme/lg_tokens.dart';
-import '../../widgets/lg_button.dart';
+import '../../widgets/lg_connect_box.dart';
+import '../../widgets/lg_device.dart';
 import '../../widgets/lg_menu.dart';
-import '../../widgets/lg_status.dart';
-import '../../widgets/lg_text_field.dart';
 
 // Examples in the connect box help, from the documentation ranges (01 §7.1 "示例数据").
 const _helpExamples = (
@@ -23,18 +24,27 @@ const _helpExamples = (
   ip: '192.0.2.10',
   domain: 'pc.example.com:21118',
   server: '123456789@leapgate.example.com',
+  relay: '123456789/r',
 );
 
 /// "Connect to ‹input›" as the current row; device IDs are never empty.
 const _connectToRow = '';
 
+LgPlatform _platform(String platform) => switch (platform) {
+  kPeerPlatformWindows => LgPlatform.windows,
+  kPeerPlatformMacOS => LgPlatform.macos,
+  kPeerPlatformLinux => LgPlatform.linux,
+  kPeerPlatformAndroid => LgPlatform.android,
+  _ => LgPlatform.unknown,
+};
+
 /// The devices page (01 P1 blocks E and F): the connect box, and under it "Recent" or, while
 /// there is input, the search results. M2a has only the "Recent" category.
 ///
-/// One current row stands for both the clicked device ("selected") and the row the arrow keys
-/// moved to ("highlighted"); Enter and "Connect" run it. While searching and before the keys
-/// move, it is [ConnectBoxSearch.defaultRow]. The rows are placeholders until the designer's
-/// `LgDeviceRow` and `LgConnectToRow` (M2a integration).
+/// One current row stands for both the clicked device and the row the arrow keys moved to;
+/// Enter and "Connect" run it. It is drawn as `selected` in "Recent" and as `highlighted` in
+/// the search results. While searching and before the keys move, it is
+/// [ConnectBoxSearch.defaultRow].
 class DevicesPage extends StatefulWidget {
   const DevicesPage({
     super.key,
@@ -177,8 +187,8 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
   }
 
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
-    // Keys of the help button inside the box are its own, and so are the keys the input
-    // method is composing with.
+    // Keys of the clear and help buttons inside the box are their own, and so are the keys the
+    // input method is composing with.
     if (!widget.focusNode.hasPrimaryFocus ||
         event is KeyUpEvent ||
         widget.controller.value.composing.isValid) {
@@ -205,7 +215,6 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
 
   @override
   Widget build(BuildContext context) {
-    final t = LgTokens.of(context);
     final l10n = AppLocalizations.of(context)!;
     return ListenableBuilder(
       listenable: Listenable.merge([_recent, widget.status]),
@@ -215,363 +224,237 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _connectBox(l10n),
-            const SizedBox(height: LgSpace.s4),
-            Text(
+            _connectBar(l10n),
+            const SizedBox(height: LgSpace.s6),
+            LgSectionTitle(
               search == null
                   ? l10n.recentCategory
                   : l10n.connectBoxSearchResults,
-              style: t.textM.copyWith(fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: LgSpace.s2),
-            Expanded(child: _list(l10n, search, current)),
+            Expanded(
+              child: search == null
+                  ? _recentList(l10n, current)
+                  : _results(l10n, search, current!),
+            ),
           ],
         );
       },
     );
   }
 
-  Widget _connectBox(AppLocalizations l10n) {
-    final canConnect = _input.isNotEmpty;
-    return Row(
-      children: [
-        Expanded(
-          child: Focus(
-            canRequestFocus: false,
-            skipTraversal: true,
-            onKeyEvent: _onKey,
-            child: LgTextField(
-              controller: widget.controller,
-              focusNode: widget.focusNode,
-              placeholder: l10n.connectBoxPlaceholder,
-              semanticLabel: l10n.connectBoxPlaceholder,
-              trailing: LgMenuAnchor(
-                width: 360,
-                items: [_HelpCard(l10n)],
-                builder: (context, menu) => LgIconButton(
-                  icon: LgIcons.help,
-                  label: l10n.connectBoxHelp,
-                  onPressed: () => menu.isOpen ? menu.close() : menu.open(),
-                ),
-              ),
-            ),
+  Widget _connectBar(AppLocalizations l10n) {
+    return Focus(
+      canRequestFocus: false,
+      skipTraversal: true,
+      onKeyEvent: _onKey,
+      child: LgConnectBar(
+        controller: widget.controller,
+        focusNode: widget.focusNode,
+        placeholder: l10n.connectBoxPlaceholder,
+        connectLabel: l10n.connectBoxConnect,
+        onConnect: _input.isEmpty ? null : _runCurrent,
+        menuLabel: l10n.connectBoxConnectionType,
+        menuItems: [
+          LgMenuItem(
+            label: l10n.connectBoxRemoteDesktop,
+            checked: true,
+            hint: l10n.connectBoxDefault,
+            onPressed: _runCurrent,
           ),
-        ),
-        const SizedBox(width: LgSpace.s2),
-        LgButton(
-          label: l10n.connectBoxConnect,
-          kind: LgButtonKind.primary,
-          onPressed: canConnect ? _runCurrent : null,
-        ),
-        LgMenuAnchor(
-          width: 320,
-          items: [
-            LgMenuItem(
-              label: l10n.connectBoxRemoteDesktop,
-              hint: l10n.connectBoxDefault,
-              onPressed: _runCurrent,
+          LgMenuItem(
+            label: l10n.connectBoxViaRelay,
+            checked: false,
+            description: l10n.connectBoxViaRelayNote,
+            onPressed: () => _runCurrent(relay: true),
+          ),
+        ],
+        clearLabel: l10n.connectBoxClear,
+        helpLabel: l10n.connectBoxHelp,
+        // Upstream `id_input_tip`, rewritten by 01 §7.6, as term and example.
+        help: LgHelpContent(
+          title: l10n.connectBoxHelpTitle,
+          rows: [
+            (l10n.connectBoxHelpId, _helpExamples.id),
+            (l10n.connectBoxHelpIp, _helpExamples.ip),
+            (l10n.connectBoxHelpDomain, _helpExamples.domain),
+            (l10n.connectBoxHelpServer, _helpExamples.server),
+            (
+              l10n.connectBoxHelpOtherServer,
+              l10n.connectBoxHelpOtherServerExample,
             ),
-            _NoteMenuItem(
-              label: l10n.connectBoxViaRelay,
-              note: l10n.connectBoxViaRelayNote,
-              onPressed: () => _runCurrent(relay: true),
-            ),
+            (l10n.connectBoxViaRelay, _helpExamples.relay),
           ],
-          builder: (context, menu) => LgIconButton(
-            icon: LgIcons.chevD,
-            label: l10n.connectBoxConnectionType,
-            onPressed: canConnect
-                ? () => menu.isOpen ? menu.close() : menu.open()
-                : null,
-          ),
         ),
+      ),
+    );
+  }
+
+  Widget _recentList(AppLocalizations l10n, int? current) {
+    // The loading and empty states scroll in a window too short for them.
+    if (!_recent.loaded) {
+      return SingleChildScrollView(
+        child: LgDeviceSkeleton(semanticLabel: l10n.recentLoading),
+      );
+    }
+    final peers = _recent.peers;
+    if (peers.isEmpty) {
+      return SingleChildScrollView(child: LgEmptyState(l10n.recentEmpty));
+    }
+    return _deviceList(
+      l10n,
+      peers,
+      source: null,
+      isCurrent: (i) => (selected: i == current, highlighted: false),
+    );
+  }
+
+  Widget _results(AppLocalizations l10n, ConnectBoxSearch search, int current) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        LgConnectToRow(
+          text: l10n.connectBoxConnectTo(_input),
+          emphasis: _input,
+          highlighted: current == 0,
+          onTap: () => _connect(_input),
+        ),
+        const SizedBox(height: LgSpace.s3),
+        if (search.matches.isEmpty)
+          LgNoResultsNote(l10n.connectBoxNoMatch)
+        else
+          Expanded(
+            child: _deviceList(
+              l10n,
+              search.matches,
+              source: l10n.recentCategory,
+              isCurrent: (i) =>
+                  (selected: false, highlighted: i + 1 == current),
+            ),
+          ),
       ],
     );
   }
 
-  Widget _list(AppLocalizations l10n, ConnectBoxSearch? search, int? current) {
+  /// The rows on their surface, as tall as they need up to the space there is; the list
+  /// scrolls beyond that. Rows only exist on screen, so the rows that ask for online state are
+  /// the visible ones.
+  Widget _deviceList(
+    AppLocalizations l10n,
+    List<Peer> peers, {
+    required String? source,
+    required ({bool selected, bool highlighted}) Function(int i) isCurrent,
+  }) {
     final t = LgTokens.of(context);
-    final note = t.textM.copyWith(color: t.colors.text2);
-    if (search == null && !_recent.loaded) {
-      return Align(
-        alignment: Alignment.topLeft,
-        child: Semantics(
-          label: l10n.recentLoading,
-          child: const LgSpinner(size: 20),
-        ),
-      );
-    }
-    if (search == null && _recent.peers.isEmpty) {
-      return Text(l10n.recentEmpty, style: note);
-    }
-    final peers = search?.matches ?? _recent.peers;
-    final offset = search == null ? 0 : 1;
+    final rowHeight = t.sizes.tableRow;
+    // The surface's own padding (`LgListSurface`) and the column titles.
+    final chrome = LgSpace.s1 + LgSpace.s2 + t.sizes.button;
     // The UI process asks the server itself, service or not; only an unreachable server leaves
-    // the query unanswered.
+    // the query unanswered (`src/client.rs` `query_online_states`): offline then, not
+    // "checking" forever. "Connecting" (the state at start) and a stopped service still ask.
     final serverUnreachable = widget.status.status == ServiceStatus.notReady;
-    return ListView.builder(
-      // Rows only exist on screen, so the rows that ask for online state are the visible ones.
-      scrollCacheExtent: const ScrollCacheExtent.pixels(0),
-      itemCount:
-          peers.length + offset + (search != null && peers.isEmpty ? 1 : 0),
-      itemBuilder: (context, i) {
-        if (search != null && i == 0) {
-          return _ConnectToRow(
-            text: l10n.connectBoxConnectTo(_input),
-            current: current == 0,
-            onTap: () => _connect(_input),
-          );
-        }
-        if (search != null && peers.isEmpty) {
-          return Padding(
-            padding: const EdgeInsets.all(LgSpace.s3),
-            child: Text(l10n.connectBoxNoMatch, style: note),
-          );
-        }
-        final peer = peers[i - offset];
-        return _DeviceRow(
-          key: ValueKey(peer.id),
-          peer: peer,
-          // Rust answers no query while the server is out of reach
-          // (`src/client.rs` `query_online_states`): offline, not "checking" forever.
-          // "Connecting" (the state at start) and a stopped service still ask.
-          status: !serverUnreachable && !_recent.hasOnlineState(peer.id)
-              ? (LgStatus.querying, l10n.recentQuerying)
-              : peer.online
-              ? (LgStatus.online, l10n.recentOnline)
-              : (LgStatus.offline, l10n.recentOffline),
-          source: search == null ? null : l10n.recentCategory,
-          current: current == i,
-          connectLabel: l10n.connectBoxConnect,
-          onlines: _onlines,
-          onTap: () {
-            setState(() => _current = peer.id);
-            // A click outside the box takes the focus away on Windows; Enter runs the row from
-            // the box.
-            widget.focusNode.requestFocus();
-          },
-          onConnect: () => _connect(peer.id),
-        );
-      },
-    );
-  }
-}
-
-/// "Connect to ‹input›", the first search result.
-class _ConnectToRow extends StatelessWidget {
-  const _ConnectToRow({
-    required this.text,
-    required this.current,
-    required this.onTap,
-  });
-
-  final String text;
-  final bool current;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = LgTokens.of(context);
-    return Semantics(
-      container: true,
-      button: true,
-      selected: current,
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          height: 44,
-          padding: const EdgeInsets.symmetric(horizontal: LgSpace.s3),
-          alignment: Alignment.centerLeft,
-          color: current ? t.colors.nav : null,
-          child: Text(text, style: t.text),
+    return LayoutBuilder(
+      builder: (context, box) => Align(
+        alignment: Alignment.topCenter,
+        child: LgListSurface(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              LgDeviceListHeader(
+                status: l10n.recentColumnStatus,
+                name: l10n.recentColumnName,
+                id: l10n.recentColumnId,
+                userHost: l10n.recentColumnUserHost,
+                source: source == null ? null : l10n.recentColumnSource,
+              ),
+              SizedBox(
+                height: math.max(
+                  0,
+                  math.min(peers.length * rowHeight, box.maxHeight - chrome),
+                ),
+                child: ListView.builder(
+                  scrollCacheExtent: const ScrollCacheExtent.pixels(0),
+                  itemExtent: rowHeight,
+                  itemCount: peers.length,
+                  itemBuilder: (context, i) {
+                    final peer = peers[i];
+                    final (
+                      status,
+                      label,
+                    ) = !serverUnreachable && !_recent.hasOnlineState(peer.id)
+                        ? (LgDeviceStatus.querying, l10n.recentQuerying)
+                        : peer.online
+                        ? (LgDeviceStatus.online, l10n.recentOnline)
+                        : (LgDeviceStatus.offline, l10n.recentOffline);
+                    final userHost = peerUserHost(peer);
+                    final current = isCurrent(i);
+                    return _AskedRow(
+                      key: ValueKey(peer.id),
+                      id: peer.id,
+                      onlines: _onlines,
+                      child: LgDeviceRow(
+                        name: peerDisplayName(peer),
+                        id: formatPeerId(peer.id),
+                        platform: _platform(peer.platform),
+                        status: status,
+                        statusLabel: label,
+                        userHost: userHost.isEmpty ? null : userHost,
+                        source: source,
+                        selected: current.selected,
+                        highlighted: current.highlighted,
+                        topDivider: i > 0,
+                        connectLabel: l10n.connectBoxConnect,
+                        onTap: () {
+                          setState(() => _current = peer.id);
+                          // A click outside the box takes the focus away on Windows; Enter
+                          // runs the row from the box.
+                          widget.focusNode.requestFocus();
+                        },
+                        onDoubleTap: () => _connect(peer.id),
+                        onConnect: () => _connect(peer.id),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
-/// One device: name, formatted ID, `user@host`, online state, and "Connect" while hovered.
-/// Asks [onlines] about its device while it exists.
-class _DeviceRow extends StatefulWidget {
-  const _DeviceRow({
+/// Asks [onlines] about its device while the row exists.
+class _AskedRow extends StatefulWidget {
+  const _AskedRow({
     super.key,
-    required this.peer,
-    required this.status,
-    required this.source,
-    required this.current,
-    required this.connectLabel,
+    required this.id,
     required this.onlines,
-    required this.onTap,
-    required this.onConnect,
+    required this.child,
   });
 
-  final Peer peer;
-  final (LgStatus, String) status;
-  final String? source;
-  final bool current;
-  final String connectLabel;
+  final String id;
   final OnlineQuery onlines;
-  final VoidCallback onTap;
-  final VoidCallback onConnect;
+  final Widget child;
 
   @override
-  State<_DeviceRow> createState() => _DeviceRowState();
+  State<_AskedRow> createState() => _AskedRowState();
 }
 
-class _DeviceRowState extends State<_DeviceRow> {
-  bool _hovered = false;
-
+class _AskedRowState extends State<_AskedRow> {
   @override
   void initState() {
     super.initState();
-    widget.onlines.show(widget.peer.id);
+    widget.onlines.show(widget.id);
   }
 
   @override
   void dispose() {
-    widget.onlines.hide(widget.peer.id);
+    widget.onlines.hide(widget.id);
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) {
-    final t = LgTokens.of(context);
-    final c = t.colors;
-    final peer = widget.peer;
-    final userHost = peerUserHost(peer);
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() => _hovered = false),
-      child: Semantics(
-        container: true,
-        selected: widget.current,
-        child: GestureDetector(
-          onTap: widget.onTap,
-          onDoubleTap: widget.onConnect,
-          child: Container(
-            height: 52,
-            padding: const EdgeInsets.symmetric(horizontal: LgSpace.s3),
-            color: widget.current ? c.nav : null,
-            child: Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        peerDisplayName(peer),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: t.text.copyWith(fontWeight: FontWeight.w700),
-                      ),
-                      Text(
-                        [
-                          formatPeerId(peer.id),
-                          userHost,
-                        ].where((s) => s.isNotEmpty).join('  '),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: t.textS.copyWith(color: c.text2),
-                      ),
-                    ],
-                  ),
-                ),
-                if (widget.source != null) ...[
-                  Text(widget.source!, style: t.textS.copyWith(color: c.text2)),
-                  const SizedBox(width: LgSpace.s3),
-                ],
-                DefaultTextStyle(
-                  style: t.textS,
-                  child: LgStatusText(widget.status.$1, widget.status.$2),
-                ),
-                if (_hovered) ...[
-                  const SizedBox(width: LgSpace.s3),
-                  LgButton(
-                    label: widget.connectLabel,
-                    onPressed: widget.onConnect,
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// A menu item with a line of small text under its label ("经中继连接", 01 P1 block E).
-class _NoteMenuItem extends StatelessWidget {
-  const _NoteMenuItem({
-    required this.label,
-    required this.note,
-    required this.onPressed,
-  });
-
-  final String label;
-  final String note;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = LgTokens.of(context);
-    return MenuItemButton(
-      onPressed: onPressed,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: LgSpace.s1),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(label, style: t.text),
-            Text(note, style: t.textS.copyWith(color: t.colors.text2)),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// What the connect box takes (upstream `id_input_tip`, rewritten by 01 §7.6).
-class _HelpCard extends StatelessWidget {
-  const _HelpCard(this.l10n);
-
-  final AppLocalizations l10n;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = LgTokens.of(context);
-    final small = t.textS.copyWith(color: t.colors.text2);
-    Widget line(String what, String example) => Padding(
-      padding: const EdgeInsets.only(top: LgSpace.s1),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(flex: 2, child: Text(what, style: t.textS)),
-          Expanded(flex: 3, child: Text(example, style: small)),
-        ],
-      ),
-    );
-    return Padding(
-      padding: const EdgeInsets.all(LgSpace.s3),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            l10n.connectBoxHelpTitle,
-            style: t.textS.copyWith(fontWeight: FontWeight.w700),
-          ),
-          line(l10n.connectBoxHelpId, _helpExamples.id),
-          line(l10n.connectBoxHelpIp, _helpExamples.ip),
-          line(l10n.connectBoxHelpDomain, _helpExamples.domain),
-          line(l10n.connectBoxHelpServer, _helpExamples.server),
-          const SizedBox(height: LgSpace.s2),
-          Text(l10n.connectBoxHelpKey, style: small),
-          const SizedBox(height: LgSpace.s1),
-          Text(l10n.connectBoxHelpRelay, style: small),
-        ],
-      ),
-    );
-  }
+  Widget build(BuildContext context) => widget.child;
 }

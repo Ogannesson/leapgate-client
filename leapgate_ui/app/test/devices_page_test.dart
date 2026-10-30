@@ -1,5 +1,3 @@
-import 'dart:ui';
-
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -7,7 +5,8 @@ import 'package:flutter_hbb/leapgate/local_status.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:leapgate_ui/shell/navigation.dart';
-import 'package:leapgate_ui/widgets/lg_button.dart';
+import 'package:leapgate_ui/widgets/lg_connect_box.dart';
+import 'package:leapgate_ui/widgets/lg_device.dart';
 
 import 'home_fakes.dart';
 
@@ -44,19 +43,30 @@ Future<void> type(WidgetTester tester, String text) async {
   await tester.pump();
 }
 
-/// Whether the row showing [text] is the current one (highlighted or selected).
-bool isCurrent(WidgetTester tester, String text) =>
-    tester.getSemantics(find.text(text)).flagsCollection.isSelected ==
-    Tristate.isTrue;
-
-/// The "连接" button next to the box (rows show their own "连接" only while hovered).
-bool connectEnabled(WidgetTester tester) =>
-    tester
-        .widget<LgButton>(
-          find.byWidgetPredicate((w) => w is LgButton && w.label == '连接'),
+/// Whether the row showing [text] is the current one: selected in "Recent", highlighted in
+/// the search results. Read from the row, since a highlighted row is not marked selected to
+/// screen readers.
+bool isCurrent(WidgetTester tester, String text) {
+  final row = tester.widget(
+    find
+        .ancestor(
+          of: find.text(text),
+          matching: find.byWidgetPredicate(
+            (w) => w is LgDeviceRow || w is LgConnectToRow,
+          ),
         )
-        .onPressed !=
-    null;
+        .first,
+  );
+  return switch (row) {
+    LgDeviceRow r => r.selected || r.highlighted,
+    LgConnectToRow r => r.highlighted,
+    _ => false,
+  };
+}
+
+/// The "连接" button next to the box.
+bool connectEnabled(WidgetTester tester) =>
+    tester.widget<LgSplitButton>(find.byType(LgSplitButton)).onPressed != null;
 
 void main() {
   setUp(() {
@@ -85,10 +95,8 @@ void main() {
       expect(find.text('书房台式机'), findsOneWidget);
       expect(find.text('LAPTOP-MAMA'), findsOneWidget);
       expect(find.text('456 789 123'), findsNWidgets(2));
-      expect(
-        find.text('123 456 789  zhangsan@DESKTOP-SHUFANG'),
-        findsOneWidget,
-      );
+      expect(find.text('123 456 789'), findsOneWidget);
+      expect(find.text('zhangsan@DESKTOP-SHUFANG'), findsOneWidget);
       expect(
         find.textContaining('正在查询…', findRichText: true),
         findsNWidgets(4),
@@ -278,17 +286,24 @@ void main() {
       (tester) async {
         await pumpDevices(tester);
         await type(tester, '6789');
+        bool onButton(String label) {
+          final focused = FocusManager.instance.primaryFocus!.context!;
+          return find
+              .ancestor(
+                of: find.byElementPredicate((e) => e == focused),
+                matching: find.bySemanticsLabel(label),
+              )
+              .evaluate()
+              .isNotEmpty;
+        }
+
+        // From the box: the clear button, then the help button.
         await tester.sendKeyEvent(LogicalKeyboardKey.tab);
         await tester.pump();
-        final focused = FocusManager.instance.primaryFocus!.context!;
-        expect(
-          find.ancestor(
-            of: find.byElementPredicate((e) => e == focused),
-            matching: find.bySemanticsLabel('帮助'),
-          ),
-          findsOneWidget,
-          reason: 'Tab leaves the box for the help button',
-        );
+        expect(onButton('清除'), isTrue);
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        await tester.pump();
+        expect(onButton('帮助'), isTrue);
         await tester.sendKeyEvent(LogicalKeyboardKey.enter);
         await tester.pump();
         expect(nav.connects, isEmpty);
