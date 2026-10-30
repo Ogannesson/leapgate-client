@@ -814,6 +814,12 @@ fn core_main_invoke_new_connection(mut args: std::env::Args) -> Option<Vec<Strin
     #[cfg(windows)]
     {
         use winapi::um::winuser::WM_USER;
+        // leapgate: the new UI hands links only to its own main window (W1)
+        if let Some(res) =
+            crate::leapgate_hooks::send_to_new_ui_main_window((WM_USER + 2) as _, &uni_links)
+        {
+            return if res { None } else { Some(Vec::new()) };
+        }
         let res = crate::platform::send_message_to_hnwd(
             &crate::platform::FLUTTER_RUNNER_WIN32_WINDOW_CLASS,
             &crate::get_app_name(),

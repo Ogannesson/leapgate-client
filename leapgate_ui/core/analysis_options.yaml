@@ -1,0 +1,7 @@
+# 上游：flutter/analysis_options.yaml@bd9262397（原样复制）
+include: package:lints/recommended.yaml
+
+linter:
+  rules:
+    non_constant_identifier_names: false
+    sort_child_properties_last: false
