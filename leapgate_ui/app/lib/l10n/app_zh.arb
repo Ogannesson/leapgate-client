@@ -163,8 +163,6 @@
   "connectBoxHelpIp": "IP 地址（直连）",
   "connectBoxHelpDomain": "域名:端口",
   "connectBoxHelpServer": "ID@服务器",
-  "connectBoxHelpKey": "连接其他服务器上的设备时，在服务器地址后附加该服务器的密钥：‹ID›@‹服务器›?key=‹密钥›。",
-  "connectBoxHelpRelay": "在 ID 末尾添加“/r”将经中继连接。今后连接此设备将始终经中继。",
   "connectBoxSearchResults": "搜索结果",
   "connectBoxNoMatch": "未找到匹配的设备",
   "recentCategory": "最近",
@@ -172,5 +170,13 @@
   "recentLoading": "正在加载…",
   "recentOnline": "在线",
   "recentOffline": "离线",
-  "recentQuerying": "正在查询…"
+  "recentQuerying": "正在查询…",
+  "connectBoxClear": "清除",
+  "connectBoxHelpOtherServer": "其他服务器上的设备",
+  "connectBoxHelpOtherServerExample": "‹ID›@‹服务器›?key=‹密钥›",
+  "recentColumnStatus": "状态",
+  "recentColumnName": "名称",
+  "recentColumnId": "ID",
+  "recentColumnUserHost": "用户@主机",
+  "recentColumnSource": "来源"
 }

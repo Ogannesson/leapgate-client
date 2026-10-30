@@ -180,8 +180,6 @@
   "connectBoxHelpIp": "IP address (direct)",
   "connectBoxHelpDomain": "Domain:port",
   "connectBoxHelpServer": "ID@server",
-  "connectBoxHelpKey": "For a device on another server, add that server's key after its address: ‹ID›@‹server›?key=‹key›.",
-  "connectBoxHelpRelay": "Add “/r” after the ID to connect via relay. This device will then always be connected via relay.",
   "connectBoxSearchResults": "Search results",
   "connectBoxNoMatch": "No matching devices",
   "recentCategory": "Recent",
@@ -189,5 +187,13 @@
   "recentLoading": "Loading…",
   "recentOnline": "Online",
   "recentOffline": "Offline",
-  "recentQuerying": "Checking…"
+  "recentQuerying": "Checking…",
+  "connectBoxClear": "Clear",
+  "connectBoxHelpOtherServer": "Device on another server",
+  "connectBoxHelpOtherServerExample": "‹ID›@‹server›?key=‹key›",
+  "recentColumnStatus": "Status",
+  "recentColumnName": "Name",
+  "recentColumnId": "ID",
+  "recentColumnUserHost": "User@host",
+  "recentColumnSource": "Source"
 }
