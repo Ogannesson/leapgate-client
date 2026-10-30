@@ -50,3 +50,12 @@ pub fn leapgate_msgbox_reason(
     json["retry"] = retry.into();
     SyncReturn(json.to_string())
 }
+
+/// V1: a hidden session tab takes no frames (still received and decoded). Showing it again, the
+/// UI calls `session_refresh` for a fresh frame.
+pub fn leapgate_session_set_visible(session_id: SessionID, visible: bool) -> SyncReturn<()> {
+    leapgate::session::set_visible(session_id, visible, |id| {
+        crate::flutter::sessions::get_session_by_session_id(id).is_some()
+    });
+    SyncReturn(())
+}

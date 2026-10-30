@@ -869,6 +869,10 @@ impl InvokeUiSession for FlutterHandler {
     #[inline]
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     fn on_rgba(&self, display: usize, rgba: &mut scrap::ImageRgb) {
+        // leapgate: no frames for a session tab the new UI has hidden (V1)
+        if leapgate::session::all_hidden(self.session_handlers.read().unwrap().keys()) {
+            return;
+        }
         let use_texture_render = self.use_texture_render.load(Ordering::Relaxed);
         self.on_rgba_flutter_texture_render(use_texture_render, display, rgba);
         if !use_texture_render {
@@ -885,6 +889,10 @@ impl InvokeUiSession for FlutterHandler {
     #[inline]
     #[cfg(feature = "vram")]
     fn on_texture(&self, display: usize, texture: *mut c_void) {
+        // leapgate: no frames for a session tab the new UI has hidden (V1)
+        if leapgate::session::all_hidden(self.session_handlers.read().unwrap().keys()) {
+            return;
+        }
         if !self.use_texture_render.load(Ordering::Relaxed) {
             return;
         }

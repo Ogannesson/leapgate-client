@@ -13,6 +13,7 @@ pub mod reason;
 pub mod rendezvous;
 pub mod report;
 pub mod route;
+pub mod session;
 pub mod sign;
 pub mod ui;
 pub mod update;
