@@ -461,6 +461,27 @@ Leapgate 自己的文件里和挂钩配套的：`report/heartbeat.rs` 在开关�
 - 合并上游时核对：`core_main_invoke_new_connection` 的 Windows 分支仍按 `send_message_to_hnwd` 加 `WM_USER + 2` 把链接交给已有窗口（`uni_links_desktop` 认这个消息号）；上游有没有新增按 `FLUTTER_RUNNER_WIN32_WINDOW_CLASS` 或窗口标题找窗口的地方（`git grep -n "FLUTTER_RUNNER_WIN32_WINDOW\|FindWindow"`）。
 - 已知限制：新界面还没有安装页（第三轮）。exe 名以 `install.exe` 结尾时，core_main 会注入 `--install`、不起服务，runner 按安装页处理，新界面目前写一行日志后退出。M0 只出名叫 `leapgate.exe` 的便携目录，碰不到；做便携打包（03 §1.7 第 5 步）或安装页时处理。
 
+### 10.x 选项 model
+
+代码在 `leapgate_ui/core/lib/leapgate/options.dart`（03 §3.3 第 7 条、§3.6）。页面读写选项只经它，不直接调 `bind.*`。
+
+- **`OptionsModel`**：全应用一份，由全局 model 持有者持有（通知只在同一个实例里传）。
+  - `config`：Config，`bind.mainGetOptionSync` / `mainSetOption`。安装版由服务进程保管，界面读的是 Rust 经 IPC 刷新的副本，写入经 IPC 交给服务。
+  - `local`：LocalConfig，`bind.mainGetLocalOption` / `mainSetLocalOption`。
+  - `peer(id)`：一台远程设备的选项，`bind.mainGetPeerOptionSync` / `mainSetPeerOption`；同一个 ID 每次拿到同一个对象。这台设备有会话开着时改走会话选项：会话读的是 Rust 自己内存里的副本，看不到这里写的值。
+  - `isFixed(key)`：`bind.mainIsOptionFixed`。Leapgate 里恒为假（02 R2-Q4），设置页照样保留只读样式。
+  - `isInstalled`：`bind.mainIsInstalled`，安装版还是便携版（M2a 关窗时的确认按它分，01 Q6）。
+- 三种作用域是同一个 `OptionScope`：`get` / `set`（字符串，空串表示没设，写空串删除这个键）、`getBool` / `setBool`、`listenable(key)`。
+- **`SessionOptions(sessionId)`**：一个会话的选项，只依赖会话 ID，由会话对象持有。`get` / `set` 是 `bind.sessionGetOption` / `sessionPeerOption`（会话内存里的设备选项，写入时存回设备文件；会话已关时 `get` 返回 null）；`getToggle` / `toggle` 是 `bind.sessionGetToggleOptionSync` / `sessionToggleOption`。开关选项只有 "Y" 和空两种值，不用 `option2bool`（上游 `common.dart:1676-1678`）。
+- **布尔语义**：`option2bool` 照抄上游（`enable-` 开头和其他键空值为真；`allow-` 开头、`stop-service`、`direct-server`、`force-always-relay` 只认 "Y"）。`bool2option` 一律写 'Y' / 'N'：上游在 `isCustomClient` 为真时就是这样，而 Leapgate 的应用名不是 RustDesk，`isCustomClient` 恒为真，所以和旧界面写进配置的值相同。只认 "Y" 但不在上面名单里的键（例如 `leapgate-allow-exit`，空值按 `option2bool` 会算成真）用 `get(key) == 'Y'`，不用 `getBool`。
+- **写入的返回值**：`set`、`setBool`、`toggle` 返回是否保存成功。S9（03 §6.1）到位之前 Rust 不报结果，桥调用返回就算成功、恒为真；桥抛的异常照常往上抛（由 M0 的全局错误处理写进日志），不吞。S9 到位后改成 Rust 给的真值，接口不变。
+- **变更通知**：`listenable(key)` 在经同一个对象写这个键之后触发（值没变也触发），监听方自己重新读。别处改的值不通知：服务进程、服务端策略（心跳策略直接改 Config）、上游界面。需要跟上这类变化的页面在显示时重新读。
+- **接入办法**（每块开工的第一步）：
+  1. 列出这一块页面要用的上游 `bind.*` 选项调用，对照两份说明去掉已经不做的功能。
+  2. 选项键用常量，不在页面里写字面值：上游有的照上游名字和值补进 core 的 `consts.dart`（以后复制进来的 models 直接能用），Leapgate 新加的键放在用它的 core 文件里。
+  3. 普通读写直接用 `config` / `local` / `peer(id)` / `SessionOptions`；有特殊读写规则的（例如上游 `main_set_option` 对 `stop-service` 会去装卸服务、`leapgate-allow-exit` 只认 "Y"）在 core 里包一个具名方法，页面调方法。
+  4. 选项以外的 `bind.*`（例如画质 `sessionGetImageQuality`、Flutter 选项 `sessionGetFlutterOption`）按领域收进对应的 model，不往 `OptionsModel` 里堆；作用域本身不够用时（例如 LocalConfig 的 `ui_flutter`）再加一个 `OptionScope` 子类。
+
 ### 10.5 验收记录
 
 #### M0 工程骨架（2026-10-30，`f426ef520`）
