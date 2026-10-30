@@ -457,7 +457,7 @@ Leapgate 自己的文件里和挂钩配套的：`report/heartbeat.rs` 在开关�
 | L1 | `src/leapgate_ffi.rs` 的 `leapgate_log(level, msg)` | 界面的日志写进日志文件，target `leapgate_ui`；1 error、2 warn、3 info、4 debug、其他 trace。不限流，重复的同一条错误由界面合并后再写 |
 | S12 | `src/leapgate_ffi.rs` 的 `leapgate_version()` | `libs/leapgate` 的版本（`libs/leapgate/src/ui.rs` 的 `VERSION`），界面当产品版本显示；构建时由 `--build-name` 写进 Windows 版本资源 |
 
-- 新界面 runner 的窗口类：主窗口 `LEAPGATE_UI_MAIN`，CM（`--cm`）`LEAPGATE_UI_CM`。两者分开，按主窗口类名找时不会找到 CM。runner 里的这两个字符串和 `libs/leapgate/src/ui.rs` 的常量要一致。
+- 新界面 runner 的窗口类：主窗口 `LEAPGATE_UI_MAIN`，CM（`--cm`）`LEAPGATE_UI_CM`，安装页（`--install`）`LEAPGATE_UI_INSTALL`。三者分开，按主窗口类名找时不会找到另外两个。主窗口的类名（`leapgate_ui/app/windows/runner/main.cpp` 的 `kMainWindowClass`）和 `libs/leapgate/src/ui.rs` 的 `MAIN_WINDOW_CLASS` 要一致；另外两个 Rust 不找，只在 runner 里。
 - 合并上游时核对：`core_main_invoke_new_connection` 的 Windows 分支仍按 `send_message_to_hnwd` 加 `WM_USER + 2` 把链接交给已有窗口（`uni_links_desktop` 认这个消息号）；上游有没有新增按 `FLUTTER_RUNNER_WIN32_WINDOW_CLASS` 或窗口标题找窗口的地方（`git grep -n "FLUTTER_RUNNER_WIN32_WINDOW\|FindWindow"`）。
 
 ### 10.5 验收记录
