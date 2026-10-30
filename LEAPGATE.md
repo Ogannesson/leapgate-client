@@ -430,6 +430,7 @@ Leapgate 自己的文件里和挂钩配套的：`report/heartbeat.rs` 在开关�
 
 - **上游 `flutter/` 一行不改**（architecture §3.3）。评审规则：新界面的分支合入 main 之前，`git diff main -- flutter/` 必须为空（切换之后那次还原除外，03 §7.3）。构建会打补丁、改写 `flutter/` 下被跟踪的文件，所以在构建过的 worktree 里只 `git add <具体路径>`，不用 `git add -A`、`git commit -a`。编旧界面还会在 `flutter/` 下留下块 2 的三个未跟踪文件（`flutter/lib/generated_bridge_leapgate.dart`、`flutter/macos/Runner/bridge_generated_leapgate.h`、`flutter/ios/Runner/bridge_generated_leapgate.h`），构建 worktree 把它们加进 `.git/info/exclude`（不改上游的 `.gitignore`）。
 - **复制件头上写来源**：从上游复制的每个文件第一行写来源，例如 `// 上游：flutter/lib/models/input_model.dart@bd9262397（只删界面调用，不格式化）`。分三档：原样复制、只删界面调用、改写（03 §3.2）。合并上游 tag 之后，总仓库的 `scripts/windows/sync-ui-upstream.ps1`（还没写，最晚在有复制件以后的第一次合并上游之前写好）对前两档做三方合并（base = 头上记的提交里的上游原件，ours = 副本，theirs = 新 tag 的上游原件，`git merge-file`），冲突留给人，成功后改头上的提交号；改写档列出 `git log <旧>..<新> -- <上游文件>` 逐个人工判断。来源只记在文件头上，不另建对照表。来源行通常是第一行；有格式要求的文件放在允许的第一个位置（`Runner.rc` 在 `#pragma code_page(65001)` 之后，`runner.exe.manifest` 在 XML 声明之后），同步脚本按内容（`上游：` 开头的注释）找来源行，不按行号。
+- **一个上游文件混了两档时**（`models/model.dart`：`ImageModel`、`CanvasModel`、`CursorModel`、`QualityMonitorModel`、`RecordingModel`、`PeerInfo` 等属于只删界面调用，`FfiModel`、`FFI` 属于改写）：整份复制到 `core/lib/models/model.dart`，保留的类按只删界面调用处理，改写的两个类整段删掉（`FFI` 前面的 `ConnType` 跟着 `FFI` 走），改写版放进 `lib/leapgate/` 下的新文件，沿用原类名和复制件用到的成员名。来源行写"只删界面调用；`FfiModel`、`FFI` 改写到 `lib/leapgate/<文件名>`"（`FFI` 在 `lib/leapgate/session.dart`）。同步脚本照常对它做三方合并；上游改了那两个类，会以冲突的形式冒出来，由人工移植到改写文件。
 - **复制件和上游原件的差异保持最小**：`core` 原样使用上游的 `flutter/analysis_options.yaml`；"原样复制""只删界面调用"两档不跑 `dart format`、`dart fix`，不顺手修 lint；`flutter analyze` 的"新告警"以上游原件为基准算。评审时看 `git diff --no-index <上游原件> <副本>`，"只删界面调用"那一档的差异应该只有界面调用和导入。
 - **废弃 API**（03 §8.8）：新写的代码和"改写"档的文件不用最新 stable 已标记废弃的 API，最新 stable 检查报出的这类提示当场处理。"原样复制""只删界面调用"两档按上一条不改：上游原件在同一版 SDK 下也报的提示在验收记录里单列，等上游改了随三方合并带过来，到升 Flutter（M10）还没改的在升级时处理；某个 API 在最新 stable 里已经删掉、复制件编不过时，照最小差异改，并在文件头的来源行后注明。
 - 新的 FFI 函数只放 `src/leapgate_ffi.rs`（frb 的第二个块），逻辑在 `libs/leapgate`，按领域分段追加；Leapgate 自己的事件用块 2 的 `StreamSink`，不往上游的 `InvokeUiSession` 加方法。上游文件里的挂钩照 §1 的纪律写。
@@ -490,3 +491,32 @@ Leapgate 自己的文件里和挂钩配套的：`report/heartbeat.rs` 在开关�
 - **新旧界面同时运行时 IPC 互相拒绝**：上游 2026-05 起，主 IPC 管道（`\\.\pipe\Leapgate\query`）只接受和本进程同一路径的 exe（`src/ipc/auth.rs` 的 `authorize_windows_main_ipc_connection`）。新旧界面的 exe 在不同目录，先启动的占住管道，后启动的连上去被拒、不停重试：日志每秒约 3 行，后启动的界面显示"未就绪"、一次性密码一直"正在生成"。两个界面都是便携版时就会这样；装着的旧界面（服务进程在安装目录）加新界面便携版，按读码应当一样。03 §7.1 的"共用配置、ID、IPC 管道"因此不成立。维护者 2026-10-30 定：新界面便携版只在旧界面不运行时用（装着的旧界面连托盘和服务一起停掉），不放宽上游校验、不分开命名，03 §7.1 已改。
 - 新界面首次启动时不处理自己命令行里的链接（只开旧界面时跑新界面的 `--connect`，新界面起来了，但没有接这个链接）；`--connect` 交给已有主窗口后窗口不到前台。都随 M2a 的连接入口做。
 - 每启动一次辅助进程（第二个实例、`--connect`），日志文件 `leapgate_rCURRENT.log` 都会被改名换新，常驻进程接着写改名后的文件（上游行为），读日志要扫全部文件。
+
+### 10.6 core 的结构（M1）
+
+03 §3.3 第 1、2、4、5、6、8 条在 `core/lib/leapgate/` 落成下面几个文件，复制进来的 models 和改写的 `FfiModel` 接在这上面。
+
+| 文件 | 放了什么 | 怎么接 |
+|---|---|---|
+| `session.dart` | 会话对象 `FFI`（改写档，沿用上游类名和 `sessionId`、`id`、`connType`、`closed` 这几个成员名）和 `ConnType`（从 `model.dart` 挪来，`.index` 传给 Rust，顺序不能动）；`events`、`notices`、按会话记的状态、`connToken`、`ask`、`start`、`close` | 每个会话自己的 model 字段（`imageModel`、`ffiModel`、`canvasModel` 等）照上游写成 `late final`，在构造函数里用 `WeakReference(this)` 建；`start` 里各 model 的初始化、`close` 里的清理（放在 `bind.sessionClose` 之前）、`_onMessage` 里 `Rgba`、`Cursor`、`Texture` 三种消息，照上游 `FFI.start`、`FFI.close` 补进去 |
+| `session_registry.dart` | 会话注册表：一台设备一个标签，标签里每个视图一个会话；`open`、`close`、`closeDevice`；同一设备再开别的视图时用标签里已有会话的连接令牌；`singleSession` 时（手机，01 §8 Q8）开新会话前关掉已开的 | 只有它创建、启动、关闭 `FFI`；页面不再自己 `FFI(...)`、`start`、`close` |
+| `app_core.dart` | 全局持有者 `AppCore`（窗口接口、注册表、全局轻提示、提问接口），全局变量 `appCore` 由 app 的 `main` 设 | 上游 `FFI` 里标着 global 的 model（`serverModel`、`abModel`、`groupModel`、`userModel`、`peerTabModel`、三个 `Peers`、CM 的 `cmFileModel`）不进会话对象，到各自的里程碑（M3、M4）加到这里 |
+| `session_events.dart` | 会话事件按 `name` 查表分发；没人处理的名字经 L1 写一行警告（只写名字，事件里可能有密码和路径），每个名字一次运行只写一次 | `ffi.events.on('<name>', handler)`。复制进来的 model 的事件在 `FFI` 构造函数里登记，`FfiModel` 的在它自己的构造函数里登记；同一个名字只能登记一次 |
+| `notices.dart` | 会话通知 `SessionNotices`（列表，后来的不冲掉前面的；同 `tag` 的原地替换，`dismissTag` 按 tag 去掉）和全局轻提示 `Toasts`（一次一条，新的替换旧的，到时自动消失） | 通知和轻提示都只带 key 和参数，文案在 app。key 用上游的翻译 key（`translate(...)` 的参数、Rust 推来的文本）。`showToast(translate(k))` 改成 `appCore.toasts.show(k)`；上游弹窗前的 `dialogManager.dismissAll()` 不再照搬；Rust 的 `cancel_msgbox` 对应 `dismissTag(evt['tag'])` |
+| `prompts.dart` | 提问接口 `Prompter.ask(prompt, session:)`：带会话时只遮那个会话的标签，不带时只遮主页；关掉不答返回 null。三种提问：`OverwritePrompt`（覆盖 / 跳过 / 取消 + 全部照此）、`DeletePrompt`（删除 / 取消 + 全部照此）、`RenamePrompt`（提交时用 `check` 校验，返回新名字） | 会话里用 `ffi.ask(...)`。`file_model` 里 `showFileConfirmDialog`、`showRemoveDialog` 保留函数名和返回值，函数体改成调 `ask` 再换回上游的 `bool?` 和"全部照此"勾选；`renameAction` 改成 `RenamePrompt`，重名和非法名放进 `check`。`removeAction` 里的 `showLoading` 没有对应接口，出错的 `msgBox` 改成会话通知 |
+| `app_window.dart` | 窗口接口 `AppWindow`：`getFrame`（物理像素）、`setFullscreen`、`bringToFront`；app 的 `lib/shell/app_window.dart` 用 `window_manager` 实现 | 见下面的对照 |
+
+按设备 ID 记的共享状态（上游 `common/shared_state.dart` 按 tag `Get.put`）改成会话对象上的字段，复制件里 `XxxState.find(id).value` 改成 `parent.target!.xxx.value`（或 `ffi.xxx.value`），算在允许的差异里：`KeyboardEnabledState` → `keyboardEnabled`，`CurrentDisplayState` → `currentDisplay`，`PrivacyModeState` → `privacyMode`，`BlockInputState` → `blockInput`，`FingerprintState` → `fingerprint`，`ShowRemoteCursorState` → `showRemoteCursor`（`CursorModel.showsRemoteCursor` 的 `Get.isRegistered` 那段一起换），`RemoteCursorMovedState` → `remoteCursorMoved`。`models/desktop_render_texture.dart:158` 也读 `CurrentDisplayState`，这一行照样改，来源行后注明。其余几个不在这里：`ConnectionTypeState` 归连接状态（每个会话一份，`FfiModel` 改写时定）；`PeerStringOption`（`model.dart:780` 的 `tabLabel`）是设备选项，归会话选项；`UnreadChatCountState` 随 `chat_model` 改写；`stateGlobal.relativeMouseModeState` 按设备 ID 记，但一台设备只有一个远程桌面视图，先不动，随 `state_model` 改写再定。
+
+上游 models 里碰窗口的地方怎么改：
+
+| 上游 | 改成 |
+|---|---|
+| `WindowController.fromWindowId(kWindowId!).getFrame()`（`input_model.dart:1954`、`relative_mouse_model.dart:779`） | `appCore.window.getFrame()` |
+| `WindowController.fromWindowId(windowId).setFullscreen(...)`（`state_model.dart:109`） | `appCore.window.setFullscreen(...)` |
+| `windowOnTop(null)`（`model.dart:760`、`chat_model.dart:415`、`:434`、`server_model.dart:579`、`:760`） | `appCore.window.bringToFront()` |
+| `rustDeskWinManager.getOtherRemoteWindowCoordsFromMain()`（`input_model.dart:1953`） | 单 engine 下没有别的会话窗口，空列表 |
+| `rustDeskWinManager.call(WindowType.Main, kWindowBumpMouse, …)`（`model.dart:2673`） | 本来就在主窗口里，直接调 `RdPlatformChannel.instance.bumpMouse` |
+| 按 `desktopType`、`kWindowId` 分支 | 按主窗口处理 |
+
+接口里没有的：`windowManager.minimize`、`close`（`server_model.dart:169`、`:584`，CM 是单独的进程，M3 再定）；`model.dart:755-756` 的关闭全部窗口（URL 动作，只来自 macOS 和 Linux）；窗口标题（跟着当前标签，在 app 的外壳里设）；`chat_model.dart:319-332` 的聊天窗口大小（`chat_model` 只留消息存储）。
