@@ -5,6 +5,7 @@ import '../../icons/lg_icon.dart';
 import '../../l10n/app_localizations.dart';
 import '../../shell/navigation.dart';
 import '../../theme/lg_tokens.dart';
+import '../../widgets/lg_button.dart';
 import '../../widgets/lg_pressable.dart';
 import '../../widgets/lg_status.dart';
 import 'devices_page.dart';
@@ -114,6 +115,7 @@ class _HomePageState extends State<HomePage> {
                     child: DevicesPage(
                       controller: _connectBox,
                       focusNode: _connectBoxFocus,
+                      status: widget.status,
                     ),
                   ),
                 ],
@@ -171,7 +173,22 @@ class _SideColumn extends StatelessWidget {
                   children: [
                     status.id.isEmpty
                         ? _IdGenerating(text: l10n.idGenerating)
-                        : _IdGroups(status.id),
+                        // Double-click the ID or "Copy" beside it (01 P1 block A).
+                        : Row(
+                            children: [
+                              Expanded(
+                                child: GestureDetector(
+                                  onDoubleTap: () => copyWithToast(status.id),
+                                  child: _IdGroups(status.id),
+                                ),
+                              ),
+                              LgButton(
+                                label: l10n.homeCopy,
+                                kind: LgButtonKind.text,
+                                onPressed: () => copyWithToast(status.id),
+                              ),
+                            ],
+                          ),
                     SizedBox(height: short ? LgSpace.s2 : LgSpace.s3),
                     PasswordRowView(status: status),
                     SizedBox(height: short ? LgSpace.s2 : LgSpace.s5),

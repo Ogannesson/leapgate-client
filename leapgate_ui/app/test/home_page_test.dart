@@ -2,8 +2,34 @@ import 'package:flutter/services.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/local_status.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:leapgate_ui/pages/home/password_row.dart';
 
 import 'home_fakes.dart';
+
+/// The password row's "Copy"; the ID has one of its own.
+final _passwordCopy = find.descendant(
+  of: find.byType(PasswordRowView),
+  matching: find.text('复制'),
+);
+
+/// Keeps what the page puts on the clipboard.
+class _Clipboard {
+  String? text;
+}
+
+_Clipboard _mockClipboard(WidgetTester tester) {
+  final clipboard = _Clipboard();
+  tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+    SystemChannels.platform,
+    (call) async {
+      if (call.method == 'Clipboard.setData') {
+        clipboard.text = (call.arguments as Map)['text'] as String;
+      }
+      return null;
+    },
+  );
+  return clipboard;
+}
 
 void main() {
   setUp(installHomeFakes);
@@ -67,7 +93,7 @@ void main() {
       await tester.pump();
       expect(find.text('一次性密码'), findsOneWidget);
       expect(find.text('a1b2c3'), findsOneWidget);
-      expect(find.text('复制'), findsOneWidget);
+      expect(_passwordCopy,findsOneWidget);
       expect(find.text('也可使用固定密码'), findsNothing);
       await unmount(tester);
     });
@@ -78,7 +104,7 @@ void main() {
       expect(find.text('一次性密码'), findsOneWidget);
       expect(find.text('a1b2c3'), findsOneWidget);
       expect(find.text('也可使用固定密码'), findsOneWidget);
-      expect(find.text('复制'), findsOneWidget);
+      expect(_passwordCopy,findsOneWidget);
       await unmount(tester);
     });
 
@@ -90,7 +116,7 @@ void main() {
       expect(find.text('固定密码'), findsOneWidget);
       expect(find.text('已设置'), findsOneWidget);
       expect(find.text('a1b2c3'), findsNothing);
-      expect(find.text('复制'), findsNothing);
+      expect(_passwordCopy,findsNothing);
       await unmount(tester);
     });
 
@@ -99,7 +125,7 @@ void main() {
       await tester.pump();
       expect(find.text('审批方式'), findsOneWidget);
       expect(find.text('需在本机接受连接请求'), findsOneWidget);
-      expect(find.text('复制'), findsNothing);
+      expect(_passwordCopy,findsNothing);
       await unmount(tester);
     });
 
@@ -109,32 +135,60 @@ void main() {
       expect(find.text('一次性密码'), findsOneWidget);
       expect(find.text('不可用'), findsOneWidget);
       expect(find.text('a1b2c3'), findsNothing);
-      expect(find.text('复制'), findsNothing);
+      expect(_passwordCopy,findsNothing);
       await unmount(tester);
     });
 
     testWidgets('"Copy" puts the password on the clipboard and says so', (
       tester,
     ) async {
-      String? copied;
-      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-        SystemChannels.platform,
-        (call) async {
-          if (call.method == 'Clipboard.setData') {
-            copied = (call.arguments as Map)['text'] as String;
-          }
-          return null;
-        },
-      );
+      final clipboard = _mockClipboard(tester);
       await pumpRow(tester, method: kUseTemporaryPassword);
       await tester.pump();
-      await tester.tap(find.text('复制'));
+      await tester.tap(_passwordCopy);
       await tester.pump();
-      expect(copied, 'a1b2c3');
+      expect(clipboard.text, 'a1b2c3');
       expect(appCore.toasts.current?.key, 'Copied');
       await unmount(tester);
       // The toast's own timer.
       await tester.pump(const Duration(seconds: 3));
+    });
+  });
+
+  group('copying the ID (01 P1 block A)', () {
+    testWidgets('"Copy" beside it', (tester) async {
+      final clipboard = _mockClipboard(tester);
+      await pumpHome(tester, id: '135792468');
+      final idCopy = find.text('复制').first;
+      expect(
+        find.descendant(of: find.byType(PasswordRowView), matching: idCopy),
+        findsNothing,
+      );
+      await tester.tap(idCopy);
+      await tester.pump();
+      expect(clipboard.text, '135792468');
+      expect(appCore.toasts.current?.key, 'Copied');
+      await unmount(tester);
+      await tester.pump(const Duration(seconds: 3));
+    });
+
+    testWidgets('a double click on it', (tester) async {
+      final clipboard = _mockClipboard(tester);
+      await pumpHome(tester, id: '135792468');
+      await tester.tap(find.text('792'));
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tap(find.text('792'));
+      await tester.pump();
+      expect(clipboard.text, '135792468');
+      expect(appCore.toasts.current?.key, 'Copied');
+      await unmount(tester);
+      await tester.pump(const Duration(seconds: 3));
+    });
+
+    testWidgets('nothing to copy while it is generated', (tester) async {
+      await pumpHome(tester);
+      expect(find.text('复制'), findsNothing);
+      await unmount(tester);
     });
   });
 

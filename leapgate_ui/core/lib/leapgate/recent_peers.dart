@@ -60,6 +60,11 @@ String peerDisplayName(Peer peer) => peer.alias.isNotEmpty
         ? peer.hostname
         : formatPeerId(peer.id);
 
+/// `user@host` as a device row shows it; empty when both are unknown.
+String peerUserHost(Peer peer) => peer.username.isEmpty && peer.hostname.isEmpty
+    ? ''
+    : '${peer.username}@${peer.hostname}';
+
 /// A numeric ID in groups of three from the right, keeping a `/r` suffix; anything else as it
 /// is (upstream `common/formatter/id_formatter.dart` `formatID`).
 String formatPeerId(String id) {

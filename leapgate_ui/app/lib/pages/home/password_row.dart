@@ -55,7 +55,7 @@ class PasswordRowView extends StatelessWidget {
               LgButton(
                 label: l10n.homeCopy,
                 kind: LgButtonKind.text,
-                onPressed: () => _copy(password),
+                onPressed: () => copyWithToast(password),
               ),
           ],
         ),
@@ -68,9 +68,11 @@ class PasswordRowView extends StatelessWidget {
     );
   }
 
-  Future<void> _copy(String password) async {
-    await Clipboard.setData(ClipboardData(text: password));
-    // Upstream's translation key; the app's toast host shows "已复制".
-    appCore.toasts.show('Copied');
-  }
+}
+
+/// "Copy" of this device's ID and password (01 P1 block A).
+Future<void> copyWithToast(String text) async {
+  await Clipboard.setData(ClipboardData(text: text));
+  // Upstream's translation key; the app's toast host shows "已复制".
+  appCore.toasts.show('Copied');
 }

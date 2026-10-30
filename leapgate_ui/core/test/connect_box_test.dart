@@ -108,6 +108,19 @@ void main() {
       expect(s.defaultRow, 0);
     });
 
+    test('a whole user@host copied from a row: that device, not ID@server',
+        () {
+      final peers = [
+        peer('123456789', username: 'zhangsan', hostname: 'DESKTOP-SHUFANG'),
+        peer('234567891', username: 'zhangsan', hostname: 'OFFICE-PC01'),
+      ];
+      final s = ConnectBoxSearch('zhangsan@OFFICE-PC01', peers);
+      expect(s.matches.map((p) => p.id), ['234567891']);
+      expect(s.defaultRow, 1);
+      // Only part of it is an ordinary search.
+      expect(ConnectBoxSearch('zhangsan@', peers).matches, hasLength(2));
+    });
+
     test('an ID with /r is not the exact device but an address', () {
       final s = ConnectBoxSearch('123456789/r', peers);
       expect(s.defaultRow, 0);

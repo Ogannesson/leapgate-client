@@ -3,6 +3,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/connect_box.dart';
+import 'package:flutter_hbb/leapgate/local_status.dart';
 import 'package:flutter_hbb/leapgate/recent_peers.dart';
 import 'package:flutter_hbb/models/peer_model.dart';
 import 'package:window_manager/window_manager.dart';
@@ -24,6 +25,9 @@ const _helpExamples = (
   server: '123456789@leapgate.example.com',
 );
 
+/// "Connect to ‹input›" as the current row; device IDs are never empty.
+const _connectToRow = '';
+
 /// The devices page (01 P1 blocks E and F): the connect box, and under it "Recent" or, while
 /// there is input, the search results. M2a has only the "Recent" category.
 ///
@@ -36,11 +40,15 @@ class DevicesPage extends StatefulWidget {
     super.key,
     required this.controller,
     required this.focusNode,
+    required this.status,
   });
 
   /// Owned by the home page, which puts text and the cursor into the box on request.
   final TextEditingController controller;
   final FocusNode focusNode;
+
+  /// Whether this device reaches the server, which answers the online queries.
+  final LocalStatusModel status;
 
   @override
   State<DevicesPage> createState() => _DevicesPageState();
@@ -51,8 +59,10 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
   late final _onlines = OnlineQuery(_recent.queryOnlines);
   String _text = '';
 
-  /// Set by a click or the arrow keys; null follows the default.
-  int? _current;
+  /// The current row's device ID, or [_connectToRow]; set by a click or the arrow keys, null
+  /// follows the default. Kept by ID: Rust pushes the list again whenever a session in another
+  /// tab reconnects, and Enter must still run the device the user moved to.
+  String? _current;
   bool _windowFocused = true;
   bool _onScreen = true;
   DateTime _restoredAt = DateTime(0);
@@ -123,15 +133,15 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
   ConnectBoxSearch? get _search =>
       _input.isEmpty ? null : ConnectBoxSearch(_input, _recent.peers);
 
-  int _rowCount(ConnectBoxSearch? search) =>
-      search?.rowCount ?? (_recent.loaded ? _recent.peers.length : 0);
+  /// The rows in order: [_connectToRow] first while searching, then device IDs.
+  List<String> _rowIds(ConnectBoxSearch? search) => search == null
+      ? [if (_recent.loaded) for (final p in _recent.peers) p.id]
+      : [_connectToRow, for (final p in search.matches) p.id];
 
-  /// A row set before the list got shorter (Rust pushed it again) falls back to the default.
+  /// Where the current row is now; the default once its device is no longer listed.
   int? _currentRow(ConnectBoxSearch? search) {
-    final current = _current;
-    return current != null && current < _rowCount(search)
-        ? current
-        : search?.defaultRow;
+    final at = _current == null ? -1 : _rowIds(search).indexOf(_current!);
+    return at >= 0 ? at : search?.defaultRow;
   }
 
   void _connect(String id, {bool relay = false}) =>
@@ -153,16 +163,22 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
 
   void _move(int by) {
     final search = _search;
-    final n = _rowCount(search);
-    if (n == 0) return;
+    final ids = _rowIds(search);
+    if (ids.isEmpty) return;
     final row = _currentRow(search);
     if (row == null && by < 0) return;
-    setState(() => _current = row == null ? 0 : (row + by).clamp(0, n - 1));
+    setState(
+      () => _current =
+          ids[row == null ? 0 : (row + by).clamp(0, ids.length - 1)],
+    );
   }
 
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
-    // Keys the input method is composing with are its own.
-    if (event is KeyUpEvent || widget.controller.value.composing.isValid) {
+    // Keys of the help button inside the box are its own, and so are the keys the input
+    // method is composing with.
+    if (!widget.focusNode.hasPrimaryFocus ||
+        event is KeyUpEvent ||
+        widget.controller.value.composing.isValid) {
       return KeyEventResult.ignored;
     }
     switch (event.logicalKey) {
@@ -189,7 +205,7 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
     final t = LgTokens.of(context);
     final l10n = AppLocalizations.of(context)!;
     return ListenableBuilder(
-      listenable: _recent,
+      listenable: Listenable.merge([_recent, widget.status]),
       builder: (context, _) {
         final search = _search;
         final current = _currentRow(search);
@@ -287,6 +303,7 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
     }
     final peers = search?.matches ?? _recent.peers;
     final offset = search == null ? 0 : 1;
+    final serverReady = widget.status.status == ServiceStatus.ready;
     return ListView.builder(
       // Rows only exist on screen, so the rows that ask for online state are the visible ones.
       scrollCacheExtent: const ScrollCacheExtent.pixels(0),
@@ -305,21 +322,27 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
             child: Text(l10n.connectBoxNoMatch, style: note),
           );
         }
-        final row = i;
         final peer = peers[i - offset];
         return _DeviceRow(
           key: ValueKey(peer.id),
           peer: peer,
-          status: !_recent.hasOnlineState(peer.id)
+          // Rust answers no query while the server is out of reach
+          // (`src/client.rs` `query_online_states`): offline, not "checking" forever.
+          status: serverReady && !_recent.hasOnlineState(peer.id)
               ? (LgStatus.querying, l10n.recentQuerying)
               : peer.online
               ? (LgStatus.online, l10n.recentOnline)
               : (LgStatus.offline, l10n.recentOffline),
           source: search == null ? null : l10n.recentCategory,
-          current: current == row,
+          current: current == i,
           connectLabel: l10n.connectBoxConnect,
           onlines: _onlines,
-          onTap: () => setState(() => _current = row),
+          onTap: () {
+            setState(() => _current = peer.id);
+            // A click outside the box takes the focus away on Windows; Enter runs the row from
+            // the box.
+            widget.focusNode.requestFocus();
+          },
           onConnect: () => _connect(peer.id),
         );
       },
@@ -408,9 +431,7 @@ class _DeviceRowState extends State<_DeviceRow> {
     final t = LgTokens.of(context);
     final c = t.colors;
     final peer = widget.peer;
-    final userHost = peer.username.isEmpty && peer.hostname.isEmpty
-        ? ''
-        : '${peer.username}@${peer.hostname}';
+    final userHost = peerUserHost(peer);
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),

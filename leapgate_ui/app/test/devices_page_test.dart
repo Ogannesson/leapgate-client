@@ -3,6 +3,7 @@ import 'dart:ui';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_hbb/leapgate/local_status.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:leapgate_ui/shell/navigation.dart';
@@ -23,11 +24,17 @@ const _recent = [
   {'id': '456789123'},
 ];
 
+// Focus and clicks behave as on the desktop the app ships for.
+final _windows = TargetPlatformVariant.only(TargetPlatform.windows);
+
 late FakeBind bind;
 late FakeNavigation nav;
 
-Future<void> pumpDevices(WidgetTester tester) async {
-  await pumpHome(tester, id: '135792468');
+Future<void> pumpDevices(
+  WidgetTester tester, {
+  ServiceStatus status = ServiceStatus.ready,
+}) async {
+  await pumpHome(tester, id: '135792468', status: status);
   await loadRecent(_recent);
   await tester.pump();
 }
@@ -41,6 +48,15 @@ Future<void> type(WidgetTester tester, String text) async {
 bool isCurrent(WidgetTester tester, String text) =>
     tester.getSemantics(find.text(text)).flagsCollection.isSelected ==
     Tristate.isTrue;
+
+/// The "连接" button next to the box (rows show their own "连接" only while hovered).
+bool connectEnabled(WidgetTester tester) =>
+    tester
+        .widget<LgButton>(
+          find.byWidgetPredicate((w) => w is LgButton && w.label == '连接'),
+        )
+        .onPressed !=
+    null;
 
 void main() {
   setUp(() {
@@ -60,7 +76,7 @@ void main() {
       expect(find.bySemanticsLabel('正在加载…'), findsNothing);
       expect(find.text('暂无最近连接的设备'), findsOneWidget);
       await unmount(tester);
-    });
+    }, variant: _windows);
 
     testWidgets('names, IDs and online state', (tester) async {
       await pumpDevices(tester);
@@ -69,8 +85,14 @@ void main() {
       expect(find.text('书房台式机'), findsOneWidget);
       expect(find.text('LAPTOP-MAMA'), findsOneWidget);
       expect(find.text('456 789 123'), findsNWidgets(2));
-      expect(find.text('123 456 789  zhangsan@DESKTOP-SHUFANG'), findsOneWidget);
-      expect(find.textContaining('正在查询…', findRichText: true), findsNWidgets(4));
+      expect(
+        find.text('123 456 789  zhangsan@DESKTOP-SHUFANG'),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining('正在查询…', findRichText: true),
+        findsNWidgets(4),
+      );
 
       // The rows on screen are asked about once they stood for a second.
       await tester.pump(const Duration(milliseconds: 1500));
@@ -85,7 +107,19 @@ void main() {
       expect(find.textContaining('在线', findRichText: true), findsNWidgets(2));
       expect(find.textContaining('离线', findRichText: true), findsNWidgets(2));
       await unmount(tester);
-    });
+    }, variant: _windows);
+
+    testWidgets('without the server nothing answers: offline, not checking', (
+      tester,
+    ) async {
+      await pumpDevices(tester, status: ServiceStatus.notReady);
+      expect(
+        find.textContaining('正在查询…', findRichText: true),
+        findsNothing,
+      );
+      expect(find.textContaining('离线', findRichText: true), findsNWidgets(4));
+      await unmount(tester);
+    }, variant: _windows);
 
     testWidgets('a click selects, a double click connects', (tester) async {
       final semantics = tester.ensureSemantics();
@@ -102,7 +136,18 @@ void main() {
       expect(nav.connects, [(id: '123456789', forceRelay: false)]);
       await unmount(tester);
       semantics.dispose();
-    });
+    }, variant: _windows);
+
+    testWidgets('Enter after a click connects the clicked device', (
+      tester,
+    ) async {
+      await pumpDevices(tester);
+      await tester.tap(find.text('LAPTOP-MAMA'));
+      await tester.pump(kDoubleTapTimeout);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      expect(nav.connects, [(id: '234567891', forceRelay: false)]);
+      await unmount(tester);
+    }, variant: _windows);
 
     testWidgets('arrow keys from the empty box, then Enter, connect a row', (
       tester,
@@ -116,19 +161,40 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.enter);
       expect(nav.connects, [(id: '234567891', forceRelay: false)]);
       await unmount(tester);
-    });
+    }, variant: _windows);
+
+    testWidgets('the current device stays when Rust pushes the list again', (
+      tester,
+    ) async {
+      final semantics = tester.ensureSemantics();
+      await pumpDevices(tester);
+      await tester.tap(find.byType(EditableText));
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pump();
+      expect(isCurrent(tester, 'LAPTOP-MAMA'), isTrue);
+
+      // A session in another tab reconnected: its device moved to the top.
+      await loadRecent([_recent[3], _recent[0], _recent[1], _recent[2]]);
+      await tester.pump();
+      expect(isCurrent(tester, 'LAPTOP-MAMA'), isTrue);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      expect(nav.connects, [(id: '234567891', forceRelay: false)]);
+      await unmount(tester);
+      semantics.dispose();
+    }, variant: _windows);
   });
 
   group('connect box (01 P1 block E, Q2)', () {
     testWidgets('"Connect" is disabled while the box is empty', (tester) async {
       await pumpDevices(tester);
-      LgButtonFinder.connect(tester, enabled: false);
+      expect(connectEnabled(tester), isFalse);
       await type(tester, '6789');
-      LgButtonFinder.connect(tester, enabled: true);
+      expect(connectEnabled(tester), isTrue);
       await type(tester, '   ');
-      LgButtonFinder.connect(tester, enabled: false);
+      expect(connectEnabled(tester), isFalse);
       await unmount(tester);
-    });
+    }, variant: _windows);
 
     testWidgets('typing turns the list into search results', (tester) async {
       await pumpDevices(tester);
@@ -147,7 +213,7 @@ void main() {
       expect(find.text('最近'), findsOneWidget);
       expect(find.text('LAPTOP-MAMA'), findsOneWidget);
       await unmount(tester);
-    });
+    }, variant: _windows);
 
     testWidgets('the default row', (tester) async {
       final semantics = tester.ensureSemantics();
@@ -168,12 +234,16 @@ void main() {
       expect(isCurrent(tester, '书房笔记本'), isTrue);
       expect(isCurrent(tester, '连接到 345 678 912'), isFalse);
 
+      // Its whole user@host, copied from the row: that device.
+      await type(tester, 'mama@LAPTOP-MAMA');
+      expect(isCurrent(tester, 'LAPTOP-MAMA'), isTrue);
+
       // Nothing matches: "Connect to".
       await type(tester, '办公桌');
       expect(isCurrent(tester, '连接到 办公桌'), isTrue);
       await unmount(tester);
       semantics.dispose();
-    });
+    }, variant: _windows);
 
     testWidgets('Enter runs the current row', (tester) async {
       await pumpDevices(tester);
@@ -187,7 +257,30 @@ void main() {
       // As typed; navigation turns /r into a relay.
       expect(nav.connects.last, (id: '6789/r', forceRelay: false));
       await unmount(tester);
-    });
+    }, variant: _windows);
+
+    testWidgets('Enter on the help button opens the help, not a connection', (
+      tester,
+    ) async {
+      await pumpDevices(tester);
+      await type(tester, '6789');
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump();
+      final focused = FocusManager.instance.primaryFocus!.context!;
+      expect(
+        find.ancestor(
+          of: find.byElementPredicate((e) => e == focused),
+          matching: find.bySemanticsLabel('帮助'),
+        ),
+        findsOneWidget,
+        reason: 'Tab leaves the box for the help button',
+      );
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      expect(nav.connects, isEmpty);
+      expect(find.text('可输入'), findsOneWidget);
+      await unmount(tester);
+    }, variant: _windows);
 
     testWidgets('arrow keys move, Esc goes back to the default', (
       tester,
@@ -212,7 +305,7 @@ void main() {
       expect(nav.connects.last, (id: '123456789', forceRelay: false));
       await unmount(tester);
       semantics.dispose();
-    });
+    }, variant: _windows);
 
     testWidgets('"Connect via relay" in the menu', (tester) async {
       await pumpDevices(tester);
@@ -228,7 +321,7 @@ void main() {
       await tester.pump();
       expect(nav.connects, [(id: '246813579', forceRelay: true)]);
       await unmount(tester);
-    });
+    }, variant: _windows);
 
     testWidgets('the help', (tester) async {
       await pumpDevices(tester);
@@ -238,7 +331,7 @@ void main() {
       expect(find.text('IP 地址（直连）'), findsOneWidget);
       expect(find.text('192.0.2.10'), findsOneWidget);
       await unmount(tester);
-    });
+    }, variant: _windows);
 
     testWidgets('a focus request puts the text in, all selected', (
       tester,
@@ -255,19 +348,11 @@ void main() {
       final field = tester.widget<EditableText>(find.byType(EditableText));
       expect(field.focusNode.hasFocus, isTrue);
       expect(field.controller.text, '987654321');
-      expect(field.controller.selection,
-          const TextSelection(baseOffset: 0, extentOffset: 9));
+      expect(
+        field.controller.selection,
+        const TextSelection(baseOffset: 0, extentOffset: 9),
+      );
       await unmount(tester);
-    });
+    }, variant: _windows);
   });
-}
-
-/// The "连接" button next to the box (rows show their own "连接" only while hovered).
-abstract final class LgButtonFinder {
-  static void connect(WidgetTester tester, {required bool enabled}) {
-    final button = tester.widget<LgButton>(
-      find.byWidgetPredicate((w) => w is LgButton && w.label == '连接'),
-    );
-    expect(button.onPressed != null, enabled);
-  }
 }

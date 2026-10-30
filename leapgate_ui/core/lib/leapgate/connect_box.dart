@@ -1,4 +1,5 @@
 import '../models/peer_model.dart';
+import 'recent_peers.dart';
 
 // Rust's own patterns (hbb_common `lib.rs` `is_ipv4_str`, `is_ipv6_str`, `is_domain_port_str`).
 final _ipv4 = RegExp(
@@ -38,11 +39,13 @@ bool looksLikeAddress(String input) {
 /// contains it, ignoring case. One rule for every category; upstream's connect box left out the
 /// note and its list search only looked at it in the address book
 /// (`flutter/lib/desktop/pages/connection_page.dart:393-404`, `flutter/lib/common.dart:1680-1700`).
-/// The ID is compared without spaces, so "123 456" finds 123456789.
+/// The ID is compared without spaces, so "123 456" finds 123456789; `user@host` as a row shows
+/// it counts as user name and host name together.
 bool peerMatches(Peer peer, String input) {
   final q = input.trim().toLowerCase();
   if (q.isEmpty) return true;
   return peer.id.toLowerCase().contains(q.replaceAll(' ', '')) ||
+      peerUserHost(peer).toLowerCase().contains(q) ||
       peer.alias.toLowerCase().contains(q) ||
       peer.hostname.toLowerCase().contains(q) ||
       peer.username.toLowerCase().contains(q) ||
@@ -60,8 +63,8 @@ class ConnectBoxSearch {
   /// Matching devices in the order they came (recent: most recent first).
   final List<Peer> matches;
 
-  /// The row Enter runs before the arrow keys move (01 P1 block E): the device whose ID is the
-  /// input; otherwise "Connect to" when the input looks like an address; otherwise the first
+  /// The row Enter runs before the arrow keys move (01 P1 block E): the device whose ID (or
+  /// whole `user@host`) is the input; otherwise "Connect to" when the input looks like an address; otherwise the first
   /// match; "Connect to" when nothing matches.
   late final int defaultRow;
 
@@ -69,7 +72,10 @@ class ConnectBoxSearch {
 
   int _defaultRow(String input) {
     final id = input.replaceAll(' ', '');
-    final exact = matches.indexWhere((p) => p.id == id);
+    final userHost = input.trim().toLowerCase();
+    // `user@host` copied from a row is that device, not `‹ID›@‹server›`.
+    final exact = matches.indexWhere((p) =>
+        p.id == id || (userHost.isNotEmpty && peerUserHost(p).toLowerCase() == userHost));
     if (exact >= 0) return exact + 1;
     if (looksLikeAddress(input) || matches.isEmpty) return 0;
     return 1;

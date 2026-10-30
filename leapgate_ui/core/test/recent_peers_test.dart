@@ -2,7 +2,6 @@ import 'dart:convert';
 
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
-import 'package:flutter_hbb/leapgate/local_status.dart';
 import 'package:flutter_hbb/leapgate/recent_peers.dart';
 import 'package:flutter_hbb/models/peer_model.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
@@ -126,37 +125,5 @@ void main() {
     expect(formatPeerId('1234567890'), '1 234 567 890');
     expect(formatPeerId('123456789/r'), '123 456 789/r');
     expect(formatPeerId('office-pc'), 'office-pc');
-  });
-
-  group('LocalStatusModel.passwordRow (01 P1 block A)', () {
-    PasswordRow row(
-            {ServiceStatus status = ServiceStatus.ready,
-            String approve = '',
-            String method = ''}) =>
-        (LocalStatusModel()
-              ..status = status
-              ..approveMode = approve
-              ..verificationMethod = method)
-            .passwordRow;
-
-    test('the five kinds', () {
-      expect(row(method: kUseTemporaryPassword), PasswordRow.oneTime);
-      expect(row(approve: 'password', method: kUseBothPasswords),
-          PasswordRow.both);
-      expect(row(method: kUsePermanentPassword), PasswordRow.permanent);
-      expect(row(approve: 'click', method: kUseTemporaryPassword),
-          PasswordRow.acceptOnly);
-      expect(
-          row(
-              status: ServiceStatus.stopped,
-              approve: 'click',
-              method: kUsePermanentPassword),
-          PasswordRow.unavailable);
-    });
-
-    test('an unset or unknown method counts as both, as upstream', () {
-      expect(row(), PasswordRow.both);
-      expect(row(method: 'something-else'), PasswordRow.both);
-    });
   });
 }
