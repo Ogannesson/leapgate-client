@@ -292,7 +292,7 @@ class _SessionPageState extends State<SessionPage>
             // The panel dims the last frame itself while the remote device restarts.
             if (conn.stage != ConnStage.connected) ...[
               const ModalBarrier(dismissible: false),
-              ConnectionPanel(ffi: _ffi),
+              ConnectionPanel(ffi: _ffi, active: widget.active),
             ],
           ],
         );

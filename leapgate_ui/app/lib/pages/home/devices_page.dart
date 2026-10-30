@@ -3,7 +3,6 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/connect_box.dart';
 import 'package:flutter_hbb/leapgate/local_status.dart';
@@ -17,6 +16,7 @@ import '../../theme/lg_tokens.dart';
 import '../../widgets/lg_connect_box.dart';
 import '../../widgets/lg_device.dart';
 import '../../widgets/lg_menu.dart';
+import '../peer_platform.dart';
 
 // Examples in the connect box help, from the documentation ranges (01 §7.1 "示例数据").
 const _helpExamples = (
@@ -29,14 +29,6 @@ const _helpExamples = (
 
 /// "Connect to ‹input›" as the current row; device IDs are never empty.
 const _connectToRow = '';
-
-LgPlatform _platform(String platform) => switch (platform) {
-  kPeerPlatformWindows => LgPlatform.windows,
-  kPeerPlatformMacOS => LgPlatform.macos,
-  kPeerPlatformLinux => LgPlatform.linux,
-  kPeerPlatformAndroid => LgPlatform.android,
-  _ => LgPlatform.unknown,
-};
 
 /// The devices page (01 P1 blocks E and F): the connect box, and under it "Recent" or, while
 /// there is input, the search results. M2a has only the "Recent" category.
@@ -395,7 +387,7 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
                       child: LgDeviceRow(
                         name: peerDisplayName(peer),
                         id: formatPeerId(peer.id),
-                        platform: _platform(peer.platform),
+                        platform: lgPlatformOf(peer.platform),
                         status: status,
                         statusLabel: label,
                         userHost: userHost.isEmpty ? null : userHost,

@@ -48,12 +48,14 @@ Future<void> main(List<String> args) async {
     await bind.mainCheckConnectStatus();
     final version = lgBind.leapgateVersion();
     lgBind.leapgateLog(level: 3, msg: 'leapgate ui: version $version');
-    _listenLinks();
     runApp(LeapgateApp(home: MainWindow(status: LocalStatusModel()..start())));
     // A launch that found no main window keeps its `--connect` or link on its own command
-    // line (M0 acceptance, LEAPGATE.md §10.5); the main window sets the navigation it needs.
-    WidgetsBinding.instance.addPostFrameCallback(
-        (_) => handleLaunchArgs(args, bind.mainUriPrefixSync()));
+    // line (M0 acceptance, LEAPGATE.md §10.5). Both need the navigation the main window sets
+    // in its first build.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _listenLinks();
+      handleLaunchArgs(args, bind.mainUriPrefixSync());
+    });
     // The top bar is drawn by the app (docs/新界面/01-内容与逻辑说明.md §2.1). The runner already
     // sized and centered the window.
     windowManager.waitUntilReadyToShow(

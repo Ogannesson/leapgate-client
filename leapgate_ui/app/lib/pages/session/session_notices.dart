@@ -106,7 +106,7 @@ class _SessionNoticesViewState extends State<SessionNoticesView> {
     final items = _notices.items;
     // Notices with buttons (screenshot, printing, elevation) come with M2b.
     return LgNoticeStack(
-      dismissLabel: l10n.close,
+      dismissLabel: l10n.sessionNoticeDismiss,
       notices: [
         for (final n in items)
           LgNotice(

@@ -40,6 +40,7 @@
   "sessionNoticePrivacyPeerExit": "远程设备已退出隐私模式",
   "sessionNoticePrivacyTurnedOff": "隐私模式已关闭",
   "sessionNoticeDisplayUnplugged": "远程设备的一台显示器已断开，已切换到主显示器",
+  "sessionNoticeDismiss": "关闭通知",
   "sessionNoticeUac": "远程设备上正在显示用户账户控制（UAC）窗口",
   "sessionNoticeWaitUac": "正在等待对方确认…",
   "connConnectingTo": "正在连接 {name}…",

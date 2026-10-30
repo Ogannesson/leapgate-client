@@ -25,9 +25,12 @@ const kWaitingImageHintAfter = 5;
 /// error has none (upstream's box has no default action, and "改用中继" would be saved for the
 /// device).
 class ConnectionPanel extends StatefulWidget {
-  const ConnectionPanel({super.key, required this.ffi});
+  const ConnectionPanel({super.key, required this.ffi, required this.active});
 
   final FFI ffi;
+
+  /// Its tab is the selected one.
+  final bool active;
 
   @override
   State<ConnectionPanel> createState() => _ConnectionPanelState();
@@ -36,6 +39,9 @@ class ConnectionPanel extends StatefulWidget {
 class _ConnectionPanelState extends State<ConnectionPanel> {
   final _password = TextEditingController();
   final _code = TextEditingController();
+
+  /// The password or code field, whichever shows.
+  final _inputFocus = FocusNode();
   var _remember = false;
   var _trust = false;
   String? _windowsSession;
@@ -54,12 +60,24 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
     _onChange();
   }
 
+  /// A field that came up while the tab was in the background could not take the focus
+  /// (`autofocus` is refused there); it takes it when the tab is selected. The image does not
+  /// take the keyboard back this way, the panel's field does.
+  @override
+  void didUpdateWidget(ConnectionPanel old) {
+    super.didUpdateWidget(old);
+    if (!old.active && widget.active && _inputFocus.context != null) {
+      _inputFocus.requestFocus();
+    }
+  }
+
   @override
   void dispose() {
     _conn.removeListener(_onChange);
     _ticker?.cancel();
     _password.dispose();
     _code.dispose();
+    _inputFocus.dispose();
     super.dispose();
   }
 
@@ -151,6 +169,7 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
             inputs
               ..add(LgPasswordField(
                 controller: _password,
+                focusNode: _inputFocus,
                 showLabel: l10n.connShowPassword,
                 hideLabel: l10n.connHidePassword,
                 placeholder: l10n.connPassword,
@@ -176,6 +195,7 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
           case ConnInput.twoFactor:
             inputs.add(LgCodeField(
               controller: _code,
+              focusNode: _inputFocus,
               semanticLabel: l10n.connCode,
               autofocus: true,
               errorText:

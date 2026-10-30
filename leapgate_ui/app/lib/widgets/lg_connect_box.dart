@@ -293,8 +293,6 @@ class LgConnectBar extends StatelessWidget {
     required this.help,
     this.focusNode,
     this.autofocus = false,
-    this.onChanged,
-    this.onSubmitted,
   });
 
   final TextEditingController controller;
@@ -312,8 +310,6 @@ class LgConnectBar extends StatelessWidget {
   final String clearLabel;
   final String helpLabel;
   final LgHelpContent help;
-  final ValueChanged<String>? onChanged;
-  final ValueChanged<String>? onSubmitted;
 
   @override
   Widget build(BuildContext context) {
@@ -328,8 +324,6 @@ class LgConnectBar extends StatelessWidget {
             autofocus: autofocus,
             placeholder: placeholder,
             semanticLabel: placeholder,
-            onChanged: onChanged,
-            onSubmitted: onSubmitted,
             leading: LgIcon(LgIcons.search, size: 22, color: c.text2),
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
@@ -345,7 +339,6 @@ class LgConnectBar extends StatelessWidget {
                           iconSize: 22,
                           onPressed: () {
                             controller.clear();
-                            onChanged?.call('');
                             focusNode?.requestFocus();
                           },
                         ),
