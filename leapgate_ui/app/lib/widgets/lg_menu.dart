@@ -2,6 +2,8 @@
 // submenus, built on Material's MenuAnchor for positioning, dismissal and
 // keyboard navigation (arrows, Enter, Escape).
 
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../icons/lg_icon.dart';
@@ -141,7 +143,12 @@ class LgMenuPanel extends StatelessWidget {
   }
 }
 
-ButtonStyle _itemStyle(LgTokens t, {required bool danger, required bool bold}) {
+ButtonStyle _itemStyle(
+  LgTokens t, {
+  required bool danger,
+  required bool bold,
+  bool tall = false,
+}) {
   final c = t.colors;
   return ButtonStyle(
     backgroundColor: WidgetStateProperty.resolveWith((s) {
@@ -163,11 +170,17 @@ ButtonStyle _itemStyle(LgTokens t, {required bool danger, required bool bold}) {
     textStyle: WidgetStatePropertyAll(
       t.text.copyWith(fontWeight: bold ? FontWeight.w700 : FontWeight.w400),
     ),
-    padding: const WidgetStatePropertyAll(
-      EdgeInsets.symmetric(horizontal: LgSpace.s4),
+    padding: WidgetStatePropertyAll(
+      EdgeInsets.symmetric(
+        horizontal: LgSpace.s4,
+        vertical: tall ? LgSpace.s2 : 0,
+      ),
     ),
     minimumSize: WidgetStatePropertyAll(Size(0, t.sizes.row)),
-    maximumSize: WidgetStatePropertyAll(Size(double.infinity, t.sizes.row)),
+    // A row with a description grows with it (`.mr.two`).
+    maximumSize: WidgetStatePropertyAll(
+      Size(double.infinity, tall ? double.infinity : t.sizes.row),
+    ),
     shape: const WidgetStatePropertyAll(RoundedRectangleBorder()),
     visualDensity: VisualDensity.standard,
     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -192,22 +205,56 @@ Widget? _lead(LgColors c, {LgIcons? icon, bool? checked}) {
 class _ItemRow extends StatelessWidget {
   const _ItemRow({
     required this.label,
+    this.description,
     this.lead,
     this.trailing,
     required this.disabled,
   });
 
   final String label;
+  final String? description;
   final Widget? lead;
   final Widget? trailing;
   final bool disabled;
 
   @override
   Widget build(BuildContext context) {
+    final t = LgTokens.of(context);
     final row = Row(
+      crossAxisAlignment: description == null
+          ? CrossAxisAlignment.center
+          : CrossAxisAlignment.start,
       children: [
-        if (lead != null) ...[lead!, const SizedBox(width: LgSpace.s3)],
-        Expanded(child: LgEllipsisText(label)),
+        if (lead != null) ...[
+          // Top aligned with a description: keep the icon on the first line.
+          description == null
+              ? lead!
+              : Padding(
+                  padding: EdgeInsets.only(
+                    top: math.max(0, (t.sizes.lh - 20) / 2),
+                  ),
+                  child: lead!,
+                ),
+          const SizedBox(width: LgSpace.s3),
+        ],
+        Expanded(
+          child: description == null
+              ? LgEllipsisText(label)
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(label),
+                    Text(
+                      description!,
+                      style: t.textS.copyWith(
+                        color: t.colors.text2,
+                        fontWeight: FontWeight.w400,
+                      ),
+                    ),
+                  ],
+                ),
+        ),
         if (trailing != null) ...[const SizedBox(width: LgSpace.s3), trailing!],
       ],
     );
@@ -231,6 +278,7 @@ class LgMenuItem extends StatelessWidget {
     this.icon,
     this.checked,
     this.hint,
+    this.description,
     this.danger = false,
   });
 
@@ -239,6 +287,9 @@ class LgMenuItem extends StatelessWidget {
   final LgIcons? icon;
   final bool? checked;
   final String? hint;
+
+  /// Small text on a second line under the label (`.mr.two`).
+  final String? description;
   final bool danger;
 
   @override
@@ -250,9 +301,15 @@ class LgMenuItem extends StatelessWidget {
       statesController: _forced(context),
       // Inside a menu MenuAnchor already uses this; it matters for LgMenuPanel.
       overflowAxis: Axis.vertical,
-      style: _itemStyle(t, danger: danger, bold: danger || checked == true),
+      style: _itemStyle(
+        t,
+        danger: danger,
+        bold: danger || checked == true,
+        tall: description != null,
+      ),
       child: _ItemRow(
         label: label,
+        description: description,
         disabled: onPressed == null,
         lead: _lead(c, icon: icon, checked: checked),
         trailing: hint == null

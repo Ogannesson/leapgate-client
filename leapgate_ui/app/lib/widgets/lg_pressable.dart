@@ -33,6 +33,7 @@ class LgPressable extends StatefulWidget {
     this.focusable = true,
     this.focusNode,
     this.autofocus = false,
+    this.onActivate,
     this.onSecondaryTapUp,
     this.semanticLabel,
     this.selected,
@@ -47,6 +48,10 @@ class LgPressable extends StatefulWidget {
   final bool focusable;
   final FocusNode? focusNode;
   final bool autofocus;
+
+  /// What Enter and Space do, when that differs from a click (a list row:
+  /// click selects, Enter connects). Defaults to [onPressed].
+  final VoidCallback? onActivate;
   final GestureTapUpCallback? onSecondaryTapUp;
   final String? semanticLabel;
   final bool? selected;
@@ -86,7 +91,7 @@ class _LgPressableState extends State<LgPressable> {
     super.dispose();
   }
 
-  void _activate() => widget.onPressed?.call();
+  void _activate() => (widget.onActivate ?? widget.onPressed)?.call();
 
   @override
   Widget build(BuildContext context) {
@@ -120,7 +125,7 @@ class _LgPressableState extends State<LgPressable> {
         onTapDown: enabled ? (_) => setState(() => _pressed = true) : null,
         onTapUp: enabled ? (_) => setState(() => _pressed = false) : null,
         onTapCancel: enabled ? () => setState(() => _pressed = false) : null,
-        onTap: enabled ? _activate : null,
+        onTap: enabled ? widget.onPressed : null,
         onSecondaryTapUp: widget.onSecondaryTapUp,
         child: Semantics(
           button: true,
