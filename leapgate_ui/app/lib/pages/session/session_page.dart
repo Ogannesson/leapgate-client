@@ -1,5 +1,6 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/connection.dart';
 import 'package:flutter_hbb/leapgate/session.dart';
@@ -16,9 +17,6 @@ import 'image_paint.dart';
 import 'remote_input.dart';
 import 'session_notices.dart';
 import 'session_toolbar.dart';
-
-/// Where the notices start: below the toolbar, at the top right (01 P2 block C).
-const double _noticesTop = 56;
 
 /// A remote desktop view in its session tab (01 P2): the image, keyboard and mouse, the
 /// connection panel while there is no image, the toolbar and the notices.
@@ -254,7 +252,8 @@ class _SessionPageState extends State<SessionPage>
 
   @override
   Widget build(BuildContext context) {
-    final c = LgTokens.of(context).colors;
+    final t = LgTokens.of(context);
+    final c = t.colors;
     return ListenableBuilder(
       listenable: Listenable.merge([_ffi.connection, _ffi.ffiModel]),
       builder: (context, _) {
@@ -272,9 +271,6 @@ class _SessionPageState extends State<SessionPage>
                 ),
               ),
             ),
-            // The remote device restarts: its last frame stays, dimmed (01 §4.1 stage 7).
-            if (conn.dimLastFrame)
-              Positioned.fill(child: ColoredBox(color: c.scrim)),
             if (_ffi.ffiModel.pi.isSet.isTrue)
               Positioned(
                 top: 0,
@@ -287,14 +283,16 @@ class _SessionPageState extends State<SessionPage>
                       overlays: widget.overlays),
                 ),
               ),
+            // At the right below the toolbar (`LgNoticeStack`: right 16, top 12 + bar + 12).
             Positioned(
-              top: _noticesTop,
-              right: LgSpace.s3,
+              top: LgSpace.s3 + t.sizes.bar + LgSpace.s3,
+              right: LgSpace.s4,
               child: SessionNoticesView(ffi: _ffi),
             ),
+            // The panel dims the last frame itself while the remote device restarts.
             if (conn.stage != ConnStage.connected) ...[
               const ModalBarrier(dismissible: false),
-              Center(child: ConnectionPanel(ffi: _ffi)),
+              ConnectionPanel(ffi: _ffi),
             ],
           ],
         );

@@ -3,6 +3,7 @@ import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/connection.dart';
 import 'package:flutter_hbb/leapgate/identity_color.dart';
 import 'package:flutter_hbb/leapgate/local_status.dart';
+import 'package:flutter_hbb/leapgate/recent_peers.dart';
 import 'package:flutter_hbb/leapgate/session.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/models/state_model.dart';
@@ -14,8 +15,9 @@ import '../pages/home/home_page.dart';
 import '../pages/session/reasons.dart';
 import '../pages/session/session_names.dart';
 import '../pages/session/session_page.dart';
-import '../theme/lg_tokens.dart';
+import '../widgets/lg_feedback.dart';
 import '../widgets/lg_status.dart';
+import '../widgets/lg_tab_tip.dart';
 import '../widgets/lg_title_bar.dart';
 import 'keep_display_on.dart';
 import 'navigation.dart';
@@ -184,7 +186,8 @@ class _MainWindowState extends State<MainWindow>
     final name = deviceName(s);
     Widget status;
     var disconnected = false;
-    final lines = [name, l10n.sessionIdLine(formatId(s.id))];
+    final lines = <String>[];
+    final tipViews = <(String, Widget)>[];
     if (conn.stage == ConnStage.failed) {
       final reason = conn.reason!;
       lines.add(reasonView(l10n, reason, s.id).text);
@@ -201,29 +204,23 @@ class _MainWindowState extends State<MainWindow>
     } else if (!showsRoute(conn)) {
       status = LgStatusText(LgStatus.connecting, l10n.sessionConnecting);
     } else {
-      final direct = conn.direct!;
-      final route = direct ? l10n.sessionDirect : l10n.sessionRelayed;
-      status = LgRouteMark(
-        route: direct ? LgRoute.direct : LgRoute.relay,
-        label: route,
-        encrypted: conn.secure != false,
-        unencryptedLabel: l10n.sessionUnencrypted,
-        worstOnly: true,
-      );
-      lines.add(conn.secure == false
-          ? '$route · ${l10n.sessionUnencrypted}'
-          : route);
+      LgRouteMark mark({bool worstOnly = false}) => LgRouteMark(
+            route: conn.direct! ? LgRoute.direct : LgRoute.relay,
+            label: conn.direct! ? l10n.sessionDirect : l10n.sessionRelayed,
+            encrypted: conn.secure != false,
+            unencryptedLabel: l10n.sessionUnencrypted,
+            worstOnly: worstOnly,
+          );
+      status = mark(worstOnly: true);
+      tipViews.add((l10n.toolbarRemoteDesktop, mark()));
     }
     return LgSessionTab(
       name: name,
       identity: identityGroup(s.id),
       status: status,
       disconnected: disconnected,
-      tooltip: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [for (final l in lines) Text(l)],
-      ),
+      tooltip: LgTabTip(
+          name: name, id: formatPeerId(s.id), views: tipViews, lines: lines),
     );
   }
 
@@ -313,7 +310,12 @@ class _MainWindowState extends State<MainWindow>
               ? const SizedBox.shrink()
               : titleBar),
           Expanded(
-            child: Stack(
+            child: ListenableBuilder(
+              listenable: appCore.toasts,
+              builder: (context, content) => LgToastHost(
+                  text: toastText(l10n, appCore.toasts.current?.key),
+                  child: content!),
+              child: Stack(
               children: [
                 IndexedStack(
                   index: selectedIndex,
@@ -337,13 +339,8 @@ class _MainWindowState extends State<MainWindow>
                 ),
                 Positioned.fill(
                     child: Overlay(key: _overlays.keyOf(kWindowScope))),
-                const Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: LgSpace.s6,
-                  child: IgnorePointer(child: Center(child: ToastView())),
-                ),
               ],
+            ),
             ),
           ),
         ],

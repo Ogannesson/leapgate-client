@@ -2,17 +2,14 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/leapgate/connection.dart';
+import 'package:flutter_hbb/leapgate/recent_peers.dart';
 import 'package:flutter_hbb/leapgate/session.dart';
 
-import '../../icons/lg_icon.dart';
 import '../../l10n/app_localizations.dart';
-import '../../shell/confirm_card.dart';
 import '../../shell/navigation.dart';
-import '../../theme/lg_tokens.dart';
-import '../../widgets/lg_button.dart';
+import '../../widgets/lg_connection_panel.dart';
+import '../../widgets/lg_panel_inputs.dart';
 import '../../widgets/lg_selection.dart';
-import '../../widgets/lg_status.dart';
-import '../../widgets/lg_text_field.dart';
 import 'reasons.dart';
 import 'session_names.dart';
 
@@ -20,11 +17,13 @@ import 'session_names.dart';
 /// (01 P2 block D "超过几秒").
 const kWaitingImageHintAfter = 5;
 
-enum _Step { pending, active, done }
-
 /// The connection panel (01 P2 block D, §4.1, §4.3): what [ConnectionModel] says, in the middle of
-/// the session tab while there is no image. Placeholder look until the designer's
-/// `LgConnectionPanel` replaces it; the texts, inputs and buttons are final.
+/// the session tab while there is no image, drawn by [LgConnectionPanel].
+///
+/// Enter runs the button marked `isDefault`: "断开" on the insecure connection warning, the
+/// submit button of the password and code panels, "连接" of the Windows user sessions. An
+/// error has none (upstream's box has no default action, and "改用中继" would be saved for the
+/// device).
 class ConnectionPanel extends StatefulWidget {
   const ConnectionPanel({super.key, required this.ffi});
 
@@ -37,7 +36,6 @@ class ConnectionPanel extends StatefulWidget {
 class _ConnectionPanelState extends State<ConnectionPanel> {
   final _password = TextEditingController();
   final _code = TextEditingController();
-  var _showPassword = false;
   var _remember = false;
   var _trust = false;
   String? _windowsSession;
@@ -108,57 +106,59 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
 
   Widget _build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final t = LgTokens.of(context);
-    final c = t.colors;
     final conn = _conn;
     final ffi = widget.ffi;
 
-    _Step? connectStep, verifyStep;
-    String? text;
-    String? detail;
-    String? error;
+    List<LgPanelStep>? steps;
+    var tone = LgPanelTone.normal;
+    String? message;
+    var busy = false;
+    String? secondary;
+    String? notice;
+    LgPanelCountdown? countdown;
+    var dim = false;
     final inputs = <Widget>[];
-    final buttons = <(String, VoidCallback?, LgButtonKind)>[];
-    final cancel = (l10n.connCancel, conn.cancel, LgButtonKind.secondary);
+    final actions = <LgPanelAction>[];
+    final cancel = LgPanelAction(label: l10n.connCancel, onPressed: conn.cancel);
+
+    List<LgPanelStep> twoSteps(LgStepState connect, LgStepState verify) => [
+          LgPanelStep(l10n.connStepConnect, connect),
+          LgPanelStep(l10n.connStepVerify, verify),
+        ];
 
     switch (conn.stage) {
       case ConnStage.connecting:
-        connectStep = _Step.active;
-        verifyStep = _Step.pending;
-        text = l10n.connConnectingTo(deviceName(ffi));
-        buttons.add(cancel);
+        steps = twoSteps(LgStepState.current, LgStepState.todo);
+        message = l10n.connConnectingTo(deviceName(ffi));
+        busy = true;
+        actions.add(cancel);
       case ConnStage.insecure:
-        connectStep = _Step.active;
-        verifyStep = _Step.pending;
-        text = l10n.connInsecure;
-        buttons
-          ..add((l10n.connContinue, conn.continueInsecure, LgButtonKind.secondary))
-          ..add((l10n.connDisconnect, conn.rejectInsecure, LgButtonKind.primary));
+        steps = twoSteps(LgStepState.current, LgStepState.todo);
+        tone = LgPanelTone.warning;
+        message = l10n.connInsecure;
+        actions
+          ..add(LgPanelAction(
+              label: l10n.connContinue, onPressed: conn.continueInsecure))
+          ..add(LgPanelAction(
+              label: l10n.connDisconnect,
+              onPressed: conn.rejectInsecure,
+              primary: true,
+              isDefault: true));
       case ConnStage.verifying:
-        connectStep = _Step.done;
-        verifyStep = _Step.active;
+        steps = twoSteps(LgStepState.done, LgStepState.current);
         switch (conn.input) {
           case ConnInput.password:
-            if (conn.reason?.code == 'wrong_password') {
-              error = l10n.connWrongPassword;
-            }
             inputs
-              ..add(LgTextField(
+              ..add(LgPasswordField(
                 controller: _password,
+                showLabel: l10n.connShowPassword,
+                hideLabel: l10n.connHidePassword,
                 placeholder: l10n.connPassword,
                 semanticLabel: l10n.connPassword,
-                obscureText: !_showPassword,
                 autofocus: true,
-                errorText: error,
-                onSubmitted: (_) => _login(),
-                trailing: LgIconButton(
-                  icon: _showPassword ? LgIcons.eyeOff : LgIcons.eye,
-                  label: _showPassword
-                      ? l10n.connHidePassword
-                      : l10n.connShowPassword,
-                  onPressed: () =>
-                      setState(() => _showPassword = !_showPassword),
-                ),
+                errorText: conn.reason?.code == 'wrong_password'
+                    ? l10n.connWrongPassword
+                    : null,
               ))
               ..add(LgCheckbox(
                 value: _remember,
@@ -166,26 +166,22 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
                 onChanged: (v) => setState(() => _remember = v),
               ));
             // An empty password does nothing upstream; here the button says so (01 P2 block D).
-            buttons
-              ..add((
-                l10n.connConnect,
-                _password.text.trim().isEmpty ? null : _login,
-                LgButtonKind.primary
-              ))
-              ..add(cancel);
+            actions
+              ..add(cancel)
+              ..add(LgPanelAction(
+                  label: l10n.connConnect,
+                  onPressed: _password.text.trim().isEmpty ? null : _login,
+                  primary: true,
+                  isDefault: true));
           case ConnInput.twoFactor:
-            if (conn.reason?.code == 'wrong_2fa') error = l10n.connWrong2fa;
-            inputs.add(LgTextField(
+            inputs.add(LgCodeField(
               controller: _code,
-              placeholder: l10n.connCode,
               semanticLabel: l10n.connCode,
               autofocus: true,
-              errorText: error,
-              onSubmitted: (_) => _submit2fa(),
+              errorText:
+                  conn.reason?.code == 'wrong_2fa' ? l10n.connWrong2fa : null,
               // Six digits submit by themselves.
-              onChanged: (v) {
-                if (v.trim().length == 6) _submit2fa();
-              },
+              onCompleted: (_) => _submit2fa(),
             ));
             if (conn.trustedDevicesEnabled) {
               inputs.add(LgCheckbox(
@@ -194,149 +190,116 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
                 onChanged: (v) => setState(() => _trust = v),
               ));
             }
-            buttons
-              ..add((l10n.connVerify, _submit2fa, LgButtonKind.primary))
-              ..add(cancel);
+            actions
+              ..add(cancel)
+              ..add(LgPanelAction(
+                  label: l10n.connVerify,
+                  onPressed: _submit2fa,
+                  primary: true,
+                  isDefault: true));
           case ConnInput.remoteAccept:
-            text = l10n.connWaitingAccept;
-            detail = l10n.connWaited(_duration(l10n, _elapsed));
-            buttons.add(cancel);
+            message = l10n.connWaitingAccept;
+            busy = true;
+            secondary = l10n.connWaited(_duration(l10n, _elapsed));
+            actions.add(cancel);
           case ConnInput.windowsSession:
-            text = l10n.connChooseWindowsSession;
-            for (final s in conn.windowsSessions) {
-              inputs.add(LgRadio<String>(
-                value: s.sid,
-                groupValue: _windowsSession,
-                label: s.name,
-                onChanged: (v) => setState(() => _windowsSession = v),
-              ));
-            }
+            message = l10n.connChooseWindowsSession;
+            inputs.add(LgSelectField<String>(
+              items: [
+                for (final s in conn.windowsSessions) LgSelectItem(s.sid, s.name)
+              ],
+              value: _windowsSession,
+              semanticLabel: l10n.connChooseWindowsSession,
+              onChanged: (v) => setState(() => _windowsSession = v),
+            ));
             // No cancel: upstream says closing it leaves a black screen.
-            buttons.add((
-              l10n.connConnect,
-              _windowsSession == null
+            actions.add(LgPanelAction(
+              label: l10n.connConnect,
+              onPressed: _windowsSession == null
                   ? null
                   : () => conn.selectWindowsSession(_windowsSession!),
-              LgButtonKind.primary
+              primary: true,
+              isDefault: true,
             ));
           // The terminal's OS account is round 3; M2a opens remote desktops only.
           case ConnInput.osAccount:
           case ConnInput.osAccountAndPassword:
           case ConnInput.none:
-            text = l10n.connVerifying;
-            buttons.add(cancel);
+            message = l10n.connVerifying;
+            busy = true;
+            actions.add(cancel);
         }
       case ConnStage.waitingForImage:
-        connectStep = _Step.done;
-        verifyStep = _Step.done;
-        text = l10n.connWaitingImage;
+        steps = twoSteps(LgStepState.done, LgStepState.done);
+        message = l10n.connWaitingImage;
+        busy = true;
         if (_elapsed >= kWaitingImageHintAfter) {
-          detail = l10n.connWaitingImageHint;
+          notice = l10n.connWaitingImageHint;
         }
-        buttons.add(cancel);
+        actions.add(cancel);
       case ConnStage.restarting:
-        text = l10n.connRestarting;
-        buttons.add((l10n.connCloseTab, conn.cancel, LgButtonKind.secondary));
+        message = l10n.connRestarting;
+        busy = true;
+        dim = true;
+        actions.add(
+            LgPanelAction(label: l10n.connCloseTab, onPressed: conn.cancel));
       case ConnStage.failed:
         final view = reasonView(l10n, conn.reason!, ffi.id);
-        text = view.text;
-        final countdown = conn.retryCountdown;
-        if (countdown != null) {
-          detail = l10n.connRetryIn(countdown, conn.retryAttempt);
+        message = view.text;
+        final left = conn.retryCountdown;
+        if (left != null) {
+          tone = LgPanelTone.warning;
+          // The wait doubles from 1 s with each attempt (ConnectionModel.showMsgBox).
+          final total = 1 << (conn.retryAttempt - 1);
+          countdown = LgPanelCountdown(
+            text: l10n.connRetryIn(left, conn.retryAttempt),
+            progress: 1 - left / total,
+          );
+        } else {
+          tone = LgPanelTone.error;
         }
-        // The first step is the main one.
-        for (final (i, step) in view.steps.indexed) {
-          final kind = i == 0 ? LgButtonKind.primary : LgButtonKind.secondary;
-          buttons.add(switch (step) {
-            NextStep.retry => (l10n.connRetry, conn.retry, kind),
-            NextStep.reconnect => (l10n.connReconnect, conn.retry, kind),
-            NextStep.useRelay => (l10n.connUseRelay, conn.useRelay, kind),
-            NextStep.changeId => (
-                l10n.connChangeId,
-                // The failed tab goes; the ID waits in the connect box.
-                () {
-                  conn.cancel();
-                  mainNavigation.showHome(connectBoxText: ffi.id);
-                },
-                kind
-              ),
-            NextStep.closeTab => (l10n.connCloseTab, conn.cancel, kind),
-          });
+        // The first next step is the main one and goes last, as the panel lays them out.
+        for (final (i, step) in view.steps.indexed.toList().reversed) {
+          final VoidCallback onPressed = switch (step) {
+            NextStep.retry || NextStep.reconnect => conn.retry,
+            NextStep.useRelay => conn.useRelay,
+            // The failed tab goes; the ID waits in the connect box.
+            NextStep.changeId => () {
+                conn.cancel();
+                mainNavigation.showHome(connectBoxText: ffi.id);
+              },
+            NextStep.closeTab => conn.cancel,
+          };
+          actions.add(LgPanelAction(
+            label: switch (step) {
+              NextStep.retry => l10n.connRetry,
+              NextStep.reconnect => l10n.connReconnect,
+              NextStep.useRelay => l10n.connUseRelay,
+              NextStep.changeId => l10n.connChangeId,
+              NextStep.closeTab => l10n.connCloseTab,
+            },
+            onPressed: onPressed,
+            primary: i == 0,
+          ));
         }
       case ConnStage.connected:
         return const SizedBox.shrink();
     }
 
-    final panel = Container(
-      width: 440,
-      padding: const EdgeInsets.all(LgSpace.s6),
-      decoration: BoxDecoration(
-        color: c.surface,
-        borderRadius: BorderRadius.circular(LgRadius.r12),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(deviceName(ffi),
-              style: t.text.copyWith(color: c.text, fontWeight: FontWeight.w700)),
-          Text(formatId(ffi.id), style: t.textS.copyWith(color: c.text2)),
-          if (connectStep != null) ...[
-            const SizedBox(height: LgSpace.s4),
-            Row(children: [
-              _StepMark(connectStep, l10n.connStepConnect),
-              const SizedBox(width: LgSpace.s4),
-              _StepMark(verifyStep!, l10n.connStepVerify),
-            ]),
-          ],
-          if (text != null) ...[
-            const SizedBox(height: LgSpace.s4),
-            Text(text, style: t.text.copyWith(color: c.text)),
-          ],
-          if (detail != null) ...[
-            const SizedBox(height: LgSpace.s2),
-            Text(detail, style: t.textS.copyWith(color: c.text2)),
-          ],
-          for (final input in inputs) ...[
-            const SizedBox(height: LgSpace.s3),
-            input,
-          ],
-          if (buttons.isNotEmpty) ...[
-            const SizedBox(height: LgSpace.s6),
-            Wrap(
-              alignment: WrapAlignment.end,
-              spacing: LgSpace.s2,
-              runSpacing: LgSpace.s2,
-              children: [
-                for (final (label, onPressed, kind) in buttons.reversed)
-                  LgButton(label: label, kind: kind, onPressed: onPressed),
-              ],
-            ),
-          ],
-        ],
-      ),
+    return LgConnectionPanel(
+      title: deviceName(ffi),
+      subtitle: formatPeerId(ffi.id),
+      platform: platformOf(ffi),
+      steps: steps,
+      tone: tone,
+      message: message,
+      busy: busy,
+      secondary: secondary,
+      notice: notice,
+      countdown: countdown,
+      inputs: inputs,
+      actions: actions,
+      dimBackdrop: dim,
     );
-    // Enter disconnects only on the insecure connection warning (01 P2 block D); upstream's
-    // error box has no default action, and "Use relay" would be saved for the device. The
-    // password and code fields submit by themselves.
-    if (conn.stage != ConnStage.insecure) return panel;
-    return DefaultActionScope(onDefault: conn.rejectInsecure, child: panel);
-  }
-}
-
-class _StepMark extends StatelessWidget {
-  const _StepMark(this.step, this.label);
-
-  final _Step step;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final status = switch (step) {
-      _Step.pending => LgStatus.offline,
-      _Step.active => LgStatus.connecting,
-      _Step.done => LgStatus.online,
-    };
-    return LgStatusText(status, label);
   }
 }

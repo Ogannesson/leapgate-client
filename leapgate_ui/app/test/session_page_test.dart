@@ -4,8 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/session.dart';
+import 'package:flutter_hbb/models/state_model.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:leapgate_ui/shell/navigation.dart';
+import 'package:leapgate_ui/widgets/lg_title_bar.dart';
 
 import 'session_fakes.dart';
 
@@ -38,6 +40,11 @@ void main() {
 
   setUp(() => fakes = installAppFakes());
 
+  // The canvas maps the pointer below the title bar by core's height.
+  test('the title bar is as high as core reserves for it', () {
+    expect(kLgTitleBarHeight, kLeapgateTitleBarHeight);
+  });
+
   group('the connection panel', () {
     testMainWindow('connecting: two steps, cancel closes the tab (01 §4.1 stage 1)',
         (tester) async {
@@ -48,8 +55,8 @@ void main() {
 
       expect(callsTo(fakes, #sessionAddSync).single[#id], _id);
       expect(find.text('正在连接 100 200 300…'), findsOneWidget);
-      expect(_mark('建立连接'), findsOneWidget);
-      expect(_mark('验证身份'), findsOneWidget);
+      expect(find.text('建立连接'), findsOneWidget);
+      expect(find.text('验证身份'), findsOneWidget);
       expect(_mark('正在连接…'), findsOneWidget); // the tab
       expect(fakes.window, contains('setTitle'));
 
@@ -137,8 +144,12 @@ void main() {
 
       expect(find.text('远程设备上有多个用户已登录，请选择要连接的用户。'), findsOneWidget);
       expect(find.text('取消'), findsNothing);
-      await tester.tap(find.text('bob'));
-      await tester.pump();
+      // The first user is picked; the list opens from the field. (The tab's spinner never
+      // settles.)
+      await tester.tap(find.text('alice'));
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.tap(find.text('bob').last);
+      await tester.pump(const Duration(milliseconds: 300));
       await tester.tap(find.text('连接'));
       await tester.pump();
       expect(callsTo(fakes, #sessionSendSelectedSessionId).single[#sid], '2');
@@ -166,9 +177,10 @@ void main() {
       await emit(tester, fakes, s,
           msgbox('custom-nocancel-nook-hasclose-insecure-connection', '', ''));
 
-      // From the card, Tab goes to "Disconnect", then to "Continue".
+      // "Disconnect", the default, holds the focus; "Continue" is the button before it.
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shift);
       await tester.sendKeyEvent(LogicalKeyboardKey.tab);
-      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shift);
       await tester.pump();
       await tester.sendKeyEvent(LogicalKeyboardKey.enter);
       await tester.pump();
@@ -286,11 +298,11 @@ void main() {
       await emit(tester, fakes, s, connectionReady());
       await emit(tester, fakes, s, peerInfo());
 
-      expect(_mark('建立连接'), findsNothing);
+      expect(find.text('建立连接'), findsNothing);
       expect(find.text('已建立中继连接'), findsOneWidget);
       expect(_mark('经中继'), findsNWidgets(2)); // tab and toolbar
       expect(find.text('画面'), findsOneWidget);
-      expect(find.text('断开'), findsOneWidget);
+      expect(find.bySemanticsLabel('断开'), findsOneWidget);
       // One monitor: no monitor menu.
       expect(find.text('显示器'), findsNothing);
       expect(fakes.window.last, 'setTitle');
@@ -331,7 +343,7 @@ void main() {
       _imageFocus(tester, a).requestFocus();
       await tester.pump();
 
-      await tester.tap(find.text('断开'));
+      await tester.tap(find.bySemanticsLabel('断开'));
       await tester.pump();
 
       final order = [
@@ -415,10 +427,12 @@ void main() {
       await emit(tester, fakes, a, connectionReady(direct: true));
       await emit(tester, fakes, a, peerInfo());
 
-      await tester.tap(find.bySemanticsLabel('固定'));
+      final pin = find.bySemanticsLabel('固定');
+      expect(tester.getSemantics(pin), isSemantics(isToggled: false));
+      await tester.tap(pin);
       await tester.pump();
       expect(fakes.bind.flutterOptions['remoteMenubarState'], '{"pin":true}');
-      expect(find.bySemanticsLabel('取消固定'), findsOneWidget);
+      expect(tester.getSemantics(pin), isSemantics(isToggled: true));
     });
 
     testMainWindow('a connection lost in full screen leaves full screen', (tester) async {

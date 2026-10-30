@@ -42,7 +42,8 @@ class StateGlobal {
   static final StateGlobal instance = StateGlobal._();
 }
 
-/// Height of the app's title bar with the tabs (01 §2.1); the app's `kLgTitleBarHeight` is this.
+/// Height of the app's title bar with the tabs (01 §2.1); the app's `kLgTitleBarHeight` must
+/// equal it (a test in the app checks).
 const double kLeapgateTitleBarHeight = 40;
 
 // This final variable is initialized when the first time it is accessed.

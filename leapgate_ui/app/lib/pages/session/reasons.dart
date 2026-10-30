@@ -1,7 +1,7 @@
 import 'package:flutter_hbb/leapgate/connection.dart';
+import 'package:flutter_hbb/leapgate/recent_peers.dart';
 
 import '../../l10n/app_localizations.dart';
-import 'session_names.dart';
 
 /// A next step under a connection error (01 §4.3 "下一步").
 enum NextStep { retry, reconnect, useRelay, changeId, closeTab }
@@ -16,7 +16,7 @@ enum NextStep { retry, reconnect, useRelay, changeId, closeTab }
   const close = [NextStep.closeTab];
   final (text, steps) = switch (reason.code) {
     'id_not_exist' => (
-        l10n.connReasonIdNotExist(formatId(id)),
+        l10n.connReasonIdNotExist(formatPeerId(id)),
         [NextStep.changeId, NextStep.closeTab]
       ),
     'peer_offline' => (l10n.connReasonPeerOffline, retryClose),

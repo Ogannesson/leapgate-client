@@ -44,6 +44,11 @@ const String kOptionTouchMode = "touch-mode";
 
 const String kOptionStopService = "stop-service";
 
+const String kOptionCollapseToolbar = "collapse_toolbar";
+const String kOptionZoomCursor = "zoom-cursor";
+const String kOptionRemoteMenubarState = "remoteMenubarState";
+const String kOptionEnableConfirmClosingTabs = "enable-confirm-closing-tabs";
+
 const String kOptionToggleViewOnly = "view-only";
 
 const String kOptionToggleShowMyCursor = "show-my-cursor";
@@ -146,6 +151,15 @@ const kRemoteScrollStyleBar = 'scrollbar';
 
 /// [kRemoteScrollStyleEdge] Scroll image auto at edges.
 const kRemoteScrollStyleEdge = 'scrolledge';
+
+/// [kRemoteImageQualityBest] Best image quality.
+const kRemoteImageQualityBest = 'best';
+
+/// [kRemoteImageQualityBalanced] Balanced image quality, mid performance.
+const kRemoteImageQualityBalanced = 'balanced';
+
+/// [kRemoteImageQualityLow] Low image quality, better performance.
+const kRemoteImageQualityLow = 'low';
 
 const kIgnoreDpi = true;
 
