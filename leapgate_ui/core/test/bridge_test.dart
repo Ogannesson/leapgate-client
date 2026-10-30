@@ -1,6 +1,5 @@
 import 'package:flutter_hbb/generated_bridge_leapgate.dart' as lg;
 import 'package:flutter_hbb/leapgate/bridge.dart';
-import 'package:flutter_rust_bridge/flutter_rust_bridge.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 class _FakeLeapgate implements lg.Leapgate {
@@ -13,13 +12,9 @@ class _FakeLeapgate implements lg.Leapgate {
   @override
   String leapgateVersion({dynamic hint}) => '9.9.9';
 
+  // Exports this test does not use; block 2 grows with every milestone.
   @override
-  FlutterRustBridgeTaskConstMeta get kLeapgateLogConstMeta =>
-      throw UnimplementedError();
-
-  @override
-  FlutterRustBridgeTaskConstMeta get kLeapgateVersionConstMeta =>
-      throw UnimplementedError();
+  dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError();
 }
 
 void main() {
