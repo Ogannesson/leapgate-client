@@ -1,0 +1,26 @@
+# Leapgate new UI, core package: the bridge, models, sessions and state; no pages.
+# It keeps upstream's package name so files copied from flutter/lib import unchanged
+# (docs/新界面/03-实施方案.md §1.1). Dependencies follow flutter/pubspec.yaml.
+name: flutter_hbb
+description: Leapgate UI core (bridge, models, state).
+publish_to: none
+
+environment:
+  sdk: '^3.1.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  ffi: ^2.1.0
+  flutter_rust_bridge: "1.80.1"
+  freezed_annotation: ^2.0.3
+  meta: any
+  uuid: ^3.0.7
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^2.0.2
+  build_runner: ^2.4.6
+  freezed: ^2.4.2
+  ffigen: ^8.0.2

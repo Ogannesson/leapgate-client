@@ -13,4 +13,5 @@ pub mod rendezvous;
 pub mod report;
 pub mod route;
 pub mod sign;
+pub mod ui;
 pub mod update;

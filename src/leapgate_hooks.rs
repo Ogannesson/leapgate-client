@@ -701,6 +701,34 @@ impl Drop for AgentSlot {
     }
 }
 
+/// W1: in the new UI's process, hands a link (`--connect` and the like) only to the new UI's main
+/// window, found by its class alone: its title follows the current tab. Returns `None` in the upstream
+/// UI's process, which then looks up its window by class and title as upstream does; the two never
+/// fall back to each other's window. `Some(false)` when no main window of the new UI is running.
+#[cfg(all(windows, feature = "flutter"))]
+pub(crate) fn send_to_new_ui_main_window(dw_data: usize, data: &str) -> Option<bool> {
+    use winapi::um::winuser::{FindWindowW, SendMessageW, COPYDATASTRUCT, WM_COPYDATA};
+    if !leapgate::ui::is_next_ui() {
+        return None;
+    }
+    let class = crate::platform::windows::wide_string(leapgate::ui::MAIN_WINDOW_CLASS);
+    let window = unsafe { FindWindowW(class.as_ptr(), std::ptr::null()) };
+    if window.is_null() {
+        log::info!("leapgate ui: no main window to hand the link to");
+        return Some(false);
+    }
+    let mut bytes: Vec<u8> = data.bytes().chain(Some(0)).collect();
+    let data_struct = COPYDATASTRUCT {
+        dwData: dw_data,
+        cbData: bytes.len() as _,
+        lpData: bytes.as_mut_ptr() as _,
+    };
+    unsafe {
+        SendMessageW(window, WM_COPYDATA, 0, &data_struct as *const COPYDATASTRUCT as _);
+    }
+    Some(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

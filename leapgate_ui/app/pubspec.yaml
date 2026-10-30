@@ -1,0 +1,35 @@
+# Leapgate new UI, app package: pages, components, tokens and the Windows runner
+# (docs/新界面/03-实施方案.md §1.1). The product version comes from libs/leapgate through
+# `flutter build --build-name` (scripts/windows/build-client.ps1 -Ui leapgate).
+name: leapgate_ui
+description: Leapgate desktop UI.
+publish_to: none
+
+environment:
+  sdk: '^3.8.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  intl: any
+  flutter_hbb:
+    path: ../core
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^2.0.2
+
+flutter:
+  uses-material-design: true
+  generate: true
+  fonts:
+    - family: Atkinson Hyperlegible Next
+      fonts:
+        - asset: assets/fonts/AtkinsonHyperlegibleNext-Regular.ttf
+        - asset: assets/fonts/AtkinsonHyperlegibleNext-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/AtkinsonHyperlegibleNext-Bold.ttf
+          weight: 700
