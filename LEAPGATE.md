@@ -510,6 +510,73 @@ Leapgate 自己的文件里和挂钩配套的：`report/heartbeat.rs` 在开关�
 - 不在 01 §4.3 里的错误不给码，归 `other`：摄像头、终端的（`No cameras`、`view_camera_unsupported_tip`、`Remote terminal is not supported by the remote side`）第三轮随说明一起补；`No active console user logged on…` 01 没有文案。
 - 合并上游时：`git diff <旧> <新> -- src | grep msgbox` 看 msgbox 文本有没有变，变了就改 `reason.rs` 的表和单测（03 §3.8 第 3 条）；`check_if_retry` 的签名或语义变了，核对 `leapgate_msgbox_reason`。
 
+#### Q3 挂钩方案（待维护者确认）
+
+2026-10-30 读码定的方案，基线 `7bc0abd92`，行号以它为准；代码还没改。按 03 §6.1 Q3、§12 IQ14，挂钩位置先交维护者确认，确认后另起一轮实现。界面要什么见 01 §4.2（第二级的"路径""中继服务器""传输"三项）。
+
+**思路**：`race_ice`（§7.1 的 H-1，`src/client.rs:393`）包着整个 `Client::_start`，上游的结果、上游的错误、ICE 的结果都从它这里出去，所以路径在它里面判、在它里面写表。`_start` 里面有三样东西 `race_ice` 看不到：服务端回没回 `is_local`、局域网多候选赢没赢、连的是哪台中继。这三处的挂钩拿不到会话，用 tokio 的 task-local 记录器传：`race_ice` 一进来建一个记录器，用 `scope` 包住上游那条 future；已有的 `lan_connect`、`lan_fallback` 和新加的 `note_relay` 在函数里往记录器写，不在 scope 里（单测、别的调用方）时什么也不做。已有挂钩的调用行和参数都不用改。能这样做是因为 `_start` 的整棵调用树（两轮 `_start_inner` 的 `select_ok`、`connect`、`request_relay`、中继和 IPv6、WebRTC 的竞速）都在同一个 future 里被 poll；被 `tokio::spawn` 的只有 UDP NAT 测试和 WebRTC 的候选桥，Q3 用不到它们。
+
+##### 1. 六种路径怎么判
+
+纯函数 `leapgate::session::classify`，`race_ice` 拿到成功结果后调用，按下表顺序取第一条命中：
+
+| 顺序 | 01 §4.2 的叫法 | 路径码 | 条件 | 数据从哪来 |
+|---|---|---|---|---|
+| 1 | 直接 IP 访问 | `direct_ip` | `is_direct_ip_access(peer)`（`src/common.rs:3039`） | `race_ice` 的 `peer` 参数。上游 `_start` 对 IP 和 `域名:端口` 直接 `connect_tcp_local`，返回 `"TCP"`（`src/client.rs:440`、`:455`） |
+| 2 | ICE 胜出时 | `lan` / `punch_v4` / `punch_v6` | `race_legs` 返回 `Either::Left`。选中对的对端地址是私网 IPv4（10/8、172.16/12、192.168/16）或 ULA（fc00::/7）时 `lan`；否则按地址族 `punch_v4` / `punch_v6` | `IceWin` 里多存一个 `sel.remote`，改在 `leapgate_hooks.rs` 里，不碰上游 |
+| 3 | 经中继 / 经中继（WebSocket） | `relay` / `relay_ws` | 结果的 `direct` 为假（`"Relay"`、`"WebSocket"`，以及走 TURN 的 `"WebRTC"`）。流是 `Stream::WebSocket` 时 `relay_ws`，否则 `relay` | 结果元组。按流的变体判、不按标签：`connect()` 的中继回退在 WebSocket 下也写 `"Relay"`（`src/client.rs:1588`、`:1627`） |
+| 4 | 局域网直连 | `lan` | `"TCP"`、直连，并且这次尝试里服务端回过 `is_local`（局域网多候选胜出，或上游按 `is_local` 连了本地地址） | 记录器：`lan_connect` 成功时、`lan_fallback` 收到 `is_local = true` 时各记一笔（已有挂钩，`src/leapgate_hooks.rs:48`、`:99`） |
+| 5 | 打洞直连（IPv4）/（IPv6） | `punch_v4` / `punch_v6` | `"TCP"` 直连但不是局域网（TCP 打洞）：按流本地地址的地址族（IPv4 映射地址算 IPv4）；`"UDP"` 是 `punch_v4`；`"IPv6"` 是 `punch_v6`；直连的 `"WebRTC"` 按 `webrtc_remote_ipv6()` | 结果元组、`Stream::local_addr` |
+| 6 | 都不是 | 不给 | 读码看不会出现；界面只显示第一级 | |
+
+- 传输（01 §4.2"传输：TCP / UDP"）顺带给：结果里带 KCP（UDP 打洞、IPv6 打洞、ICE）或是 WebRTC 时 `udp`，其余 `tcp`。
+- 01 §4.2 要求不区分 ICE 和上游打洞，这里只按"实际走的是不是局域网地址"分 `lan` 和打洞（待确认第 3 条）。全局 IPv6 即使两端在同一 /64 也算打洞直连（IPv6），和上游 IPv6 打洞一致。srflx 的对端地址都是公网地址，归打洞。
+- 上游 UDP 打洞不会出现在 `is_local` 那一轮：服务端的局域网响应不带 `is_udp`（leapgate-server `rendezvous_server.rs` 的 `handle_local_addr`），`_start_inner` 不会把 NAT socket 连上去。`is_local` 那一轮 IPv6 打洞赢了算打洞直连（IPv6）。
+- WebRTC：自建服务器时默认关（`get_local_option` 给 "N"），用户打开时按上表第 3、5 行处理，走 TURN 时不给中继名。
+
+##### 2. 中继名
+
+- 01 §4.2 和 §7 的示例显示的是服务器下发的中继地址（`relay-1.example.com`），没有另起的名字。取服务端下发的原串，去掉默认端口 `:21117`（`RELAY_PORT`），非默认端口保留。
+- 挂钩放在 `create_relay` 里，不放 03 写的 `request_relay`。中继连接有三个来源：`_start_inner` 收到被控端要求中继的 `RelayResponse` 时直接 `create_relay(rr.relay_server)`（`src/client.rs:1135`）；`connect()` 直连失败后、两处 WebRTC 握手失败后经 `request_relay` 再 `create_relay`（`:1868`）。放在 `request_relay` 只看得到后两种，第一种会漏（被控端是对称 NAT、任一端强制中继时都走它）；三条路最后都经过 `create_relay`。
+- `create_relay` 在 `RelayResponse` 分支里和 IPv6、WebRTC 同时起跑，没赢也会被记下，所以只在第 1 节判成中继时才给名字；`"WebRTC"`（TURN）不给；一次尝试里记到两台不同的中继时不给（两轮 `_start_inner` 同时问服务端，读码看服务端给的是同一台，实际碰不到）。
+- 不按连接对上：`create_relay` 把 `relay_server` 按值交给 `ipv4_to_ipv6` 再去连，连好以后原串已经没了；要对上得在连接前后各加一处挂钩，不值。
+
+##### 3. 挂钩清单
+
+| 编号 | 文件 | 位置 | 加几行 | 调用 | 为什么不能少 |
+|---|---|---|---|---|---|
+| Q3-1 | `src/client.rs` | `create_relay`（`:1872`）里，`let relay_server = check_port(relay_server, RELAY_PORT);`（`:1881`）之前 | 2（注释 + 调用） | `crate::leapgate_hooks::note_relay(&relay_server);` | 中继地址只在 `_start_inner` 和 `create_relay` 的局部变量里，`race_ice` 拿到的结果里没有 |
+| C3-1 | `src/client.rs` | `_start_inner`，`bail!(ph.other_failure);`（`:1011`）之前 | 2 | `crate::leapgate_hooks::note_server_refusal(&ph.other_failure);` | 服务器自定义的拒绝原因是任意正文，到界面时和系统错误分不开（C3 的已知限制） |
+| C3-2 | `src/client.rs` | `request_relay`，`bail!(rs.refuse_reason);`（`:1858`）之前 | 2 | `crate::leapgate_hooks::note_server_refusal(&rs.refuse_reason);` | 同上；这条在 `connect()` 里还会被包成 `Failed to connect via relay server: <原因>`，按正文认不出来 |
+| 已有 H-1 | `src/client.rs:393` | `race_ice` | 0 | 调用不改 | 建记录器、判路径、写表都在函数里 |
+| 已有 | `src/client.rs:1379`、`:1385` | `lan_connect`、`lan_fallback` | 0 | 调用不改 | 在函数里记局域网胜出和 `is_local` |
+
+- **只做 Q3**：`src/client.rs` 新增 1 处（Q3-1），其他上游文件 0 处。
+- **Q3 加 C3 前缀**：`src/client.rs` 新增 3 处（Q3-1、C3-1、C3-2），其他上游文件 0 处。合并不了：两处拒绝都在各自的 `bail!` 前面，和 `create_relay` 不在同一个函数里；把 Q3 挂到 `request_relay` 里能和 C3-2 挨着，但会漏掉上面说的 `RelayResponse` 那条中继。
+- 两个方案都在 03 §6.1 定的"不超过 3 处"以内。`src/client/io_loop.rs`、`src/flutter.rs` 不加：`race_ice` 返回在 `io_loop` 调 `set_connection_type`（发连接就绪事件，`src/client/io_loop.rs:218`）之前，界面收到事件时表已经写好；导出用上游已有的 `sessions::get_session_by_session_id` 找会话。
+
+##### 4. 交给界面
+
+- 状态放 `libs/leapgate/src/session.rs`，键是（对端 ID、连接类型），值是这次连接的路径、传输、中继名（加 C3 时另有拒绝原因）。不按界面 session_id 存：`race_ice` 拿到的是对端会话（上游的 `Session`），一个对端会话可以挂多个界面会话；上游 `flutter::sessions` 的 `SESSIONS` 就是按（`lc.id`、`conn_type`）存对端会话、每个键只有一个（`insert_session` 用 `entry().or_insert`），`race_ice` 里的 `interface.get_id()` 和 `get_lch()` 的 `conn_type` 正是这个键。
+- 导出 `leapgate_session_connection(session_id)`，同步，返回 JSON 字符串（和 C3 一样，F0 实测过的形态）：先用 `sessions::get_session_by_session_id` 找到对端会话、取出键，再查表。例：`{"path":"relay","transport":"tcp","relay":"relay-1.example.com"}`、`{"path":"lan","transport":"tcp"}`；没有记录（还没连上、正在重连、会话已不在）时 `{}`，界面只显示第一级。路径码 `lan`、`direct_ip`、`punch_v4`、`punch_v6`、`relay`、`relay_ws` 和 C3 的原因码一样算接口。不另给地址族：打洞的两种已经带着，其余几种界面用不到。
+- 写入：`race_ice` 一进来先删掉这个键的旧记录，成功时写新记录。重连（`Session::reconnect`、自动重试）每次都重新走 `Client::start`，所以重连期间查到 `{}`，连上以后换成新路径，界面在这一轮的连接就绪事件后重新取。`Session::reconnect` 在"正在连接"时直接返回，同一个对端会话不会有两轮 `Client::start` 同时跑。
+- 清理：不加挂钩，照 V1 的做法：每次写入时顺手删掉已经没有对端会话的键（用上游 `sessions::get_session_by_peer_id` 判断，查的时候不拿着表的锁）。
+- 端口转发、出口隧道也经 `Client::start`，同样会写（连接类型不同，键互不影响）；界面不查它们，出口的状态由 E2 给。
+- 加 C3 时：`race_ice` 返回错误、记录器里有服务器拒绝原因时，把原因写进同一张表，导出返回 `{"refused":"<原文>"}`；界面收到连接阶段的 msgbox 后调这个导出，有 `refused` 就显示"服务器拒绝了此连接：<原文>"。错误原文不动，旧界面和以前一样（待确认第 2 条）。
+
+##### 5. 拼不全、有风险的地方
+
+- 记录器只在 `race_ice` 的 future 里被 poll 时有效。上游哪天把 `_start_inner`、`connect` 或中继竞速改成 `tokio::spawn`，就拿不到局域网标记和中继名：局域网的 TCP 直连会被判成打洞直连，中继没有名字，不报错。单测覆盖不到，合并上游时核对 `_start`、`_start_inner`、`connect`、`request_relay` 里有没有新增 spawn，以及 `create_relay` 是否仍是所有中继连接的必经之处。
+- 一次尝试里记到两台不同的中继时不给名字（见第 2 节）。
+- 上游的局域网判断靠服务端的 `is_local`：服务端误判同网（两端公网出口相同、其实不在一个局域网，§3.4 的已知限制）时，上游的 TCP 直连被判成局域网直连；服务端判成不同网、其实在一个局域网、走了 TCP 打洞时，判成打洞直连。ICE 按地址判，不受这条影响。
+- 上游 `is_local` 那一轮 IPv6 打洞赢了算打洞直连（IPv6），哪怕两台在同一局域网。
+
+##### 待维护者确认
+
+1. Q3 的挂钩放 `create_relay`，不放 03 写的 `request_relay`（理由见第 2 节），`src/client.rs` 新增 1 处。
+2. C3 的"服务器拒绝了此连接："前缀要不要做（再加 2 处，共 3 处）。做的话，拒绝原因怎么交给界面：推荐写进本表、由 `leapgate_session_connection` 返回，错误原文不动、旧界面不受影响；备选是在 `race_ice` 里把错误正文改写成 `Server refused the connection: <原因>`，C3 照旧只按正文归类，代价是旧界面也显示这句英文，`connect()` 里那条原来的 `Failed to connect via relay server: <原因>: Please try later` 也变成它。
+3. ICE 选中的是局域网地址（私网 IPv4、ULA）时显示"局域网直连"（推荐：显示的是实际走的网络）；备选是 ICE 一律按地址族显示打洞直连，和旧界面的标签一致。
+
 ### 10.5 验收记录
 
 #### M0 工程骨架（2026-10-30，`f426ef520`）
