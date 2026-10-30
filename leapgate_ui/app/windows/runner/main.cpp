@@ -59,11 +59,14 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   }
 
   // leapgate: tells the Rust core it runs in the new UI's process, so it hands links only to this
-  // UI's main window (W1, LEAPGATE.md §10.4). Set in every process, not inherited.
+  // UI's main window (W1, LEAPGATE.md §10.4). Only core_main reads it; it is cleared right after so
+  // processes started from here (a browser, Explorer) do not inherit it and later launch the
+  // upstream UI as if it were the new one.
   ::SetEnvironmentVariableW(L"LEAPGATE_UI", L"next");
 
   int args_len = 0;
   char** c_args = rustdesk_core_main(&args_len);
+  ::SetEnvironmentVariableW(L"LEAPGATE_UI", nullptr);
   if (!c_args)
   {
     std::string args_str = "";
@@ -185,8 +188,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   } else {
     // leapgate: the main window's first-launch size and its minimum shrink with the work area
     // (docs/新界面/03-实施方案.md §1.5); the position is not remembered.
-    Win32Desktop::GetMainWindowBounds(origin, size);
-    window.SetMinimumSize(960u, 600u);
+    const Win32Window::Size min_size(960u, 600u);
+    Win32Desktop::GetMainWindowBounds(min_size, origin, size);
+    window.SetMinimumSize(min_size.width, min_size.height);
   }
 
   std::wstring window_title;

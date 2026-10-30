@@ -69,10 +69,11 @@ namespace Win32Desktop
     size.height = std::min(size.height, workarea_bottom_right.y - origin.y);
   }
 
-  // leapgate: the main window's first-launch bounds (docs/新界面/03-实施方案.md §1.5): the smaller
-  // of 1280x800 and 0.9 x the work area, in logical pixels, centered in the work area of the
-  // monitor under the cursor. |origin| comes back in physical screen coordinates.
-  void GetMainWindowBounds(Win32Window::Point& origin, Win32Window::Size& size)
+  // leapgate: the main window's first-launch bounds (docs/新界面/03-实施方案.md §1.5), in logical
+  // pixels: the smaller of 1280x800 and 0.9 x the work area, but not below the minimum, which is
+  // the smaller of |min_size| and the work area (as FlutterWindow enforces it). Centered in the
+  // work area of the monitor under the cursor; |origin| comes back in physical screen coordinates.
+  void GetMainWindowBounds(const Win32Window::Size& min_size, Win32Window::Point& origin, Win32Window::Size& size)
   {
     POINT cursor = {0, 0};
     GetCursorPos(&cursor);
@@ -85,8 +86,12 @@ namespace Win32Desktop
     const LONG work_width = work.right - work.left;
     const LONG work_height = work.bottom - work.top;
 
-    size.width = static_cast<unsigned int>(std::min(1280.0, work_width / scale * 0.9));
-    size.height = static_cast<unsigned int>(std::min(800.0, work_height / scale * 0.9));
+    const double work_w = work_width / scale;
+    const double work_h = work_height / scale;
+    size.width = static_cast<unsigned int>(std::max(std::min(1280.0, work_w * 0.9),
+                                                    std::min(static_cast<double>(min_size.width), work_w)));
+    size.height = static_cast<unsigned int>(std::max(std::min(800.0, work_h * 0.9),
+                                                     std::min(static_cast<double>(min_size.height), work_h)));
     origin.x = static_cast<unsigned int>(work.left + (work_width - static_cast<LONG>(size.width * scale)) / 2);
     origin.y = static_cast<unsigned int>(work.top + (work_height - static_cast<LONG>(size.height * scale)) / 2);
   }
