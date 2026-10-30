@@ -30,25 +30,12 @@ pub fn leapgate_version() -> SyncReturn<String> {
 
 // ---- Session ----
 
-/// The reason behind one of the session's message boxes (C3), as JSON: `code`, `retry`, and the
-/// reason's parameters if it has any (`feature`, `port`; `LEAPGATE.md` §10.4). `retry` is
-/// upstream's `check_if_retry`, given the session's state the way `Session::msgbox` gives it.
-pub fn leapgate_msgbox_reason(
-    session_id: SessionID,
-    msgtype: String,
-    title: String,
-    text: String,
-) -> SyncReturn<String> {
-    let retry_for_relay =
-        crate::flutter::sessions::get_session_by_session_id(&session_id).map_or(false, |s| {
-            let lc = s.lc.read().unwrap();
-            lc.direct == Some(true) && !lc.received
-        });
-    let retry = crate::client::check_if_retry(&msgtype, &title, &text, retry_for_relay);
-    let mut json = serde_json::to_value(leapgate::reason::classify(&msgtype, &title, &text))
-        .unwrap_or_default();
-    json["retry"] = retry.into();
-    SyncReturn(json.to_string())
+/// The reason behind a session's message box (C3), as JSON: `code` and the reason's parameters
+/// if it has any (`feature`, `port`; `LEAPGATE.md` §10.4). Whether to retry is the event's
+/// `hasRetry`.
+pub fn leapgate_msgbox_reason(msgtype: String, title: String, text: String) -> SyncReturn<String> {
+    let reason = leapgate::reason::classify(&msgtype, &title, &text);
+    SyncReturn(serde_json::to_string(&reason).unwrap_or_default())
 }
 
 /// V1: a hidden session tab takes no frames (still received and decoded). Showing it again, the

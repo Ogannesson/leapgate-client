@@ -456,7 +456,7 @@ Leapgate 自己的文件里和挂钩配套的：`report/heartbeat.rs` 在开关�
 | W1 | `src/core_main.rs` 的 `core_main_invoke_new_connection`，Windows 分支开头 | 新界面的进程里（runner 只在调 `rustdesk_core_main_args` 期间设着 `LEAPGATE_UI=next`，返回后马上清掉，免得从新界面起的浏览器、资源管理器等后代进程继承它、再起旧界面时误判；W1 只在 core_main 里读它），链接、`--connect` 等只交给类名为 `LEAPGATE_UI_MAIN` 的主窗口（`leapgate_hooks::send_to_new_ui_main_window`，只按类名找，不看标题）；旧界面的进程里它返回 `None`，照上游按"旧类名 + 标题"找。两边不交叉回退 |
 | L1 | `src/leapgate_ffi.rs` 的 `leapgate_log(level, msg)` | 界面的日志写进日志文件，target `leapgate_ui`；1 error、2 warn、3 info、4 debug、其他 trace。不限流，重复的同一条错误由界面合并后再写 |
 | S12 | `src/leapgate_ffi.rs` 的 `leapgate_version()` | `libs/leapgate` 的版本（`libs/leapgate/src/ui.rs` 的 `VERSION`），界面当产品版本显示；构建时由 `--build-name` 写进 Windows 版本资源 |
-| C3 | `src/leapgate_ffi.rs` 的 `leapgate_msgbox_reason(session_id, msgtype, title, text)`，同步 | 会话的 `msgbox` 事件按（类型、标题、正文）归成原因码，返回 JSON 字符串：`{"code": "...", "retry": bool}`，带参数的原因多一个键（`feature` 或 `port`，见下表）。归类在 `libs/leapgate/src/reason.rs`（纯函数）；`retry` 直接调上游 `check_if_retry`（`src/client.rs`），`retry_for_relay` 照 `Session::msgbox` 从这个会话的 `direct`、`received` 算，会话已不在时按 `false`，所以和事件里的 `hasRetry` 一致。没认出的归 `other`，界面显示原文；同一段正文只在日志里写一次（最多记 64 段，有的正文来自对端）。上游 Dart 的"连上过的会话报不在线时 30 秒内照样重试"（`model.dart` 的 `shouldAutoRetryOnOffline`）不在 Rust 里，归 `core` 的连接状态。返回 JSON 而不是块 2 的结构体：参数随原因变，`SyncReturn<String>` 是 F0 实测过的形态 |
+| C3 | `src/leapgate_ffi.rs` 的 `leapgate_msgbox_reason(msgtype, title, text)`，同步 | 会话的 `msgbox` 事件按（类型、标题、正文）归成原因码，返回 JSON 字符串：`{"code": "..."}`，带参数的原因多一个键（`feature` 或 `port`，见下表）。归类在 `libs/leapgate/src/reason.rs`（纯函数）。能否重试取 msgbox 事件的 `hasRetry`（即 `Session::msgbox` 当时调上游 `check_if_retry` 算出的结果，`src/flutter.rs` 的 `msgbox`），C3 只给原因码。没认出的归 `other`，界面显示原文；同一段正文只在日志里写一次（最多记 64 段，有的正文来自对端）。上游 Dart 的"连上过的会话报不在线时 30 秒内照样重试"（`model.dart` 的 `shouldAutoRetryOnOffline`）不在 Rust 里，归 `core` 的连接状态。返回 JSON 而不是块 2 的结构体：参数随原因变，`SyncReturn<String>` 是 F0 实测过的形态 |
 | V1 | `src/leapgate_ffi.rs` 的 `leapgate_session_set_visible(session_id, visible)`，同步；`src/flutter.rs` 的 `on_rgba`（桌面那一份）、`on_texture` 开头各一处挂钩 | 不可见的会话标签不往界面推帧：照常收流、解码、计帧率，只是不交给 Flutter（03 §3.3 第 1 条）。界面用法：标签切走时设 `false`；切回时设 `true`，再调上游的 `session_refresh(session_id, display)` 要一帧（软件上屏、纹理上屏都一样）。状态在 `libs/leapgate/src/session.rs`，默认可见，只记被隐藏的会话；挂钩在这个对端会话的所有界面会话（`session_handlers`）都被隐藏时才跳过，同一台设备在另一个窗口里还显示着就照推。会话关闭不加挂钩：设回可见时删掉条目，每次调 `leapgate_session_set_visible` 时顺手删掉已经不在的会话（隐藏着被关掉的标签），查会话时不拿着这把锁（挂钩是拿着 `session_handlers` 读锁再拿它，反过来会有锁序问题）。不会卡住：软件上屏的"界面还没取走上一帧就不推下一帧"（`display_rgbas` 的 `valid`）只在已经发出的 `Rgba` 事件被界面处理后复位，隐藏前发出的那一条照常会被 `core` 处理（取帧、`session_next_rgba` 不依赖页面是否显示）；纹理上屏的"第一帧通知"（`notify_render_type`）隐藏期间不动，切回后的第一帧照常通知。界面要注意：上游 Dart 连上后 1.5 秒还没画面会给对方发空的系统登录密码（`model.dart` 的 `waitForImageTimer`），标签在第一帧到之前被隐藏时这个判断会误触发，`core` 要在隐藏期间不按"没画面"处理 |
 
 - 新界面 runner 的窗口类：主窗口 `LEAPGATE_UI_MAIN`，CM（`--cm`）`LEAPGATE_UI_CM`，安装页（`--install`）`LEAPGATE_UI_INSTALL`。三者分开，按主窗口类名找时不会找到另外两个。主窗口的类名（`leapgate_ui/app/windows/runner/main.cpp` 的 `kMainWindowClass`）和 `libs/leapgate/src/ui.rs` 的 `MAIN_WINDOW_CLASS` 要一致；另外两个 Rust 不找，只在 runner 里。
@@ -465,7 +465,7 @@ Leapgate 自己的文件里和挂钩配套的：`report/heartbeat.rs` 在开关�
 
 #### C3 原因码
 
-原因码是稳定的，界面的连接状态和文案按它查表；改名等于改接口。"对应"一列是 `docs/新界面/01-内容与逻辑说明.md` §4.3 表里的那一行（按"现在的原文"列）。"能否重试"全部来自上游 `check_if_retry`，这里写的是按它算出的结果，和 01 §4.3"自动重试"一列一致：标题是 `Connection Error`、正文不含 offline、not exist、failed、resolve、mismatch、manually、restricted、incoming only、not allowed 时才是"是"。匹配按正文，下表"上游原文"写匹配方式；单测里每条都注明了源码位置（`reason.rs` 的 `upstream_message_boxes`）。
+原因码是稳定的，界面的连接状态和文案按它查表；改名等于改接口。"对应"一列是 `docs/新界面/01-内容与逻辑说明.md` §4.3 表里的那一行（按"现在的原文"列）。"能否重试"给界面核对用，导出不返回它：界面用 msgbox 事件的 `hasRetry`，它来自上游 `check_if_retry`，这里写的是按它算出的结果，和 01 §4.3"自动重试"一列一致：标题是 `Connection Error`、正文不含 offline、not exist、failed、resolve、mismatch、manually、restricted、incoming only、not allowed 时才是"是"。匹配按正文，下表"上游原文"写匹配方式；单测里每条都注明了源码位置（`reason.rs` 的 `upstream_message_boxes`）。
 
 | 原因码 | 参数 | 对应 01 §4.3 | 上游原文（匹配方式） | 能否重试 |
 |---|---|---|---|---|
@@ -502,11 +502,12 @@ Leapgate 自己的文件里和挂钩配套的：`report/heartbeat.rs` 在开关�
 | `local_port_in_use` | `port` | 出口：本地端口被占用 | 正文是 `Failed to listen on <端口>: …`，端口取冒号前的数字（普通端口转发也是这句） | 否 |
 | `exit_blocked` | | 出口：单个目标被拦（MSG_BLOCKED） | 正文等于 `exit::MSG_BLOCKED` | 否 |
 | `exit_fake_ip_literal` | | 出口：MSG_FAKE_IP_LITERAL | 正文等于 `exit::MSG_FAKE_IP_LITERAL` | 否 |
-| `other` | | 其余，含"服务器自定义的拒绝原因" | 以上都不是 | 按 `check_if_retry` |
+| `other` | | 其余，含"服务器自定义的拒绝原因" | 以上都不是 | 按 `hasRetry` |
 
 - `feature` 取 `file_transfer`、`camera`、`terminal`、`port_forward`；`port` 是数字。
 - 01 §4.3 里写"不会出现"的两行（Incoming only mode、MSG_NEED_MUX）不给码，真出现时归 `other`。
-- 服务器自定义的拒绝原因（`PunchHoleResponse.other_failure`、`RelayResponse.refuse_reason`）在 msgbox 里只是任意正文，和系统错误原文分不开，归 `other`；01 §4.3 要的"服务器拒绝了此连接："前缀做不到，除非在 `src/client.rs` 的这两处加挂钩。
+- 已知限制：服务器自定义的拒绝原因（`PunchHoleResponse.other_failure`、`RelayResponse.refuse_reason`）在 msgbox 里只是任意正文，和系统错误原文分不开，归 `other`、显示原文。01 §4.3 要的"服务器拒绝了此连接："前缀，得在 `src/client.rs` 加两处挂钩（`_start_inner` 的 `bail!(ph.other_failure)`、`request_relay` 的 `bail!(rs.refuse_reason)`），等 Q3 的挂钩位置交维护者确认时一起问。
+- 不在 01 §4.3 里的错误不给码，归 `other`：摄像头、终端的（`No cameras`、`view_camera_unsupported_tip`、`Remote terminal is not supported by the remote side`）第三轮随说明一起补；`No active console user logged on…` 01 没有文案。
 - 合并上游时：`git diff <旧> <新> -- src | grep msgbox` 看 msgbox 文本有没有变，变了就改 `reason.rs` 的表和单测（03 §3.8 第 3 条）；`check_if_retry` 的签名或语义变了，核对 `leapgate_msgbox_reason`。
 
 ### 10.5 验收记录

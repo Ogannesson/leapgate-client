@@ -1,7 +1,7 @@
 //! Reason codes for the new UI (C3): upstream reports connection failures as message boxes
 //! carrying English text, and the UI looks its wording up by code instead of translating that
-//! text. Whether to retry automatically stays upstream's rule (`check_if_retry` in the root crate),
-//! which `leapgate_ffi.rs` applies beside this.
+//! text. Only the reason comes from here: whether to retry automatically is the msgbox event's
+//! `hasRetry`, which `Session::msgbox` computed with upstream's `check_if_retry` at the time.
 //!
 //! Matching is on upstream's wording, so an upstream merge that rewords a message silently drops
 //! it to `Other`; compare the msgbox texts between the tags and update this table and its tests
