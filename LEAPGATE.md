@@ -521,6 +521,17 @@ Leapgate 自己的文件里和挂钩配套的：`report/heartbeat.rs` 在开关�
 
 接口里没有的：`windowManager.minimize`、`close`（`server_model.dart:169`、`:584`，CM 是单独的进程，M3 再定）；`model.dart:755-756` 的关闭全部窗口（URL 动作，只来自 macOS 和 Linux）；窗口标题（跟着当前标签，在 app 的外壳里设）；`chat_model.dart:319-332` 的聊天窗口大小（`chat_model` 只留消息存储）。
 
+**复制进来的 models 和 `FfiModel`（M1 B 块）**。下面的行号都是上游 `bd9262397` 的。
+
+- `FfiModel` 的改写在 `core/lib/leapgate/ffi_model.dart`，是 `models/model.dart` 的 `part`（它要写 `Display._scale`，上游也是同一个库）。只做非连接部分：peer info、显示器（切换、同步、跟随、分辨率）、权限、光标、剪贴板、屏蔽输入、隐私模式、指纹、会话选项同步、纹理渲染切换、便携服务、退出相对鼠标；这些事件在它的构造函数里登记。复制进来的 model 的事件（文件传输 8 个、`update_quality_status`、`record_status`）在 `FFI` 的构造函数里登记。上游 `FfiModel` 里属于"不要"的（`CachedPeerData`、`handleCachedPeerData`、`_queryAuditGuid`、结束时询问备注）、多窗口的（`tryUseAllMyDisplaysForTheRemoteSession`，:1500、:1535-1577）、手机的（`VirtualMouseMode`、`tryShowAndroidActionsOverlay`、Android 文档选择器）、终端的分支，以及界面组件（`getConnectionImageText`）都没搬。`openMonitorInTheSameTab` 搬进了 core 的 `common.dart`。
+- 留给 C（连接状态）的：事件 `msgbox`（:334-335，`handleMsgBox` :888-976）、`toast`（:336，`handleToast` :1032-1061）、`set_multiple_windows_session`（:338，:874-885）、`connection_ready`（:346-349，`setConnectionType` :267-282，连同 `ConnectionTypeState`）、`cancel_msgbox`（:405，:867-872）都没登记。改写文件里留给 C 补的位置：`handlePeerInfo` 开头的关掉连接对话框（:1355）和 `if (displays.isNotEmpty)` 里的重连计数复位（:1454-1456）；`_handleUseTextureRender` 的等画面框（:729-730）；`FFI.onEvent2UIRgba` 的等画面框和 1.5 秒唤醒的计时（:4322-4326）、重启重连复位（:4330）；`FfiModel.clear` 里连接那几个字段（:254-264）。`waitForFirstImage`、`isRefreshing` 已在 `FfiModel` 里（首帧时要重排画布），C 读写同一个字段。
+- 没登记、等各自的块或要主会话定的：`screenshot`（:468，:484-550，"另存为"要选文件的对话框）、`printer_request`（:466，:552-722，要选打印机的提问）、`switch_back`（:407-410）、`on_url_scheme_received`（:413，只来自 macOS 和 Linux）；聊天和语音（:362-367、:416-428，随 `chat_model`）、`terminal_response`（第三轮）、CM 的（`add_connection`、`on_client_remove`、`show_elevation`、`update_voice_call_state`、`cm_file_transfer_log`，M3）、`sync_peer_hash_password_to_personal_ab`（M4）；`selected_files`、`send_emptry_dirs` 只在 Web 上有。它们收到时由事件表写一行"没处理"的日志。
+- **暂删、`shortcut_model` 改写时（随 M2a/M2b）照上游原样补回**：`models/input_model.dart:426` 本地快捷键分发器里的 `ffi.shortcutModel.onTriggered(action)`（回调留空体）；同文件 `_matchFlutterShortcut` 的匹配部分（:1212-1236，现在只剩 `return null`，因为它读 `ShortcutModel.config`；`shortcut_utils.dart` 因此没复制）；`model.dart:473-477` 的 `kShortcutEventName` 事件不登记。
+- `cm_file_model.dart` 推迟到 M3，和 `server_model` 一起复制（它读 `serverModel.clients`、`tabController` 和 `chatModel`）。`ElevationModel` 留在 `model.dart` 里（peer info 和便携服务事件要用）。`QualityMonitorModel.webrtcTransport` 只在 Web 上有值、读 `CachedPeerData`，删了。
+- 复制件里的提示：`msgBox` 改成会话通知，key 用 msgbox 的正文（`file_model` 的单向传输错误是翻译 key `one-way-file-transfer-tip`，删除时的出错是原始错误文本）；`JobState.display`、`JobProgress.display` 这类返回界面文字的仍调 core 的 `translate`（经 Rust 翻译），没改。
+- `FFI.close` 除了上游 `FFI.close` 的清理，还做了上游页面在关会话前做的 model 清理：文件视图的 `FileModel.close`（`file_manager_page.dart:125`），远程桌面的纹理、图像、光标图（`remote_page.dart:676`、`:684-685`）。纹理在 `start` 里建，跟会话走，不跟页面走。页面自己的（`enterOrLeave`、`hostStopSystemKeyPropagate`、键盘焦点）归 M2a 的会话页。
+- `StateGlobal`（`models/state_model.dart`，改写档）只留复制件和 `FfiModel` 用到的：`fullscreen` 和 `setFullscreen`（经 `appCore.window.setFullscreen`）、`windowBorderWidth`、`tabBarHeight`、`relativeMouseModeState`、`resetLastResolutionGroupValues`、`getInputSource`。`relativeMouseModeState` 照上游按设备 ID 记：一台设备只有一个远程桌面视图，不会互相覆盖。`tabBarHeight` 照上游是 28（全屏时 0），`CanvasModel` 拿它算画面可用的高度；M2a 的会话页上方占的高度不同时改这里。`consts.dart` 的 `kDragToResizeAreaPadding` 恒为 0（上游只在 Linux 上留改大小的边）。
+
 ### 10.7 选项 model（M1）
 
 代码在 `leapgate_ui/core/lib/leapgate/options.dart`（03 §3.3 第 7 条、§3.6）。页面读写选项只经它，不直接调 `bind.*`。
