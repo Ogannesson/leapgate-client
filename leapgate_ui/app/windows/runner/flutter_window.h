@@ -16,9 +16,10 @@ class FlutterWindow : public Win32Window {
   explicit FlutterWindow(const flutter::DartProject& project);
   virtual ~FlutterWindow();
 
-  // leapgate: minimum window size in logical pixels, capped by the work area of the window's
-  // monitor; 0 leaves it to the system. Call before CreateAndShow.
-  void SetMinimumSize(unsigned int width, unsigned int height);
+  // leapgate: makes this the main window, sized by its client area in logical pixels: the window
+  // gets |default_size| (capped by the work area) when first shown, and can't be made smaller
+  // than |min_size| (capped likewise). Call before CreateAndShow.
+  void SetClientSizes(const Size& default_size, const Size& min_size);
 
  protected:
   // Win32Window:
@@ -42,8 +43,13 @@ class FlutterWindow : public Win32Window {
   // Number of force-redraw attempts made so far.
   UINT force_redraw_tries_ = 0;
 
+  void ApplyDefaultClientSize(HWND hwnd);
+
+  unsigned int default_width_ = 0;
+  unsigned int default_height_ = 0;
   unsigned int min_width_ = 0;
   unsigned int min_height_ = 0;
+  bool default_size_applied_ = false;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

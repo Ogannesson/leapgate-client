@@ -188,9 +188,10 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   } else {
     // leapgate: the main window's first-launch size and its minimum shrink with the work area
     // (docs/新界面/03-实施方案.md §1.5); the position is not remembered.
+    const Win32Window::Size default_size(1280u, 800u);
     const Win32Window::Size min_size(960u, 600u);
-    Win32Desktop::GetMainWindowBounds(min_size, origin, size);
-    window.SetMinimumSize(min_size.width, min_size.height);
+    Win32Desktop::GetMainWindowBounds(default_size, min_size, origin, size);
+    window.SetClientSizes(default_size, min_size);
   }
 
   std::wstring window_title;

@@ -154,9 +154,38 @@ bool FlutterWindow::OnCreate() {
   return true;
 }
 
-void FlutterWindow::SetMinimumSize(unsigned int width, unsigned int height) {
-  min_width_ = width;
-  min_height_ = height;
+void FlutterWindow::SetClientSizes(const Size& default_size, const Size& min_size) {
+  default_width_ = default_size.width;
+  default_height_ = default_size.height;
+  min_width_ = min_size.width;
+  min_height_ = min_size.height;
+}
+
+namespace {
+
+// Window size minus client size, in physical pixels.
+SIZE FrameSize(HWND hwnd) {
+  RECT window, client;
+  GetWindowRect(hwnd, &window);
+  GetClientRect(hwnd, &client);
+  return {(window.right - window.left) - (client.right - client.left),
+          (window.bottom - window.top) - (client.bottom - client.top)};
+}
+
+}  // namespace
+
+void FlutterWindow::ApplyDefaultClientSize(HWND hwnd) {
+  RECT work;
+  double scale;
+  Win32Desktop::GetMonitorWorkArea(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), work, scale);
+  const SIZE frame = FrameSize(hwnd);
+  const SIZE client = Win32Desktop::DefaultClientSize(
+      work, scale, frame, Size(default_width_, default_height_), Size(min_width_, min_height_));
+  const LONG width = client.cx + frame.cx;
+  const LONG height = client.cy + frame.cy;
+  SetWindowPos(hwnd, nullptr, work.left + (work.right - work.left - width) / 2,
+               work.top + (work.bottom - work.top - height) / 2, width, height,
+               SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
 void FlutterWindow::OnDestroy() {
@@ -172,20 +201,25 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
-  // leapgate: window_manager answers WM_GETMINMAXINFO itself and only overrides the minimum when
-  // Dart sets one, so the minimum goes in before the plugins see the message.
+  // leapgate: the main window's sizes are of the client area (docs/新界面/03-实施方案.md §1.5),
+  // so the frame window_manager leaves around it is measured and added.
+  // window_manager answers WM_GETMINMAXINFO itself and only overrides the minimum when Dart sets
+  // one, so the minimum goes in before the plugins see the message.
   if (message == WM_GETMINMAXINFO && min_width_ != 0) {
-    HMONITOR monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
-    MONITORINFO info = {0};
-    info.cbSize = sizeof(info);
-    if (GetMonitorInfoW(monitor, &info)) {
-      const double scale = FlutterDesktopGetDpiForMonitor(monitor) / 96.0;
-      auto* minmax = reinterpret_cast<MINMAXINFO*>(lparam);
-      minmax->ptMinTrackSize.x = std::min(static_cast<LONG>(min_width_ * scale),
-                                          info.rcWork.right - info.rcWork.left);
-      minmax->ptMinTrackSize.y = std::min(static_cast<LONG>(min_height_ * scale),
-                                          info.rcWork.bottom - info.rcWork.top);
-    }
+    RECT work;
+    double scale;
+    Win32Desktop::GetMonitorWorkArea(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), work, scale);
+    const SIZE frame = FrameSize(hwnd);
+    const SIZE client = Win32Desktop::MinClientSize(work, scale, frame, Size(min_width_, min_height_));
+    auto* minmax = reinterpret_cast<MINMAXINFO*>(lparam);
+    minmax->ptMinTrackSize.x = client.cx + frame.cx;
+    minmax->ptMinTrackSize.y = client.cy + frame.cy;
+  }
+  // The frame is known only once Dart has set the title bar style, which it does before showing
+  // the window for the first time.
+  if (message == WM_SHOWWINDOW && wparam == TRUE && default_width_ != 0 && !default_size_applied_) {
+    default_size_applied_ = true;
+    ApplyDefaultClientSize(hwnd);
   }
 
   // Give Flutter, including plugins, an opportunity to handle window messages.

@@ -69,31 +69,53 @@ namespace Win32Desktop
     size.height = std::min(size.height, workarea_bottom_right.y - origin.y);
   }
 
-  // leapgate: the main window's first-launch bounds (docs/新界面/03-实施方案.md §1.5), in logical
-  // pixels: the smaller of 1280x800 and 0.9 x the work area, but not below the minimum, which is
-  // the smaller of |min_size| and the work area (as FlutterWindow enforces it). Centered in the
-  // work area of the monitor under the cursor; |origin| comes back in physical screen coordinates.
-  void GetMainWindowBounds(const Win32Window::Size& min_size, Win32Window::Point& origin, Win32Window::Size& size)
+  // leapgate: main window sizing (docs/新界面/03-实施方案.md §1.5). The sizes are of the client
+  // area, in physical pixels. |frame| is the window size minus the client size, measured on the
+  // window: window_manager draws the frame of a hidden title bar itself, so AdjustWindowRect
+  // does not know it.
+
+  void GetMonitorWorkArea(HMONITOR monitor, RECT& work, double& scale)
   {
-    POINT cursor = {0, 0};
-    GetCursorPos(&cursor);
-    HMONITOR monitor = MonitorFromPoint(cursor, MONITOR_DEFAULTTOPRIMARY);
     MONITORINFO info = {0};
     info.cbSize = sizeof(info);
     GetMonitorInfoW(monitor, &info);
-    const RECT& work = info.rcWork;
-    const double scale = FlutterDesktopGetDpiForMonitor(monitor) / 96.0;
-    const LONG work_width = work.right - work.left;
-    const LONG work_height = work.bottom - work.top;
+    work = info.rcWork;
+    scale = FlutterDesktopGetDpiForMonitor(monitor) / 96.0;
+  }
 
-    const double work_w = work_width / scale;
-    const double work_h = work_height / scale;
-    size.width = static_cast<unsigned int>(std::max(std::min(1280.0, work_w * 0.9),
-                                                    std::min(static_cast<double>(min_size.width), work_w)));
-    size.height = static_cast<unsigned int>(std::max(std::min(800.0, work_h * 0.9),
-                                                     std::min(static_cast<double>(min_size.height), work_h)));
-    origin.x = static_cast<unsigned int>(work.left + (work_width - static_cast<LONG>(size.width * scale)) / 2);
-    origin.y = static_cast<unsigned int>(work.top + (work_height - static_cast<LONG>(size.height * scale)) / 2);
+  SIZE MinClientSize(const RECT& work, double scale, SIZE frame, const Win32Window::Size& min_size)
+  {
+    return {std::min(static_cast<LONG>(min_size.width * scale), work.right - work.left - frame.cx),
+            std::min(static_cast<LONG>(min_size.height * scale), work.bottom - work.top - frame.cy)};
+  }
+
+  SIZE DefaultClientSize(const RECT& work, double scale, SIZE frame,
+                         const Win32Window::Size& default_size, const Win32Window::Size& min_size)
+  {
+    const SIZE min = MinClientSize(work, scale, frame, min_size);
+    return {std::max(std::min(static_cast<LONG>(default_size.width * scale),
+                              static_cast<LONG>((work.right - work.left) * 0.9)), min.cx),
+            std::max(std::min(static_cast<LONG>(default_size.height * scale),
+                              static_cast<LONG>((work.bottom - work.top) * 0.9)), min.cy)};
+  }
+
+  // Bounds to create the main window with, on the monitor under the cursor. The frame is not known
+  // before the window exists and title bar style is set, so FlutterWindow corrects the size to
+  // the exact client size when the window is first shown. |origin| comes back in physical screen
+  // coordinates, |size| in logical pixels (what Win32Window::CreateAndShow takes).
+  void GetMainWindowBounds(const Win32Window::Size& default_size, const Win32Window::Size& min_size,
+                           Win32Window::Point& origin, Win32Window::Size& size)
+  {
+    POINT cursor = {0, 0};
+    GetCursorPos(&cursor);
+    RECT work;
+    double scale;
+    GetMonitorWorkArea(MonitorFromPoint(cursor, MONITOR_DEFAULTTOPRIMARY), work, scale);
+    const SIZE client = DefaultClientSize(work, scale, {0, 0}, default_size, min_size);
+    size.width = static_cast<unsigned int>(client.cx / scale);
+    size.height = static_cast<unsigned int>(client.cy / scale);
+    origin.x = static_cast<unsigned int>(work.left + (work.right - work.left - client.cx) / 2);
+    origin.y = static_cast<unsigned int>(work.top + (work.bottom - work.top - client.cy) / 2);
   }
 
   bool BumpMouse(int dx, int dy)
