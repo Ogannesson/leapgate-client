@@ -109,15 +109,25 @@ void main() {
       await unmount(tester);
     }, variant: _windows);
 
-    testWidgets('without the server nothing answers: offline, not checking', (
+    testWidgets(
+      'without the server nothing answers: offline, not checking',
+      (tester) async {
+        await pumpDevices(tester, status: ServiceStatus.notReady);
+        expect(find.textContaining('正在查询…', findRichText: true), findsNothing);
+        expect(find.textContaining('离线', findRichText: true), findsNWidgets(4));
+        await unmount(tester);
+      },
+      variant: _windows,
+    );
+
+    testWidgets('still connecting to the server at start: checking', (
       tester,
     ) async {
-      await pumpDevices(tester, status: ServiceStatus.notReady);
+      await pumpDevices(tester, status: ServiceStatus.connecting);
       expect(
         find.textContaining('正在查询…', findRichText: true),
-        findsNothing,
+        findsNWidgets(4),
       );
-      expect(find.textContaining('离线', findRichText: true), findsNWidgets(4));
       await unmount(tester);
     }, variant: _windows);
 
@@ -149,40 +159,44 @@ void main() {
       await unmount(tester);
     }, variant: _windows);
 
-    testWidgets('arrow keys from the empty box, then Enter, connect a row', (
-      tester,
-    ) async {
-      await pumpDevices(tester);
-      await tester.tap(find.byType(EditableText));
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-      expect(nav.connects, isEmpty, reason: 'nothing is current yet');
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-      expect(nav.connects, [(id: '234567891', forceRelay: false)]);
-      await unmount(tester);
-    }, variant: _windows);
+    testWidgets(
+      'arrow keys from the empty box, then Enter, connect a row',
+      (tester) async {
+        await pumpDevices(tester);
+        await tester.tap(find.byType(EditableText));
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        expect(nav.connects, isEmpty, reason: 'nothing is current yet');
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        expect(nav.connects, [(id: '234567891', forceRelay: false)]);
+        await unmount(tester);
+      },
+      variant: _windows,
+    );
 
-    testWidgets('the current device stays when Rust pushes the list again', (
-      tester,
-    ) async {
-      final semantics = tester.ensureSemantics();
-      await pumpDevices(tester);
-      await tester.tap(find.byType(EditableText));
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-      await tester.pump();
-      expect(isCurrent(tester, 'LAPTOP-MAMA'), isTrue);
+    testWidgets(
+      'the current device stays when Rust pushes the list again',
+      (tester) async {
+        final semantics = tester.ensureSemantics();
+        await pumpDevices(tester);
+        await tester.tap(find.byType(EditableText));
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+        await tester.pump();
+        expect(isCurrent(tester, 'LAPTOP-MAMA'), isTrue);
 
-      // A session in another tab reconnected: its device moved to the top.
-      await loadRecent([_recent[3], _recent[0], _recent[1], _recent[2]]);
-      await tester.pump();
-      expect(isCurrent(tester, 'LAPTOP-MAMA'), isTrue);
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-      expect(nav.connects, [(id: '234567891', forceRelay: false)]);
-      await unmount(tester);
-      semantics.dispose();
-    }, variant: _windows);
+        // A session in another tab reconnected: its device moved to the top.
+        await loadRecent([_recent[3], _recent[0], _recent[1], _recent[2]]);
+        await tester.pump();
+        expect(isCurrent(tester, 'LAPTOP-MAMA'), isTrue);
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        expect(nav.connects, [(id: '234567891', forceRelay: false)]);
+        await unmount(tester);
+        semantics.dispose();
+      },
+      variant: _windows,
+    );
   });
 
   group('connect box (01 P1 block E, Q2)', () {
@@ -259,28 +273,30 @@ void main() {
       await unmount(tester);
     }, variant: _windows);
 
-    testWidgets('Enter on the help button opens the help, not a connection', (
-      tester,
-    ) async {
-      await pumpDevices(tester);
-      await type(tester, '6789');
-      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
-      await tester.pump();
-      final focused = FocusManager.instance.primaryFocus!.context!;
-      expect(
-        find.ancestor(
-          of: find.byElementPredicate((e) => e == focused),
-          matching: find.bySemanticsLabel('帮助'),
-        ),
-        findsOneWidget,
-        reason: 'Tab leaves the box for the help button',
-      );
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-      await tester.pump();
-      expect(nav.connects, isEmpty);
-      expect(find.text('可输入'), findsOneWidget);
-      await unmount(tester);
-    }, variant: _windows);
+    testWidgets(
+      'Enter on the help button opens the help, not a connection',
+      (tester) async {
+        await pumpDevices(tester);
+        await type(tester, '6789');
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        await tester.pump();
+        final focused = FocusManager.instance.primaryFocus!.context!;
+        expect(
+          find.ancestor(
+            of: find.byElementPredicate((e) => e == focused),
+            matching: find.bySemanticsLabel('帮助'),
+          ),
+          findsOneWidget,
+          reason: 'Tab leaves the box for the help button',
+        );
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pump();
+        expect(nav.connects, isEmpty);
+        expect(find.text('可输入'), findsOneWidget);
+        await unmount(tester);
+      },
+      variant: _windows,
+    );
 
     testWidgets('arrow keys move, Esc goes back to the default', (
       tester,
@@ -313,10 +329,7 @@ void main() {
       await tester.tap(find.bySemanticsLabel('连接方式'));
       await tester.pump();
       expect(find.text('远程桌面'), findsOneWidget);
-      expect(
-        find.text('今后连接此设备将始终经中继。可在设备菜单中取消“始终经中继连接”。'),
-        findsOneWidget,
-      );
+      expect(find.text('今后连接此设备将始终经中继。可在设备菜单中取消“始终经中继连接”。'), findsOneWidget);
       await tester.tap(find.text('经中继连接'));
       await tester.pump();
       expect(nav.connects, [(id: '246813579', forceRelay: true)]);

@@ -75,7 +75,8 @@ class ConnectBoxSearch {
     final userHost = input.trim().toLowerCase();
     // `user@host` copied from a row is that device, not `‹ID›@‹server›`.
     final exact = matches.indexWhere((p) =>
-        p.id == id || (userHost.isNotEmpty && peerUserHost(p).toLowerCase() == userHost));
+        p.id == id ||
+        (userHost.isNotEmpty && peerUserHost(p).toLowerCase() == userHost));
     if (exact >= 0) return exact + 1;
     if (looksLikeAddress(input) || matches.isEmpty) return 0;
     return 1;

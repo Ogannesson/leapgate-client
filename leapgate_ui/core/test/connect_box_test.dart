@@ -86,7 +86,8 @@ void main() {
 
     test('an exact ID wins over earlier partial matches', () {
       final s = ConnectBoxSearch('345678912', peers);
-      expect(s.defaultRow, s.matches.indexWhere((p) => p.id == '345678912') + 1);
+      expect(
+          s.defaultRow, s.matches.indexWhere((p) => p.id == '345678912') + 1);
     });
 
     test('looks like an address: "Connect to" even with matches', () {
@@ -108,8 +109,7 @@ void main() {
       expect(s.defaultRow, 0);
     });
 
-    test('a whole user@host copied from a row: that device, not ID@server',
-        () {
+    test('a whole user@host copied from a row: that device, not ID@server', () {
       final peers = [
         peer('123456789', username: 'zhangsan', hostname: 'DESKTOP-SHUFANG'),
         peer('234567891', username: 'zhangsan', hostname: 'OFFICE-PC01'),

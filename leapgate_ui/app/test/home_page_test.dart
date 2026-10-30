@@ -93,7 +93,8 @@ void main() {
       await tester.pump();
       expect(find.text('一次性密码'), findsOneWidget);
       expect(find.text('a1b2c3'), findsOneWidget);
-      expect(_passwordCopy,findsOneWidget);
+      expect(_passwordCopy, findsOneWidget);
+      expect(find.bySemanticsLabel('复制密码'), findsOneWidget);
       expect(find.text('也可使用固定密码'), findsNothing);
       await unmount(tester);
     });
@@ -104,7 +105,7 @@ void main() {
       expect(find.text('一次性密码'), findsOneWidget);
       expect(find.text('a1b2c3'), findsOneWidget);
       expect(find.text('也可使用固定密码'), findsOneWidget);
-      expect(_passwordCopy,findsOneWidget);
+      expect(_passwordCopy, findsOneWidget);
       await unmount(tester);
     });
 
@@ -116,7 +117,7 @@ void main() {
       expect(find.text('固定密码'), findsOneWidget);
       expect(find.text('已设置'), findsOneWidget);
       expect(find.text('a1b2c3'), findsNothing);
-      expect(_passwordCopy,findsNothing);
+      expect(_passwordCopy, findsNothing);
       await unmount(tester);
     });
 
@@ -125,7 +126,7 @@ void main() {
       await tester.pump();
       expect(find.text('审批方式'), findsOneWidget);
       expect(find.text('需在本机接受连接请求'), findsOneWidget);
-      expect(_passwordCopy,findsNothing);
+      expect(_passwordCopy, findsNothing);
       await unmount(tester);
     });
 
@@ -135,7 +136,7 @@ void main() {
       expect(find.text('一次性密码'), findsOneWidget);
       expect(find.text('不可用'), findsOneWidget);
       expect(find.text('a1b2c3'), findsNothing);
-      expect(_passwordCopy,findsNothing);
+      expect(_passwordCopy, findsNothing);
       await unmount(tester);
     });
 
@@ -164,6 +165,9 @@ void main() {
         find.descendant(of: find.byType(PasswordRowView), matching: idCopy),
         findsNothing,
       );
+      // Shown as "复制" twice; read out as what each copies.
+      expect(find.bySemanticsLabel('复制 ID'), findsOneWidget);
+      expect(find.bySemanticsLabel('复制'), findsNothing);
       await tester.tap(idCopy);
       await tester.pump();
       expect(clipboard.text, '135792468');

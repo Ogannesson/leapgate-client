@@ -5,7 +5,6 @@ import '../../icons/lg_icon.dart';
 import '../../l10n/app_localizations.dart';
 import '../../shell/navigation.dart';
 import '../../theme/lg_tokens.dart';
-import '../../widgets/lg_button.dart';
 import '../../widgets/lg_pressable.dart';
 import '../../widgets/lg_status.dart';
 import 'devices_page.dart';
@@ -182,10 +181,10 @@ class _SideColumn extends StatelessWidget {
                                   child: _IdGroups(status.id),
                                 ),
                               ),
-                              LgButton(
+                              CopyButton(
                                 label: l10n.homeCopy,
-                                kind: LgButtonKind.text,
-                                onPressed: () => copyWithToast(status.id),
+                                semanticLabel: l10n.homeCopyId,
+                                text: status.id,
                               ),
                             ],
                           ),

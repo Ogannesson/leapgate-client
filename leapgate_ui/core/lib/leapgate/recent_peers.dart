@@ -12,7 +12,9 @@ import '../models/platform_model.dart';
 class RecentPeers extends Peers {
   RecentPeers()
       : super(
-            name: 'recent', loadEvent: 'load_recent_peers', getInitPeers: null) {
+            name: 'recent',
+            loadEvent: 'load_recent_peers',
+            getInitPeers: null) {
     // Run after `Peers`' own handlers, which registered first under [name].
     platformFFI.registerEventHandler(loadEvent, _handler, (evt) async {
       if (!loaded) {

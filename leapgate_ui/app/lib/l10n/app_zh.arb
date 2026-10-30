@@ -27,6 +27,8 @@
   "homePasswordUnavailable": "不可用",
   "homeAlsoPermanentPassword": "也可使用固定密码",
   "homeCopy": "复制",
+  "homeCopyId": "复制 ID",
+  "homeCopyPassword": "复制密码",
   "connectBoxPlaceholder": "输入 ID 或搜索设备",
   "connectBoxConnect": "连接",
   "connectBoxConnectTo": "连接到 {input}",

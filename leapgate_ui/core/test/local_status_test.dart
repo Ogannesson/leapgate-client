@@ -26,8 +26,7 @@ class _StatusBind implements RustdeskImpl {
       options[key] ?? '';
 
   @override
-  dynamic noSuchMethod(Invocation invocation) =>
-      super.noSuchMethod(invocation);
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
 void main() {

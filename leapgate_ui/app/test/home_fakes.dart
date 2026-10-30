@@ -47,11 +47,12 @@ class FakeNavigation implements MainNavigation {
   final connects = <({String id, bool forceRelay})>[];
 
   @override
-  void connect(String id,
-          {String password = '',
-          bool isSharedPassword = false,
-          bool forceRelay = false}) =>
-      connects.add((id: id, forceRelay: forceRelay));
+  void connect(
+    String id, {
+    String password = '',
+    bool isSharedPassword = false,
+    bool forceRelay = false,
+  }) => connects.add((id: id, forceRelay: forceRelay));
 
   @override
   void showHome({bool focusConnectBox = false, String? connectBoxText}) {}

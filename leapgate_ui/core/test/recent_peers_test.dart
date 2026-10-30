@@ -44,8 +44,7 @@ void main() {
       expect(recent.peers.map((p) => p.id), ['123456789', '234567891']);
     });
 
-    test('a device has no online state until a query answers for it',
-        () async {
+    test('a device has no online state until a query answers for it', () async {
       await platformFFI.tryHandle({
         'name': 'load_recent_peers',
         'peers': jsonEncode([
@@ -70,7 +69,8 @@ void main() {
   });
 
   group('OnlineQuery (peers_view.dart:313-346)', () {
-    test('asks for the rows on screen once they stood for a second, '
+    test(
+        'asks for the rows on screen once they stood for a second, '
         'then every 6 s while active', () {
       fakeAsync((async) {
         final asked = <List<String>>[];
@@ -118,8 +118,8 @@ void main() {
   });
 
   test('the row name: alias, host name, then the formatted ID', () {
-    expect(peerDisplayName(peer('123456789', alias: '书房', hostname: 'PC')),
-        '书房');
+    expect(
+        peerDisplayName(peer('123456789', alias: '书房', hostname: 'PC')), '书房');
     expect(peerDisplayName(peer('123456789', hostname: 'PC')), 'PC');
     expect(peerDisplayName(peer('123456789')), '123 456 789');
     expect(formatPeerId('1234567890'), '1 234 567 890');

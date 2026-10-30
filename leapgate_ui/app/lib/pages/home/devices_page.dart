@@ -47,7 +47,7 @@ class DevicesPage extends StatefulWidget {
   final TextEditingController controller;
   final FocusNode focusNode;
 
-  /// Whether this device reaches the server, which answers the online queries.
+  /// Whether the server, which answers the online queries, is out of reach.
   final LocalStatusModel status;
 
   @override
@@ -135,7 +135,10 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
 
   /// The rows in order: [_connectToRow] first while searching, then device IDs.
   List<String> _rowIds(ConnectBoxSearch? search) => search == null
-      ? [if (_recent.loaded) for (final p in _recent.peers) p.id]
+      ? [
+          if (_recent.loaded)
+            for (final p in _recent.peers) p.id,
+        ]
       : [_connectToRow, for (final p in search.matches) p.id];
 
   /// Where the current row is now; the default once its device is no longer listed.
@@ -168,8 +171,8 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
     final row = _currentRow(search);
     if (row == null && by < 0) return;
     setState(
-      () => _current =
-          ids[row == null ? 0 : (row + by).clamp(0, ids.length - 1)],
+      () =>
+          _current = ids[row == null ? 0 : (row + by).clamp(0, ids.length - 1)],
     );
   }
 
@@ -303,11 +306,14 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
     }
     final peers = search?.matches ?? _recent.peers;
     final offset = search == null ? 0 : 1;
-    final serverReady = widget.status.status == ServiceStatus.ready;
+    // The UI process asks the server itself, service or not; only an unreachable server leaves
+    // the query unanswered.
+    final serverUnreachable = widget.status.status == ServiceStatus.notReady;
     return ListView.builder(
       // Rows only exist on screen, so the rows that ask for online state are the visible ones.
       scrollCacheExtent: const ScrollCacheExtent.pixels(0),
-      itemCount: peers.length + offset + (search != null && peers.isEmpty ? 1 : 0),
+      itemCount:
+          peers.length + offset + (search != null && peers.isEmpty ? 1 : 0),
       itemBuilder: (context, i) {
         if (search != null && i == 0) {
           return _ConnectToRow(
@@ -328,7 +334,8 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
           peer: peer,
           // Rust answers no query while the server is out of reach
           // (`src/client.rs` `query_online_states`): offline, not "checking" forever.
-          status: serverReady && !_recent.hasOnlineState(peer.id)
+          // "Connecting" (the state at start) and a stopped service still ask.
+          status: !serverUnreachable && !_recent.hasOnlineState(peer.id)
               ? (LgStatus.querying, l10n.recentQuerying)
               : peer.online
               ? (LgStatus.online, l10n.recentOnline)
@@ -459,9 +466,10 @@ class _DeviceRowState extends State<_DeviceRow> {
                         style: t.text.copyWith(fontWeight: FontWeight.w700),
                       ),
                       Text(
-                        [formatPeerId(peer.id), userHost]
-                            .where((s) => s.isNotEmpty)
-                            .join('  '),
+                        [
+                          formatPeerId(peer.id),
+                          userHost,
+                        ].where((s) => s.isNotEmpty).join('  '),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: t.textS.copyWith(color: c.text2),
@@ -479,7 +487,10 @@ class _DeviceRowState extends State<_DeviceRow> {
                 ),
                 if (_hovered) ...[
                   const SizedBox(width: LgSpace.s3),
-                  LgButton(label: widget.connectLabel, onPressed: widget.onConnect),
+                  LgButton(
+                    label: widget.connectLabel,
+                    onPressed: widget.onConnect,
+                  ),
                 ],
               ],
             ),

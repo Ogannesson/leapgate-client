@@ -27,6 +27,8 @@
   "homePasswordUnavailable": "Unavailable",
   "homeAlsoPermanentPassword": "Permanent password also accepted",
   "homeCopy": "Copy",
+  "homeCopyId": "Copy ID",
+  "homeCopyPassword": "Copy password",
   "connectBoxPlaceholder": "Enter an ID or search devices",
   "connectBoxConnect": "Connect",
   "connectBoxConnectTo": "Connect to {input}",

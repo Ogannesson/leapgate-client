@@ -34,8 +34,7 @@ class PasswordRowView extends StatelessWidget {
       PasswordRow.unavailable => l10n.homePasswordUnavailable,
       _ => password.isEmpty ? l10n.idGenerating : password,
     };
-    final dim =
-        row == PasswordRow.permanent || row == PasswordRow.unavailable;
+    final dim = row == PasswordRow.permanent || row == PasswordRow.unavailable;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -52,10 +51,10 @@ class PasswordRowView extends StatelessWidget {
               ),
             ),
             if (showsPassword && password.isNotEmpty)
-              LgButton(
+              CopyButton(
                 label: l10n.homeCopy,
-                kind: LgButtonKind.text,
-                onPressed: () => copyWithToast(password),
+                semanticLabel: l10n.homeCopyPassword,
+                text: password,
               ),
           ],
         ),
@@ -67,7 +66,40 @@ class PasswordRowView extends StatelessWidget {
       ],
     );
   }
+}
 
+/// "Copy" beside this device's ID or password. Both read "复制"; the semantic label says which,
+/// so Narrator and UI Automation tell them apart.
+class CopyButton extends StatelessWidget {
+  const CopyButton({
+    super.key,
+    required this.label,
+    required this.semanticLabel,
+    required this.text,
+  });
+
+  final String label;
+  final String semanticLabel;
+
+  /// What goes on the clipboard.
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      container: true,
+      button: true,
+      enabled: true,
+      label: semanticLabel,
+      onTap: () => copyWithToast(text),
+      excludeSemantics: true,
+      child: LgButton(
+        label: label,
+        kind: LgButtonKind.text,
+        onPressed: () => copyWithToast(text),
+      ),
+    );
+  }
 }
 
 /// "Copy" of this device's ID and password (01 P1 block A).
