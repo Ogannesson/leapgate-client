@@ -55,6 +55,22 @@ Widget _panel({
   ),
 );
 
+/// Presses Tab round the card: the focus visits the same controls again and
+/// again and never reaches [outside].
+Future<void> _expectTabLoop(WidgetTester tester, FocusNode outside) async {
+  final visited = <FocusNode>[];
+  for (var i = 0; i < 16; i++) {
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pump();
+    final node = FocusManager.instance.primaryFocus!;
+    expect(outside.hasFocus, isFalse, reason: 'Tab $i left the card');
+    visited.add(node);
+  }
+  // A whole round brings back the node the round began with.
+  expect(visited.toSet().length, lessThan(visited.length));
+  expect(visited.first, visited[visited.indexOf(visited.first, 1)]);
+}
+
 void main() {
   Future<void> bigSurface(WidgetTester tester) async {
     tester.view.physicalSize = const Size(1000, 640);
@@ -351,9 +367,97 @@ void main() {
         ),
       );
       await tester.tap(find.byType(TextField));
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      // The key is reported as handled, so the field does not submit as well.
+      expect(await tester.sendKeyEvent(LogicalKeyboardKey.enter), isTrue);
       await tester.pump();
       expect((connects, submits), (1, 0));
+    });
+
+    testWidgets(
+      'Enter on an option of the drop-down picks it, not the default',
+      (tester) async {
+        await bigSurface(tester);
+        String? picked;
+        var connects = 0;
+        await pumpLg(
+          tester,
+          _panel(
+            inputs: [
+              LgSelectField<String>(
+                semanticLabel: 'Windows 用户',
+                value: 'zhangsan',
+                items: const [
+                  LgSelectItem('zhangsan', 'zhangsan'),
+                  LgSelectItem('lisi', 'lisi'),
+                ],
+                onChanged: (v) => picked = v,
+              ),
+            ],
+            actions: [
+              LgPanelAction(
+                label: '连接',
+                primary: true,
+                isDefault: true,
+                onPressed: () => connects++,
+              ),
+            ],
+          ),
+        );
+        await tester.pump();
+        // Tab to the drop-down, Enter opens it, Down enters the menu and moves
+        // to the second option, Enter picks it.
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        await tester.pump();
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pumpAndSettle();
+        expect(find.text('lisi'), findsOneWidget);
+        expect(connects, 0);
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pumpAndSettle();
+        expect(picked, 'lisi');
+        expect(connects, 0);
+      },
+    );
+
+    testWidgets('Tab goes round the card and never out of it', (tester) async {
+      await bigSurface(tester);
+      final outside = FocusNode();
+      addTearDown(outside.dispose);
+      final controller = TextEditingController();
+      addTearDown(controller.dispose);
+      await pumpLg(
+        tester,
+        Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            LgButton(label: '标题栏上的按钮', focusNode: outside, onPressed: () {}),
+            _panel(
+              inputs: [
+                LgPasswordField(
+                  controller: controller,
+                  placeholder: '密码',
+                  showLabel: '显示密码',
+                  hideLabel: '隐藏密码',
+                ),
+                LgCheckbox(value: false, label: '记住密码', onChanged: (_) {}),
+              ],
+              actions: [
+                LgPanelAction(label: '取消', onPressed: () {}),
+                LgPanelAction(
+                  label: '连接',
+                  primary: true,
+                  isDefault: true,
+                  onPressed: () {},
+                ),
+              ],
+            ),
+          ],
+        ),
+      );
+      await tester.pump();
+      await _expectTabLoop(tester, outside);
     });
 
     testWidgets('with inputs the default button does not take the focus', (

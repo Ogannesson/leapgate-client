@@ -286,6 +286,87 @@ void main() {
       expect((cancels, ends), (0, 0));
     });
 
+    testWidgets(
+      'a destructive button that is not marked default does nothing',
+      (tester) async {
+        var cancels = 0, ends = 0;
+        final controller = TextEditingController();
+        addTearDown(controller.dispose);
+        await pumpLg(
+          tester,
+          host(
+            onBehind: () {},
+            children: [LgTextField(controller: controller)],
+            actions: [
+              LgDialogAction(label: '取消', onPressed: () => cancels++),
+              LgDialogAction(
+                label: '断开',
+                kind: LgButtonKind.dangerSolid,
+                onPressed: () => ends++,
+              ),
+            ],
+          ),
+        );
+        await tester.pumpAndSettle();
+        // Nothing has the focus yet, then the field has it: neither case runs
+        // a button.
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.tap(find.byType(TextField));
+        expect(await tester.sendKeyEvent(LogicalKeyboardKey.enter), isFalse);
+        await tester.pump();
+        expect((cancels, ends), (0, 0));
+      },
+    );
+
+    testWidgets('Tab goes round the dialog and never out of it', (
+      tester,
+    ) async {
+      final outside = FocusNode();
+      addTearDown(outside.dispose);
+      var checked = false;
+      await pumpLg(
+        tester,
+        StatefulBuilder(
+          builder: (context, setState) => Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              LgButton(label: '标题栏上的按钮', focusNode: outside, onPressed: () {}),
+              LgConfirmDialog(
+                title: '断开全部 2 个会话并关闭窗口？',
+                actions: [
+                  LgDialogAction(label: '取消', onPressed: () {}),
+                  LgDialogAction(
+                    label: '断开',
+                    kind: LgButtonKind.primary,
+                    isDefault: true,
+                    onPressed: () {},
+                  ),
+                ],
+                children: [
+                  LgCheckbox(
+                    value: checked,
+                    label: '不再提示',
+                    onChanged: (v) => setState(() => checked = v),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final visited = <FocusNode>[];
+      for (var i = 0; i < 12; i++) {
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        await tester.pump();
+        expect(outside.hasFocus, isFalse, reason: 'Tab $i left the dialog');
+        visited.add(FocusManager.instance.primaryFocus!);
+      }
+      // Three controls: the box and the two buttons, round and round.
+      expect(visited.toSet().length, 3);
+      expect(visited[0], visited[3]);
+    });
+
     testWidgets('Tab to another button, then Enter, is that button', (
       tester,
     ) async {
@@ -338,7 +419,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       await tester.tap(find.byType(TextField));
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      expect(await tester.sendKeyEvent(LogicalKeyboardKey.enter), isTrue);
       expect(ok, 1);
     });
 
@@ -428,6 +509,68 @@ void main() {
       expect(find.bySemanticsLabel('断开全部 2 个会话并关闭窗口？'), findsWidgets);
       expect(find.bySemanticsLabel('后面的按钮'), findsNothing);
       handle.dispose();
+    });
+
+    testWidgets('check box, radio and segment are named once, by their text', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      await pumpLg(
+        tester,
+        Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            LgCheckbox(value: false, label: '记住密码', onChanged: (_) {}),
+            LgRadio<int>(
+              value: 1,
+              groupValue: 0,
+              label: '在后台运行',
+              onChanged: (_) {},
+            ),
+            LgSegmented<int>(
+              segments: const [LgSegment(0, '鼠标模式'), LgSegment(1, '触控模式')],
+              selected: 0,
+              onChanged: (_) {},
+            ),
+          ],
+        ),
+      );
+      for (final label in ['记住密码', '在后台运行', '鼠标模式', '触控模式']) {
+        final nodes = find.bySemanticsLabel(label);
+        expect(nodes, findsOneWidget, reason: label);
+        expect(tester.getSemantics(nodes).label, label);
+      }
+      handle.dispose();
+    });
+
+    testWidgets('a notice with buttons is bold, one without is not', (
+      tester,
+    ) async {
+      FontWeight? weight(String text) {
+        final span = tester.widget<Text>(find.textContaining(text)).textSpan!;
+        FontWeight? found;
+        span.visitChildren((s) {
+          if (s is TextSpan && (s.text ?? '').contains(text)) {
+            found = s.style?.fontWeight;
+          }
+          return true;
+        });
+        return found;
+      }
+
+      await pumpLg(
+        tester,
+        LgNoticeStack(
+          notices: [
+            _notice('a', actions: [LgNoticeAction('另存为', () {})]),
+            _notice('b'),
+          ],
+          dismissLabel: '关闭',
+          onDismiss: (_) {},
+        ),
+      );
+      expect(weight('通知 a'), FontWeight.w700);
+      expect(weight('通知 b'), isNull);
     });
 
     testWidgets('two buttons that read alike are named apart', (tester) async {

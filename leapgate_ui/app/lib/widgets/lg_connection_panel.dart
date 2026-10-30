@@ -299,7 +299,13 @@ class LgConnectionPanel extends StatelessWidget {
       container: true,
       explicitChildNodes: true,
       label: semanticLabel ?? title,
-      child: LgDefaultEnter(onEnter: defaultAction?.onPressed, child: body),
+      child: LgDefaultEnter(
+        onEnter: defaultAction?.onPressed,
+        // Tab goes round the card and never out to what is under or around it
+        // (the toolbar, the title bar); the scope takes the focus when the
+        // card appears.
+        child: FocusScope(autofocus: true, child: body),
+      ),
     );
   }
 }
