@@ -14,6 +14,8 @@ dependencies:
   flutter_localizations:
     sdk: flutter
   intl: any
+  # The session page's copies from upstream (pages/session/) keep its Rx state; same as core.
+  get: ^4.6.5
   flutter_hbb:
     path: ../core
   # Same fork and ref as flutter/pubspec.yaml (docs/新界面/03-实施方案.md §1.6)

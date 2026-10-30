@@ -134,7 +134,12 @@ class FFI {
   /// Upstream `FFI.start` without the tab-to-window path, plus the model setup upstream's pages
   /// did around it (`desktop/pages/remote_page.dart:160-165`, `:198`,
   /// `desktop/pages/view_camera_page.dart:105-110`, `:130`).
-  void start({bool forceRelay = false, String? connToken}) {
+  void start(
+      {bool forceRelay = false,
+      String? connToken,
+      String password = '',
+      bool isSharedPassword = false,
+      String switchUuid = ''}) {
     if (connType == ConnType.defaultConn) {
       canvasModel.id = id;
       imageModel.id = id;
@@ -159,10 +164,10 @@ class FFI {
           connType == ConnType.portForward || connType == ConnType.rdp,
       isRdp: connType == ConnType.rdp,
       isTerminal: connType == ConnType.terminal,
-      switchUuid: '',
+      switchUuid: switchUuid,
       forceRelay: forceRelay,
-      password: '',
-      isSharedPassword: false,
+      password: password,
+      isSharedPassword: isSharedPassword,
       connToken: connToken,
     );
     if (isDesktop && _hasImage) {
@@ -258,6 +263,42 @@ class FFI {
           recordSelection: false, updateCursorPos: false);
     }
   }
+
+  // The session toolbar's actions (01 §3.2 block B), with the bridge calls and the conditions of
+  // upstream's toolbar (`common/widgets/toolbar.dart`).
+
+  /// "Original size" and "Fit to window" (`toolbar.dart:799-811`); the canvas follows.
+  Future<void> setViewStyle(String style) async {
+    await bind.sessionSetViewStyle(sessionId: sessionId, value: style);
+    await canvasModel.updateViewStyle();
+  }
+
+  /// One of `kRemoteImageQuality*`; '' before Rust has one (`toolbar.dart:833-840`).
+  Future<String> getImageQuality() async =>
+      await bind.sessionGetImageQuality(sessionId: sessionId) ?? '';
+
+  Future<void> setImageQuality(String value) =>
+      bind.sessionSetImageQuality(sessionId: sessionId, value: value);
+
+  /// Upstream shows "Insert Ctrl + Alt + Del" only on these terms (`toolbar.dart:638-648`).
+  bool get canSendCtrlAltDel =>
+      connType == ConnType.defaultConn &&
+      !ffiModel.viewOnly &&
+      ffiModel.keyboard &&
+      (ffiModel.pi.platform == kPeerPlatformLinux || ffiModel.pi.sasEnabled);
+
+  void sendCtrlAltDel() => bind.sessionCtrlAltDel(sessionId: sessionId);
+
+  /// `toolbar.dart:650-661`.
+  bool get canRestartRemoteDevice =>
+      connType == ConnType.defaultConn &&
+      ffiModel.permissions['restart'] != false &&
+      const [kPeerPlatformLinux, kPeerPlatformWindows, kPeerPlatformMacOS]
+          .contains(ffiModel.pi.platform);
+
+  /// After the user confirmed (`common/widgets/dialog.dart:1403-1431`).
+  void restartRemoteDevice() =>
+      bind.sessionRestartRemoteDevice(sessionId: sessionId);
 
   /// Upstream `FFI.close`, plus the model cleanup upstream's pages did before it, now that the
   /// pages no longer close sessions: `FileModel.close` (`desktop/pages/file_manager_page.dart:125`)

@@ -6,10 +6,12 @@ abstract class MainNavigation {
   /// Opens the remote desktop view of [id], or switches to its tab when it is already open
   /// (01 §4.1 stage 1). [id] is as typed: spaces and a `/r` suffix (which turns into
   /// [forceRelay]) are handled here, the way upstream `common.dart` `connect` does.
+  /// [switchUuid] comes only with a link (switch sides).
   void connect(String id,
       {String password = '',
       bool isSharedPassword = false,
-      bool forceRelay = false});
+      bool forceRelay = false,
+      String switchUuid = ''});
 
   /// Switches to the home tab. With [focusConnectBox] the cursor goes into the connect box
   /// ("+" on the title bar, 01 §2.1); [connectBoxText], when given, replaces its text, all
