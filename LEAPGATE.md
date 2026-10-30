@@ -544,6 +544,29 @@ Leapgate 自己的文件里和挂钩配套的：`report/heartbeat.rs` 在开关�
 - 新界面首次启动时不处理自己命令行里的链接（只开旧界面时跑新界面的 `--connect`，新界面起来了，但没有接这个链接）；`--connect` 交给已有主窗口后窗口不到前台。都随 M2a 的连接入口做。
 - 每启动一次辅助进程（第二个实例、`--connect`），日志文件 `leapgate_rCURRENT.log` 都会被改名换新，常驻进程接着写改名后的文件（上游行为），读日志要扫全部文件。
 
+#### M1 core 第一批（2026-10-31，`951605d69`）
+
+范围是 03 §3.5 第 2~5 步（第 1 步随 M0 做了），分四块：A 结构、D 选项 model、B 复制上游 models、C 连接状态，结构和取舍见 10.6、10.7。同期合入的 Rust 导出：C3 原因码、V1 标签可见性（10.4）。审查做了三路：B 单独一轮；C 的连接状态一轮；M1 整体衔接加 C3、V1 一轮。必须改的都改了，可以不改的按 10.6 记成已知限制或留给后面的块。
+
+03 §5.2 M1 的验收：
+
+| 项 | 结果 |
+|---|---|
+| §3.4 每一条都有回放测试并通过 | 通过。对照表在 10.6；core 66 个测试全过。连接状态几处关键的复位和判断，逐个去掉后都有测试失败 |
+| `core` 不引用 `app` | 通过。core 的 pubspec 不依赖 `leapgate_ui`，`lib/` 里没有 `package:leapgate_ui` |
+| `flutter analyze` 相对上游原件没有新告警 | 通过。3.44.9 下 core 是 92 条 info，全在复制件里（`input_model` 71、`model` 9、`relative_mouse_model` 6、`local_flutter_shortcuts` 5、`file_model` 1），抽查过和上游原件同一位置的提示一致；改写和新写的文件 0 条。app 0 条 |
+| "只删界面调用"那一档和上游原件的差异只有界面调用和导入 | 通过。B 的审查逐个复制件比过，整体审查又抽查了 4 个；允许的偏离（快捷键暂删、`kWindowId` 判断、按会话记的状态、`desktop_render_texture` 一行）都写在文件头的来源行和 10.6 里 |
+
+Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcodec,vram,flutter` 做 `cargo check` 通过（C3、V1 合入时）。`git diff main HEAD -- flutter/` 为空。
+
+最新 stable 检查（03 §8.8）：Flutter 3.47.9（2026-10-29，仍是当时最新的 stable），官方 SDK、官方引擎、Impeller 默认开。检查做在 `b3f94489a` 上；之后的 `951605d69` 只改了 core 的 Dart 和 `reason.rs`，在 3.44.9 下重跑过测试和 analyze。
+1. 按 `-Ui leapgate` 编一次：通过。`pub get` 改了锁文件里的几个基础包（app 5 个：intl、matcher、meta、test_api、vector_math；core 4 个，没有 intl），检查完已还原，不提交。
+2. 组件画廊：通过。两版各导出 352 张，逐张比较，差异在抗锯齿级别；能看出来的两处和 M0 相同：菜单面板的 elevation 阴影在 Impeller 下略深，标签溢出那几张截图时滚动动画还没走完。
+3. 4K 上屏：不适用，M2a 起才有会话页。
+4. `flutter analyze`：app 没有问题；core 是 97 条，比 3.44.9 多出 5 条 warning `unawaited_return_in_try_block`，在复制件 `models/file_model.dart` 的 :1466、:1486、:1492、:1501、:1518。这 5 行和上游原件逐字相同，属于上游带来的提示，按 10.1 不改，等上游改了随三方合并带过来。因为是 warning，3.47.9 下 core 的 `flutter analyze --no-fatal-infos` 退出码不是 0；拿退出码当关卡时要知道这一点。新写和改写的文件没有新提示，也没有废弃提示。core 61 个、app 33 个测试（另跳过 1 个）在 3.47.9 下都通过。
+
+留给后面的块的，都写在 10.6：截图、打印、`switch_back`、聊天和语音事件随 M2b；`cm_file_model` 和 CM 的全局事件随 M3；`shortcut_model` 改写时补回暂删的几行；V1 接入时要处理 1.5 秒唤醒；01 §4.1 的"查找设备""建立连接"合成一步。
+
 ### 10.6 core 的结构（M1）
 
 03 §3.3 第 1、2、4、5、6、8 条在 `core/lib/leapgate/` 落成下面几个文件，复制进来的 models 和改写的 `FfiModel` 接在这上面。
