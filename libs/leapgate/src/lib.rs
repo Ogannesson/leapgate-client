@@ -9,6 +9,7 @@ pub mod ice;
 pub mod lan;
 pub mod lang;
 pub mod options;
+pub mod reason;
 pub mod rendezvous;
 pub mod report;
 pub mod route;
