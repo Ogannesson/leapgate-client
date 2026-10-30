@@ -10,7 +10,8 @@ import '../../l10n/app_localizations.dart';
 import '../../widgets/lg_banner.dart';
 import '../../widgets/lg_feedback.dart';
 
-/// At most this many notices show; later ones wait (01 P2 block E).
+/// At most this many notices show, later ones wait (01 P2 block E): [LgNoticeStack] draws this
+/// many, and a waiting notice starts its time only when it shows.
 const kVisibleNotices = 3;
 
 /// A notice without buttons goes after this long (01 P2 block E "几秒后自己消失").
@@ -105,7 +106,6 @@ class _SessionNoticesViewState extends State<SessionNoticesView> {
     final items = _notices.items;
     // Notices with buttons (screenshot, printing, elevation) come with M2b.
     return LgNoticeStack(
-      maxVisible: kVisibleNotices,
       dismissLabel: l10n.close,
       notices: [
         for (final n in items)

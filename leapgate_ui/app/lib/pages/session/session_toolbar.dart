@@ -148,6 +148,8 @@ class _SessionToolbarState extends State<SessionToolbar> {
     final fullscreen = stateGlobal.fullscreen.isTrue;
     final conn = _ffi.connection;
     final pi = _ffi.ffiModel.pi;
+    // Shown from "waiting for the image" on (01 P2 block A); before that the folded bar has no dot.
+    final shown = showsRoute(conn);
     final route = conn.direct == true ? LgRoute.direct : LgRoute.relay;
     final routeLabel =
         conn.direct == true ? l10n.sessionDirect : l10n.sessionRelayed;
@@ -184,8 +186,8 @@ class _SessionToolbarState extends State<SessionToolbar> {
       onMinimize: windowManager.minimize,
       deviceName: deviceName(_ffi),
       deviceId: _ffi.id,
-      route: route,
-      routeLabel: routeLabel,
+      route: shown ? route : null,
+      routeLabel: shown ? routeLabel : null,
       encrypted: encrypted,
       unencryptedLabel: l10n.sessionUnencrypted,
       groups: [
@@ -252,7 +254,7 @@ class _SessionToolbarState extends State<SessionToolbar> {
               items: actions,
             ),
         ],
-        if (showsRoute(conn))
+        if (shown)
           [
             LgTooltip(
               message: encrypted

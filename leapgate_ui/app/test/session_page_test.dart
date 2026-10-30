@@ -488,6 +488,23 @@ void main() {
     });
   });
 
+  testMainWindow('a panel in a tab out of sight does not take the focus', (tester) async {
+    await pumpMainWindow(tester);
+    final a = await _open(tester);
+    final b = await _open(tester, id: '400500600');
+    await emit(tester, fakes, b, connectionReady());
+    await emit(tester, fakes, b, peerInfo());
+
+    // A's insecure warning comes up while B, connected, is in front.
+    await emit(tester, fakes, a,
+        msgbox('custom-nocancel-nook-hasclose-insecure-connection', '', ''));
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    expect(callsTo(fakes, #sessionSetCommon), isEmpty);
+    expect(appCore.sessions.devices, [_id, '400500600']);
+  });
+
   testMainWindow('a tab out of sight gets no frames, shown again it asks for one (V1)',
       (tester) async {
     await pumpMainWindow(tester);
