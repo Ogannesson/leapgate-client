@@ -148,5 +148,46 @@
   "closingBackgroundDetail": "The service and exit nodes in use keep running. Start Leapgate again to restore the window.",
   "closingRemember": "Remember this choice",
   "closingDisconnect": "Disconnect",
-  "closingClose": "Close"
+  "closingClose": "Close",
+  "homeOneTimePassword": "One-time password",
+  "homePermanentPassword": "Permanent password",
+  "homeApprovalMode": "Approval mode",
+  "homePasswordSet": "Configured",
+  "homeAcceptOnThisDevice": "Connection requests must be accepted on this device",
+  "homePasswordUnavailable": "Unavailable",
+  "homeAlsoPermanentPassword": "Permanent password also accepted",
+  "homeCopy": "Copy",
+  "homeCopyId": "Copy ID",
+  "homeCopyPassword": "Copy password",
+  "connectBoxPlaceholder": "Enter an ID or search devices",
+  "connectBoxConnect": "Connect",
+  "connectBoxConnectTo": "Connect to {input}",
+  "@connectBoxConnectTo": {
+    "placeholders": {
+      "input": {
+        "type": "String"
+      }
+    }
+  },
+  "connectBoxConnectionType": "Connection type",
+  "connectBoxRemoteDesktop": "Remote desktop",
+  "connectBoxDefault": "Default",
+  "connectBoxViaRelay": "Connect via relay",
+  "connectBoxViaRelayNote": "This device will always be connected via relay from now on. You can turn off “Always connect via relay” in the device menu.",
+  "connectBoxHelp": "Help",
+  "connectBoxHelpTitle": "You can enter",
+  "connectBoxHelpId": "Device ID",
+  "connectBoxHelpIp": "IP address (direct)",
+  "connectBoxHelpDomain": "Domain:port",
+  "connectBoxHelpServer": "ID@server",
+  "connectBoxHelpKey": "For a device on another server, add that server's key after its address: ‹ID›@‹server›?key=‹key›.",
+  "connectBoxHelpRelay": "Add “/r” after the ID to connect via relay. This device will then always be connected via relay.",
+  "connectBoxSearchResults": "Search results",
+  "connectBoxNoMatch": "No matching devices",
+  "recentCategory": "Recent",
+  "recentEmpty": "No recent devices",
+  "recentLoading": "Loading…",
+  "recentOnline": "Online",
+  "recentOffline": "Offline",
+  "recentQuerying": "Checking…"
 }
