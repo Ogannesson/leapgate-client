@@ -19,12 +19,12 @@ const _help = LgHelpContent(
 Widget _bar(
   TextEditingController controller, {
   VoidCallback? onConnect,
-  ValueChanged<String>? onChanged,
   VoidCallback? onRelay,
 }) => SizedBox(
   width: 900,
-  child: StatefulBuilder(
-    builder: (context, setState) => LgConnectBar(
+  child: ListenableBuilder(
+    listenable: controller,
+    builder: (context, _) => LgConnectBar(
       controller: controller,
       placeholder: '输入 ID 或搜索设备',
       connectLabel: '连接',
@@ -37,10 +37,6 @@ Widget _bar(
       clearLabel: '清除',
       helpLabel: '输入说明',
       help: _help,
-      onChanged: (v) {
-        onChanged?.call(v);
-        setState(() {});
-      },
     ),
   ),
 );
@@ -74,8 +70,7 @@ void main() {
     ) async {
       final controller = TextEditingController();
       addTearDown(controller.dispose);
-      final changes = <String>[];
-      await pumpLg(tester, _bar(controller, onChanged: changes.add));
+      await pumpLg(tester, _bar(controller));
       final clear = find.byWidgetPredicate(
         (w) => w is LgIconButton && w.icon == LgIcons.x,
       );
@@ -86,7 +81,6 @@ void main() {
       await tester.tap(clear);
       await tester.pump();
       expect(controller.text, '');
-      expect(changes, ['6789', '']);
       expect(clear, findsNothing);
     });
 

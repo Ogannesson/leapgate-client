@@ -36,6 +36,7 @@ class AppFakeBind extends FakeBind {
       case #sessionSetImageQuality:
       case #sessionToggleOption:
       case #mainOnMainWindowClose:
+      case #queryOnlines:
         calls.add(invocation);
         return Future<void>.value();
       case #sessionEnterOrLeave:
@@ -94,6 +95,8 @@ AppFakes installAppFakes() {
   platformFFI.setBindingForTesting(bind);
   setLgBindForTesting(leapgate);
   appCore = AppCore(window: FakeWindow());
+  // Its event handlers are registered by name; the next test's AppCore needs the names free.
+  addTearDown(appCore.recentPeers.dispose);
   return (bind: bind, lg: leapgate, window: window);
 }
 

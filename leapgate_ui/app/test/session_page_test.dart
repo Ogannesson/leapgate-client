@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/session.dart';
+import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/models/state_model.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:leapgate_ui/shell/navigation.dart';
@@ -571,19 +572,65 @@ void main() {
     expect(appCore.sessions.devices, isEmpty);
   });
 
-  testMainWindow('"+" goes home and asks for the connect box', (tester) async {
+  testMainWindow('"+" goes home and focuses the connect box, keeping its text',
+      (tester) async {
     await pumpMainWindow(tester);
+    await tester.enterText(find.byType(EditableText), 'abc');
     await _open(tester);
-    var asked = 0;
-    void count() => asked++;
-    connectBoxFocusRequests.addListener(count);
-    addTearDown(() => connectBoxFocusRequests.removeListener(count));
 
     await tester.tap(find.bySemanticsLabel('新建连接'));
     await tester.pump();
-    expect(asked, 1);
-    expect(connectBoxFocusRequests.text, null);
-    expect(_mark('建立连接').hitTestable(), findsNothing);
+    await tester.pump();
+    final box = tester.widget<EditableText>(find.byType(EditableText));
+    expect(box.focusNode.hasPrimaryFocus, true);
+    expect(box.controller.text, 'abc');
+    expect(find.text('建立连接').hitTestable(), findsNothing);
+  });
+
+  testMainWindow('online queries stop while a session tab covers home, and resume',
+      (tester) async {
+    await pumpMainWindow(tester);
+    await platformFFI.tryHandle({
+      'name': 'load_recent_peers',
+      'peers': jsonEncode([
+        {'id': '111222333', 'alias': '', 'hostname': 'h', 'username': 'u',
+          'platform': 'Windows'}
+      ]),
+    });
+    await tester.pump(); // the row shows
+    await tester.pump(const Duration(seconds: 2));
+    final shown = fakes.bind.callsTo(#queryOnlines).length;
+    expect(shown, greaterThan(0));
+
+    await _open(tester);
+    final covered = fakes.bind.callsTo(#queryOnlines).length;
+    await tester.pump(const Duration(seconds: 20));
+    expect(fakes.bind.callsTo(#queryOnlines).length, covered);
+
+    mainNavigation.showHome();
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 7));
+    expect(fakes.bind.callsTo(#queryOnlines).length, greaterThan(covered));
+  });
+
+  testMainWindow('a password panel that came up behind another tab takes the focus on return',
+      (tester) async {
+    await pumpMainWindow(tester);
+    final s = await _open(tester);
+    mainNavigation.showHome();
+    await tester.pump();
+    await emit(tester, fakes, s, connectionReady());
+    await emit(tester, fakes, s, msgbox('input-password', 'Password Required', ''));
+
+    await tester.tap(find.text('100 200 300')); // its tab
+    await tester.pump();
+    await tester.pump();
+    final field = tester.widget<EditableText>(
+        find.byWidgetPredicate((w) => w is EditableText && w.obscureText));
+    expect(field.focusNode.hasPrimaryFocus, true);
+    // The image does not take the keyboard back on its own.
+    expect(callsTo(fakes, #sessionEnterOrLeave).where((c) => c[#enter] == true),
+        isEmpty);
   });
 
   testMainWindow('"/r" connects through the relay, the tab keyed by the ID', (tester) async {

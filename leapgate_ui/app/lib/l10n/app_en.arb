@@ -41,6 +41,7 @@
   "sessionNoticePrivacyPeerExit": "The remote device turned off privacy mode",
   "sessionNoticePrivacyTurnedOff": "Privacy mode was turned off",
   "sessionNoticeDisplayUnplugged": "A monitor of the remote device was disconnected. Switched to the main monitor.",
+  "sessionNoticeDismiss": "Dismiss notification",
   "sessionNoticeUac": "A User Account Control (UAC) prompt is showing on the remote device",
   "sessionNoticeWaitUac": "Waiting for the remote user to confirm…",
   "connConnectingTo": "Connecting to {name}…",

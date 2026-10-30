@@ -39,15 +39,12 @@ const String kAppTypeDesktopRemote = "remote";
 
 const String kOptionVerificationMethod = "verification-method";
 const String kOptionApproveMode = "approve-mode";
-
-const String kOptionTouchMode = "touch-mode";
-
-const String kOptionStopService = "stop-service";
-
 const String kOptionCollapseToolbar = "collapse_toolbar";
 const String kOptionZoomCursor = "zoom-cursor";
+const String kOptionTouchMode = "touch-mode";
 const String kOptionRemoteMenubarState = "remoteMenubarState";
 const String kOptionEnableConfirmClosingTabs = "enable-confirm-closing-tabs";
+const String kOptionStopService = "stop-service";
 
 const String kOptionToggleViewOnly = "view-only";
 
