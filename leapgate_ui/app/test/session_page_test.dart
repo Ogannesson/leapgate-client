@@ -398,6 +398,20 @@ void main() {
     });
   });
 
+  testMainWindow('a tab out of sight gets no frames, shown again it asks for one (V1)',
+      (tester) async {
+    await pumpMainWindow(tester);
+    final a = await _open(tester);
+    final b = await _open(tester, id: '400500600');
+    expect(fakes.lg.visible, [(a.sessionId, false)]);
+
+    await tester.tap(find.text('100 200 300'));
+    await tester.pump();
+    expect(fakes.lg.visible.skip(1),
+        unorderedEquals([(b.sessionId, false), (a.sessionId, true)]));
+    expect(callsTo(fakes, #sessionRefresh).single[#sessionId], a.sessionId);
+  });
+
   testMainWindow('"+" goes home and asks for the connect box', (tester) async {
     await pumpMainWindow(tester);
     await _open(tester);

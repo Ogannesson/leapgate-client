@@ -85,9 +85,12 @@ class _SessionPageState extends State<SessionPage>
   @override
   void didUpdateWidget(SessionPage old) {
     super.didUpdateWidget(old);
+    if (old.active == widget.active) return;
     // Switched away: release now, before the next tab can take the keyboard. Coming back does
     // not take it; the pointer entering or clicking the image does (§4 item 3).
-    if (old.active && !widget.active) _release();
+    if (!widget.active) _release();
+    // V1: no frames for a tab nobody sees (§4 item 7).
+    _ffi.setVisible(widget.active);
   }
 
   @override

@@ -403,12 +403,25 @@ class ConnectionModel with ChangeNotifier {
     }
     _waitForImageDialogShow = true;
     _waitForImageTimer?.cancel();
-    _waitForImageTimer = Timer(Duration(milliseconds: 1500), () {
-      if (ffiModel.waitForFirstImage.isTrue && !ffiModel.isRefreshing) {
-        bind.sessionInputOsPassword(sessionId: sessionId, value: '');
-      }
-    });
+    // V1: a hidden tab gets no frames; the wait starts when it shows (onVisibilityChanged).
+    if (parent.target!.visible) {
+      _waitForImageTimer = Timer(Duration(milliseconds: 1500), () {
+        if (ffiModel.waitForFirstImage.isTrue && !ffiModel.isRefreshing) {
+          bind.sessionInputOsPassword(sessionId: sessionId, value: '');
+        }
+      });
+    }
     bind.sessionOnWaitingForImageDialogShow(sessionId: sessionId);
+  }
+
+  /// The tab was hidden or shown (V1): hidden, the wake timer stops; shown while still waiting
+  /// for the first frame, the wait starts again.
+  void onVisibilityChanged() {
+    if (!parent.target!.visible) {
+      _waitForImageTimer?.cancel();
+    } else if (_stage == ConnStage.waitingForImage) {
+      showConnectedWaitingForImage();
+    }
   }
 
   // Called from where upstream dismissed or reset the connection dialogs.

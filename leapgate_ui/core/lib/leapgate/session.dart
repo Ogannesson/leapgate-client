@@ -14,6 +14,7 @@ import 'package:get/get.dart';
 import 'package:uuid/uuid.dart';
 
 import 'app_core.dart';
+import 'bridge.dart';
 import 'connection.dart';
 import 'notices.dart';
 import 'options.dart';
@@ -262,6 +263,21 @@ class FFI {
       openMonitorInTheSameTab(restore, this, ffiModel.pi,
           recordSelection: false, updateCursorPos: false);
     }
+  }
+
+  /// Whether the session's tab shows (V1, `LEAPGATE.md` §10.4).
+  bool get visible => _visible;
+  var _visible = true;
+
+  /// V1: a hidden tab gets no frames from Rust (still received and decoded); shown again, it
+  /// asks for a fresh frame. No frame while hidden is no reason to wake the remote screen, so
+  /// the connection's 1.5 s wake waits until the tab shows (`LEAPGATE.md` §10.6).
+  void setVisible(bool visible) {
+    if (visible == _visible) return;
+    _visible = visible;
+    lgBind.leapgateSessionSetVisible(sessionId: sessionId, visible: visible);
+    if (visible) sessionRefreshVideo(sessionId, ffiModel.pi);
+    connection.onVisibilityChanged();
   }
 
   // The session toolbar's actions (01 §3.2 block B), with the bridge calls and the conditions of
