@@ -17,6 +17,10 @@ sealed class Prompt<T> {
 
 /// A file being transferred already exists at the destination. Upstream:
 /// `models/file_model.dart:178` (`overrideFileConfirm`), dialog at `:217-290`.
+///
+/// Closed without an answer (null) counts as cancel, as upstream's Esc does. Upstream could
+/// also lose the dialog to a `dismissAll` from elsewhere and then read it as skip; nothing here
+/// closes a question that way.
 final class OverwritePrompt extends Prompt<OverwriteAnswer> {
   const OverwritePrompt({required this.path, required this.isIdentical});
 
@@ -42,9 +46,16 @@ enum DeleteKind {
 
 /// Confirms deleting one item. Upstream: `models/file_model.dart:779`, `:814`
 /// (`removeAction`), dialog at `:858-920`.
+///
+/// Closed without an answer (null) skips this file and asks about the next one. Upstream's Esc
+/// is "cancel", and with "for all" ticked before it, that cancels the rest of the directory.
 final class DeletePrompt extends Prompt<DeleteAnswer> {
   const DeletePrompt(
-      {required this.kind, required this.path, this.index = 0, this.count = 1});
+      {required this.kind,
+      required this.path,
+      this.index = 0,
+      this.count = 1,
+      this.forAll = false});
 
   final DeleteKind kind;
   final String path;
@@ -53,6 +64,10 @@ final class DeletePrompt extends Prompt<DeleteAnswer> {
   /// are more than one.
   final int index;
   final int count;
+
+  /// How the "for all" box starts. Upstream keeps the last answer's box through one delete
+  /// action, so the first file of the next directory starts with it.
+  final bool forAll;
 }
 
 typedef DeleteAnswer = ({bool delete, bool forAll});

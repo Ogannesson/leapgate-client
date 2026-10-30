@@ -17,16 +17,9 @@ class StateGlobal {
   // Kept per device as upstream does: a device has at most one remote desktop view.
   final RxMap<String, bool> relativeMouseModeState = <String, bool>{}.obs;
 
-  // Use for desktop -> remote toolbar -> resolution
-  final Map<String, Map<int, String?>> _lastResolutionGroupValues = {};
-
   RxBool get fullscreen => _fullscreen;
   double get tabBarHeight => fullscreen.isTrue ? 0 : kDesktopRemoteTabBarHeight;
   RxDouble get windowBorderWidth => _windowBorderWidth;
-
-  resetLastResolutionGroupValues(String peerId) {
-    _lastResolutionGroupValues[peerId] = {};
-  }
 
   setFullscreen(bool v) {
     if (_fullscreen.value != v) {

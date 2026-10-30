@@ -1,4 +1,4 @@
-// 上游：flutter/lib/models/relative_mouse_model.dart@bd9262397（只删界面调用，不格式化）
+// 上游：flutter/lib/models/relative_mouse_model.dart@bd9262397（只删界面调用，不格式化；updatePointerLockCenter 里 `kWindowId == null` 的判断删了：它守的是按窗口 ID 取窗口，单 engine 下会话就在主窗口里）
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;

@@ -47,9 +47,7 @@ enum DesktopType {
 }
 
 const K = 1024;
-
 const M = K * K;
-
 const G = M * K;
 
 String readableFileSize(double size) {

@@ -736,6 +736,7 @@ class FileController {
           path: entries[i].path,
           index: i,
           count: entries.length,
+          forAll: _removeCheckboxRemember,
         ));
         try {
           if (confirm == true) {
@@ -779,7 +780,9 @@ class FileController {
   Future<bool?> showRemoveDialog(DeletePrompt prompt) async {
     final answer = await rootState.target?.ask(prompt);
     if (answer == null) return null;
-    _removeCheckboxRemember = answer.forAll;
+    if (prompt.kind == DeleteKind.fileInDirectory) {
+      _removeCheckboxRemember = answer.forAll;
+    }
     return answer.delete;
   }
 

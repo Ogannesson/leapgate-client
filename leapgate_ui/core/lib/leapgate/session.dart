@@ -125,12 +125,26 @@ class FFI {
   Future<T?> ask<T>(Prompt<T> prompt) =>
       appCore.prompter.ask(prompt, session: this);
 
-  /// Upstream `FFI.start` without the tab-to-window path.
+  bool get _hasImage =>
+      connType == ConnType.defaultConn || connType == ConnType.viewCamera;
+
+  /// Upstream `FFI.start` without the tab-to-window path, plus the model setup upstream's pages
+  /// did around it (`desktop/pages/remote_page.dart:160-165`, `:198`,
+  /// `desktop/pages/view_camera_page.dart:105-110`, `:130`).
   void start({bool forceRelay = false, String? connToken}) {
     if (connType == ConnType.defaultConn) {
       canvasModel.id = id;
       imageModel.id = id;
       cursorModel.peerId = id;
+    }
+    if (_hasImage) {
+      imageModel.addCallbackOnFirstImage((String peerId) {
+        if (connType == ConnType.defaultConn) {
+          canvasModel.activateLocalCursor();
+        }
+        recordingModel
+            .updateStatus(bind.sessionGetIsRecording(sessionId: sessionId));
+      });
     }
     bind.sessionAddSync(
       sessionId: sessionId,
@@ -148,9 +162,7 @@ class FFI {
       isSharedPassword: false,
       connToken: connToken,
     );
-    if (isDesktop &&
-        (connType == ConnType.defaultConn ||
-            connType == ConnType.viewCamera)) {
+    if (isDesktop && _hasImage) {
       textureModel.updateCurrentDisplay(0);
     }
 
@@ -165,6 +177,9 @@ class FFI {
       if (closed) return;
       _onMessage(message);
     });
+    if (_hasImage) {
+      qualityMonitorModel.checkShowQualityMonitor(sessionId);
+    }
   }
 
   var _hasGpuTextureRender = false;
@@ -243,32 +258,39 @@ class FFI {
   /// pages no longer close sessions: `FileModel.close` (`desktop/pages/file_manager_page.dart:125`)
   /// and the textures and images of the remote page (`desktop/pages/remote_page.dart:676`,
   /// `:684-685`). The textures are made in [start], so they go with the session, not the page.
+  /// Rust closes the session even when the cleanup throws, as upstream's file page closes it
+  /// whatever `FileModel.close` does (`model.close().whenComplete(() => _ffi.close())`).
   Future<void> close() async {
     closed = true;
-    if (connType == ConnType.fileTransfer) {
-      await fileModel.close();
+    try {
+      if (connType == ConnType.fileTransfer) {
+        await fileModel.close();
+      }
+      if (connType == ConnType.defaultConn) {
+        textureModel.onRemotePageDispose(true);
+      } else if (connType == ConnType.viewCamera) {
+        textureModel.onViewCameraPageDispose(true);
+      }
+      imageModel.disposeImage();
+      cursorModel.disposeImages();
+      // Never true after disposeImage: upstream's desktop pages dispose the image before
+      // FFI.close too, so the desktop does not save the canvas position (only the web reads it).
+      if (imageModel.image != null && !isWebDesktop) {
+        await setCanvasConfig(sessionId, cursorModel.x, cursorModel.y,
+            canvasModel.x, canvasModel.y, canvasModel.scale,
+            ffiModel.pi.currentDisplay);
+      }
+      imageModel.callbacksOnFirstImage.clear();
+      await imageModel.update(null);
+      cursorModel.clear();
+      ffiModel.clear();
+      canvasModel.clear();
+      inputModel.resetModifiers();
+      // Dispose relative mouse mode resources to ensure cursor is restored
+      inputModel.disposeRelativeMouseMode();
+      inputModel.disposeSideButtonTracking();
+    } finally {
+      await bind.sessionClose(sessionId: sessionId);
     }
-    if (connType == ConnType.defaultConn) {
-      textureModel.onRemotePageDispose(true);
-    } else if (connType == ConnType.viewCamera) {
-      textureModel.onViewCameraPageDispose(true);
-    }
-    imageModel.disposeImage();
-    cursorModel.disposeImages();
-    if (imageModel.image != null && !isWebDesktop) {
-      await setCanvasConfig(sessionId, cursorModel.x, cursorModel.y,
-          canvasModel.x, canvasModel.y, canvasModel.scale,
-          ffiModel.pi.currentDisplay);
-    }
-    imageModel.callbacksOnFirstImage.clear();
-    await imageModel.update(null);
-    cursorModel.clear();
-    ffiModel.clear();
-    canvasModel.clear();
-    inputModel.resetModifiers();
-    // Dispose relative mouse mode resources to ensure cursor is restored
-    inputModel.disposeRelativeMouseMode();
-    inputModel.disposeSideButtonTracking();
-    await bind.sessionClose(sessionId: sessionId);
   }
 }

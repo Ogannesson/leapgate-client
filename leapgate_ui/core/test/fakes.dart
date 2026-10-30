@@ -18,12 +18,24 @@ class FakeBind implements RustdeskImpl {
   final streams = <SessionID, StreamController<EventToUI>>{};
   final tokens = <SessionID, String>{};
 
+  /// Calls that throw, to see what still happens after them.
+  final failing = <Symbol>{};
+
+  /// What `sessionReadLocalDirSync` answers, as Rust's JSON.
+  String localDir = '{"id":0,"path":"","entries":[]}';
+
   List<Invocation> callsTo(Symbol name) =>
       calls.where((c) => c.memberName == name).toList();
+
+  // Rust's `transfer-job-id` counter.
+  var _jobId = 0;
 
   @override
   dynamic noSuchMethod(Invocation invocation) {
     calls.add(invocation);
+    if (failing.contains(invocation.memberName)) {
+      throw StateError('failing ${invocation.memberName}');
+    }
     final sessionId = invocation.namedArguments[#sessionId] as SessionID?;
     switch (invocation.memberName) {
       case #sessionAddSync:
@@ -61,8 +73,23 @@ class FakeBind implements RustdeskImpl {
       case #sessionGetViewStyle:
       case #sessionGetScrollStyle:
         return Future<String?>.value();
+      case #sessionGetToggleOption:
+        return Future<bool?>.value(false);
       case #sessionRegisterPixelbufferTexture:
         return null;
+      case #translate:
+        return invocation.namedArguments[#name];
+      // File transfer.
+      case #mainGetCommonSync:
+        return '${++_jobId}';
+      case #sessionReadLocalDirSync:
+        return Future<String>.value(localDir);
+      case #sessionSetConfirmOverrideFile:
+      case #sessionCancelJob:
+      case #sessionReadDirToRemoveRecursive:
+      case #sessionRemoveFile:
+      case #sessionRemoveAllEmptyDirs:
+      case #sessionRenameFile:
       case #mainLoadRecentPeers:
       case #sessionSendMouse:
       case #sessionPeerOption:

@@ -1,4 +1,4 @@
-// 上游：flutter/lib/models/model.dart@bd9262397（只删界面调用，不格式化；FfiModel 改写到 lib/leapgate/ffi_model.dart，ConnType 和 FFI 改写到 lib/leapgate/session.dart；CachedPeerData 和标签拖成窗口那条路径不要，VirtualMouseMode 随移动端再复制，clearWaitingForImage 归连接状态）
+// 上游：flutter/lib/models/model.dart@bd9262397（只删界面调用，不格式化；FfiModel 改写到 lib/leapgate/ffi_model.dart，ConnType 和 FFI 改写到 lib/leapgate/session.dart；CachedPeerData 和标签拖成窗口那条路径不要，VirtualMouseMode 随移动端再复制，clearWaitingForImage 归连接状态；删了 QualityMonitorModel.webrtcTransport：只在 Web 上有值，读 CachedPeerData）
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';

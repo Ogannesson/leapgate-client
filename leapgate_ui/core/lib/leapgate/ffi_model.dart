@@ -453,7 +453,6 @@ class FfiModel with ChangeNotifier {
     }
 
     _pi.isSet.value = true;
-    stateGlobal.resetLastResolutionGroupValues(peerId);
 
     if (isDesktop || isWebDesktop) {
       // checkDesktopKeyboardMode may change the keyboard mode if the current
