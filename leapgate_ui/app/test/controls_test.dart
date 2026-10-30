@@ -97,6 +97,10 @@ void main() {
         tester.getRect(find.textContaining('密码错误')).top,
         greaterThan(field.bottom),
       );
+      // Screen readers get the error with the text field itself.
+      final node = tester.getSemantics(find.byType(EditableText));
+      expect(node.flagsCollection.isTextField, isTrue);
+      expect(node.label, contains('密码错误'));
     });
 
     testWidgets('typing reaches the controller; disabled refuses focus', (

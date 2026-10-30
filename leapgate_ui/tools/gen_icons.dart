@@ -250,9 +250,32 @@ class _Style {
           : d.trim().split(RegExp(r'[\s,]+')).map(double.parse).toList();
     }
     final t = a['transform'];
-    if (t != null) transform = _rotation(id, t);
+    if (t != null) {
+      if (transform != null) {
+        throw FormatException('$id: nested transforms are not supported');
+      }
+      transform = _rotation(id, t);
+    }
   }
 }
+
+const _paintAttributes = {
+  'fill',
+  'stroke',
+  'stroke-width',
+  'stroke-linecap',
+  'stroke-linejoin',
+  'stroke-dasharray',
+};
+
+/// Attributes each element may carry; anything else would be silently
+/// ignored, so it is an error instead.
+const _allowedAttributes = {
+  'g': {..._paintAttributes, 'transform'},
+  'path': {..._paintAttributes, 'd'},
+  'circle': {..._paintAttributes, 'cx', 'cy', 'r'},
+  'rect': {..._paintAttributes, 'x', 'y', 'width', 'height', 'rx', 'ry'},
+};
 
 bool _paint(String id, String v) {
   if (v == 'none') return false;
@@ -300,6 +323,15 @@ List<String> _parseBody(String id, String body) {
       for (final a in RegExp(r'([\w-]+)="([^"]*)"').allMatches(m.group(3)!))
         a.group(1)!: a.group(2)!,
     };
+    final allowed = _allowedAttributes[tag];
+    if (allowed == null)
+      throw FormatException('$id: unsupported element <$tag>');
+    final unknown = attrs.keys.where((k) => !allowed.contains(k));
+    if (unknown.isNotEmpty) {
+      throw FormatException(
+        '$id: unsupported attributes on <$tag>: ${unknown.join(', ')}',
+      );
+    }
     if (tag == 'g') {
       if (closing) {
         stack.removeLast();

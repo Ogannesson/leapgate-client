@@ -12,7 +12,7 @@ enum LgStatus {
   /// Filled dot, online colour.
   online,
 
-  /// Ring, offline colour.
+  /// Ring, offline colour (also "已断开" on a session tab).
   offline,
 
   /// Spinning 3/4 arc, connecting colour ("正在连接…").
@@ -26,26 +26,25 @@ enum LgStatus {
 
   /// Circled x, error colour.
   error,
-
-  /// Ring, offline colour, regular weight: a session tab after disconnect.
-  disconnected,
 }
 
 /// Marker and text in the marker's colour, bold (`.stt`). The font size is the
 /// ambient one, as in the mockups where the parent sets it.
 class LgStatusText extends StatelessWidget {
-  const LgStatusText(this.status, this.label, {super.key});
+  const LgStatusText(this.status, this.label, {super.key, this.gap = 6});
 
   final LgStatus status;
   final String label;
+
+  /// Marker to text: 6 (`.stt`), 8 for the service status line (`.stline`).
+  final double gap;
 
   @override
   Widget build(BuildContext context) {
     final c = LgTokens.of(context).colors;
     final (icon, color) = switch (status) {
       LgStatus.online => (LgIcons.markDot, c.online),
-      LgStatus.offline ||
-      LgStatus.disconnected => (LgIcons.markRing, c.offline),
+      LgStatus.offline => (LgIcons.markRing, c.offline),
       LgStatus.connecting => (LgIcons.markSpin, c.connecting),
       LgStatus.querying => (LgIcons.markSpin, c.offline),
       LgStatus.warning => (LgIcons.markTri, c.warning),
@@ -55,10 +54,7 @@ class LgStatusText extends StatelessWidget {
         status == LgStatus.connecting || status == LgStatus.querying;
     return _Marked(
       color: color,
-      weight: status == LgStatus.disconnected
-          ? FontWeight.w400
-          : FontWeight.w700,
-      gap: 6,
+      gap: gap,
       marks: [
         spinning
             ? LgSpinner(icon: icon, size: 12, color: color)
@@ -154,14 +150,12 @@ class _Marked extends StatelessWidget {
     required this.gap,
     required this.marks,
     required this.label,
-    this.weight = FontWeight.w700,
   });
 
   final Color color;
   final double gap;
   final List<Widget> marks;
   final String label;
-  final FontWeight weight;
 
   // One rich text, so it works in unbounded rows (tab strip) and wraps in
   // bounded ones.
@@ -180,7 +174,7 @@ class _Marked extends StatelessWidget {
           TextSpan(text: label),
         ],
       ),
-      style: TextStyle(color: color, fontWeight: weight),
+      style: TextStyle(color: color, fontWeight: FontWeight.w700),
     );
   }
 }

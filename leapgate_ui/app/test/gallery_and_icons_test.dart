@@ -6,22 +6,47 @@ import 'package:leapgate_ui/gallery_main.dart';
 
 import '../../tools/gen_icons.dart' as gen;
 
-/// The mockup lives in the leapgate repository, two levels above leapgate-client
-/// (client/leapgate_ui/app). Override with LG_MOCKUP_HTML.
-File _mockup() => File(
-  Platform.environment['LG_MOCKUP_HTML'] ??
-      '${Directory.current.path}/../../../docs/新界面/样稿/A-基础.html',
-);
-
 void main() {
   test('lg_icons.g.dart is what gen_icons produces from the mockup', () {
-    final html = _mockup();
+    // The mockup lives in the leapgate repository, two levels above
+    // leapgate-client (client/leapgate_ui/app). LG_MOCKUP_HTML overrides it and
+    // then must exist; the default path may be missing (leapgate-client
+    // checked out on its own), which skips the test.
+    final override = Platform.environment['LG_MOCKUP_HTML'];
+    final html = File(
+      override ?? '${Directory.current.path}/../../../docs/新界面/样稿/A-基础.html',
+    );
     if (!html.existsSync()) {
-      markTestSkipped('mockup not found at ${html.path}');
+      if (override != null) {
+        fail('LG_MOCKUP_HTML points to a missing file: $override');
+      }
+      final reason =
+          'skipped: mockup not found at ${html.path} (set LG_MOCKUP_HTML)';
+      // ignore: avoid_print
+      print(reason);
+      markTestSkipped(reason);
       return;
     }
     final committed = File('lib/icons/lg_icons.g.dart').readAsStringSync();
     expect(gen.generate(html.readAsStringSync()), committed);
+  });
+
+  test('gen_icons rejects what it would otherwise drop silently', () {
+    String symbol(String body) =>
+        '<symbol id="i-test" viewBox="0 0 24 24">$body</symbol>';
+    expect(
+      () => gen.generate(symbol('<path d="M0 0L1 1" opacity=".5"/>')),
+      throwsFormatException,
+    );
+    expect(
+      () => gen.generate(
+        symbol(
+          '<g transform="rotate(90 12 12)"><g transform="rotate(90 12 12)">'
+          '<path d="M0 0L1 1"/></g></g>',
+        ),
+      ),
+      throwsFormatException,
+    );
   });
 
   testWidgets('every gallery specimen builds in every theme and mode', (

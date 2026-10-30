@@ -33,7 +33,6 @@ class LgPressable extends StatefulWidget {
     this.focusable = true,
     this.focusNode,
     this.autofocus = false,
-    this.onDoubleTap,
     this.onSecondaryTapUp,
     this.semanticLabel,
     this.selected,
@@ -48,7 +47,6 @@ class LgPressable extends StatefulWidget {
   final bool focusable;
   final FocusNode? focusNode;
   final bool autofocus;
-  final VoidCallback? onDoubleTap;
   final GestureTapUpCallback? onSecondaryTapUp;
   final String? semanticLabel;
   final bool? selected;
@@ -105,9 +103,8 @@ class _LgPressableState extends State<LgPressable> {
       enabled: enabled,
       focusNode: _node,
       autofocus: widget.autofocus,
-      mouseCursor: enabled
-          ? SystemMouseCursors.click
-          : SystemMouseCursors.basic,
+      // Arrow, not the hand: Windows controls and the mockups set no pointer cursor.
+      mouseCursor: SystemMouseCursors.basic,
       actions: {
         ActivateIntent: CallbackAction<ActivateIntent>(
           onInvoke: (_) => _activate(),
@@ -124,7 +121,6 @@ class _LgPressableState extends State<LgPressable> {
         onTapUp: enabled ? (_) => setState(() => _pressed = false) : null,
         onTapCancel: enabled ? () => setState(() => _pressed = false) : null,
         onTap: enabled ? _activate : null,
-        onDoubleTap: widget.onDoubleTap,
         onSecondaryTapUp: widget.onSecondaryTapUp,
         child: Semantics(
           button: true,
@@ -151,17 +147,23 @@ Color? lgStateOverlay(LgColors c, Set<WidgetState> states) {
 
 /// Keyboard focus ring: 2 px accent outline, 2 px outside the control
 /// (`.frame .focus` in A-基础.html).
+///
+/// [inset] draws it just inside the control instead, for controls with no
+/// room around them (the title bar's tabs and buttons, which a scroll view or
+/// the bar's bottom edge would cut).
 class LgFocusRing extends StatelessWidget {
   const LgFocusRing({
     super.key,
     required this.show,
     required this.radius,
     required this.child,
+    this.inset = false,
   });
 
   final bool show;
   final BorderRadius radius;
   final Widget child;
+  final bool inset;
 
   @override
   Widget build(BuildContext context) {
@@ -170,6 +172,7 @@ class LgFocusRing extends StatelessWidget {
       foregroundPainter: _RingPainter(
         LgTokens.of(context).colors.accent,
         radius,
+        inset,
       ),
       child: child,
     );
@@ -177,18 +180,18 @@ class LgFocusRing extends StatelessWidget {
 }
 
 class _RingPainter extends CustomPainter {
-  _RingPainter(this.color, this.radius);
+  _RingPainter(this.color, this.radius, this.inset);
 
   final Color color;
   final BorderRadius radius;
+  final bool inset;
 
   @override
   void paint(Canvas canvas, Size size) {
-    // Offset 2 plus half the 2 px stroke.
-    const grow = 3.0;
-    final rrect = radius.toRRect(Offset.zero & size).inflate(grow);
+    final rrect = radius.toRRect(Offset.zero & size);
     canvas.drawRRect(
-      rrect,
+      // Outside: offset 2 plus half the 2 px stroke; inside: half the stroke.
+      inset ? rrect.deflate(1) : rrect.inflate(3),
       Paint()
         ..color = color
         ..style = PaintingStyle.stroke
@@ -198,5 +201,5 @@ class _RingPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_RingPainter old) =>
-      old.color != color || old.radius != radius;
+      old.color != color || old.radius != radius || old.inset != inset;
 }

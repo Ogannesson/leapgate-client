@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 
 import '../icons/lg_icon.dart';
 import '../theme/lg_tokens.dart';
@@ -136,35 +137,41 @@ class _LgTextFieldState extends State<LgTextField> {
         ],
       ),
     );
-    if (!error) return Semantics(label: widget.semanticLabel, child: field);
-    return Semantics(
-      label: widget.semanticLabel,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          field,
-          const SizedBox(height: LgSpace.s2),
-          // `.ferr`
-          DefaultTextStyle(
-            style: t.textS.copyWith(
-              color: c.error,
-              fontWeight: FontWeight.w700,
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.only(top: 1),
-                  child: LgIcon(LgIcons.err, size: 16, color: c.error),
-                ),
-                const SizedBox(width: LgSpace.s2),
-                Expanded(child: Text(widget.errorText!)),
-              ],
-            ),
-          ),
-        ],
+    // One semantics node: the label and the error text belong to the field.
+    return MergeSemantics(
+      child: Semantics(
+        label: widget.semanticLabel,
+        validationResult: error
+            ? SemanticsValidationResult.invalid
+            : SemanticsValidationResult.none,
+        child: error ? _withError(t, c, field) : field,
       ),
+    );
+  }
+
+  Widget _withError(LgTokens t, LgColors c, Widget field) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        field,
+        const SizedBox(height: LgSpace.s2),
+        // `.ferr`
+        DefaultTextStyle(
+          style: t.textS.copyWith(color: c.error, fontWeight: FontWeight.w700),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: 1),
+                child: LgIcon(LgIcons.err, size: 16, color: c.error),
+              ),
+              const SizedBox(width: LgSpace.s2),
+              Expanded(child: Text(widget.errorText!)),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

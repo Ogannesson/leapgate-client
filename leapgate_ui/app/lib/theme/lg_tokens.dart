@@ -335,6 +335,7 @@ class LgSizes {
     required this.fsCmName,
     required this.lhCmName,
     required this.cmHeadGap,
+    required this.icon,
   });
 
   /// `--lg-h-btn`: buttons, icon buttons, segmented control.
@@ -394,6 +395,11 @@ class LgSizes {
   final double lhCmName;
   final double cmHeadGap;
 
+  /// Inline icon size (A-基础.html icon table: "行内 20（详细 18）"). Icons in
+  /// navigation and the phone toolbar are 24, and those inside buttons and
+  /// menu rows stay 20 in both modes as in the mockups.
+  final double icon;
+
   static const compact = LgSizes(
     button: 36,
     nav: 40,
@@ -420,6 +426,7 @@ class LgSizes {
     fsCmName: 20,
     lhCmName: 28,
     cmHeadGap: 16,
+    icon: 20,
   );
 
   static const detail = LgSizes(
@@ -448,6 +455,7 @@ class LgSizes {
     fsCmName: 14,
     lhCmName: 20,
     cmHeadGap: 12,
+    icon: 18,
   );
 }
 

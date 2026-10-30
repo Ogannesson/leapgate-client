@@ -257,6 +257,7 @@ class _LgTitleBarState extends State<LgTitleBar> {
           icon: LgIcons.plus,
           label: labels.newTab,
           size: _tabHeight,
+          insetFocusRing: true,
           onPressed: widget.onNewTab,
         ),
         if (_overflow)
@@ -273,6 +274,7 @@ class _LgTitleBarState extends State<LgTitleBar> {
               icon: LgIcons.chevD,
               label: labels.allTabs,
               size: _tabHeight,
+              insetFocusRing: true,
               onPressed: () =>
                   controller.isOpen ? controller.close() : controller.open(),
             ),
@@ -435,6 +437,7 @@ class _Tab extends StatelessWidget {
         return LgFocusRing(
           show: states.contains(WidgetState.focused),
           radius: radius,
+          inset: true,
           child: Stack(
             children: [
               Container(
@@ -474,7 +477,8 @@ class _Tab extends StatelessWidget {
                       LgBadge(badge),
                     ],
                     if (onClose != null) ...[
-                      const SizedBox(width: LgSpace.s2 - 2),
+                      // `.tab` gap 8 plus `.x` margin 2, less the button's 2 px padding.
+                      const SizedBox(width: LgSpace.s2),
                       LgIconButton(
                         icon: LgIcons.x,
                         label: closeLabel!,

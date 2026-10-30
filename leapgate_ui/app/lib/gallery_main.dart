@@ -176,7 +176,7 @@ List<LgSessionTab> _sessions({int count = 4}) {
     const LgSessionTab(
       name: '爸爸的台式机',
       identity: 3,
-      status: LgStatusText(LgStatus.disconnected, '已断开'),
+      status: LgStatusText(LgStatus.offline, '已断开'),
       disconnected: true,
     ),
     const LgSessionTab(
@@ -222,7 +222,7 @@ List<Widget> _menuItems() => [
     onPressed: _noop,
   ),
   const LgMenuGroup('操作'),
-  const LgMenuItem(label: '传输文件', icon: LgIcons.files, onPressed: _noop),
+  const LgMenuItem(label: '文件传输', icon: LgIcons.files, onPressed: _noop),
   const LgMenuItem(
     label: '这是一个很长很长的菜单项名称，放不下时省略并在悬停时显示全文',
     icon: LgIcons.note,
@@ -297,7 +297,7 @@ List<Specimen> buildSpecimens() {
         'secondary-icon',
         btn,
         (_) => const LgButton(
-          label: '传输文件',
+          label: '文件传输',
           icon: LgIcons.files,
           onPressed: _noop,
         ),
@@ -499,7 +499,7 @@ List<Specimen> buildSpecimens() {
         states: _hover,
         (_) => const LgMenuPanel(
           items: [
-            LgMenuItem(label: '传输文件', icon: LgIcons.files, onPressed: _noop),
+            LgMenuItem(label: '文件传输', icon: LgIcons.files, onPressed: _noop),
           ],
         ),
       ),
@@ -554,7 +554,6 @@ List<Specimen> buildSpecimens() {
       LgStatus.querying => '正在查询…',
       LgStatus.warning => '已中断',
       LgStatus.error => '已停止',
-      LgStatus.disconnected => '已断开',
     };
     list.add(
       Specimen(

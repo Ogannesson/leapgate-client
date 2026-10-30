@@ -134,18 +134,22 @@ class _SideColumn extends StatelessWidget {
                         ServiceStatus.ready => LgStatusText(
                           LgStatus.online,
                           l10n.serviceReady,
+                          gap: LgSpace.s2, // `.stline`
                         ),
                         ServiceStatus.connecting => LgStatusText(
                           LgStatus.connecting,
                           l10n.serviceConnecting,
+                          gap: LgSpace.s2, // `.stline`
                         ),
                         ServiceStatus.notReady => LgStatusText(
                           LgStatus.warning,
                           l10n.serviceNotReady,
+                          gap: LgSpace.s2, // `.stline`
                         ),
                         ServiceStatus.stopped => LgStatusText(
                           LgStatus.error,
                           l10n.serviceStopped,
+                          gap: LgSpace.s2, // `.stline`
                         ),
                       },
                     ),
@@ -185,6 +189,11 @@ class _IdGroups extends StatelessWidget {
 
   final String id;
 
+  static List<String> _groups(String id) => [
+    for (var i = 0; i < id.length; i += 3)
+      id.substring(i, i + 3 > id.length ? id.length : i + 3),
+  ];
+
   @override
   Widget build(BuildContext context) {
     final c = LgTokens.of(context).colors;
@@ -194,21 +203,18 @@ class _IdGroups extends StatelessWidget {
       FontWeight.w700,
     ).copyWith(color: c.text);
     return Semantics(
-      label: id,
+      label: _groups(id).join(' '),
       excludeSemantics: true,
       child: Wrap(
         spacing: 10,
         runSpacing: LgSpace.s1,
         children: [
-          for (var i = 0; i < id.length; i += 3)
+          for (final group in _groups(id))
             IntrinsicWidth(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text(
-                    id.substring(i, i + 3 > id.length ? id.length : i + 3),
-                    style: style,
-                  ),
+                  Text(group, style: style),
                   const SizedBox(height: 2),
                   Container(
                     height: 4,

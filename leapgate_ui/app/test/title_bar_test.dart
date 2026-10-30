@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:leapgate_ui/icons/lg_icon.dart';
+import 'package:leapgate_ui/widgets/lg_pressable.dart';
 import 'package:leapgate_ui/widgets/lg_status.dart';
 import 'package:leapgate_ui/widgets/lg_title_bar.dart';
 
@@ -149,6 +150,43 @@ void main() {
     await tester.tap(find.text('设备11').last);
     await tester.pumpAndSettle();
     expect(log.events, ['select 12']);
+  });
+
+  testWidgets('focus rings of tabs and "+" stay inside the visible bar', (
+    tester,
+  ) async {
+    final log = _Log();
+    await pumpLg(tester, _bar(log));
+    final bar = tester.getRect(find.byType(LgTitleBar));
+    final strip = tester.getRect(find.byType(SingleChildScrollView));
+    Rect focusedRing() {
+      final ring = find.byWidgetPredicate((w) => w is LgFocusRing && w.show);
+      expect(ring, findsOneWidget);
+      // Inset rings are drawn within the control's own rect.
+      expect(tester.widget<LgFocusRing>(ring).inset, isTrue);
+      return tester.getRect(ring);
+    }
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab); // home tab
+    await tester.pump();
+    final home = focusedRing();
+    expect(
+      strip.contains(home.topLeft) &&
+          strip.contains(home.bottomRight - const Offset(.1, .1)),
+      isTrue,
+    );
+
+    // Home, two sessions, then "+".
+    for (var i = 0; i < 3; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    }
+    await tester.pump();
+    final plus = focusedRing();
+    expect(
+      bar.contains(plus.topLeft) &&
+          bar.contains(plus.bottomRight - const Offset(.1, .1)),
+      isTrue,
+    );
   });
 
   testWidgets('tabs are reachable with Tab and selected with Enter', (

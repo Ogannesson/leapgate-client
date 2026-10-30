@@ -59,6 +59,11 @@ class _MainWindowState extends State<MainWindow> with WindowListener {
   @override
   void onWindowUnmaximize() => setState(() => _maximized = false);
 
+  // Maximized, minimized, then restored: the plugin reports "restore", not
+  // "maximize", so ask again.
+  @override
+  void onWindowRestore() => _readWindowState();
+
   // Full screen hides the whole bar (01 §2.1); entered from session pages later.
   @override
   void onWindowEnterFullScreen() => setState(() => _fullScreen = true);

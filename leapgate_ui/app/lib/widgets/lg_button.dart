@@ -23,7 +23,6 @@ class LgButton extends StatelessWidget {
     this.icon,
     this.large = false,
     this.focusNode,
-    this.autofocus = false,
   });
 
   final String label;
@@ -32,7 +31,6 @@ class LgButton extends StatelessWidget {
   final LgIcons? icon;
   final bool large;
   final FocusNode? focusNode;
-  final bool autofocus;
 
   @override
   Widget build(BuildContext context) {
@@ -42,7 +40,6 @@ class LgButton extends StatelessWidget {
     return LgPressable(
       onPressed: onPressed,
       focusNode: focusNode,
-      autofocus: autofocus,
       semanticLabel: label,
       builder: (context, states) {
         final disabled = states.contains(WidgetState.disabled);
@@ -62,14 +59,21 @@ class LgButton extends StatelessWidget {
             fg = c.error;
             border = c.error;
         }
+        // Disabled: `.btn.dis` fills primary with the disabled ground; outlined
+        // buttons keep the strong border (`.btn.out.dis`) and, like text
+        // buttons (`.btn.txt.dis`), drop to 60 % opacity.
+        var opacity = 1.0;
         if (disabled) {
-          // `.btn.dis`; a disabled text button keeps no background.
-          bg = kind == LgButtonKind.text ? null : c.disabled;
           fg = c.text2;
-          border = null;
+          if (kind == LgButtonKind.primary) {
+            bg = c.disabled;
+          } else {
+            opacity = .6;
+            if (border != null) border = c.borderStrong;
+          }
         }
         final overlay = lgStateOverlay(c, states);
-        return LgFocusRing(
+        final button = LgFocusRing(
           show: states.contains(WidgetState.focused),
           radius: radius,
           child: Container(
@@ -107,6 +111,7 @@ class LgButton extends StatelessWidget {
             ),
           ),
         );
+        return opacity == 1 ? button : Opacity(opacity: opacity, child: button);
       },
     );
   }
@@ -120,9 +125,9 @@ class LgIconButton extends StatelessWidget {
     required this.label,
     required this.onPressed,
     this.size,
-    this.iconSize = 20,
-    this.color,
+    this.iconSize,
     this.focusable = true,
+    this.insetFocusRing = false,
   });
 
   final LgIcons icon;
@@ -133,9 +138,13 @@ class LgIconButton extends StatelessWidget {
 
   /// Defaults to `--lg-h-btn`.
   final double? size;
-  final double iconSize;
-  final Color? color;
+
+  /// Defaults to the inline icon size of the mode (20, detail 18).
+  final double? iconSize;
   final bool focusable;
+
+  /// See [LgFocusRing.inset].
+  final bool insetFocusRing;
 
   @override
   Widget build(BuildContext context) {
@@ -154,6 +163,7 @@ class LgIconButton extends StatelessWidget {
         return LgFocusRing(
           show: states.contains(WidgetState.focused),
           radius: radius,
+          inset: insetFocusRing,
           child: Container(
             width: side,
             height: side,
@@ -163,8 +173,13 @@ class LgIconButton extends StatelessWidget {
               borderRadius: radius,
             ),
             child: Opacity(
-              opacity: disabled ? .6 : 1,
-              child: LgIcon(icon, size: iconSize, color: color ?? c.text2),
+              // `.ib.off`
+              opacity: disabled ? .45 : 1,
+              child: LgIcon(
+                icon,
+                size: iconSize ?? t.sizes.icon,
+                color: c.text2,
+              ),
             ),
           ),
         );

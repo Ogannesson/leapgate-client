@@ -171,6 +171,7 @@ ButtonStyle _itemStyle(LgTokens t, {required bool danger, required bool bold}) {
     shape: const WidgetStatePropertyAll(RoundedRectangleBorder()),
     visualDensity: VisualDensity.standard,
     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    mouseCursor: const WidgetStatePropertyAll(SystemMouseCursors.basic),
     alignment: AlignmentDirectional.centerStart,
   );
 }
@@ -293,7 +294,8 @@ class LgSubmenu extends StatelessWidget {
       menuStyle: _panelStyle(c),
       clipBehavior: Clip.none,
       submenuIcon: const WidgetStatePropertyAll(SizedBox.shrink()),
-      menuChildren: [_panelBody(width, items)],
+      // No children disables the button, so it cannot open an empty panel.
+      menuChildren: items.isEmpty ? const [] : [_panelBody(width, items)],
       child: _ItemRow(
         label: label,
         disabled: items.isEmpty,

@@ -46,6 +46,8 @@ void main() {
       expect(find.text('135'), findsOneWidget);
       expect(find.text('792'), findsOneWidget);
       expect(find.text('468'), findsOneWidget);
+      // Read out in the same groups.
+      expect(find.bySemanticsLabel('135 792 468'), findsOneWidget);
     },
   );
 

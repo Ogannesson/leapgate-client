@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
@@ -28,9 +29,12 @@ Future<void> main(List<String> args) async {
     await windowManager.ensureInitialized();
     runApp(const LeapgateApp(home: Scaffold()));
     windowManager.waitUntilReadyToShow(null, () => windowManager.show());
+  } else if (args.contains('--install')) {
+    // The install page is round 3.
+    lgBind.leapgateLog(
+        level: 2, msg: 'leapgate ui: --install is not supported yet');
+    exit(0);
   } else {
-    // `--install` (an exe named *install.exe gets it from core_main) also lands here: the install
-    // page is round 3, until then the main window opens as usual.
     desktopType = DesktopType.main;
     await windowManager.ensureInitialized();
     await platformFFI.init(kAppTypeMain);
