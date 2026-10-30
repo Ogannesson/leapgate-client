@@ -1,18 +1,22 @@
 {
   "@@locale": "en",
   "appName": "Leapgate",
+  "home": "Home",
+  "newConnection": "New connection",
+  "allTabs": "All tabs",
+  "closeTab": "Close tab",
+  "minimize": "Minimize",
+  "maximize": "Maximize",
+  "restore": "Restore down",
+  "close": "Close",
   "thisDevice": "This device",
   "deviceId": "ID",
+  "idGenerating": "Generating…",
   "serviceReady": "Ready",
   "serviceConnecting": "Connecting to server…",
   "serviceNotReady": "Can't connect to the server. Retrying automatically. Check your network connection.",
   "serviceStopped": "Service stopped. This device can't accept remote connections.",
-  "version": "Version {version}",
-  "@version": {
-    "placeholders": {
-      "version": {
-        "type": "String"
-      }
-    }
-  }
+  "navDevices": "Devices",
+  "navExitNodes": "Exit nodes",
+  "navSettings": "Settings"
 }

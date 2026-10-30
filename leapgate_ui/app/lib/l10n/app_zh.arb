@@ -1,11 +1,22 @@
 {
   "@@locale": "zh",
   "appName": "Leapgate",
+  "home": "主页",
+  "newConnection": "新建连接",
+  "allTabs": "全部标签",
+  "closeTab": "关闭标签",
+  "minimize": "最小化",
+  "maximize": "最大化",
+  "restore": "向下还原",
+  "close": "关闭",
   "thisDevice": "本机",
   "deviceId": "ID",
+  "idGenerating": "正在生成…",
   "serviceReady": "已就绪",
   "serviceConnecting": "正在连接服务器…",
   "serviceNotReady": "无法连接服务器，正在自动重试。请检查网络连接。",
   "serviceStopped": "服务已停止，本机无法接受远程连接",
-  "version": "版本 {version}"
+  "navDevices": "设备",
+  "navExitNodes": "出口",
+  "navSettings": "设置"
 }

@@ -12,7 +12,9 @@ import 'package:uni_links/uni_links.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'l10n/app_localizations.dart';
-import 'placeholder_home.dart';
+import 'shell/main_window.dart';
+import 'theme/lg_theme.dart';
+import 'theme/lg_tokens.dart';
 
 // Startup follows upstream's desktop paths (flutter/lib/main.dart `main`, `runMainApp`,
 // `runConnectionManagerScreen`), keeping only what the main window needs to show this device's ID
@@ -30,7 +32,9 @@ Future<void> main(List<String> args) async {
   } else if (args.contains('--install')) {
     // The install page is round 3.
     lgBind.leapgateLog(
-        level: 2, msg: 'leapgate ui: --install is not supported yet');
+      level: 2,
+      msg: 'leapgate ui: --install is not supported yet',
+    );
     exit(0);
   } else {
     desktopType = DesktopType.main;
@@ -41,16 +45,16 @@ Future<void> main(List<String> args) async {
     final version = lgBind.leapgateVersion();
     lgBind.leapgateLog(level: 3, msg: 'leapgate ui: version $version');
     _logLinks();
-    runApp(LeapgateApp(
-        home: PlaceholderHome(
-            status: LocalStatusModel()..start(), version: version)));
+    runApp(LeapgateApp(home: MainWindow(status: LocalStatusModel()..start())));
     // The top bar is drawn by the app (docs/新界面/01-内容与逻辑说明.md §2.1). The runner already
     // sized and centered the window.
     windowManager.waitUntilReadyToShow(
-        const WindowOptions(titleBarStyle: TitleBarStyle.hidden), () async {
-      await windowManager.show();
-      await windowManager.focus();
-    });
+      const WindowOptions(titleBarStyle: TitleBarStyle.hidden),
+      () async {
+        await windowManager.show();
+        await windowManager.focus();
+      },
+    );
   }
 }
 
@@ -75,8 +79,9 @@ void _logLinks() {
     if (uri == null) return;
     // The query may carry a password (`--password`), so it stays out of the log.
     lgBind.leapgateLog(
-        level: 3,
-        msg: 'leapgate ui: link received ${uri.scheme}://${uri.host}${uri.path}');
+      level: 3,
+      msg: 'leapgate ui: link received ${uri.scheme}://${uri.host}${uri.path}',
+    );
   });
 }
 
@@ -87,8 +92,17 @@ class LeapgateApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Light / dark follow the system and the mode is compact until the
+    // settings page (M6) stores the user's choice.
     return MaterialApp(
       debugShowCheckedModeBanner: false,
+      theme: buildLgTheme(brightness: Brightness.light, mode: LgMode.compact),
+      darkTheme: buildLgTheme(
+        brightness: Brightness.dark,
+        mode: LgMode.compact,
+      ),
+      // The tokens switch mode at the middle of a theme animation; no animation.
+      themeAnimationDuration: Duration.zero,
       onGenerateTitle: (context) => AppLocalizations.of(context)!.appName,
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       // English first: any other system language falls back to it.
