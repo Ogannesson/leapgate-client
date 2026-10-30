@@ -614,7 +614,10 @@ class FfiModel with ChangeNotifier {
               switchToNewDisplay(newDisplay, sessionId, peerId);
             }
           } else {
-            parent.target!.notices.add(SessionNotice('No Displays'));
+            // Upstream's box closes the session on OK (`models/model.dart:1713`). Rust's
+            // wording (`ui_session_interface.rs:1845`), so C3 gives `no_displays`.
+            parent.target!.connection
+                .showMsgBox('nocancel-error', 'Prompt', 'No displays', false);
           }
         }
       }

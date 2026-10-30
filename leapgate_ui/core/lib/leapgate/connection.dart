@@ -215,11 +215,13 @@ class ConnectionModel with ChangeNotifier {
     if (type == 're-input-password') {
       _askPassword(ConnInput.password, ConnReason._of(type, title, text));
     } else if (type == 'input-2fa') {
-      // The title says whether it is asked for the first time or the code was wrong.
-      final reason = ConnReason._of(type, title, text);
+      // The title says whether it is asked for the first time (`REQUIRE_2FA`, no reason) or
+      // the code was wrong.
       _show(ConnStage.verifying,
           input: ConnInput.twoFactor,
-          reason: reason.code == 'other' ? null : reason);
+          reason: title == '2FA Required'
+              ? null
+              : ConnReason._of(type, title, text));
     } else if (type == 'input-password') {
       _askPassword(ConnInput.password, null);
     } else if (type == 'terminal-admin-login') {
@@ -389,10 +391,16 @@ class ConnectionModel with ChangeNotifier {
 
   /// Upstream `showConnectedWaitingForImage` (`models/model.dart:1184-1205`): 1.5 s after
   /// connecting without a frame, an empty OS password wakes a locked screen.
+  ///
+  /// A render switch (`isRefreshing`) reaches every session (`src/flutter_ffi.rs:1259-1273`);
+  /// upstream only lays its dialog over whatever is shown, so a session asking for a password
+  /// or counting down to a retry stays as it is, and only a connected one waits for the image.
   void showConnectedWaitingForImage() {
     final ffiModel = parent.target!.ffiModel;
     if (ffiModel.waitForFirstImage.isFalse) return;
-    _show(ConnStage.waitingForImage);
+    if (!ffiModel.isRefreshing || _stage == ConnStage.connected) {
+      _show(ConnStage.waitingForImage);
+    }
     _waitForImageDialogShow = true;
     _waitForImageTimer?.cancel();
     _waitForImageTimer = Timer(Duration(milliseconds: 1500), () {
@@ -431,35 +439,43 @@ class ConnectionModel with ChangeNotifier {
     resetRestartReconnectState();
   }
 
-  // What the connection panel does.
+  // What the connection panel does. Each only acts in the state it answers, so a second Enter
+  // sends nothing again.
+
+  bool _asking(ConnInput input) =>
+      _stage == ConnStage.verifying && _input == input;
 
   /// Upstream `FFI.login` from the password and OS account dialogs
-  /// (`common/widgets/dialog.dart:962-1105`). Ignored while a required field is empty, as there.
+  /// (`common/widgets/dialog.dart:962-1105`): fields trimmed, ignored while a required one is
+  /// empty, as there.
   void login(
       {String osUsername = '',
       String osPassword = '',
       String password = '',
       bool remember = false}) {
-    if (_input == ConnInput.osAccount ||
-        _input == ConnInput.osAccountAndPassword) {
-      if (osUsername.trim().isEmpty) return;
-    }
-    if ((_input == ConnInput.password ||
-            _input == ConnInput.osAccountAndPassword) &&
-        password.isEmpty) {
+    final user = osUsername.trim(), osPw = osPassword.trim();
+    final pw = password.trim();
+    if (_asking(ConnInput.password)) {
+      if (pw.isEmpty) return;
+    } else if (_asking(ConnInput.osAccount)) {
+      if (user.isEmpty) return;
+    } else if (_asking(ConnInput.osAccountAndPassword)) {
+      if (user.isEmpty || pw.isEmpty) return;
+    } else {
       return;
     }
     bind.sessionLogin(
         sessionId: sessionId,
-        osUsername: osUsername.trim(),
-        osPassword: osPassword,
-        password: password,
+        osUsername: user,
+        osPassword: osPw,
+        password: pw,
         remember: remember);
     _show(ConnStage.verifying);
   }
 
   /// Upstream `enter2FaDialog` (`common/widgets/dialog.dart:2346-2410`).
   void submit2fa(String code, {required bool trustThisDevice}) {
+    if (!_asking(ConnInput.twoFactor)) return;
     bind.sessionSend2Fa(
         sessionId: sessionId,
         code: code.trim(),
@@ -470,12 +486,14 @@ class ConnectionModel with ChangeNotifier {
   /// Upstream `showWindowsSessionsDialog` (`common/widgets/dialog.dart:2412-2461`). It has no
   /// cancel: upstream says closing it leaves a black screen.
   void selectWindowsSession(String sid) {
+    if (!_asking(ConnInput.windowsSession)) return;
     bind.sessionSendSelectedSessionId(sessionId: sessionId, sid: sid);
     _show(ConnStage.verifying);
   }
 
   /// "Continue" on the insecure connection warning (`common.dart:1186-1219`).
   void continueInsecure() {
+    if (_stage != ConnStage.insecure) return;
     unawaited(bind.sessionSetCommon(
         sessionId: sessionId, key: 'continue-insecure-connection', value: 'Y'));
     _show(ConnStage.verifying);
@@ -484,6 +502,7 @@ class ConnectionModel with ChangeNotifier {
   /// "Disconnect" on the insecure connection warning, also its default action: Enter and
   /// closing it disconnect, as upstream.
   Future<void> rejectInsecure() async {
+    if (_stage != ConnStage.insecure) return;
     await bind.sessionSetCommon(
         sessionId: sessionId, key: 'continue-insecure-connection', value: 'N');
     await cancel();

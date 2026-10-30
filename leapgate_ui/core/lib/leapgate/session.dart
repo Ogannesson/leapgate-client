@@ -267,6 +267,8 @@ class FFI {
   /// whatever `FileModel.close` does (`model.close().whenComplete(() => _ffi.close())`).
   Future<void> close() async {
     closed = true;
+    // Before the first await: no retry or wake timer may fire into a closing session.
+    connection.clear();
     try {
       if (connType == ConnType.fileTransfer) {
         await fileModel.close();
@@ -289,7 +291,6 @@ class FFI {
       await imageModel.update(null);
       cursorModel.clear();
       ffiModel.clear();
-      connection.clear();
       canvasModel.clear();
       inputModel.resetModifiers();
       // Dispose relative mouse mode resources to ensure cursor is restored

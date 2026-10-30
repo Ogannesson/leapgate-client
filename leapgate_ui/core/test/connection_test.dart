@@ -238,6 +238,23 @@ void main() {
         expect(_reconnects(fakes).length, 5);
       });
     });
+
+    test(
+        'the 30 s start again once a retry got displays (model.dart:1454-1456)',
+        () {
+      fakeAsync((async) {
+        final fakes = installFakes();
+        final s = _connected(async, fakes);
+        _emit(async, fakes, s, offline);
+        async.elapse(const Duration(seconds: 1));
+        _emit(async, fakes, s, _peerInfo);
+
+        async.elapse(const Duration(seconds: 40));
+        _emit(async, fakes, s, offline);
+
+        expect(s.connection.retryCountdown, 1);
+      });
+    });
   });
 
   test(
@@ -363,6 +380,90 @@ void main() {
 
         expect(wakes(fakes), isEmpty);
       });
+    });
+  });
+
+  test(
+      'a render switch reaches every session but changes only a connected one: a password '
+      'prompt and a retry countdown stay (model.dart:724-731, flutter_ffi.rs:1259-1273)',
+      () {
+    fakeAsync((async) {
+      final fakes = installFakes();
+      final asking = appCore.sessions.open(_id, ConnType.defaultConn);
+      _emit(async, fakes, asking,
+          _msgbox('input-password', 'Password Required', ''));
+      final failed = _connected(async, fakes, id: '400500600');
+      _emit(async, fakes, failed,
+          _msgbox('error', 'Connection Error', 'Timeout', hasRetry: true));
+      final connected = _connected(async, fakes, id: '700800900');
+
+      for (final s in [asking, failed, connected]) {
+        _emit(async, fakes, s, {'name': 'use_texture_render', 'v': 'Y'});
+      }
+
+      expect((asking.connection.stage, asking.connection.input),
+          (ConnStage.verifying, ConnInput.password));
+      expect((failed.connection.stage, failed.connection.retryCountdown),
+          (ConnStage.failed, 1));
+      expect(connected.connection.stage, ConnStage.waitingForImage);
+      async.elapse(const Duration(seconds: 1));
+      expect(_reconnects(fakes), [false]);
+    });
+  });
+
+  test('a first frame ends the silent restart window (model.dart:4330)', () {
+    fakeAsync((async) {
+      final fakes = installFakes();
+      final s = _connected(async, fakes);
+      // A render switch makes the next frame a first frame again.
+      _emit(async, fakes, s, {'name': 'use_texture_render', 'v': 'Y'});
+      _emit(
+          async,
+          fakes,
+          s,
+          _msgbox('restarting', 'Restarting remote device',
+              'Connection in progress. Please wait.'));
+      _frame(async, fakes, s);
+
+      async.elapse(const Duration(seconds: 10));
+
+      expect(_reconnects(fakes), [false]);
+      expect(s.connection.stage, ConnStage.connected);
+    });
+  });
+
+  test(
+      'no displays ends the connection (model.dart:1713, ui_session_interface.rs:1845)',
+      () {
+    fakeAsync((async) {
+      final fakes = installFakes();
+      fakes.lg.reasons['No displays'] = 'no_displays';
+      final s = _connected(async, fakes);
+
+      _emit(async, fakes, s, {'name': 'sync_peer_info', 'displays': '[]'});
+
+      expect((s.connection.stage, s.connection.reason?.code),
+          (ConnStage.failed, 'no_displays'));
+    });
+  });
+
+  test(
+      'the password is trimmed, and sent once (common/widgets/dialog.dart:1000-1002)',
+      () {
+    fakeAsync((async) {
+      final fakes = installFakes();
+      final s = appCore.sessions.open(_id, ConnType.defaultConn);
+      _emit(
+          async, fakes, s, _msgbox('input-password', 'Password Required', ''));
+
+      s.connection.login(password: '   ');
+      expect(fakes.bind.callsTo(#sessionLogin), isEmpty);
+      s.connection.login(password: ' secret ');
+      // A second Enter while verifying.
+      s.connection.login(password: ' secret ');
+
+      expect(fakes.bind.callsTo(#sessionLogin).single.namedArguments,
+          containsPair(#password, 'secret'));
     });
   });
 
