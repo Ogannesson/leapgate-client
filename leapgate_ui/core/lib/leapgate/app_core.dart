@@ -1,5 +1,6 @@
 import 'app_window.dart';
 import 'notices.dart';
+import 'options.dart';
 import 'prompts.dart';
 import 'session_registry.dart';
 
@@ -13,6 +14,7 @@ class AppCore {
   final AppWindow window;
   final SessionRegistry sessions;
   final toasts = Toasts();
+  final options = OptionsModel();
 
   /// Set by the app once it can show dialogs (the session pages, M2a).
   late Prompter prompter;

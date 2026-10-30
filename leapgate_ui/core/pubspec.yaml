@@ -21,6 +21,10 @@ dependencies:
   meta: any
   uuid: ^3.0.7
   get: ^4.6.5
+  tuple: ^2.0.0
+  image: ^4.0.17
+  path: ^1.8.1
+  vector_math: ^2.1.4
   # Same forks and refs as flutter/pubspec.yaml: the Rust core loads the two texture plugins by
   # dll name and C symbol (docs/新界面/03-实施方案.md §1.6).
   texture_rgba_renderer:

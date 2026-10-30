@@ -1,6 +1,6 @@
 import 'dart:async';
-import 'dart:ui';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/generated_bridge.dart';
 import 'package:flutter_hbb/generated_bridge_leapgate.dart' as lg;
@@ -10,6 +10,7 @@ import 'package:flutter_hbb/leapgate/bridge.dart';
 import 'package:flutter_hbb/leapgate/prompts.dart';
 import 'package:flutter_hbb/leapgate/session.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
+import 'package:flutter_test/flutter_test.dart';
 
 /// Block 1 of the bridge: records the calls and plays the session streams from the test.
 class FakeBind implements RustdeskImpl {
@@ -32,6 +33,43 @@ class FakeBind implements RustdeskImpl {
       case #sessionGetConnToken:
         return tokens[sessionId];
       case #sessionClose:
+        return Future<void>.value();
+      // What the copied models call while a session starts, handles peer info and closes.
+      // Values are those of a fresh session without saved options.
+      case #getNextTextureKey:
+        return 0;
+      case #mainGetUseTextureRender:
+      case #mainHasGpuTextureRender:
+      case #sessionGetToggleOptionSync:
+      case #sessionIsKeyboardModeSupported:
+        return false;
+      case #isSupportMultiUiSession:
+        return true;
+      case #peerGetSessionsCount:
+      case #versionToNumber:
+        return 1;
+      case #mainGetLocalOption:
+      case #mainGetInputSource:
+        return '';
+      case #sessionGetUseAllMyDisplaysForTheRemoteSession:
+        return null;
+      case #sessionGetTrackpadSpeed:
+        return Future<int?>.value();
+      case #sessionGetOption:
+      case #sessionGetKeyboardMode:
+      case #sessionGetFlutterOption:
+      case #sessionGetViewStyle:
+      case #sessionGetScrollStyle:
+        return Future<String?>.value();
+      case #sessionRegisterPixelbufferTexture:
+        return null;
+      case #mainLoadRecentPeers:
+      case #sessionSendMouse:
+      case #sessionPeerOption:
+      case #sessionSetSize:
+      case #sessionSwitchDisplay:
+      case #sessionSetKeyboardMode:
+      case #sessionSetFlutterOption:
         return Future<void>.value();
     }
     return super.noSuchMethod(invocation);
@@ -80,6 +118,12 @@ class FakePrompter implements Prompter {
 ({FakeBind bind, FakeLeapgate lg}) installFakes({bool singleSession = false}) {
   final bind = FakeBind();
   final leapgate = FakeLeapgate();
+  // A desktop session makes a pixel buffer texture through the plugin's channel when it starts
+  // (`TextureModel.updateCurrentDisplay`); -1 is the plugin's "not created".
+  TestWidgetsFlutterBinding.ensureInitialized()
+      .defaultBinaryMessenger
+      .setMockMethodCallHandler(const MethodChannel('texture_rgba_renderer'),
+          (call) async => call.method == 'createTexture' ? -1 : null);
   platformFFI.setBindingForTesting(bind);
   setLgBindForTesting(leapgate);
   appCore = AppCore(window: FakeWindow(), singleSession: singleSession);

@@ -3,32 +3,6 @@ import 'package:flutter/foundation.dart';
 import '../common.dart';
 import '../models/platform_model.dart';
 
-// 上游 common.dart:1613-1630（原样，常量换成字面值）
-// This function must be kept the same as the one in rust and sciter code.
-// rust: libs/hbb_common/src/config.rs -> option2bool()
-bool option2bool(String option, String value) {
-  bool res;
-  if (option.startsWith("enable-")) {
-    res = value != "N";
-  } else if (option.startsWith("allow-") ||
-      option == "stop-service" ||
-      option == "direct-server" ||
-      option == "force-always-relay") {
-    res = value == "Y";
-  } else {
-    // "" is true
-    res = value != "N";
-  }
-  return res;
-}
-
-/// Upstream `bool2option` (common.dart:1632-1648) writes `defaultOptionYes` / `defaultOptionNo`
-/// in two of its branches, which are 'Y' / 'N' whenever `isCustomClient` is true, and that is
-/// always the case here: `src/common.rs` `is_custom_client` is "app name isn't RustDesk". So every
-/// branch comes down to 'Y' / 'N', the same values the upstream UI writes in a Leapgate build.
-/// Session options are not booleans of this kind; see [SessionOptions].
-String bool2option(String option, bool b) => b ? 'Y' : 'N';
-
 class _KeyNotifier extends ChangeNotifier {
   void fire() => notifyListeners();
 }
