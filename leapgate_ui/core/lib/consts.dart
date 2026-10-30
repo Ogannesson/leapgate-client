@@ -61,6 +61,8 @@ const String kMouseEventTypeUp = "up";
 
 const String kKeyFlutterKey = "flutter_key";
 
+const String kMsgboxTextWaitingForImage = 'Connected, waiting for image...';
+
 const int kMobileDefaultDisplayWidth = 720;
 
 const int kMobileDefaultDisplayHeight = 1280;

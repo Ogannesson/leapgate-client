@@ -14,6 +14,7 @@ import 'package:get/get.dart';
 import 'package:uuid/uuid.dart';
 
 import 'app_core.dart';
+import 'connection.dart';
 import 'notices.dart';
 import 'options.dart';
 import 'prompts.dart';
@@ -49,6 +50,7 @@ class FFI {
     inputModel = InputModel(WeakReference(this));
     elevationModel = ElevationModel(WeakReference(this));
     textureModel = TextureModel(WeakReference(this));
+    connection = ConnectionModel(WeakReference(this));
     _registerEvents();
   }
 
@@ -94,6 +96,7 @@ class FFI {
   late final InputModel inputModel;
   late final ElevationModel elevationModel;
   late final TextureModel textureModel;
+  late final ConnectionModel connection;
 
   /// The device ID.
   final String id;
@@ -222,12 +225,14 @@ class FFI {
     }
   }
 
-  /// Upstream `FFI.onEvent2UIRgba` without the waiting-for-image dialog (`model.dart:4322-4326`)
-  /// and the reset of the restart reconnect (`:4330`), which are the connection state's.
+  /// Upstream `FFI.onEvent2UIRgba`; the waiting-for-image dialog (`model.dart:4322-4326`) and
+  /// the dialogs dismissed on the first frame (`:4330-4331`) are the connection state's.
   Future<void> onEvent2UIRgba() async {
+    connection.onImage();
     if (ffiModel.waitForFirstImage.value == true) {
       ffiModel.waitForFirstImage.value = false;
       ffiModel.cancelPendingRestoreTimer();
+      connection.onFirstImage();
       try {
         await canvasModel.updateViewStyle();
         await canvasModel.updateScrollStyle();
@@ -284,6 +289,7 @@ class FFI {
       await imageModel.update(null);
       cursorModel.clear();
       ffiModel.clear();
+      connection.clear();
       canvasModel.clear();
       inputModel.resetModifiers();
       // Dispose relative mouse mode resources to ensure cursor is restored

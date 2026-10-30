@@ -25,6 +25,9 @@ dependencies:
   image: ^4.0.17
   path: ^1.8.1
   vector_math: ^2.1.4
+  # The connection state's 30 s offline retry window reads the time through it, so tests can
+  # move it with fake_async.
+  clock: ^1.1.1
   # Same forks and refs as flutter/pubspec.yaml: the Rust core loads the two texture plugins by
   # dll name and C symbol (docs/新界面/03-实施方案.md §1.6).
   texture_rgba_renderer:

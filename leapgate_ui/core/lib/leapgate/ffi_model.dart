@@ -1,4 +1,4 @@
-// 上游：flutter/lib/models/model.dart@bd9262397 的 FfiModel（改写：只做 peer info、显示器、权限、光标、隐私模式等非连接部分，事件经 ffi.events 登记；连接状态那部分归 lib/leapgate 的连接状态。上游这一段改了，合并时人工移植到这里）
+// 上游：flutter/lib/models/model.dart@bd9262397 的 FfiModel（改写：只做 peer info、显示器、权限、光标、隐私模式等非连接部分，事件经 ffi.events 登记；连接状态那部分归 lib/leapgate/connection.dart。上游这一段改了，合并时人工移植到这里）
 //
 // A part of models/model.dart, as upstream's FfiModel was: it sets `Display._scale`.
 part of '../models/model.dart';
@@ -177,7 +177,7 @@ class FfiModel with ChangeNotifier {
   bool get keyboard => _permissions['keyboard'] != false;
 
   /// Upstream also resets the connection state here (`models/model.dart:254-264`); that is
-  /// the connection state's own.
+  /// [ConnectionModel.clear], called next to this one.
   clear() {
     _pi = PeerInfo();
     lastUserDisplay = null;
@@ -196,6 +196,7 @@ class FfiModel with ChangeNotifier {
     parent.target?.imageModel.setUseTextureRender(evt['v'] == 'Y');
     waitForFirstImage.value = true;
     isRefreshing = true;
+    parent.target?.connection.showConnectedWaitingForImage();
   }
 
   _handleSyncPeerOption(Map<String, dynamic> evt, String peer) {
@@ -338,6 +339,7 @@ class FfiModel with ChangeNotifier {
     // Recent peer is updated by handle_peer_info(ui_session_interface.rs) --> handle_peer_info(client.rs) --> save_config(client.rs)
     bind.mainLoadRecentPeers();
 
+    parent.target?.connection.onPeerInfo();
     _pi.version = evt['version'];
     // Note: Relative mouse mode is NOT auto-enabled on connect.
     // Users must manually enable it via toolbar or keyboard shortcut (Ctrl+Alt+Shift+M).
@@ -423,6 +425,7 @@ class FfiModel with ChangeNotifier {
             () => parent.target?.applyPendingMonitorRestore());
       }
       if (displays.isNotEmpty) {
+        parent.target?.connection.onDisplays();
         waitForFirstImage.value = true;
         isRefreshing = false;
       }

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common.dart';
@@ -20,6 +21,9 @@ class FakeBind implements RustdeskImpl {
 
   /// Calls that throw, to see what still happens after them.
   final failing = <Symbol>{};
+
+  /// What `sessionGetRemember` answers: the saved "remember password" of the device.
+  bool? remember;
 
   /// What `sessionReadLocalDirSync` answers, as Rust's JSON.
   String localDir = '{"id":0,"path":"","entries":[]}';
@@ -53,6 +57,8 @@ class FakeBind implements RustdeskImpl {
       case #mainGetUseTextureRender:
       case #mainHasGpuTextureRender:
       case #sessionGetToggleOptionSync:
+      case #sessionGetEnableTrustedDevices:
+      case #sessionGetIsRecording:
       case #sessionIsKeyboardModeSupported:
         return false;
       case #isSupportMultiUiSession:
@@ -66,6 +72,7 @@ class FakeBind implements RustdeskImpl {
       case #sessionGetUseAllMyDisplaysForTheRemoteSession:
         return null;
       case #sessionGetTrackpadSpeed:
+      case #sessionGetEdgeScrollEdgeThickness:
         return Future<int?>.value();
       case #sessionGetOption:
       case #sessionGetKeyboardMode:
@@ -75,6 +82,8 @@ class FakeBind implements RustdeskImpl {
         return Future<String?>.value();
       case #sessionGetToggleOption:
         return Future<bool?>.value(false);
+      case #sessionGetRemember:
+        return Future<bool?>.value(remember);
       case #sessionRegisterPixelbufferTexture:
         return null;
       case #translate:
@@ -97,15 +106,34 @@ class FakeBind implements RustdeskImpl {
       case #sessionSwitchDisplay:
       case #sessionSetKeyboardMode:
       case #sessionSetFlutterOption:
+      // Connecting.
+      case #sessionReconnect:
+      case #sessionLogin:
+      case #sessionSend2Fa:
+      case #sessionSendSelectedSessionId:
+      case #sessionSetCommon:
+      case #sessionInputOsPassword:
+      case #sessionOnWaitingForImageDialogShow:
         return Future<void>.value();
     }
     return super.noSuchMethod(invocation);
   }
 }
 
-/// Block 2: keeps the log lines.
+/// Block 2: keeps the log lines and answers C3 from [reasons].
 class FakeLeapgate implements lg.Leapgate {
   final logged = <String>[];
+
+  /// C3's answer by message box text; others are `other`.
+  final reasons = <String, String>{};
+
+  @override
+  String leapgateMsgboxReason(
+          {required String msgtype,
+          required String title,
+          required String text,
+          dynamic hint}) =>
+      jsonEncode({'code': reasons[text] ?? 'other'});
 
   @override
   void leapgateLog({required int level, required String msg, dynamic hint}) =>
