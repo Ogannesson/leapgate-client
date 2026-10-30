@@ -12,24 +12,14 @@ import 'package:window_manager/window_manager.dart';
 
 import '../../icons/lg_icon.dart';
 import '../../l10n/app_localizations.dart';
-import '../../shell/confirm_card.dart';
 import '../../shell/tab_overlays.dart';
-import '../../theme/lg_tokens.dart';
 import '../../widgets/lg_button.dart';
+import '../../widgets/lg_feedback.dart';
 import '../../widgets/lg_menu.dart';
+import '../../widgets/lg_session_toolbar.dart';
 import '../../widgets/lg_status.dart';
 import '../../widgets/lg_tooltip.dart';
 import 'session_names.dart';
-
-// Upstream option keys and values (`flutter/lib/consts.dart:139`, `:144`, `:163`, `:414-421`).
-// Per LEAPGATE.md §10.7 they belong in core's consts.dart, outside this block's files; they
-// move there when the blocks are merged.
-const kOptionCollapseToolbar = 'collapse_toolbar';
-const kOptionZoomCursor = 'zoom-cursor';
-const kOptionRemoteMenubarState = 'remoteMenubarState';
-const kRemoteImageQualityBest = 'best';
-const kRemoteImageQualityBalanced = 'balanced';
-const kRemoteImageQualityLow = 'low';
 
 /// Unpinned, the toolbar collapses this long after the pointer enters the image (upstream
 /// `desktop/widgets/remote_toolbar.dart:648-676`).
@@ -51,8 +41,8 @@ bool get _pinned {
 void _setPinned(bool pin) => appCore.options.flutter
     .set(kOptionRemoteMenubarState, jsonEncode({'pin': pin}));
 
-/// The session's floating toolbar, top centre (01 P2 block B; M2a's set, `04-M2a拆法.md` §1.1).
-/// Placeholder look until the designer's `LgSessionToolbar` replaces it.
+/// The session's floating toolbar, top centre (01 P2 block B; M2a's set, `04-M2a拆法.md` §1.1),
+/// drawn by [LgSessionToolbar].
 class SessionToolbar extends StatefulWidget {
   const SessionToolbar(
       {super.key,
@@ -115,32 +105,30 @@ class _SessionToolbarState extends State<SessionToolbar> {
     setState(() => _collapsed = !_collapsed);
   }
 
+  /// Asks over this tab only; Enter restarts, as upstream's OK does.
   Future<void> _confirmRestart() async {
     final l10n = AppLocalizations.of(context)!;
-    final ok = await widget.overlays.show<bool>(_ffi.id, (context, close) {
-      final restart = ConfirmAction(
-          l10n.toolbarRestartConfirm, () => close(true),
-          kind: LgButtonKind.danger);
-      return ConfirmCard(
-        title: l10n.toolbarRestartTitle,
-        body: l10n.toolbarRestartBody,
-        actions: [ConfirmAction(l10n.connCancel, () => close(null)), restart],
-        defaultAction: restart,
-        onCancel: () => close(null),
-      );
-    });
+    final ok = await widget.overlays.show<bool>(
+      _ffi.id,
+      (context, close) => LgDialogScrim(
+        onEscape: () => close(null),
+        child: LgConfirmDialog(
+          title: l10n.toolbarRestartTitle,
+          body: l10n.toolbarRestartBody,
+          actions: [
+            LgDialogAction(label: l10n.connCancel, onPressed: () => close(null)),
+            LgDialogAction(
+              label: l10n.toolbarRestartConfirm,
+              kind: LgButtonKind.dangerSolid,
+              isDefault: true,
+              onPressed: () => close(true),
+            ),
+          ],
+        ),
+      ),
+    );
     if (ok == true) _ffi.restartRemoteDevice();
   }
-
-  Widget _menu(String label, List<Widget> items) => LgMenuAnchor(
-        items: items,
-        builder: (context, controller) => LgButton(
-          label: label,
-          kind: LgButtonKind.text,
-          onPressed: () =>
-              controller.isOpen ? controller.close() : controller.open(),
-        ),
-      );
 
   @override
   Widget build(BuildContext context) {
@@ -157,140 +145,139 @@ class _SessionToolbarState extends State<SessionToolbar> {
 
   Widget _build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final t = LgTokens.of(context);
     final fullscreen = stateGlobal.fullscreen.isTrue;
     final conn = _ffi.connection;
     final pi = _ffi.ffiModel.pi;
-
-    final fullscreenButton = LgIconButton(
-      icon: fullscreen ? LgIcons.fullscreenExit : LgIcons.fullscreen,
-      label: fullscreen ? l10n.toolbarExitFullscreen : l10n.toolbarFullscreen,
-      onPressed: () => stateGlobal.setFullscreen(!fullscreen),
-    );
+    final route = conn.direct == true ? LgRoute.direct : LgRoute.relay;
+    final routeLabel =
+        conn.direct == true ? l10n.sessionDirect : l10n.sessionRelayed;
     final routeTip =
         conn.direct == true ? l10n.sessionDirectTip : l10n.sessionRelayedTip;
-    final route = !showsRoute(conn)
-        ? null
-        : LgTooltip(
-            message: conn.secure == false
-                ? '$routeTip\n${l10n.sessionUnencryptedTip}'
-                : routeTip,
-            // The connection details open from here in M2b.
-            child: LgRouteMark(
-              route: conn.direct! ? LgRoute.direct : LgRoute.relay,
-              label: conn.direct! ? l10n.sessionDirect : l10n.sessionRelayed,
-              encrypted: conn.secure != false,
-              unencryptedLabel: l10n.sessionUnencrypted,
-            ),
-          );
+    final encrypted = conn.secure != false;
+    final viewStyle = _ffi.canvasModel.viewStyle.style;
+    final actions = [
+      if (_ffi.canSendCtrlAltDel)
+        LgMenuItem(
+            label: l10n.toolbarCtrlAltDel, onPressed: _ffi.sendCtrlAltDel),
+      if (_ffi.canRestartRemoteDevice)
+        LgMenuItem(label: l10n.toolbarRestart, onPressed: _confirmRestart),
+    ];
+    final pinned = _pinned;
 
-    // The drag bar has "Minimize" in full screen, expanded or collapsed (01 P2 block B).
-    final minimize = LgIconButton(
-        icon: LgIcons.windowMin,
-        label: l10n.minimize,
-        onPressed: windowManager.minimize);
-
-    final List<Widget> children;
-    if (_collapsed) {
-      children = [
-        if (route != null) route,
-        LgIconButton(
-            icon: LgIcons.chevD,
-            label: l10n.toolbarExpand,
-            onPressed: _toggleCollapsed),
-        fullscreenButton,
-        if (fullscreen) minimize,
-      ];
-    } else {
-      final viewStyle = _ffi.canvasModel.viewStyle.style;
-      final pinned = _pinned;
-      final actions = [
-        if (_ffi.canSendCtrlAltDel)
-          LgMenuItem(
-              label: l10n.toolbarCtrlAltDel, onPressed: _ffi.sendCtrlAltDel),
-        if (_ffi.canRestartRemoteDevice)
-          LgMenuItem(label: l10n.toolbarRestart, onPressed: _confirmRestart),
-      ];
-      children = [
-        if (fullscreen)
-          Text(deviceName(_ffi),
-              style: t.text
-                  .copyWith(color: t.colors.text, fontWeight: FontWeight.w700)),
-        LgIconButton(
-          icon: LgIcons.pin,
-          label: pinned ? l10n.toolbarUnpin : l10n.toolbarPin,
-          onPressed: () => _setPinned(!pinned),
-        ),
-        _menu(l10n.toolbarRemoteDesktop, [
-          LgMenuItem(
-              label: l10n.toolbarRemoteDesktop, checked: true, onPressed: () {}),
-        ]),
-        if (pi.displays.length > 1)
-          _menu(l10n.toolbarMonitor, [
-            for (var i = 0; i < pi.displays.length; i++)
+    return LgSessionToolbar(
+      labels: LgToolbarLabels(
+        toolbar: l10n.toolbarName,
+        pin: l10n.toolbarPin,
+        fullscreen: l10n.toolbarFullscreen,
+        exitFullscreen: l10n.toolbarExitFullscreen,
+        minimize: l10n.minimize,
+        collapse: l10n.toolbarCollapse,
+        expand: l10n.toolbarExpand,
+      ),
+      pinned: pinned,
+      onTogglePin: () => _setPinned(!pinned),
+      collapsed: _collapsed,
+      onToggleCollapsed: _toggleCollapsed,
+      fullscreen: fullscreen,
+      onToggleFullscreen: () => stateGlobal.setFullscreen(!fullscreen),
+      // The bar has "Minimize" in full screen, expanded or collapsed (01 P2 block B).
+      onMinimize: windowManager.minimize,
+      deviceName: deviceName(_ffi),
+      deviceId: _ffi.id,
+      route: route,
+      routeLabel: routeLabel,
+      encrypted: encrypted,
+      unencryptedLabel: l10n.sessionUnencrypted,
+      groups: [
+        [
+          LgToolbarMenuButton(
+            label: l10n.toolbarRemoteDesktop,
+            icon: LgIcons.monitor,
+            items: [
               LgMenuItem(
-                label: l10n.toolbarMonitorN(i + 1),
-                checked: pi.currentDisplay == i,
-                onPressed: () => openMonitorInTheSameTab(i, _ffi, pi),
-              ),
-          ]),
-        _menu(l10n.toolbarDisplay, [
-          LgMenuGroup(l10n.toolbarScale),
-          for (final (style, label) in [
-            (kRemoteViewStyleOriginal, l10n.toolbarScaleOriginal),
-            (kRemoteViewStyleAdaptive, l10n.toolbarScaleAdaptive),
-          ])
-            LgMenuItem(
-              label: label,
-              checked: viewStyle == style,
-              onPressed: () => _ffi.setViewStyle(style),
-            ),
-          LgMenuGroup(l10n.toolbarQuality),
-          for (final (quality, label) in [
-            (kRemoteImageQualityBest, l10n.toolbarQualityBest),
-            (kRemoteImageQualityBalanced, l10n.toolbarQualityBalanced),
-            (kRemoteImageQualityLow, l10n.toolbarQualityLow),
-          ])
-            LgMenuItem(
-              label: label,
-              checked: _quality == quality,
-              onPressed: () async {
-                await _ffi.setImageQuality(quality);
-                await _readQuality();
-              },
-            ),
-        ]),
-        if (actions.isNotEmpty) _menu(l10n.toolbarActions, actions),
-        if (route != null) route,
-        LgButton(
-          label: l10n.toolbarDisconnect,
-          kind: LgButtonKind.danger,
-          onPressed: () => appCore.sessions.close(_ffi),
-        ),
-        fullscreenButton,
-        if (fullscreen) minimize,
-        LgIconButton(
-            icon: LgIcons.chevU,
-            label: l10n.toolbarCollapse,
-            onPressed: _toggleCollapsed),
-      ];
-    }
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: LgSpace.s2),
-      decoration: BoxDecoration(
-        color: t.colors.float,
-        borderRadius:
-            const BorderRadius.vertical(bottom: Radius.circular(LgRadius.r10)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          for (final (i, c) in children.indexed) ...[
-            if (i > 0) const SizedBox(width: LgSpace.s1),
-            c,
-          ],
+                  label: l10n.toolbarRemoteDesktop,
+                  checked: true,
+                  onPressed: () {}),
+            ],
+          ),
         ],
-      ),
+        [
+          if (pi.displays.length > 1)
+            LgToolbarMenuButton(
+              label: l10n.toolbarMonitor,
+              icon: LgIcons.displays,
+              items: [
+                for (var i = 0; i < pi.displays.length; i++)
+                  LgMenuItem(
+                    label: l10n.toolbarMonitorN(i + 1),
+                    checked: pi.currentDisplay == i,
+                    onPressed: () => openMonitorInTheSameTab(i, _ffi, pi),
+                  ),
+              ],
+            ),
+          LgToolbarMenuButton(
+            label: l10n.toolbarDisplay,
+            icon: LgIcons.image,
+            items: [
+              LgMenuGroup(l10n.toolbarScale),
+              for (final (style, label) in [
+                (kRemoteViewStyleOriginal, l10n.toolbarScaleOriginal),
+                (kRemoteViewStyleAdaptive, l10n.toolbarScaleAdaptive),
+              ])
+                LgMenuItem(
+                  label: label,
+                  checked: viewStyle == style,
+                  onPressed: () => _ffi.setViewStyle(style),
+                ),
+              LgMenuGroup(l10n.toolbarQuality),
+              for (final (quality, label) in [
+                (kRemoteImageQualityBest, l10n.toolbarQualityBest),
+                (kRemoteImageQualityBalanced, l10n.toolbarQualityBalanced),
+                (kRemoteImageQualityLow, l10n.toolbarQualityLow),
+              ])
+                LgMenuItem(
+                  label: label,
+                  checked: _quality == quality,
+                  onPressed: () async {
+                    await _ffi.setImageQuality(quality);
+                    await _readQuality();
+                  },
+                ),
+            ],
+          ),
+          if (actions.isNotEmpty)
+            LgToolbarMenuButton(
+              label: l10n.toolbarActions,
+              icon: LgIcons.bolt,
+              items: actions,
+            ),
+        ],
+        if (showsRoute(conn))
+          [
+            LgTooltip(
+              message: encrypted
+                  ? routeTip
+                  : '$routeTip\n${l10n.sessionUnencryptedTip}',
+              // The connection details open from here in M2b.
+              child: LgToolbarStatus(
+                child: LgRouteMark(
+                  route: route,
+                  label: routeLabel,
+                  encrypted: encrypted,
+                  unencryptedLabel: l10n.sessionUnencrypted,
+                ),
+              ),
+            ),
+          ],
+        [
+          LgToolbarButton(
+            icon: LgIcons.power,
+            label: l10n.toolbarDisconnect,
+            danger: true,
+            onPressed: () => appCore.sessions.close(_ffi),
+          ),
+        ],
+      ],
     );
   }
 }

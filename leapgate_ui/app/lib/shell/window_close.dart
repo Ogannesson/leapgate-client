@@ -1,21 +1,19 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/options.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../l10n/app_localizations.dart';
-import '../theme/lg_tokens.dart';
 import '../widgets/lg_button.dart';
+import '../widgets/lg_feedback.dart';
 import '../widgets/lg_selection.dart';
-import 'confirm_card.dart';
 import 'tab_overlays.dart';
 
-// What closing the main window does (01 §2.1 "窗口关闭", §3.2 block G, §8.1 Q6).
-
-/// Upstream `consts.dart:170`: ask before closing sessions. The settings page names it
-/// "关闭窗口前确认断开会话" (02 §1.5.4).
-const kOptionEnableConfirmClosingTabs = 'enable-confirm-closing-tabs';
+// What closing the main window does (01 §2.1 "窗口关闭", §3.2 block G, §8.1 Q6). Asking
+// before closing sessions is upstream's kOptionEnableConfirmClosingTabs; the settings page
+// names it "关闭窗口前确认断开会话" (02 §1.5.4).
 
 /// The portable version's remembered answer to "quit or run in background" (Q6), a LocalConfig
 /// key of Leapgate's own: `exit`, `background`, or empty while not remembered.
@@ -69,8 +67,10 @@ Future<void> closeMainWindow(TabOverlays overlays) async {
   if (plan.askSessions || plan.askAction) {
     final answer = await overlays.show<CloseAnswer>(
         kWindowScope,
-        (context, close) => CloseDialog(
-            plan: plan, sessions: devices.length, onClose: close));
+        (context, close) => LgDialogScrim(
+            onEscape: () => close(null),
+            child: CloseDialog(
+                plan: plan, sessions: devices.length, onClose: close)));
     if (answer == null) return;
     if (plan.askAction) action = answer.action;
     if (answer.dontShowAgain) {
@@ -100,7 +100,7 @@ Future<void> closeMainWindow(TabOverlays overlays) async {
   }
 }
 
-/// The close confirmation; placeholder controls until the designer's dialog replaces them.
+/// The close confirmation (01 §3.2 block G); Enter is the main button, Esc cancels.
 class CloseDialog extends StatefulWidget {
   const CloseDialog(
       {super.key,
@@ -128,14 +128,21 @@ class _CloseDialogState extends State<CloseDialog> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final plan = widget.plan;
-    final confirm = ConfirmAction(
-        plan.askSessions ? l10n.closingDisconnect : l10n.closingClose, _confirm,
-        kind: LgButtonKind.primary);
-    return ConfirmCard(
+    return LgConfirmDialog(
       title: plan.askSessions
           ? l10n.closingDisconnectAll(widget.sessions)
           : l10n.closingTitle,
-      controls: [
+      actions: [
+        LgDialogAction(
+            label: l10n.connCancel, onPressed: () => widget.onClose(null)),
+        LgDialogAction(
+          label: plan.askSessions ? l10n.closingDisconnect : l10n.closingClose,
+          kind: LgButtonKind.primary,
+          isDefault: true,
+          onPressed: _confirm,
+        ),
+      ],
+      children: [
         if (plan.askAction) ...[
           for (final (a, label, detail) in [
             (CloseAction.exit, l10n.closingExit, l10n.closingExitDetail),
@@ -145,23 +152,12 @@ class _CloseDialogState extends State<CloseDialog> {
               l10n.closingBackgroundDetail
             ),
           ])
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                LgRadio<CloseAction>(
-                  value: a,
-                  groupValue: _action,
-                  label: label,
-                  onChanged: (v) => setState(() => _action = v),
-                ),
-                Padding(
-                  padding: const EdgeInsets.only(left: LgSpace.s7),
-                  child: Text(detail,
-                      style: LgTokens.of(context)
-                          .textS
-                          .copyWith(color: LgTokens.of(context).colors.text2)),
-                ),
-              ],
+            LgRadio<CloseAction>(
+              value: a,
+              groupValue: _action,
+              label: label,
+              description: detail,
+              onChanged: (v) => setState(() => _action = v),
             ),
           LgCheckbox(
             value: _remember,
@@ -176,12 +172,6 @@ class _CloseDialogState extends State<CloseDialog> {
             onChanged: (v) => setState(() => _dontShowAgain = v),
           ),
       ],
-      actions: [
-        ConfirmAction(l10n.connCancel, () => widget.onClose(null)),
-        confirm,
-      ],
-      defaultAction: confirm,
-      onCancel: () => widget.onClose(null),
     );
   }
 }

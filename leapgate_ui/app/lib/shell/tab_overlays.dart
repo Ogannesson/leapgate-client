@@ -5,8 +5,6 @@ import 'package:flutter_hbb/leapgate/bridge.dart';
 import 'package:flutter_hbb/leapgate/prompts.dart';
 import 'package:flutter_hbb/leapgate/session.dart';
 
-import '../theme/lg_tokens.dart';
-
 /// The whole content area below the title bar: the window close confirmation covers every tab.
 const Object kWindowScope = #window;
 
@@ -29,8 +27,8 @@ class TabOverlays extends ChangeNotifier {
     _open.remove(scope);
   }
 
-  /// Shows [builder]'s dialog over [scope] behind a scrim and completes with what it passes to
-  /// its `close`; null when the scope is not shown.
+  /// Shows [builder]'s layer (an `LgDialogScrim` with its dialog) over [scope] and completes
+  /// with what it passes to its `close`; null when the scope is not shown.
   Future<T?> show<T>(Object? scope,
       Widget Function(BuildContext context, void Function(T? result) close)
           builder) {
@@ -46,14 +44,7 @@ class TabOverlays extends ChangeNotifier {
       done.complete(result);
     }
 
-    entry = OverlayEntry(
-      builder: (context) => Stack(
-        children: [
-          ModalBarrier(color: LgTokens.of(context).colors.scrim),
-          Center(child: builder(context, close)),
-        ],
-      ),
-    );
+    entry = OverlayEntry(builder: (context) => builder(context, close));
     overlay.insert(entry);
     _open[scope] = (_open[scope] ?? 0) + 1;
     notifyListeners();

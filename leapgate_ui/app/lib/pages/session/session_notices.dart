@@ -6,10 +6,9 @@ import 'package:flutter_hbb/leapgate/bridge.dart';
 import 'package:flutter_hbb/leapgate/notices.dart';
 import 'package:flutter_hbb/leapgate/session.dart';
 
-import '../../icons/lg_icon.dart';
 import '../../l10n/app_localizations.dart';
-import '../../theme/lg_tokens.dart';
-import '../../widgets/lg_button.dart';
+import '../../widgets/lg_banner.dart';
+import '../../widgets/lg_feedback.dart';
 
 /// At most this many notices show; later ones wait (01 P2 block E).
 const kVisibleNotices = 3;
@@ -49,8 +48,8 @@ String noticeText(AppLocalizations l10n, SessionNotice notice) {
   return translate(notice.key);
 }
 
-/// The session's notices at the top right of its tab, below the toolbar. Placeholder bars until
-/// the designer's `LgNoticeStack` replaces them.
+/// The session's notices at the top right of its tab, below the toolbar ([LgNoticeStack]); the
+/// ones without buttons go after [kNoticeDuration].
 class SessionNoticesView extends StatefulWidget {
   const SessionNoticesView({super.key, required this.ffi});
 
@@ -103,37 +102,29 @@ class _SessionNoticesViewState extends State<SessionNoticesView> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final t = LgTokens.of(context);
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.end,
-      children: [
-        for (final n in _notices.items.take(kVisibleNotices))
-          Container(
-            width: 320,
-            margin: const EdgeInsets.only(bottom: LgSpace.s2),
-            padding: const EdgeInsets.fromLTRB(
-                LgSpace.s3, LgSpace.s2, LgSpace.s1, LgSpace.s2),
-            decoration: BoxDecoration(
-              color: t.colors.float,
-              borderRadius: BorderRadius.circular(LgRadius.r10),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(noticeText(l10n, n),
-                      style: t.text.copyWith(color: t.colors.text)),
-                ),
-                // Notices with buttons (screenshot, printing, elevation) come with M2b.
-                LgIconButton(
-                  icon: LgIcons.x,
-                  label: l10n.close,
-                  onPressed: () => _notices.dismiss(n),
-                ),
-              ],
-            ),
+    final items = _notices.items;
+    // Notices with buttons (screenshot, printing, elevation) come with M2b.
+    return LgNoticeStack(
+      maxVisible: kVisibleNotices,
+      dismissLabel: l10n.close,
+      notices: [
+        for (final n in items)
+          LgNotice(
+            id: '${identityHashCode(n)}',
+            text: noticeText(l10n, n),
+            tone: _toneOf(n),
           ),
       ],
+      onDismiss: (id) => _notices
+          .dismiss(items.firstWhere((n) => '${identityHashCode(n)}' == id)),
     );
   }
 }
+
+/// Something that did not go as asked (privacy mode refused or lost, a monitor gone) is a
+/// warning; the rest informs.
+LgTone _toneOf(SessionNotice n) =>
+    n.key == 'display_is_plugged_out_msg' ||
+            (n.args['type'] ?? '').contains('error')
+        ? LgTone.warning
+        : LgTone.info;
