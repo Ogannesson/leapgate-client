@@ -1142,12 +1142,12 @@ Widget _toolbar({
       [
         if (display)
           LgToolbarMenuButton(
-            label: english ? 'Display' : '显示器',
+            label: english ? 'Monitor' : '显示器',
             icon: LgIcons.displays,
             items: _displayMenu(),
           ),
         LgToolbarMenuButton(
-          label: english ? 'View' : '画面',
+          label: english ? 'Display' : '画面',
           icon: LgIcons.image,
           items: _pictureMenu(),
         ),
@@ -1836,7 +1836,12 @@ List<Specimen> _m2aSpecimens() {
           ],
           actions: const [
             _cancel,
-            LgPanelAction(label: '连接', primary: true, onPressed: null),
+            LgPanelAction(
+              label: '连接',
+              primary: true,
+              isDefault: true,
+              onPressed: null,
+            ),
           ],
         ),
       ),
@@ -1853,7 +1858,12 @@ List<Specimen> _m2aSpecimens() {
           ],
           actions: const [
             _cancel,
-            LgPanelAction(label: '连接', primary: true, onPressed: _noop),
+            LgPanelAction(
+              label: '连接',
+              primary: true,
+              isDefault: true,
+              onPressed: _noop,
+            ),
           ],
         ),
       ),
@@ -1870,7 +1880,12 @@ List<Specimen> _m2aSpecimens() {
           ],
           actions: const [
             _cancel,
-            LgPanelAction(label: '连接', primary: true, onPressed: _noop),
+            LgPanelAction(
+              label: '连接',
+              primary: true,
+              isDefault: true,
+              onPressed: _noop,
+            ),
           ],
         ),
       ),
@@ -1905,7 +1920,12 @@ List<Specimen> _m2aSpecimens() {
           ],
           actions: const [
             _cancel,
-            LgPanelAction(label: '验证', primary: true, onPressed: null),
+            LgPanelAction(
+              label: '验证',
+              primary: true,
+              isDefault: true,
+              onPressed: null,
+            ),
           ],
         ),
       ),
@@ -1929,7 +1949,12 @@ List<Specimen> _m2aSpecimens() {
           ],
           actions: const [
             _cancel,
-            LgPanelAction(label: '验证', primary: true, onPressed: _noop),
+            LgPanelAction(
+              label: '验证',
+              primary: true,
+              isDefault: true,
+              onPressed: _noop,
+            ),
           ],
         ),
       ),

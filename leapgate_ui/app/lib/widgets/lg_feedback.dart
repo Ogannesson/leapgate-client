@@ -59,17 +59,19 @@ class LgNotice {
   final bool dismissible;
 }
 
-/// Notices one under the other, newest at the bottom; at most [maxVisible]
+/// Notices one under the other, newest at the bottom; at most three
 /// are drawn, the ones after them wait in the caller's list until room is
 /// made. 440 wide: place it at the right of the tab under the toolbar
 /// (right 16, top 12 + toolbar height + 12).
+/// How many notices are drawn at once (01 §3.2 block E); the rest wait.
+const int _maxVisible = 3;
+
 class LgNoticeStack extends StatelessWidget {
   const LgNoticeStack({
     super.key,
     required this.notices,
     required this.onDismiss,
     required this.dismissLabel,
-    this.maxVisible = 3,
   });
 
   final List<LgNotice> notices;
@@ -77,11 +79,10 @@ class LgNoticeStack extends StatelessWidget {
 
   /// Accessible name and tooltip of the close button ("关闭").
   final String dismissLabel;
-  final int maxVisible;
 
   @override
   Widget build(BuildContext context) {
-    final shown = notices.take(maxVisible).toList();
+    final shown = notices.take(_maxVisible).toList();
     if (shown.isEmpty) return const SizedBox.shrink();
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 440),
@@ -164,7 +165,16 @@ class _NoticeCard extends StatelessWidget {
                                 fontWeight: FontWeight.w700,
                               ),
                             ),
-                          TextSpan(text: notice.text),
+                          TextSpan(
+                            text: notice.text,
+                            // A notice with buttons asks something: its sentence
+                            // is bold (`.toast .tx b`).
+                            style:
+                                notice.actions.isNotEmpty &&
+                                    notice.title == null
+                                ? const TextStyle(fontWeight: FontWeight.w700)
+                                : null,
+                          ),
                         ],
                       ),
                       style: t.textM.copyWith(color: c.text),
@@ -337,11 +347,11 @@ class LgDialogAction {
   /// for the one that cannot be taken back, secondary for the way out.
   final LgButtonKind kind;
 
-  /// What Enter does (at most one; none means Enter does nothing): the button
-  /// takes the keyboard when the dialog opens, so Enter is its own press, and
-  /// Enter in a field of the dialog runs it. A destructive question marks the
-  /// safe answer ("取消"). With the focus on another button, Enter is that
-  /// button's.
+  /// What Enter does (at most one, marked by the caller; none means Enter does
+  /// nothing): the button takes the keyboard when the dialog opens, so Enter is
+  /// its own press, and Enter in a field of the dialog runs it. Usually it is
+  /// the main button; a question that cannot be taken back may mark the way out
+  /// instead. With the focus on another button, Enter is that button's.
   final bool isDefault;
 
   /// The accessible name when it must differ from [label].
@@ -439,83 +449,88 @@ class LgConfirmDialog extends StatelessWidget {
       label: title,
       child: LgDefaultEnter(
         onEnter: defaultAction?.onPressed,
-        child: ConstrainedBox(
-          constraints: BoxConstraints(maxWidth: width),
-          child: Container(
-            padding: const EdgeInsets.all(28),
-            decoration: BoxDecoration(
-              color: c.float,
-              borderRadius: BorderRadius.circular(LgRadius.r20),
-              boxShadow: c.shadow,
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Semantics(
-                  header: true,
-                  child: Text(
-                    title,
-                    style: LgTokens.style(
-                      20,
-                      28,
-                      FontWeight.w700,
-                    ).copyWith(color: c.text),
-                  ),
-                ),
-                if (subtitle != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: LgSpace.s2),
+        // Tab goes round the card and never out of it; the scope takes the
+        // focus when the card appears, so the default button gets it.
+        child: FocusScope(
+          autofocus: true,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: width),
+            child: Container(
+              padding: const EdgeInsets.all(28),
+              decoration: BoxDecoration(
+                color: c.float,
+                borderRadius: BorderRadius.circular(LgRadius.r20),
+                boxShadow: c.shadow,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Semantics(
+                    header: true,
                     child: Text(
-                      subtitle!,
-                      style: t.textS.copyWith(color: c.text2),
+                      title,
+                      style: LgTokens.style(
+                        20,
+                        28,
+                        FontWeight.w700,
+                      ).copyWith(color: c.text),
                     ),
                   ),
-                if (body != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: LgSpace.s3),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        if (bodyIcon != null) ...[
-                          Padding(
-                            padding: EdgeInsets.only(
-                              top: (t.sizes.lhM - 18) / 2,
-                            ),
-                            child: LgIcon(bodyIcon!, size: 18, color: c.text),
-                          ),
-                          const SizedBox(width: LgSpace.s2),
-                        ],
-                        Expanded(
-                          child: Text(
-                            body!,
-                            style: t.textM.copyWith(color: c.text),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                for (final child in children) ...[
-                  const SizedBox(height: LgSpace.s4),
-                  child,
-                ],
-                const SizedBox(height: LgSpace.s6),
-                Wrap(
-                  alignment: WrapAlignment.end,
-                  spacing: LgSpace.s3,
-                  runSpacing: LgSpace.s3,
-                  children: [
-                    for (final a in actions)
-                      LgButton(
-                        label: a.label,
-                        semanticLabel: a.semanticLabel,
-                        kind: a.kind,
-                        autofocus: a == defaultAction,
-                        onPressed: a.onPressed,
+                  if (subtitle != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: LgSpace.s2),
+                      child: Text(
+                        subtitle!,
+                        style: t.textS.copyWith(color: c.text2),
                       ),
+                    ),
+                  if (body != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: LgSpace.s3),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (bodyIcon != null) ...[
+                            Padding(
+                              padding: EdgeInsets.only(
+                                top: (t.sizes.lhM - 18) / 2,
+                              ),
+                              child: LgIcon(bodyIcon!, size: 18, color: c.text),
+                            ),
+                            const SizedBox(width: LgSpace.s2),
+                          ],
+                          Expanded(
+                            child: Text(
+                              body!,
+                              style: t.textM.copyWith(color: c.text),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  for (final child in children) ...[
+                    const SizedBox(height: LgSpace.s4),
+                    child,
                   ],
-                ),
-              ],
+                  const SizedBox(height: LgSpace.s6),
+                  Wrap(
+                    alignment: WrapAlignment.end,
+                    spacing: LgSpace.s3,
+                    runSpacing: LgSpace.s3,
+                    children: [
+                      for (final a in actions)
+                        LgButton(
+                          label: a.label,
+                          semanticLabel: a.semanticLabel,
+                          kind: a.kind,
+                          autofocus: a == defaultAction,
+                          onPressed: a.onPressed,
+                        ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
         ),

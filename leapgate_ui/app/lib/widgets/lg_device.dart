@@ -77,8 +77,8 @@ enum LgDeviceStatus { online, offline, querying }
 
 // Column widths of the list: the header and the rows must agree.
 const double _statusWidth = 104;
-const double _idWidth = 108;
-const double _actionWidth = 88;
+const double _idWidth = 124;
+const double _actionWidth = 112;
 const double _columnGap = LgSpace.s3;
 const int _nameFlex = 16;
 const int _hostFlex = 15;
@@ -245,7 +245,8 @@ class _LgDeviceRowState extends State<LgDeviceRow> {
       onPressed: w.onTap ?? w.onConnect,
       onActivate: w.onConnect ?? w.onTap,
       focusNode: w.focusNode,
-      selected: w.selected,
+      // The row the arrow keys moved to is "selected" for a screen reader too.
+      selected: w.selected || w.highlighted,
       semanticLabel: label,
       builder: (context, states) {
         final hot =
@@ -325,7 +326,10 @@ class _LgDeviceRowState extends State<LgDeviceRow> {
                           flex: _hostFlex,
                           child: w.userHost == null
                               ? const SizedBox.shrink()
-                              : LgEllipsisText(w.userHost!),
+                              : LgEllipsisText(
+                                  w.userHost!,
+                                  style: cellStyle.copyWith(color: c.text2),
+                                ),
                         ),
                         if (w.source != null) ...[
                           const SizedBox(width: _columnGap),
@@ -464,6 +468,7 @@ class LgConnectToRow extends StatelessWidget {
     return LgPressable(
       onPressed: onTap,
       focusNode: focusNode,
+      selected: highlighted,
       semanticLabel: text,
       builder: (context, states) {
         final overlay = lgStateOverlay(c, states);

@@ -333,14 +333,15 @@ class LgSessionToolbar extends StatelessWidget {
     required this.onToggleCollapsed,
     required this.fullscreen,
     required this.onToggleFullscreen,
-    required this.route,
-    required this.routeLabel,
+    this.route,
+    this.routeLabel,
     this.encrypted = true,
     this.unencryptedLabel,
     this.deviceName,
     this.deviceId,
     this.onMinimize,
-  }) : assert(encrypted || unencryptedLabel != null);
+  }) : assert(route == null || routeLabel != null),
+       assert(encrypted || unencryptedLabel != null);
 
   final LgToolbarLabels labels;
 
@@ -360,9 +361,10 @@ class LgSessionToolbar extends StatelessWidget {
   final bool fullscreen;
   final VoidCallback onToggleFullscreen;
 
-  /// Direct or relayed, for the dot of the folded bar.
-  final LgRoute route;
-  final String routeLabel;
+  /// Direct or relayed, for the dot of the folded bar; null while the route is
+  /// not known yet (the dot is left out).
+  final LgRoute? route;
+  final String? routeLabel;
   final bool encrypted;
   final String? unencryptedLabel;
 
@@ -409,7 +411,7 @@ class LgSessionToolbar extends StatelessWidget {
           boxShadow: c.shadow,
         ),
         child: _Group([
-          dot,
+          ?dot,
           ?minimize,
           fullscreenButton,
           LgToolbarButton(
@@ -480,15 +482,22 @@ class LgSessionToolbar extends StatelessWidget {
 
   /// The dot of the folded bar: filled for a direct connection, half filled
   /// (a diamond in detail mode) for a relayed one, and a triangle after it
-  /// when the connection is not encrypted.
-  Widget _routeDot(LgTokens t) {
+  /// when the connection is not encrypted. Until the route is known there is
+  /// no dot (only the triangle, if the connection turns out unencrypted).
+  Widget? _routeDot(LgTokens t) {
     final c = t.colors;
+    final route = this.route;
+    if (route == null && encrypted) return null;
     final direct = route == LgRoute.direct;
     final color = direct ? c.direct : c.relay;
     final mark = direct
         ? LgIcons.markDot
         : (t.detail ? LgIcons.markDia : LgIcons.markHalf);
-    final text = encrypted ? routeLabel : '$routeLabel, $unencryptedLabel';
+    final text = route == null
+        ? unencryptedLabel!
+        : encrypted
+        ? routeLabel!
+        : '$routeLabel, $unencryptedLabel';
     return LgTooltip(
       message: text,
       child: Semantics(
@@ -501,9 +510,9 @@ class LgSessionToolbar extends StatelessWidget {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                LgIcon(mark, size: 12, color: color),
+                if (route != null) LgIcon(mark, size: 12, color: color),
                 if (!encrypted) ...[
-                  const SizedBox(width: LgSpace.s1),
+                  if (route != null) const SizedBox(width: LgSpace.s1),
                   LgIcon(LgIcons.markTri, size: 12, color: c.unencrypted),
                 ],
               ],

@@ -1,3 +1,5 @@
+import 'dart:ui' show Tristate;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -53,6 +55,38 @@ void main() {
       expect((taps, doubles), (1, 0));
       await tester.tap(find.text('书房台式机'));
       expect((taps, doubles), (2, 1));
+    });
+
+    testWidgets('a click on a row with a connect callback only selects', (
+      tester,
+    ) async {
+      var taps = 0, connects = 0;
+      await pumpLg(
+        tester,
+        _row(onTap: () => taps++, onConnect: () => connects++),
+      );
+      await tester.tap(find.text('书房台式机'));
+      expect((taps, connects), (1, 0));
+    });
+
+    testWidgets('the row of the arrow keys is read as selected', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      bool selected() =>
+          tester
+              .getSemantics(find.bySemanticsLabel(RegExp('书房台式机')))
+              .getSemanticsData()
+              .flagsCollection
+              .isSelected ==
+          Tristate.isTrue;
+      await pumpLg(tester, _row(onTap: () {}));
+      expect(selected(), isFalse);
+      await pumpLg(tester, _row(onTap: () {}, highlighted: true));
+      expect(selected(), isTrue);
+      await pumpLg(tester, _row(onTap: () {}, selected: true));
+      expect(selected(), isTrue);
+      handle.dispose();
     });
 
     testWidgets('two clicks far apart are not a double click', (tester) async {
@@ -213,6 +247,32 @@ void main() {
       });
       expect(weights['6789'], FontWeight.w700);
       expect(weights['连接到 '], isNull);
+    });
+
+    testWidgets('the highlighted "connect to" row is read as selected', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      bool selected(WidgetTester t) =>
+          t
+              .getSemantics(find.bySemanticsLabel('连接到 6789'))
+              .getSemanticsData()
+              .flagsCollection
+              .isSelected ==
+          Tristate.isTrue;
+      Widget row({required bool highlighted}) => SizedBox(
+        width: 600,
+        child: LgConnectToRow(
+          text: '连接到 6789',
+          highlighted: highlighted,
+          onTap: () {},
+        ),
+      );
+      await pumpLg(tester, row(highlighted: false));
+      expect(selected(tester), isFalse);
+      await pumpLg(tester, row(highlighted: true));
+      expect(selected(tester), isTrue);
+      handle.dispose();
     });
 
     testWidgets('Enter on the focused row taps it', (tester) async {

@@ -181,6 +181,48 @@ void main() {
       handle.dispose();
     });
 
+    testWidgets('folded without a known route draws no connection dot', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      Widget bar({bool encrypted = true}) => LgSessionToolbar(
+        labels: _labels,
+        groups: const [],
+        pinned: true,
+        onTogglePin: () {},
+        collapsed: true,
+        onToggleCollapsed: () {},
+        fullscreen: false,
+        onToggleFullscreen: () {},
+        encrypted: encrypted,
+        unencryptedLabel: encrypted ? null : '未加密',
+      );
+      await pumpLg(tester, bar());
+      expect(find.bySemanticsLabel('经中继'), findsNothing);
+      expect(find.byType(LgIcon), findsNWidgets(2)); // full screen and unfold
+      // Unencrypted before the route is known: the warning alone.
+      await pumpLg(tester, bar(encrypted: false));
+      expect(find.bySemanticsLabel('未加密'), findsOneWidget);
+      handle.dispose();
+    });
+
+    testWidgets('the open bar works without a route too', (tester) async {
+      await pumpLg(
+        tester,
+        LgSessionToolbar(
+          labels: _labels,
+          groups: const [],
+          pinned: false,
+          onTogglePin: () {},
+          collapsed: false,
+          onToggleCollapsed: () {},
+          fullscreen: false,
+          onToggleFullscreen: () {},
+        ),
+      );
+      expect(tester.takeException(), isNull);
+    });
+
     testWidgets('full screen shows the device name and minimize', (
       tester,
     ) async {
