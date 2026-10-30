@@ -86,6 +86,17 @@ class _FakeBind implements RustdeskImpl {
     if (!s.remove(value)) s.add(value);
   }
 
+  final flutter = <String, String>{};
+
+  @override
+  String getLocalFlutterOption({required String k, dynamic hint}) =>
+      flutter[k] ?? '';
+
+  @override
+  Future<void> setLocalFlutterOption(
+          {required String k, required String v, dynamic hint}) async =>
+      _put(flutter, k, v);
+
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
@@ -124,6 +135,13 @@ void main() {
 
     await options.config.set('k', '');
     expect(fake.config, isEmpty);
+  });
+
+  test('the Flutter UI table of LocalConfig is a scope of its own', () async {
+    await options.flutter.set('remoteMenubarState', '{"pin":true}');
+    expect(fake.flutter, {'remoteMenubarState': '{"pin":true}'});
+    expect(fake.local, isEmpty);
+    expect(options.flutter.get('remoteMenubarState'), '{"pin":true}');
   });
 
   test('a write notifies listeners of that key in that scope only', () async {

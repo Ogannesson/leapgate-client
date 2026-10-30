@@ -5,6 +5,7 @@
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_hbb/models/state_model.dart';
 
 import '../icons/lg_icon.dart';
 import '../theme/lg_tokens.dart';
@@ -14,7 +15,8 @@ import 'lg_pressable.dart';
 import 'lg_status.dart';
 import 'lg_tooltip.dart';
 
-const double kLgTitleBarHeight = 40;
+/// The canvas below the bar is sized with the same value (core's `StateGlobal.tabBarHeight`).
+const double kLgTitleBarHeight = kLeapgateTitleBarHeight;
 const double _tabHeight = 32;
 const double _captionWidth = 46;
 

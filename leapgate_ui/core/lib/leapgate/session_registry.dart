@@ -24,7 +24,15 @@ class SessionRegistry extends ChangeNotifier {
   /// Opens [view] of device [id], or returns it when it is already open. Another view of a
   /// device whose tab is open logs in with that tab's connection token, without the password
   /// (upstream `connectWithToken`, `common/widgets/toolbar.dart:580-610`).
-  FFI open(String id, ConnType view, {bool forceRelay = false}) {
+  ///
+  /// [password], [isSharedPassword] and [switchUuid] go to Rust as upstream's pages passed them
+  /// to `FFI.start` (`--connect --password`, a shared address book password, switch sides); a
+  /// view that is already open ignores them.
+  FFI open(String id, ConnType view,
+      {bool forceRelay = false,
+      String password = '',
+      bool isSharedPassword = false,
+      String switchUuid = ''}) {
     final views = _tabs[id] ?? const <FFI>[];
     for (final s in views) {
       if (s.connType == view) return s;
@@ -39,7 +47,12 @@ class SessionRegistry extends ChangeNotifier {
     }
     final session = FFI(id, view);
     (_tabs[id] ??= []).add(session);
-    session.start(forceRelay: forceRelay, connToken: token);
+    session.start(
+        forceRelay: forceRelay,
+        connToken: token,
+        password: password,
+        isSharedPassword: isSharedPassword,
+        switchUuid: switchUuid);
     notifyListeners();
     return session;
   }

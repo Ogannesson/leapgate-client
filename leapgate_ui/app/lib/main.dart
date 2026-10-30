@@ -14,6 +14,7 @@ import 'package:window_manager/window_manager.dart';
 
 import 'l10n/app_localizations.dart';
 import 'shell/app_window.dart';
+import 'shell/links.dart';
 import 'shell/main_window.dart';
 import 'theme/lg_theme.dart';
 import 'theme/lg_tokens.dart';
@@ -39,14 +40,20 @@ Future<void> main(List<String> args) async {
   } else {
     desktopType = DesktopType.main;
     await windowManager.ensureInitialized();
+    // Closing goes through the main window's close flow (01 §2.1), as upstream's main.dart:112.
+    await windowManager.setPreventClose(true);
     appCore = AppCore(window: const LgAppWindow());
     await platformFFI.init(kAppTypeMain);
     // Starts syncing options and the connection status with the service.
     await bind.mainCheckConnectStatus();
     final version = lgBind.leapgateVersion();
     lgBind.leapgateLog(level: 3, msg: 'leapgate ui: version $version');
-    _logLinks();
+    _listenLinks();
     runApp(LeapgateApp(home: MainWindow(status: LocalStatusModel()..start())));
+    // A launch that found no main window keeps its `--connect` or link on its own command
+    // line (M0 acceptance, LEAPGATE.md §10.5); the main window sets the navigation it needs.
+    WidgetsBinding.instance.addPostFrameCallback(
+        (_) => handleLaunchArgs(args, bind.mainUriPrefixSync()));
     // The top bar is drawn by the app (docs/新界面/01-内容与逻辑说明.md §2.1). The runner already
     // sized and centered the window.
     windowManager.waitUntilReadyToShow(
@@ -72,14 +79,14 @@ void _logUncaughtErrors() {
 }
 
 /// Links and `--connect` that a later launch hands to this window (the Rust core sends them as
-/// WM_USER + 2). Opening them comes with the session pages; for now the log shows they arrived.
-void _logLinks() {
+/// WM_USER + 2).
+void _listenLinks() {
   uriLinkStream.listen((uri) {
     if (uri == null) return;
-    // The query may carry a password (`--password`), so it stays out of the log.
+    // The path and the query may carry a password, so only the scheme and host are logged.
     lgBind.leapgateLog(
-        level: 3,
-        msg: 'leapgate ui: link received ${uri.scheme}://${uri.host}${uri.path}');
+        level: 3, msg: 'leapgate ui: link received ${uri.scheme}://${uri.host}');
+    handleLink(uri);
   });
 }
 

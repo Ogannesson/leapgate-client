@@ -355,6 +355,38 @@ void main() {
       });
     });
 
+    test('not while the tab is hidden; again once it shows (V1)', () {
+      fakeAsync((async) {
+        final fakes = installFakes();
+        final s = appCore.sessions.open(_id, ConnType.defaultConn);
+        _emit(async, fakes, s, _connectionReady);
+        _emit(async, fakes, s, _peerInfo);
+        async.elapse(const Duration(milliseconds: 1000));
+        s.setVisible(false);
+        _emit(async, fakes, s, _waitingForImage);
+        async.elapse(const Duration(seconds: 5));
+        expect(wakes(fakes), isEmpty);
+
+        s.setVisible(true);
+        expect(fakes.bind.callsTo(#sessionRefresh), hasLength(1));
+        async.elapse(const Duration(milliseconds: 1500));
+        expect(wakes(fakes), ['']);
+        expect(fakes.lg.visible, [(s.sessionId, false), (s.sessionId, true)]);
+      });
+    });
+
+    test('hiding stops a wait that already started (V1)', () {
+      fakeAsync((async) {
+        final fakes = installFakes();
+        final s = appCore.sessions.open(_id, ConnType.defaultConn);
+        connect(async, fakes, s);
+        async.elapse(const Duration(seconds: 1));
+        s.setVisible(false);
+        async.elapse(const Duration(seconds: 5));
+        expect(wakes(fakes), isEmpty);
+      });
+    });
+
     test('not when a frame came first', () {
       fakeAsync((async) {
         final fakes = installFakes();

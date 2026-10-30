@@ -114,6 +114,7 @@ class FakeBind implements RustdeskImpl {
       case #sessionSetCommon:
       case #sessionInputOsPassword:
       case #sessionOnWaitingForImageDialogShow:
+      case #sessionRefresh:
         return Future<void>.value();
     }
     return super.noSuchMethod(invocation);
@@ -138,6 +139,14 @@ class FakeLeapgate implements lg.Leapgate {
   @override
   void leapgateLog({required int level, required String msg, dynamic hint}) =>
       logged.add(msg);
+
+  /// V1 calls, in order.
+  final visible = <(SessionID, bool)>[];
+
+  @override
+  void leapgateSessionSetVisible(
+          {required SessionID sessionId, required bool visible, dynamic hint}) =>
+      this.visible.add((sessionId, visible));
 
   @override
   dynamic noSuchMethod(Invocation invocation) =>
