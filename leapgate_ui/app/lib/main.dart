@@ -4,6 +4,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/consts.dart';
+import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/bridge.dart';
 import 'package:flutter_hbb/leapgate/local_status.dart';
 import 'package:flutter_hbb/leapgate/ui_error_log.dart';
@@ -12,6 +13,7 @@ import 'package:uni_links/uni_links.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'l10n/app_localizations.dart';
+import 'shell/app_window.dart';
 import 'shell/main_window.dart';
 import 'theme/lg_theme.dart';
 import 'theme/lg_tokens.dart';
@@ -37,6 +39,7 @@ Future<void> main(List<String> args) async {
   } else {
     desktopType = DesktopType.main;
     await windowManager.ensureInitialized();
+    appCore = AppCore(window: const LgAppWindow());
     await platformFFI.init(kAppTypeMain);
     // Starts syncing options and the connection status with the service.
     await bind.mainCheckConnectStatus();
