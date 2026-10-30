@@ -37,7 +37,12 @@ const String kAppTypeMain = "main";
 
 const String kAppTypeDesktopRemote = "remote";
 
+const String kOptionVerificationMethod = "verification-method";
+const String kOptionApproveMode = "approve-mode";
+
 const String kOptionTouchMode = "touch-mode";
+
+const String kOptionStopService = "stop-service";
 
 const String kOptionToggleViewOnly = "view-only";
 

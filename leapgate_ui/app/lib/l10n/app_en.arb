@@ -18,5 +18,44 @@
   "serviceStopped": "Service stopped. This device can't accept remote connections.",
   "navDevices": "Devices",
   "navExitNodes": "Exit nodes",
-  "navSettings": "Settings"
+  "navSettings": "Settings",
+  "homeOneTimePassword": "One-time password",
+  "homePermanentPassword": "Permanent password",
+  "homeApprovalMode": "Approval mode",
+  "homePasswordSet": "Set",
+  "homeAcceptOnThisDevice": "Connection requests must be accepted on this device",
+  "homePasswordUnavailable": "Unavailable",
+  "homeAlsoPermanentPassword": "The permanent password also works",
+  "homeCopy": "Copy",
+  "connectBoxPlaceholder": "Enter an ID or search devices",
+  "connectBoxConnect": "Connect",
+  "connectBoxConnectTo": "Connect to {input}",
+  "@connectBoxConnectTo": {
+    "placeholders": {
+      "input": {
+        "type": "String"
+      }
+    }
+  },
+  "connectBoxConnectionType": "Connection type",
+  "connectBoxRemoteDesktop": "Remote desktop",
+  "connectBoxDefault": "Default",
+  "connectBoxViaRelay": "Connect via relay",
+  "connectBoxViaRelayNote": "This device will always be connected via relay from now on. You can turn off “Always connect via relay” in the device menu.",
+  "connectBoxHelp": "Help",
+  "connectBoxHelpTitle": "You can enter",
+  "connectBoxHelpId": "Device ID",
+  "connectBoxHelpIp": "IP address (direct)",
+  "connectBoxHelpDomain": "Domain:port",
+  "connectBoxHelpServer": "ID@server",
+  "connectBoxHelpKey": "For a device on another server, add that server's key after its address: ‹ID›@‹server›?key=‹key›.",
+  "connectBoxHelpRelay": "Add “/r” after the ID to connect via relay. This device will then always be connected via relay.",
+  "connectBoxSearchResults": "Search results",
+  "connectBoxNoMatch": "No matching devices",
+  "recentCategory": "Recent",
+  "recentEmpty": "No recent devices",
+  "recentLoading": "Loading…",
+  "recentOnline": "Online",
+  "recentOffline": "Offline",
+  "recentQuerying": "Checking…"
 }
