@@ -64,4 +64,13 @@ void main() {
     expect(handleLaunchArgs(['--file-transfer', '100200300'], 'leapgate://'), false);
     expect(navigation.connected, isEmpty);
   });
+
+  test('config and password links open nothing, and the log keeps only scheme and host', () {
+    final fakes = installAppFakes();
+    expect(handleLink(Uri.parse('leapgate://password')), false);
+    expect(handleLink(Uri.parse('leapgate://password/secret-1')), false);
+    expect(handleLink(Uri.parse('leapgate://config/abc')), false);
+    expect(navigation.connected, isEmpty);
+    expect(fakes.lg.logged.join('\n'), isNot(contains('secret-1')));
+  });
 }

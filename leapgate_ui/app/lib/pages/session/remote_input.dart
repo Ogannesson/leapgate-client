@@ -1,4 +1,4 @@
-// 上游：flutter/lib/common/widgets/remote_input.dart@bd9262397（改写：只留 RawKeyFocusScope、RawPointerMouseRegion，删了用不到的导入；RawKeyFocusScope 去掉两处 autofocus：上游一个会话一个窗口，页面一出现画面就拿键盘，这里几个会话同在一个窗口，画面只在鼠标进入或点击时拿（docs/新界面/04-M2a拆法.md §4）。触摸手势那几个类没搬：RawTouchGestureDetectorRegion 是桌面触摸屏和手机用的，桌面触摸随手机阶段再定。上游这两个类改了，合并时人工移植到这里）
+// 上游：flutter/lib/common/widgets/remote_input.dart@bd9262397（改写：只留 RawKeyFocusScope、RawPointerMouseRegion，删了用不到的导入；RawKeyFocusScope 去掉两处 autofocus：上游一个会话一个窗口，页面一出现画面就拿键盘，这里几个会话同在一个窗口，画面只在鼠标进入或点击时拿（docs/新界面/04-M2a拆法.md §4）。触摸手势那几个类没搬：RawTouchGestureDetectorRegion 是桌面触摸屏和手机用的，桌面触摸随手机阶段再定。下面 ignore_for_file 里的 deprecated_member_use 是为了保持复制件原样：废弃的 onKey、RawKeyEvent 只在上游的 Linux 分支用，算 LEAPGATE.md 10.1 废弃 API 规则的例外。上游这两个类改了，合并时人工移植到这里）
 // The app's lints are stricter than upstream's; the copy keeps upstream's code as it is.
 // ignore_for_file: use_key_in_widget_constructors, prefer_const_constructors_in_immutables, deprecated_member_use
 import 'package:flutter/material.dart';

@@ -1,12 +1,12 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_hbb/leapgate/connection.dart';
 import 'package:flutter_hbb/leapgate/session.dart';
 
 import '../../icons/lg_icon.dart';
 import '../../l10n/app_localizations.dart';
+import '../../shell/confirm_card.dart';
 import '../../shell/navigation.dart';
 import '../../theme/lg_tokens.dart';
 import '../../widgets/lg_button.dart';
@@ -253,7 +253,11 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
             NextStep.useRelay => (l10n.connUseRelay, conn.useRelay, kind),
             NextStep.changeId => (
                 l10n.connChangeId,
-                () => mainNavigation.showHome(connectBoxText: ffi.id),
+                // The failed tab goes; the ID waits in the connect box.
+                () {
+                  conn.cancel();
+                  mainNavigation.showHome(connectBoxText: ffi.id);
+                },
                 kind
               ),
             NextStep.closeTab => (l10n.connCloseTab, conn.cancel, kind),
@@ -262,11 +266,6 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
       case ConnStage.connected:
         return const SizedBox.shrink();
     }
-
-    // Enter runs the main button; a text field does it through its own submit.
-    final main = buttons
-        .where((b) => b.$3 == LgButtonKind.primary && b.$2 != null)
-        .firstOrNull;
 
     final panel = Container(
       width: 440,
@@ -317,11 +316,11 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
         ],
       ),
     );
-    if (main == null || inputs.isNotEmpty) return panel;
-    return CallbackShortcuts(
-      bindings: {const SingleActivator(LogicalKeyboardKey.enter): main.$2!},
-      child: Focus(autofocus: true, child: panel),
-    );
+    // Enter disconnects only on the insecure connection warning (01 P2 block D); upstream's
+    // error box has no default action, and "Use relay" would be saved for the device. The
+    // password and code fields submit by themselves.
+    if (conn.stage != ConnStage.insecure) return panel;
+    return DefaultActionScope(onDefault: conn.rejectInsecure, child: panel);
   }
 }
 

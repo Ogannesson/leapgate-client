@@ -65,6 +65,17 @@ class _LocalScope extends OptionScope {
       bind.mainSetLocalOption(key: key, value: value);
 }
 
+/// LocalConfig's `ui_flutter` table: state upstream's Flutter UI keeps for itself, such as the
+/// session toolbar's pin (`remoteMenubarState`, `desktop/widgets/remote_toolbar.dart:253-324`).
+class _FlutterScope extends OptionScope {
+  @override
+  String get(String key) => bind.getLocalFlutterOption(k: key);
+
+  @override
+  Future<void> _write(String key, String value) =>
+      bind.setLocalFlutterOption(k: key, v: value);
+}
+
 /// One remote device's options (its peer file). While a session to that device is open, read
 /// and write them through the session's [SessionOptions] instead: the session reads its own
 /// in-memory copy and does not see writes made here.
@@ -87,6 +98,7 @@ class _PeerScope extends OptionScope {
 class OptionsModel {
   final OptionScope config = _ConfigScope();
   final OptionScope local = _LocalScope();
+  final OptionScope flutter = _FlutterScope();
   final _peers = <String, OptionScope>{};
 
   /// The same object for the same [id], so its listeners hear every write made through it.

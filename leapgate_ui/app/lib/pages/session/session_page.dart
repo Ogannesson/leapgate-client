@@ -4,6 +4,7 @@ import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/connection.dart';
 import 'package:flutter_hbb/leapgate/session.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
+import 'package:flutter_hbb/models/state_model.dart';
 import 'package:get/get.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -26,8 +27,8 @@ const double _noticesTop = 56;
 /// the image takes the keyboard only when its tab is [active], no panel or dialog covers the
 /// tab, the window has focus, and the pointer is on the image or just clicked it. Taking it
 /// turns the keyboard hook on (`enterOrLeave(true)`). Leaving the tab, closing it and the
-/// window losing focus turn it off before anything else can turn it on: the hook is one for the
-/// whole process, so a late "off" from the old tab would switch off the new one.
+/// window losing focus turn it off at once, so keys still down are released on the remote
+/// device and the hook waits before another tab can take it.
 class SessionPage extends StatefulWidget {
   const SessionPage(
       {super.key,
@@ -51,9 +52,6 @@ class _SessionPageState extends State<SessionPage>
   final _cursorOverImage = false.obs;
   late final RxBool _zoomCursor;
   bool _isWindowBlur = false;
-
-  /// The keyboard hook is on for this session (`enterOrLeave(true)` sent, no "off" since).
-  bool _entered = false;
 
   /// "已建立直连" / "已建立中继连接" was shown for this session (01 §4.1 stage 6).
   bool _announced = false;
@@ -113,6 +111,12 @@ class _SessionPageState extends State<SessionPage>
   void _onConnection() {
     _onCovered();
     final conn = _ffi.connection;
+    // The panel covers the toolbar, and with it the way out of full screen.
+    if (widget.active &&
+        conn.stage != ConnStage.connected &&
+        stateGlobal.fullscreen.isTrue) {
+      stateGlobal.setFullscreen(false);
+    }
     if (!_announced && conn.stage == ConnStage.connected && conn.direct != null) {
       _announced = true;
       appCore.toasts.show(
@@ -125,16 +129,12 @@ class _SessionPageState extends State<SessionPage>
     if (_blocked && _rawKeyFocusNode.hasFocus) _rawKeyFocusNode.unfocus();
   }
 
-  void _leave() {
-    if (!_entered) return;
-    _entered = false;
-    _ffi.inputModel.enterOrLeave(false);
-  }
-
   /// `enterOrLeave(false)` sends key-ups for what is still pressed, resets the modifiers and
-  /// sets the hook to wait; then system keys stay on this device and the focus goes.
+  /// sets the hook to wait; then system keys stay on this device and the focus goes. The focus
+  /// change sends another "off" later; Rust takes "off" only from the session holding the
+  /// keyboard (`src/keyboard.rs`), so it cannot turn off the next tab's.
   void _release() {
-    _leave();
+    _ffi.inputModel.enterOrLeave(false);
     bind.hostStopSystemKeyPropagate(stopped: true);
     _cursorOverImage.value = false;
     _rawKeyFocusNode.unfocus();
@@ -147,12 +147,7 @@ class _SessionPageState extends State<SessionPage>
         if (mounted) _rawKeyFocusNode.unfocus();
       });
     }
-    if (!imageFocused) {
-      _leave();
-    } else if (!_entered) {
-      _entered = true;
-      _ffi.inputModel.enterOrLeave(true);
-    }
+    _ffi.inputModel.enterOrLeave(imageFocused);
   }
 
   @override

@@ -37,6 +37,9 @@ List<String>? linkToArgs(Uri uri) {
   if (uri.authority.isEmpty &&
       uri.path.split('').every((char) => char == '/')) {
     return [];
+  } else if (uri.authority == 'config' || uri.authority == 'password') {
+    // Phone-only upstream; never a device ID here.
+    return null;
   } else if (uri.authority == 'connection' && uri.path.startsWith('/new/')) {
     // For compatibility
     command = '--connect';
@@ -130,8 +133,18 @@ bool handleLaunchArgs(List<String> args, String uriPrefix) {
   return _open(linkArgs);
 }
 
-/// A link that a later launch handed to this window.
-bool handleLink(Uri uri) => _open(linkToArgs(uri));
+/// A link that a later launch handed to this window. Anything but a new connection is only
+/// logged, by scheme and host: the path or the query may hold a password.
+bool handleLink(Uri uri) {
+  final args = linkToArgs(uri);
+  if (args == null) {
+    lgBind.leapgateLog(
+        level: 3,
+        msg: 'leapgate ui: link not handled: ${uri.scheme}://${uri.host}');
+    return false;
+  }
+  return _open(args);
+}
 
 bool _open(List<String>? args) {
   if (args == null) return false;

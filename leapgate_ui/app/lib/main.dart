@@ -83,10 +83,9 @@ void _logUncaughtErrors() {
 void _listenLinks() {
   uriLinkStream.listen((uri) {
     if (uri == null) return;
-    // The query may carry a password (`--password`), so it stays out of the log.
+    // The path and the query may carry a password, so only the scheme and host are logged.
     lgBind.leapgateLog(
-        level: 3,
-        msg: 'leapgate ui: link received ${uri.scheme}://${uri.host}${uri.path}');
+        level: 3, msg: 'leapgate ui: link received ${uri.scheme}://${uri.host}');
     handleLink(uri);
   });
 }

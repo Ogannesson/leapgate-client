@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/common.dart';
@@ -20,11 +21,12 @@ import '../../widgets/lg_status.dart';
 import '../../widgets/lg_tooltip.dart';
 import 'session_names.dart';
 
-// Upstream option keys and values (`flutter/lib/consts.dart:139`, `:144`, `:414-421`). Per
-// LEAPGATE.md §10.7 they belong in core's consts.dart, outside this block's files; they move
-// there when the blocks are merged.
+// Upstream option keys and values (`flutter/lib/consts.dart:139`, `:144`, `:163`, `:414-421`).
+// Per LEAPGATE.md §10.7 they belong in core's consts.dart, outside this block's files; they
+// move there when the blocks are merged.
 const kOptionCollapseToolbar = 'collapse_toolbar';
 const kOptionZoomCursor = 'zoom-cursor';
+const kOptionRemoteMenubarState = 'remoteMenubarState';
 const kRemoteImageQualityBest = 'best';
 const kRemoteImageQualityBalanced = 'balanced';
 const kRemoteImageQualityLow = 'low';
@@ -33,10 +35,21 @@ const kRemoteImageQualityLow = 'low';
 /// `desktop/widgets/remote_toolbar.dart:648-676`).
 const kToolbarAutoCollapse = Duration(seconds: 5);
 
-/// "Pin", shared by every session tab for this run. Upstream also saves it
-/// (`remoteMenubarState` in the Flutter options); that store has no scope in the options model
-/// yet (`LEAPGATE.md` §10.7).
-final toolbarPinned = ValueNotifier<bool>(false);
+/// "Pin", one for every device, saved as upstream's toolbar saves it
+/// (`desktop/widgets/remote_toolbar.dart:253-324`: `{"pin": …}` in the Flutter options).
+bool get _pinned {
+  final s = appCore.options.flutter.get(kOptionRemoteMenubarState);
+  if (s.isEmpty) return false;
+  try {
+    return jsonDecode(s)['pin'] == true;
+  } catch (e) {
+    debugPrint('Failed to decode toolbar state $e');
+    return false;
+  }
+}
+
+void _setPinned(bool pin) => appCore.options.flutter
+    .set(kOptionRemoteMenubarState, jsonEncode({'pin': pin}));
 
 /// The session's floating toolbar, top centre (01 P2 block B; M2a's set, `04-M2a拆法.md` §1.1).
 /// Placeholder look until the designer's `LgSessionToolbar` replaces it.
@@ -75,7 +88,7 @@ class _SessionToolbarState extends State<SessionToolbar> {
       _collapseTimer?.cancel();
       _collapseTimer = Timer(kToolbarAutoCollapse, () {
         if (mounted &&
-            !toolbarPinned.value &&
+            !_pinned &&
             !_collapsed &&
             widget.cursorOverImage.value) {
           setState(() => _collapsed = true);
@@ -136,7 +149,7 @@ class _SessionToolbarState extends State<SessionToolbar> {
         _ffi.connection,
         _ffi.ffiModel,
         _ffi.canvasModel,
-        toolbarPinned,
+        appCore.options.flutter.listenable(kOptionRemoteMenubarState),
       ]),
       builder: (context, _) => Obx(() => _build(context)),
     );
@@ -154,12 +167,14 @@ class _SessionToolbarState extends State<SessionToolbar> {
       label: fullscreen ? l10n.toolbarExitFullscreen : l10n.toolbarFullscreen,
       onPressed: () => stateGlobal.setFullscreen(!fullscreen),
     );
-    final route = conn.direct == null
+    final routeTip =
+        conn.direct == true ? l10n.sessionDirectTip : l10n.sessionRelayedTip;
+    final route = !showsRoute(conn)
         ? null
         : LgTooltip(
-            message: conn.direct!
-                ? l10n.sessionDirectTip
-                : l10n.sessionRelayedTip,
+            message: conn.secure == false
+                ? '$routeTip\n${l10n.sessionUnencryptedTip}'
+                : routeTip,
             // The connection details open from here in M2b.
             child: LgRouteMark(
               route: conn.direct! ? LgRoute.direct : LgRoute.relay,
@@ -168,6 +183,12 @@ class _SessionToolbarState extends State<SessionToolbar> {
               unencryptedLabel: l10n.sessionUnencrypted,
             ),
           );
+
+    // The drag bar has "Minimize" in full screen, expanded or collapsed (01 P2 block B).
+    final minimize = LgIconButton(
+        icon: LgIcons.windowMin,
+        label: l10n.minimize,
+        onPressed: windowManager.minimize);
 
     final List<Widget> children;
     if (_collapsed) {
@@ -178,14 +199,11 @@ class _SessionToolbarState extends State<SessionToolbar> {
             label: l10n.toolbarExpand,
             onPressed: _toggleCollapsed),
         fullscreenButton,
-        if (fullscreen)
-          LgIconButton(
-              icon: LgIcons.windowMin,
-              label: l10n.minimize,
-              onPressed: windowManager.minimize),
+        if (fullscreen) minimize,
       ];
     } else {
       final viewStyle = _ffi.canvasModel.viewStyle.style;
+      final pinned = _pinned;
       final actions = [
         if (_ffi.canSendCtrlAltDel)
           LgMenuItem(
@@ -200,8 +218,8 @@ class _SessionToolbarState extends State<SessionToolbar> {
                   .copyWith(color: t.colors.text, fontWeight: FontWeight.w700)),
         LgIconButton(
           icon: LgIcons.pin,
-          label: toolbarPinned.value ? l10n.toolbarUnpin : l10n.toolbarPin,
-          onPressed: () => toolbarPinned.value = !toolbarPinned.value,
+          label: pinned ? l10n.toolbarUnpin : l10n.toolbarPin,
+          onPressed: () => _setPinned(!pinned),
         ),
         _menu(l10n.toolbarRemoteDesktop, [
           LgMenuItem(
@@ -250,6 +268,7 @@ class _SessionToolbarState extends State<SessionToolbar> {
           onPressed: () => appCore.sessions.close(_ffi),
         ),
         fullscreenButton,
+        if (fullscreen) minimize,
         LgIconButton(
             icon: LgIcons.chevU,
             label: l10n.toolbarCollapse,

@@ -1,5 +1,12 @@
 import 'package:flutter_hbb/leapgate/app_core.dart';
+import 'package:flutter_hbb/leapgate/connection.dart';
 import 'package:flutter_hbb/leapgate/session.dart';
+
+/// "直连 / 经中继" shows from "已连接，正在等待画面…" on; before that, password and verifying
+/// included, the tab says "正在连接…" (01 P2 block A, §4.1 stage 6).
+bool showsRoute(ConnectionModel c) =>
+    c.direct != null &&
+    (c.stage == ConnStage.waitingForImage || c.stage == ConnStage.connected);
 
 /// Upstream `formatID` (`flutter/lib/common/formatter/id_formatter.dart:36-56`): a numeric ID in
 /// groups of three, a `/r` suffix kept.

@@ -22,6 +22,7 @@ export '../../core/test/fakes.dart';
 class AppFakeBind extends FakeBind {
   bool installed = false;
   final localOptions = <String, String>{};
+  final flutterOptions = <String, String>{};
 
   @override
   dynamic noSuchMethod(Invocation invocation) {
@@ -46,6 +47,11 @@ class AppFakeBind extends FakeBind {
         return Future<void>.value();
       case #mainGetLocalOption:
         return localOptions[args[#key]] ?? '';
+      case #getLocalFlutterOption:
+        return flutterOptions[args[#k]] ?? '';
+      case #setLocalFlutterOption:
+        flutterOptions[args[#k]] = args[#v];
+        return Future<void>.value();
       // Rust's `handle_relay_id`: a `/r` suffix comes off.
       case #mainHandleRelayId:
         final id = args[#id] as String;

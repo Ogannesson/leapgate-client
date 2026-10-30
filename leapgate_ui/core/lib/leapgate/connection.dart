@@ -402,25 +402,31 @@ class ConnectionModel with ChangeNotifier {
       _show(ConnStage.waitingForImage);
     }
     _waitForImageDialogShow = true;
-    _waitForImageTimer?.cancel();
-    // V1: a hidden tab gets no frames; the wait starts when it shows (onVisibilityChanged).
-    if (parent.target!.visible) {
-      _waitForImageTimer = Timer(Duration(milliseconds: 1500), () {
-        if (ffiModel.waitForFirstImage.isTrue && !ffiModel.isRefreshing) {
-          bind.sessionInputOsPassword(sessionId: sessionId, value: '');
-        }
-      });
-    }
+    _startWaitForImageTimer();
     bind.sessionOnWaitingForImageDialogShow(sessionId: sessionId);
   }
 
+  void _startWaitForImageTimer() {
+    final ffiModel = parent.target!.ffiModel;
+    _waitForImageTimer?.cancel();
+    // V1: a hidden tab gets no frames; the wait starts when it shows (onVisibilityChanged).
+    if (!parent.target!.visible) return;
+    _waitForImageTimer = Timer(Duration(milliseconds: 1500), () {
+      if (ffiModel.waitForFirstImage.isTrue && !ffiModel.isRefreshing) {
+        bind.sessionInputOsPassword(sessionId: sessionId, value: '');
+      }
+    });
+  }
+
   /// The tab was hidden or shown (V1): hidden, the wake timer stops; shown while still waiting
-  /// for the first frame, the wait starts again.
+  /// for the first frame, the wait starts again. Called while the tab rebuilds, so it changes
+  /// no state that listeners hear.
   void onVisibilityChanged() {
     if (!parent.target!.visible) {
       _waitForImageTimer?.cancel();
-    } else if (_stage == ConnStage.waitingForImage) {
-      showConnectedWaitingForImage();
+    } else if (_stage == ConnStage.waitingForImage &&
+        parent.target!.ffiModel.waitForFirstImage.isTrue) {
+      _startWaitForImageTimer();
     }
   }
 

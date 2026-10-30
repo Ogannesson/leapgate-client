@@ -80,18 +80,23 @@ Future<void> closeMainWindow(TabOverlays overlays) async {
       await local.set(kOptionLeapgateCloseAction, answer.action.name);
     }
   }
-  // A remote session does not go on in a window nobody sees (01 §2.1).
-  await Future.wait([
-    for (final d in appCore.sessions.devices) appCore.sessions.closeDevice(d)
-  ]);
-  // Upstream calls it on every close of the main window (`desktop/pages/connection_page.dart:289`).
-  await bind.mainOnMainWindowClose();
-  if (action == CloseAction.exit) {
-    // Upstream's way out (`common.dart:2847-2848`).
-    await windowManager.setPreventClose(false);
-    await windowManager.close();
-  } else {
-    await windowManager.hide();
+  try {
+    // A remote session does not go on in a window nobody sees (01 §2.1).
+    await Future.wait([
+      for (final d in appCore.sessions.devices) appCore.sessions.closeDevice(d)
+    ]);
+  } finally {
+    // The window goes even when closing a session failed, as upstream's `finally`
+    // (`common.dart:2844-2848`).
+    // Upstream calls it on every close of the main window
+    // (`desktop/pages/connection_page.dart:289`).
+    await bind.mainOnMainWindowClose();
+    if (action == CloseAction.exit) {
+      await windowManager.setPreventClose(false);
+      await windowManager.close();
+    } else {
+      await windowManager.hide();
+    }
   }
 }
 

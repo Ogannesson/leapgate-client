@@ -17,6 +17,7 @@ import '../pages/session/session_page.dart';
 import '../theme/lg_tokens.dart';
 import '../widgets/lg_status.dart';
 import '../widgets/lg_title_bar.dart';
+import 'keep_display_on.dart';
 import 'navigation.dart';
 import 'tab_overlays.dart';
 import 'toast_view.dart';
@@ -109,16 +110,36 @@ class _MainWindowState extends State<MainWindow>
     for (final d in _devices) {
       if (!devices.contains(d)) _overlays.forget(d);
     }
+    if (devices.isEmpty != _devices.isEmpty) keepDisplayOn(devices.isNotEmpty);
     _devices = devices;
     _select(selected);
   }
 
   /// Full screen belongs to the session it was entered in; another tab shows the title bar.
   void _select(String? device) {
-    if (device != _selected && stateGlobal.fullscreen.isTrue) {
-      stateGlobal.setFullscreen(false);
+    if (device == _selected) {
+      if (mounted) setState(() {});
+      return;
     }
+    if (stateGlobal.fullscreen.isTrue) stateGlobal.setFullscreen(false);
+    _dropComposition();
     if (mounted) setState(() => _selected = device);
+  }
+
+  /// An IME composition in the tab being left is dropped, not typed (04-M2a §4 item 4): losing
+  /// focus, Flutter only clears the composing range and the Windows engine commits it, so the
+  /// text would stay in the field. The composed text is removed before the tab lets go.
+  void _dropComposition() {
+    final editable = FocusManager.instance.primaryFocus?.context
+        ?.findAncestorStateOfType<EditableTextState>();
+    if (editable == null) return;
+    final value = editable.textEditingValue;
+    final composing = value.composing;
+    if (!composing.isValid || composing.isCollapsed) return;
+    editable.widget.controller.value = TextEditingValue(
+      text: composing.textBefore(value.text) + composing.textAfter(value.text),
+      selection: TextSelection.collapsed(offset: composing.start),
+    );
   }
 
   // MainNavigation
@@ -135,6 +156,8 @@ class _MainWindowState extends State<MainWindow>
     if (id.isEmpty) return;
     final oldId = id;
     id = await bind.mainHandleRelayId(id: id);
+    // "/r" alone leaves nothing to connect to.
+    if (id.isEmpty) return;
     forceRelay = id != oldId || forceRelay;
     appCore.sessions.open(id, ConnType.defaultConn,
         forceRelay: forceRelay,
@@ -175,9 +198,7 @@ class _MainWindowState extends State<MainWindow>
       } else {
         status = LgStatusText(LgStatus.warning, l10n.sessionFailed);
       }
-    } else if (conn.direct == null ||
-        conn.stage == ConnStage.connecting ||
-        conn.stage == ConnStage.restarting) {
+    } else if (!showsRoute(conn)) {
       status = LgStatusText(LgStatus.connecting, l10n.sessionConnecting);
     } else {
       final direct = conn.direct!;
@@ -302,7 +323,7 @@ class _MainWindowState extends State<MainWindow>
                         HomePage(status: widget.status)),
                     for (final s in views)
                       KeyedSubtree(
-                        key: ValueKey(s.id),
+                        key: ObjectKey(s),
                         child: _scope(
                           s.id,
                           s.id == _selected,

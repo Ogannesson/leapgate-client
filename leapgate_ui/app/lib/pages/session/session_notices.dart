@@ -40,9 +40,11 @@ String noticeText(AppLocalizations l10n, SessionNotice notice) {
     _ => null,
   };
   if (text != null) return text;
-  if (_logged.add(notice.key)) {
-    lgBind.leapgateLog(
-        level: 3, msg: 'leapgate ui: notice without copy: ${notice.key}');
+  // Some texts come from the remote device: as C3 does, at most 64 of them, each cut to 200
+  // characters on a character boundary.
+  final key = String.fromCharCodes(notice.key.runes.take(200));
+  if (_logged.length < 64 && _logged.add(key)) {
+    lgBind.leapgateLog(level: 3, msg: 'leapgate ui: notice without copy: $key');
   }
   return translate(notice.key);
 }

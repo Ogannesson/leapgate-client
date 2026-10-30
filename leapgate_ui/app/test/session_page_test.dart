@@ -64,6 +64,9 @@ void main() {
       await emit(tester, fakes, s, connectionReady());
       await emit(tester, fakes, s, msgbox('input-password', 'Password Required', ''));
 
+      // The route shows from "waiting for the image" on (01 P2 block A).
+      expect(_mark('正在连接…'), findsOneWidget);
+      expect(_mark('经中继'), findsNothing);
       expect(find.text('记住密码'), findsOneWidget);
       await tester.tap(find.text('连接'));
       await tester.pump();
@@ -156,6 +159,35 @@ void main() {
       expect(appCore.sessions.devices, isEmpty);
     });
 
+    testMainWindow('insecure: Enter on "Continue" continues, not the default',
+        (tester) async {
+      await pumpMainWindow(tester);
+      final s = await _open(tester);
+      await emit(tester, fakes, s,
+          msgbox('custom-nocancel-nook-hasclose-insecure-connection', '', ''));
+
+      // From the card, Tab goes to "Disconnect", then to "Continue".
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      expect(callsTo(fakes, #sessionSetCommon).single[#value], 'Y');
+      expect(appCore.sessions.devices, [_id]);
+    });
+
+    testMainWindow('an error: Enter does nothing, "Use relay" is not saved by it',
+        (tester) async {
+      fakes.lg.reasons[''] = 'direct_reset';
+      await pumpMainWindow(tester);
+      final s = await _open(tester);
+      await emit(tester, fakes, s, msgbox('relay-hint', 'Connection Error', ''));
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      expect(callsTo(fakes, #sessionReconnect), isEmpty);
+    });
+
     testMainWindow('waiting for the image: a hint after a few seconds', (tester) async {
       await pumpMainWindow(tester);
       final s = await _open(tester);
@@ -211,8 +243,9 @@ void main() {
       await tester.tap(find.text('修改 ID'));
       await tester.pump();
       expect(connectBoxFocusRequests.text, _id);
-      expect(find.text('主页'), findsOneWidget);
-      expect(find.text('修改 ID').hitTestable(), findsNothing);
+      // The failed tab is closed.
+      expect(appCore.sessions.devices, isEmpty);
+      expect(find.text('修改 ID'), findsNothing);
     });
 
     testMainWindow('closed by the remote user: "已断开", reconnect or close', (tester) async {
@@ -274,23 +307,19 @@ void main() {
       await tester.pump();
       expect(callsTo(fakes, #sessionEnterOrLeave).single[#enter], true);
 
-      await _open(tester, id: '400500600');
+      final before = fakes.bind.calls.length;
+      final b = await _open(tester, id: '400500600');
       final calls = [
-        for (final c in fakes.bind.calls)
-          if (c.memberName == #sessionEnterOrLeave ||
-              c.memberName == #hostStopSystemKeyPropagate)
-            '${c.memberName}'
+        for (final c in fakes.bind.calls.skip(before))
+          if (c.memberName == #sessionEnterOrLeave)
+            (c.namedArguments[#sessionId], c.namedArguments[#enter])
+          else if (c.memberName == #hostStopSystemKeyPropagate)
+            (#hostStop, c.namedArguments[#stopped])
       ];
-      expect(calls, [
-        'Symbol("sessionEnterOrLeave")',
-        'Symbol("sessionEnterOrLeave")',
-        'Symbol("hostStopSystemKeyPropagate")',
-      ]);
-      expect(callsTo(fakes, #sessionEnterOrLeave).last[#enter], false);
-      expect(callsTo(fakes, #sessionEnterOrLeave).last[#sessionId], a.sessionId);
-      // The focus change that follows sends nothing more.
-      await tester.pump();
-      expect(callsTo(fakes, #sessionEnterOrLeave), hasLength(2));
+      // The old tab lets go first and nothing takes the keyboard on its own.
+      expect(calls.take(2), [(a.sessionId, false), (#hostStop, true)]);
+      expect(calls.where((c) => c.$2 == true && c.$1 != #hostStop), isEmpty);
+      expect(calls.where((c) => c.$1 == b.sessionId), isEmpty);
     });
 
     testMainWindow('closing the tab releases the keys before the session closes',
@@ -307,11 +336,13 @@ void main() {
 
       final order = [
         for (final c in fakes.bind.calls)
-          if (c.memberName == #sessionEnterOrLeave ||
-              c.memberName == #sessionClose)
-            c.memberName
+          if (c.memberName == #sessionEnterOrLeave)
+            c.namedArguments[#enter]
+          else if (c.memberName == #sessionClose)
+            #sessionClose
       ];
-      expect(order, [#sessionEnterOrLeave, #sessionEnterOrLeave, #sessionClose]);
+      expect(order.indexOf(false), lessThan(order.indexOf(#sessionClose)));
+      expect(order.first, true);
       expect(appCore.sessions.devices, isEmpty);
     });
 
@@ -358,6 +389,51 @@ void main() {
       await tester.pumpAndSettle();
       expect(callsTo(fakes, #sessionRestartRemoteDevice), hasLength(1));
       expect(find.text('重启远程设备？'), findsNothing);
+    });
+
+    testMainWindow('restart: Enter on "Cancel" cancels', (tester) async {
+      await pumpMainWindow(tester);
+      final a = await _open(tester);
+      await emit(tester, fakes, a, connectionReady(direct: true));
+      await emit(tester, fakes, a, peerInfo());
+      await tester.tap(find.text('操作'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('重启远程设备'));
+      await tester.pumpAndSettle();
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(find.text('重启远程设备？'), findsNothing);
+      expect(callsTo(fakes, #sessionRestartRemoteDevice), isEmpty);
+    });
+
+    testMainWindow('pin is saved where upstream keeps it', (tester) async {
+      await pumpMainWindow(tester);
+      final a = await _open(tester);
+      await emit(tester, fakes, a, connectionReady(direct: true));
+      await emit(tester, fakes, a, peerInfo());
+
+      await tester.tap(find.bySemanticsLabel('固定'));
+      await tester.pump();
+      expect(fakes.bind.flutterOptions['remoteMenubarState'], '{"pin":true}');
+      expect(find.bySemanticsLabel('取消固定'), findsOneWidget);
+    });
+
+    testMainWindow('a connection lost in full screen leaves full screen', (tester) async {
+      await pumpMainWindow(tester);
+      final a = await _open(tester);
+      await emit(tester, fakes, a, connectionReady(direct: true));
+      await emit(tester, fakes, a, peerInfo());
+      await tester.tap(find.bySemanticsLabel('全屏'));
+      await tester.pump();
+      expect(find.text('主页'), findsNothing);
+      expect(find.bySemanticsLabel('最小化'), findsOneWidget);
+
+      await emit(tester, fakes, a,
+          msgbox('error', 'Connection Error', 'Timeout', hasRetry: true));
+      expect(find.text('主页'), findsOneWidget);
     });
 
     testMainWindow('display menu: scale and image quality', (tester) async {
@@ -410,6 +486,58 @@ void main() {
     expect(fakes.lg.visible.skip(1),
         unorderedEquals([(b.sessionId, false), (a.sessionId, true)]));
     expect(callsTo(fakes, #sessionRefresh).single[#sessionId], a.sessionId);
+  });
+
+  testMainWindow(
+      'waiting for the image, away and back: no error, one wake 1.5 s later (V1)',
+      (tester) async {
+    await pumpMainWindow(tester);
+    final a = await _open(tester);
+    await emit(tester, fakes, a, connectionReady());
+    await emit(tester, fakes, a, peerInfo());
+    await emit(tester, fakes, a,
+        msgbox('success', 'Successful', 'Connected, waiting for image...'));
+    await _open(tester, id: '400500600');
+    await tester.pump(const Duration(seconds: 5));
+    expect(callsTo(fakes, #sessionInputOsPassword), isEmpty);
+
+    await tester.tap(find.text('host')); // the tab, named after the peer info
+
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(find.text('已连接，正在等待画面…'), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 1500));
+    expect(callsTo(fakes, #sessionInputOsPassword), hasLength(1));
+  });
+
+  testMainWindow('an IME composition is dropped when the tab is left (§4 item 4)',
+      (tester) async {
+    await pumpMainWindow(tester);
+    final s = await _open(tester);
+    await emit(tester, fakes, s, connectionReady());
+    await emit(tester, fakes, s, msgbox('input-password', 'Password Required', ''));
+    await tester.showKeyboard(find.byType(EditableText));
+    tester.testTextInput.updateEditingValue(const TextEditingValue(
+      text: 'xab',
+      selection: TextSelection.collapsed(offset: 3),
+      composing: TextRange(start: 1, end: 3),
+    ));
+    await tester.pump();
+
+    await tester.tap(find.text('主页'));
+    await tester.pump();
+    await tester.tap(find.text('100 200 300'));
+    await tester.pump();
+    expect(tester.widget<EditableText>(find.byType(EditableText)).controller.text,
+        'x');
+  });
+
+  testMainWindow('"/r" alone opens nothing', (tester) async {
+    await pumpMainWindow(tester);
+    mainNavigation.connect('/r');
+    await tester.pump();
+    await tester.pump();
+    expect(appCore.sessions.devices, isEmpty);
   });
 
   testMainWindow('"+" goes home and asks for the connect box', (tester) async {
