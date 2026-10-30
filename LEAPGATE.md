@@ -573,7 +573,43 @@ Leapgate 自己的文件里和挂钩配套的：`report/heartbeat.rs` 在开关�
 **复制进来的 models 和 `FfiModel`（M1 B 块）**。下面的行号都是上游 `bd9262397` 的。
 
 - `FfiModel` 的改写在 `core/lib/leapgate/ffi_model.dart`，是 `models/model.dart` 的 `part`（它要写 `Display._scale`，上游也是同一个库）。只做非连接部分：peer info、显示器（切换、同步、跟随、分辨率）、权限、光标、剪贴板、屏蔽输入、隐私模式、指纹、会话选项同步、纹理渲染切换、便携服务、退出相对鼠标；这些事件在它的构造函数里登记。复制进来的 model 的事件（文件传输 8 个、`update_quality_status`、`record_status`）在 `FFI` 的构造函数里登记。上游 `FfiModel` 里属于"不要"的（`CachedPeerData`、`handleCachedPeerData`、`_queryAuditGuid`、结束时询问备注）、多窗口的（`tryUseAllMyDisplaysForTheRemoteSession`，:1500、:1535-1577）、手机的（`VirtualMouseMode`、`tryShowAndroidActionsOverlay`、Android 文档选择器）、终端的分支，以及界面组件（`getConnectionImageText`）都没搬。`openMonitorInTheSameTab` 搬进了 core 的 `common.dart`。
-- 留给 C（连接状态）的：事件 `msgbox`（:334-335，`handleMsgBox` :888-976）、`toast`（:336，`handleToast` :1032-1061）、`set_multiple_windows_session`（:338，:874-885）、`connection_ready`（:346-349，`setConnectionType` :267-282，连同 `ConnectionTypeState`）、`cancel_msgbox`（:405，:867-872）都没登记。改写文件里留给 C 补的位置：`handlePeerInfo` 开头的关掉连接对话框（:1355）和 `if (displays.isNotEmpty)` 里的重连计数复位（:1454-1456）；`_handleUseTextureRender` 的等画面框（:729-730）；`FFI.onEvent2UIRgba` 的等画面框和 1.5 秒唤醒的计时（:4322-4326）、重启重连复位（:4330）；`FfiModel.clear` 里连接那几个字段（:254-264）。`waitForFirstImage`、`isRefreshing` 已在 `FfiModel` 里（首帧时要重排画布），C 读写同一个字段。
+- **连接状态（M1 C 块）**：`core/lib/leapgate/connection.dart` 的 `ConnectionModel`（改写档，ChangeNotifier），每个会话一个，挂在 `FFI.connection`（`FFI` 构造函数里建，在登记其他事件之前）。代替上游 `handleMsgBox`（:888-976）的模态框链和重连里的弹窗（:1124）。它登记会话流的 `msgbox`、`set_multiple_windows_session`、`connection_ready`（代替上游按设备 ID 记的 `ConnectionTypeState` 和 `FfiModel` 的 `_secure`、`_direct`）、`cancel_msgbox`（→ `notices.dismissTag`）。`toast` 不登记：Rust 在 `bd9262397` 和当前代码里都不推 `toast`（`src`、`libs` 里搜不到），上游 `handleToast` 是走不到的分支；真出现时兜底日志会记下。
+  - 字段（只读）：`stage`（`ConnStage`：connecting = 01 §4.1 第 1~3 阶段，insecure = 3a，verifying = 4，waitingForImage = 5，connected = 6、7，restarting = 7 的对方重启，failed = 7 的中断和 8 的结束）；`input`（verifying 时要用户做什么，`ConnInput`：none 即"正在验证"、password、twoFactor、osAccount、osAccountAndPassword、windowsSession、remoteAccept）；`reason`（`ConnReason`：`code`、`params` 来自块 2 的 `leapgateMsgboxReason`，另留 msgbox 的 `type`、`title`、`text`，`other` 时界面显示原文；failed 时一定有；密码再输时是 `wrong_password`，2FA 输错时是 `wrong_2fa`，第一次要时为 null，即 C4）；`retryCountdown`（秒，null 表示不自动重试）和 `retryAttempt`（第几次，从 1 起）；`dimLastFrame`（= restarting）；`windowsSessions`；`rememberPassword`（要密码时从 `sessionGetRemember` 读的初值）；`trustedDevicesEnabled`；`secure`、`direct`、`streamType`。
+  - 给界面的方法（内部调的 bind 和顺序照上游）：`login(osUsername, osPassword, password, remember)`（必填项空时不发）、`submit2fa(code, trustThisDevice:)`、`selectWindowsSession(sid)`、`continueInsecure()`、`rejectInsecure()`（回车的默认动作，等于断开并关掉这个视图）、`retry()`、`useRelay()`（`sessionReconnect(forceRelay: true)`，Rust 写进这台设备的配置）、`cancel()`（`appCore.sessions.close`）。
+  - 挂在别处的调用：`ffi_model.dart` 的 `handlePeerInfo` 开头 `connection.onPeerInfo()`（:1355）、`displays.isNotEmpty` 里 `connection.onDisplays()`（:1454-1456，重连计数、30 秒起点、重启计时复位）、`_handleUseTextureRender` 末尾 `connection.showConnectedWaitingForImage()`（:729-730）；`session.dart` 的 `onEvent2UIRgba` 开头 `connection.onImage()`（:4322-4326）、首帧分支里 `connection.onFirstImage()`（:4330-4331）、`close` 里 `ffiModel.clear()` 之后 `connection.clear()`（:254-264）。30 秒窗口用 `package:clock` 取时间，测试里 `fake_async` 能控制。
+  - msgbox 分三路（`handleMsgBox` 里按这个顺序判断；开头照上游对错误类先退出相对鼠标模式）：
+
+    | 条件 | 去向 |
+    |---|---|
+    | `re-input-password`、`input-password`、`terminal-admin-login(-password)`、`input-2fa`、`wait-remote-accept-nook` | 连接状态 verifying，加对应的 `input` |
+    | `restarting` | restarting，立即 `sessionReconnect`，5 秒后再重连一次（照上游） |
+    | `restarting-show` | 重连；标题 "Restarting remote device" → restarting，"Connecting..."（对端静默检测）→ connecting |
+    | `on-uac`、`on-foreground-elevated`、`elevation-error` | 会话通知，tag = type（Rust 按 type 发 `cancel_msgbox`）；已有 `wait-uac` 时不加 `on-uac` 一类 |
+    | `wait-uac` | 去掉 `on-uac` 一类通知，加通知 `wait_accept_uac_tip`，tag `wait-uac` |
+    | type 含 `insecure-connection` | insecure |
+    | `relay-hint`、`relay-hint2` | failed，原因 `direct_reset`，不自动重试、不动重连计数 |
+    | 正文是 `Connected, waiting for image...` | waitingForImage，起 1.5 秒唤醒计时 |
+    | 不是错误（错误 = 标题 `Connection Error`，或 type 含 `error` 且不含 `custom`） | 会话通知：key = 正文，参数 type、title、link；tag `type-title-text-link`（上游对话框的 tag 去掉会话 ID） |
+    | 其余（错误） | failed 加原因码；能否自动重试取事件的 `hasRetry`，否则看 30 秒不在线规则；能重试就按 1、2、4…秒倒计时后重连 |
+
+  - §3.4 各条对应的回放测试（`core/test/connection_test.dart`，另两条在别的文件）：
+
+    | §3.4 | 测试 |
+    |---|---|
+    | 网络中断后翻倍重连、没有上限 | `network errors retry after 1 s, doubling each time without a cap; ... (model.dart:123, :1093-1102, :1454)`、`the countdown ticks each second and "Retry" does not wait for it` |
+    | 连上过的 30 秒内不在线重试 | group `"Remote desktop is offline" (model.dart:1002-1030)` 两条 |
+    | 对方重启后静默重连 | `a restarting remote device reconnects silently, last frame dimmed (model.dart:929-948)`、`a silent peer reconnects as restarting only while it restarts (io_loop.rs:335, :361)` |
+    | 1.5 秒没画面发空系统密码 | group `1.5 s without a frame ... (model.dart:1201-1205)` 三条（没画面、先来画面、换渲染方式） |
+    | 不安全连接确认，回车等于断开 | group `an insecure connection waits for the user (io_loop.rs:220-222, common.dart:1186-1219)` 两条 |
+    | 改用中继写进设备配置 | `"Use relay" reconnects with force relay ... (ui_session_interface.rs:1329-1336)` |
+    | 能否自动重试沿用 Rust | `whether to retry by itself is hasRetry from Rust (client.rs:5192-5210)` |
+    | 打开其他视图复用连接令牌 | `session_registry_test.dart` 的 `another view of an open device joins its tab with its connection token (upstream toolbar.dart:580-610)` |
+    | 文件传输续传、替换确认 | `file_model_test.dart`（B 块） |
+
+    另有 §3.7 示例序列、2FA 的 C4、等对方接受加选 Windows 会话、通知分流和 `cancel_msgbox`、取消关视图几条。变异检查过：去掉 `_reconnects *= 2`、去掉 `pi.isSet` 条件、去掉 `!isRefreshing` 各自都有测试失败。
+  - 和上游不同的地方：任何状态变化都结束倒计时（上游手动重试后定时器还会再重连一次）；通知类 msgbox 不动重连计时和重连计数（上游的 else 分支会取消、重置）；隐私模式的通知不延迟 3 秒（上游怕画布刷新冲掉对话框）；等画面计时器重开前先取消（上游只覆盖引用）；`restarting-show` 标题是 Restarting 时进 restarting 面板（上游只显示 Connecting）；`wait-uac` 去掉 `on-uac` 通知（上游 `dismissAll`）。Android 文档选择器的分支（手机阶段）和结束时询问备注（01 §5.5 已去掉）没搬。
+  - 已知限制和留给后面的：01 §4.1 进度条的"查找设备""建立连接"两步 Rust 不区分（`connection_ready` 之前没有任何事件），合成 connecting 一种，要分就得在 Rust 加挂钩，暂不做；提权通知上的"请求提升权限"按钮要弹选方式的对话框，随 M2b 的工具栏做，现在通知没有动作；"已等待多久"、等画面超过几秒后加的那行说明，由页面自己计时。
+  - **接 V1 时要处理**（M2b 的标签切换）：第一帧到之前标签就被隐藏时，`showConnectedWaitingForImage` 起的 1.5 秒计时会误发空的系统登录密码（隐藏后 Rust 不再推帧）。接 V1 时，隐藏期间不按"没画面"处理（例如隐藏时取消计时，切回时如果仍在 `waitForFirstImage`，再起一次），具体做法 M2b 定。
 - Rust 推事件走两种流：每个会话自己的流（`sessionStart`），和全局流（`startGlobalEventStream`，`PlatformFFI.init` 里开始收）。全局流的事件先给 `PlatformFFI.tryHandle`，没人认领的交给 `setEventCallback` 设的回调（`models/native_model.dart:274-277`）。新界面的回调是 `AppCore.events`（`SessionEvents(stream: 'global')`），在 `AppCore` 的构造函数里设；app 的 `main` 先建 `AppCore` 再调 `platformFFI.init`，所以一开始的事件也不会丢。两种流没人处理的名字都按"每种流每个名字一次"写日志，日志里写明是哪种流。
 - 会话流上没登记、等各自的块或要主会话定的：`screenshot`（:468，:484-550，"另存为"要选文件的对话框）、`printer_request`（:466，:552-722，要选打印机的提问）、`switch_back`（:407-410）；聊天和语音的 6 个（`chat_client_mode`、`chat_server_mode`、`on_voice_call_*`，:362-367、:416-428）随 M2b（`chat_model` 改写）；`terminal_response`（第三轮）；`selected_files`、`send_emptry_dirs` 只在 Web 上有。
 - 全局流上没登记的：CM 的 `add_connection`、`on_client_remove`、`show_elevation`、`update_voice_call_state`、`cm_file_transfer_log`（`src/flutter.rs:1534-1596`）在 M3，`sync_peer_hash_password_to_personal_ab`（`src/client.rs:3742`）在 M4，都登记在 `appCore.events` 上，不登记在会话的表上；`on_url_scheme_received`（`src/server.rs:776`，只来自 macOS 和 Linux）。
