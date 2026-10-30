@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
@@ -29,14 +28,9 @@ Future<void> main(List<String> args) async {
     await windowManager.ensureInitialized();
     runApp(const LeapgateApp(home: Scaffold()));
     windowManager.waitUntilReadyToShow(null, () => windowManager.show());
-  } else if (args.contains('--install')) {
-    // The install page is round 3.
-    lgBind.leapgateLog(
-      level: 2,
-      msg: 'leapgate ui: --install is not supported yet',
-    );
-    exit(0);
   } else {
+    // `--install` (an exe named *install.exe gets it from core_main) also lands here: the install
+    // page is round 3, until then the main window opens as usual.
     desktopType = DesktopType.main;
     await windowManager.ensureInitialized();
     await platformFFI.init(kAppTypeMain);
@@ -49,12 +43,10 @@ Future<void> main(List<String> args) async {
     // The top bar is drawn by the app (docs/新界面/01-内容与逻辑说明.md §2.1). The runner already
     // sized and centered the window.
     windowManager.waitUntilReadyToShow(
-      const WindowOptions(titleBarStyle: TitleBarStyle.hidden),
-      () async {
-        await windowManager.show();
-        await windowManager.focus();
-      },
-    );
+        const WindowOptions(titleBarStyle: TitleBarStyle.hidden), () async {
+      await windowManager.show();
+      await windowManager.focus();
+    });
   }
 }
 
@@ -79,9 +71,8 @@ void _logLinks() {
     if (uri == null) return;
     // The query may carry a password (`--password`), so it stays out of the log.
     lgBind.leapgateLog(
-      level: 3,
-      msg: 'leapgate ui: link received ${uri.scheme}://${uri.host}${uri.path}',
-    );
+        level: 3,
+        msg: 'leapgate ui: link received ${uri.scheme}://${uri.host}${uri.path}');
   });
 }
 
@@ -92,16 +83,13 @@ class LeapgateApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Light / dark follow the system and the mode is compact until the
-    // settings page (M6) stores the user's choice.
+    // Light / dark follow the system and the mode is compact until the settings page (M6) stores
+    // the user's choice.
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       theme: buildLgTheme(brightness: Brightness.light, mode: LgMode.compact),
-      darkTheme: buildLgTheme(
-        brightness: Brightness.dark,
-        mode: LgMode.compact,
-      ),
-      // The tokens switch mode at the middle of a theme animation; no animation.
+      darkTheme: buildLgTheme(brightness: Brightness.dark, mode: LgMode.compact),
+      // The tokens switch mode halfway through a theme animation; switch at once instead.
       themeAnimationDuration: Duration.zero,
       onGenerateTitle: (context) => AppLocalizations.of(context)!.appName,
       localizationsDelegates: AppLocalizations.localizationsDelegates,
