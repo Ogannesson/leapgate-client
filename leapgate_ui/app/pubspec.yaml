@@ -16,6 +16,18 @@ dependencies:
   intl: any
   flutter_hbb:
     path: ../core
+  # Same fork and ref as flutter/pubspec.yaml (docs/新界面/03-实施方案.md §1.6)
+  window_manager:
+    git:
+      url: https://github.com/rustdesk-org/window_manager
+      ref: cf4aef0512092fad9344a27ffe1c47ad83269dfc
+  # The Rust core hands links to the main window as WM_USER + 2, which uni_links_desktop reads
+  uni_links:
+    git:
+      url: https://github.com/rustdesk-org/uni_links
+      path: uni_links
+      ref: f416118d843a7e9ed117c7bb7bdc2deda5a9e86f
+  uni_links_desktop: ^0.1.6
 
 dev_dependencies:
   flutter_test:

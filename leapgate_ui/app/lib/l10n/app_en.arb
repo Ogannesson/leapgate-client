@@ -1,4 +1,18 @@
 {
   "@@locale": "en",
-  "appName": "Leapgate"
+  "appName": "Leapgate",
+  "thisDevice": "This device",
+  "deviceId": "ID",
+  "serviceReady": "Ready",
+  "serviceConnecting": "Connecting to server…",
+  "serviceNotReady": "Can't connect to the server. Retrying automatically. Check your network connection.",
+  "serviceStopped": "Service stopped. This device can't accept remote connections.",
+  "version": "Version {version}",
+  "@version": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  }
 }

@@ -1,4 +1,11 @@
 {
   "@@locale": "zh",
-  "appName": "Leapgate"
+  "appName": "Leapgate",
+  "thisDevice": "本机",
+  "deviceId": "ID",
+  "serviceReady": "已就绪",
+  "serviceConnecting": "正在连接服务器…",
+  "serviceNotReady": "无法连接服务器，正在自动重试。请检查网络连接。",
+  "serviceStopped": "服务已停止，本机无法接受远程连接",
+  "version": "版本 {version}"
 }
