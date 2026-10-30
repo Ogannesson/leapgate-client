@@ -457,10 +457,59 @@ Leapgate 自己的文件里和挂钩配套的：`report/heartbeat.rs` 在开关�
 | W1 | `src/core_main.rs` 的 `core_main_invoke_new_connection`，Windows 分支开头 | 新界面的进程里（runner 只在调 `rustdesk_core_main_args` 期间设着 `LEAPGATE_UI=next`，返回后马上清掉，免得从新界面起的浏览器、资源管理器等后代进程继承它、再起旧界面时误判；W1 只在 core_main 里读它），链接、`--connect` 等只交给类名为 `LEAPGATE_UI_MAIN` 的主窗口（`leapgate_hooks::send_to_new_ui_main_window`，只按类名找，不看标题）；旧界面的进程里它返回 `None`，照上游按"旧类名 + 标题"找。两边不交叉回退 |
 | L1 | `src/leapgate_ffi.rs` 的 `leapgate_log(level, msg)` | 界面的日志写进日志文件，target `leapgate_ui`；1 error、2 warn、3 info、4 debug、其他 trace。不限流，重复的同一条错误由界面合并后再写 |
 | S12 | `src/leapgate_ffi.rs` 的 `leapgate_version()` | `libs/leapgate` 的版本（`libs/leapgate/src/ui.rs` 的 `VERSION`），界面当产品版本显示；构建时由 `--build-name` 写进 Windows 版本资源 |
+| C3 | `src/leapgate_ffi.rs` 的 `leapgate_msgbox_reason(msgtype, title, text)`，同步 | 会话的 `msgbox` 事件按（类型、标题、正文）归成原因码，返回 JSON 字符串：`{"code": "..."}`，带参数的原因多一个键（`feature` 或 `port`，见下表）。归类在 `libs/leapgate/src/reason.rs`（纯函数）。能否重试取 msgbox 事件的 `hasRetry`（即 `Session::msgbox` 当时调上游 `check_if_retry` 算出的结果，`src/flutter.rs` 的 `msgbox`），C3 只给原因码。没认出的归 `other`，界面显示原文；同一段正文只在日志里写一次（最多记 64 段，有的正文来自对端）。上游 Dart 的"连上过的会话报不在线时 30 秒内照样重试"（`model.dart` 的 `shouldAutoRetryOnOffline`）不在 Rust 里，归 `core` 的连接状态。返回 JSON 而不是块 2 的结构体：参数随原因变，`SyncReturn<String>` 是 F0 实测过的形态 |
+| V1 | `src/leapgate_ffi.rs` 的 `leapgate_session_set_visible(session_id, visible)`，同步；`src/flutter.rs` 的 `on_rgba`（桌面那一份）、`on_texture` 开头各一处挂钩 | 不可见的会话标签不往界面推帧：照常收流、解码、计帧率，只是不交给 Flutter（03 §3.3 第 1 条）。界面用法：标签切走时设 `false`；切回时设 `true`，再调上游的 `session_refresh(session_id, display)` 要一帧（软件上屏、纹理上屏都一样）。状态在 `libs/leapgate/src/session.rs`，默认可见，只记被隐藏的会话；挂钩在这个对端会话的所有界面会话（`session_handlers`）都被隐藏时才跳过，同一台设备在另一个窗口里还显示着就照推。会话关闭不加挂钩：设回可见时删掉条目，每次调 `leapgate_session_set_visible` 时顺手删掉已经不在的会话（隐藏着被关掉的标签），查会话时不拿着这把锁（挂钩是拿着 `session_handlers` 读锁再拿它，反过来会有锁序问题）。不会卡住：软件上屏的"界面还没取走上一帧就不推下一帧"（`display_rgbas` 的 `valid`）只在已经发出的 `Rgba` 事件被界面处理后复位，隐藏前发出的那一条照常会被 `core` 处理（取帧、`session_next_rgba` 不依赖页面是否显示）；纹理上屏的"第一帧通知"（`notify_render_type`）隐藏期间不动，切回后的第一帧照常通知。界面要注意：上游 Dart 连上后 1.5 秒还没画面会给对方发空的系统登录密码（`model.dart` 的 `waitForImageTimer`），标签在第一帧到之前被隐藏时这个判断会误触发，`core` 要在隐藏期间不按"没画面"处理 |
 
 - 新界面 runner 的窗口类：主窗口 `LEAPGATE_UI_MAIN`，CM（`--cm`）`LEAPGATE_UI_CM`，安装页（`--install`）`LEAPGATE_UI_INSTALL`。三者分开，按主窗口类名找时不会找到另外两个。主窗口的类名（`leapgate_ui/app/windows/runner/main.cpp` 的 `kMainWindowClass`）和 `libs/leapgate/src/ui.rs` 的 `MAIN_WINDOW_CLASS` 要一致；另外两个 Rust 不找，只在 runner 里。
 - 合并上游时核对：`core_main_invoke_new_connection` 的 Windows 分支仍按 `send_message_to_hnwd` 加 `WM_USER + 2` 把链接交给已有窗口（`uni_links_desktop` 认这个消息号）；上游有没有新增按 `FLUTTER_RUNNER_WIN32_WINDOW_CLASS` 或窗口标题找窗口的地方（`git grep -n "FLUTTER_RUNNER_WIN32_WINDOW\|FindWindow"`）。
 - 已知限制：新界面还没有安装页（第三轮）。exe 名以 `install.exe` 结尾时，core_main 会注入 `--install`、不起服务，runner 按安装页处理，新界面目前写一行日志后退出。M0 只出名叫 `leapgate.exe` 的便携目录，碰不到；做便携打包（03 §1.7 第 5 步）或安装页时处理。
+
+#### C3 原因码
+
+原因码是稳定的，界面的连接状态和文案按它查表；改名等于改接口。"对应"一列是 `docs/新界面/01-内容与逻辑说明.md` §4.3 表里的那一行（按"现在的原文"列）。"能否重试"给界面核对用，导出不返回它：界面用 msgbox 事件的 `hasRetry`，它来自上游 `check_if_retry`，这里写的是按它算出的结果，和 01 §4.3"自动重试"一列一致：标题是 `Connection Error`、正文不含 offline、not exist、failed、resolve、mismatch、manually、restricted、incoming only、not allowed 时才是"是"。匹配按正文，下表"上游原文"写匹配方式；单测里每条都注明了源码位置（`reason.rs` 的 `upstream_message_boxes`）。
+
+| 原因码 | 参数 | 对应 01 §4.3 | 上游原文（匹配方式） | 能否重试 |
+|---|---|---|---|---|
+| `id_not_exist` | | ID does not exist | 正文等于 | 否 |
+| `peer_offline` | | Remote desktop is offline | 正文等于 | 否（30 秒规则在 Dart） |
+| `key_mismatch` | | Key mismatch | 正文等于 | 否 |
+| `key_overuse` | | Key overuse | 正文等于 | 是 |
+| `punch_failed` | | other punch hole failure | 正文等于 | 是 |
+| `rendezvous_failed` | | Failed to connect via rendezvous server | 正文开头（`Client::start` 会给 Failed 开头的错误补 `: Please try later`） | 否 |
+| `secure_tcp_failed` | | Failed to secure tcp: … | 正文开头 | 否 |
+| `direct_reset` | | 直连被重置（10054 / 104）或超时（relay-hint） | 类型 `relay-hint`、`relay-hint2` | 否 |
+| `direct_failed` | | Failed to make direct connection to remote desktop | 正文开头 | 否 |
+| `relay_failed` | | Failed to connect via relay server | 正文开头 | 否 |
+| `peer_id_changed` | | Offline（登录阶段） | 正文等于 `Offline` | 否 |
+| `linux_login_screen` | | Login screen using Wayland is not supported 等 | 正文等于 `Login screen using Wayland is not supported` | 否 |
+| `wrong_password` | | Wrong Password | 类型 `re-input-password` | 否 |
+| `wrong_2fa` | | Wrong 2FA Code | 类型 `input-2fa` 且标题 `Wrong 2FA Code`（标题 `2FA Required` 是第一次要，归 `other`，界面按类型处理） | 否 |
+| `too_many_attempts` | | Too many wrong attempts / Please try 1 minute later | 正文以 `Too many wrong attempts` 开头（含 IPv6 前缀那条），或等于 `Please try 1 minute later` | 否 |
+| `blocked` | | Your ip / ID is blocked by the peer | 正文等于两者之一 | 否 |
+| `not_allowed` | | Connection not allowed | 正文等于（登录错误和对端的关闭原因两条路） | 否 |
+| `main_window_not_open` | | The main window is not open | 正文等于 | 否 |
+| `installed_only` | | Supported only in the installed version. | 正文等于 | 否 |
+| `no_permission` | `feature` | No permission of file transfer / viewing camera / terminal / IP tunneling | 正文等于四者之一 | 否 |
+| `privacy_mode_occupied` | | Someone turns on privacy mode, exit | 正文等于 | 否 |
+| `peer_too_old` | `feature` | 对端版本太旧（摄像头、终端、端口转发） | 正文等于 `upgrade_remote_rustdesk_client_to_{1.3.9}_tip`（camera）、`Remote terminal is not supported by the remote side. Please upgrade to version 1.4.1 or higher.`（terminal）、`exit::PEER_TOO_OLD`（port_forward） | 否 |
+| `reset_by_peer` | | Reset by the peer | 正文等于 | 是 |
+| `timeout` | | Timeout | 正文等于 | 是 |
+| `closed_by_peer` | | Closed manually by the peer | 正文等于 | 否 |
+| `inactivity` | | Connection failed due to inactivity | 正文等于 | 否 |
+| `no_displays` | | No Displays | 正文等于 `No displays` | 否 |
+| `exit_not_enabled` | | 出口：对方没开出口 | 正文等于 `exit::MSG_NOT_ENABLED`（登录被拒，或会话中关了开关后通道被拒） | 否 |
+| `exit_not_supported` | | 出口：对方不支持 / 版本太旧 | 正文等于 `exit::NOT_SUPPORTED`；出口卡片上的 `peer_too_old`（port_forward）也按这一行显示 | 否 |
+| `exit_need_encryption` | | 出口：只接受加密连接 | 正文等于 `exit::MSG_NEED_ENCRYPTION` | 否 |
+| `local_port_in_use` | `port` | 出口：本地端口被占用 | 正文是 `Failed to listen on <端口>: …`，端口取冒号前的数字（普通端口转发也是这句） | 否 |
+| `exit_blocked` | | 出口：单个目标被拦（MSG_BLOCKED） | 正文等于 `exit::MSG_BLOCKED` | 否 |
+| `exit_fake_ip_literal` | | 出口：MSG_FAKE_IP_LITERAL | 正文等于 `exit::MSG_FAKE_IP_LITERAL` | 否 |
+| `other` | | 其余，含"服务器自定义的拒绝原因" | 以上都不是 | 按 `hasRetry` |
+
+- `feature` 取 `file_transfer`、`camera`、`terminal`、`port_forward`；`port` 是数字。
+- 01 §4.3 里写"不会出现"的两行（Incoming only mode、MSG_NEED_MUX）不给码，真出现时归 `other`。
+- 已知限制：服务器自定义的拒绝原因（`PunchHoleResponse.other_failure`、`RelayResponse.refuse_reason`）在 msgbox 里只是任意正文，和系统错误原文分不开，归 `other`、显示原文。01 §4.3 要的"服务器拒绝了此连接："前缀，得在 `src/client.rs` 加两处挂钩（`_start_inner` 的 `bail!(ph.other_failure)`、`request_relay` 的 `bail!(rs.refuse_reason)`），等 Q3 的挂钩位置交维护者确认时一起问。
+- 不在 01 §4.3 里的错误不给码，归 `other`：摄像头、终端的（`No cameras`、`view_camera_unsupported_tip`、`Remote terminal is not supported by the remote side`）第三轮随说明一起补；`No active console user logged on…` 01 没有文案。
+- 合并上游时：`git diff <旧> <新> -- src | grep msgbox` 看 msgbox 文本有没有变，变了就改 `reason.rs` 的表和单测（03 §3.8 第 3 条）；`check_if_retry` 的签名或语义变了，核对 `leapgate_msgbox_reason`。
 
 ### 10.5 验收记录
 
