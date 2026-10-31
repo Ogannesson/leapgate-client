@@ -181,7 +181,7 @@ class _LgDeviceCardState extends State<LgDeviceCard> {
             states.contains(WidgetState.pressed);
         final focused = states.contains(WidgetState.focused);
         final on = w.selected || w.picked == true;
-        final showActions = !pickMode && (hot || focused || _within || on);
+        final showActions = !pickMode && (hot || focused || _within);
         final Color base;
         if (on) {
           base = Color.alphaBlend(c.active, c.surface);

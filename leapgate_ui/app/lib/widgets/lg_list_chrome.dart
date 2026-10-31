@@ -8,6 +8,8 @@
 // Everything here only draws: the texts come from the caller (localised) and
 // the callbacks are the caller's.
 
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../icons/lg_icon.dart';
@@ -440,7 +442,7 @@ class LgLocalNotice extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Padding(
-                  padding: EdgeInsets.only(top: (t.sizes.lhM - 20) / 2),
+                  padding: EdgeInsets.only(top: math.max(0, (t.sizes.lhM - 20) / 2)),
                   child: LgIcon(
                     icon ?? lgToneIcon(tone),
                     size: 20,

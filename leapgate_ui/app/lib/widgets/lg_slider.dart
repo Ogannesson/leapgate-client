@@ -25,7 +25,7 @@ class LgSlider extends StatefulWidget {
     this.max = 1,
     this.step,
     this.semanticLabel,
-    this.semanticValue,
+    this.format,
     this.focusNode,
     this.onChangeEnd,
     this.verticalArrows = true,
@@ -45,8 +45,9 @@ class LgSlider extends StatefulWidget {
   /// Accessible name ("缩放").
   final String? semanticLabel;
 
-  /// What a screen reader says for the value ("100%"); defaults to the number.
-  final String? semanticValue;
+  /// Writes a value as the screen reader should say it ("100%"); defaults to
+  /// the number. It also tells what the value would become one step up or down.
+  final String Function(double value)? format;
   final FocusNode? focusNode;
 
   /// Called once when a drag or click is over, with the last value.
@@ -77,6 +78,9 @@ class _LgSliderState extends State<LgSlider> {
     }
     return x;
   }
+
+  String _say(double v) =>
+      widget.format?.call(v) ?? v.toStringAsFixed(v == v.roundToDouble() ? 0 : 2);
 
   void _set(double v) {
     final x = _snap(v);
@@ -136,9 +140,9 @@ class _LgSliderState extends State<LgSlider> {
       slider: true,
       enabled: enabled,
       label: widget.semanticLabel,
-      value: widget.semanticValue ?? '${widget.value}',
-      increasedValue: widget.semanticValue,
-      decreasedValue: widget.semanticValue,
+      value: _say(widget.value),
+      increasedValue: _say(_snap(widget.value + _unit)),
+      decreasedValue: _say(_snap(widget.value - _unit)),
       onIncrease: enabled ? () => _set(widget.value + _unit) : null,
       onDecrease: enabled ? () => _set(widget.value - _unit) : null,
       child: Focus(

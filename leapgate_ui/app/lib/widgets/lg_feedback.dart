@@ -293,19 +293,24 @@ class _SecondaryAction extends StatelessWidget {
         child: Container(
           height: t.sizes.button,
           padding: const EdgeInsets.symmetric(horizontal: LgSpace.s3),
-          alignment: Alignment.center,
           decoration: BoxDecoration(
             color: lgStateOverlay(c, states),
             borderRadius: radius,
           ),
-          child: ExcludeSemantics(
-            child: Text(
-              action.label,
-              maxLines: 1,
-              softWrap: false,
-              style: t.text.copyWith(
-                color: c.text2,
-                fontWeight: FontWeight.w700,
+          // Centred but no wider than its text: in a Wrap a Container that
+          // aligns its child would take the whole line.
+          child: Align(
+            alignment: Alignment.center,
+            widthFactor: 1,
+            child: ExcludeSemantics(
+              child: Text(
+                action.label,
+                maxLines: 1,
+                softWrap: false,
+                style: t.text.copyWith(
+                  color: c.text2,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
           ),

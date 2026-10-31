@@ -86,6 +86,37 @@ class LgSwitchGlyph extends StatelessWidget {
   }
 }
 
+/// A small check box drawn on its own (`i-square` when off): 18 px, the accent
+/// colour with a check mark when on. The control around it takes the clicks.
+class LgCheckGlyph extends StatelessWidget {
+  const LgCheckGlyph({super.key, required this.value, this.enabled = true});
+
+  final bool value;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = LgTokens.of(context).colors;
+    return ExcludeSemantics(
+      child: Opacity(
+        opacity: enabled ? 1 : .6,
+        child: value
+            ? Container(
+                width: 18,
+                height: 18,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: c.accent,
+                  borderRadius: BorderRadius.circular(5),
+                ),
+                child: LgIcon(LgIcons.check, size: 14, color: c.onAccent),
+              )
+            : LgIcon(LgIcons.square, size: 18, color: c.text2),
+      ),
+    );
+  }
+}
+
 /// The ground of a row of this file: hover and keyboard focus both tint it,
 /// like the rows of `MenuItemButton`.
 class _Row extends StatelessWidget {
@@ -173,14 +204,66 @@ class LgMenuSwitchItem extends StatelessWidget {
                 Expanded(child: LgEllipsisText(label)),
                 if (shortcut != null) ...[
                   const SizedBox(width: LgSpace.s3),
-                  Text(
-                    shortcut!,
-                    style: t.textS.copyWith(color: c.text2),
-                    maxLines: 1,
+                  Flexible(
+                    child: Text(
+                      shortcut!,
+                      style: t.textS.copyWith(color: c.text2),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
                 ],
                 const SizedBox(width: LgSpace.s4),
                 LgSwitchGlyph(value: value, enabled: enabled),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    if (enabled || disabledNote == null) return row;
+    return LgTooltip(
+      message: disabledNote!,
+      child: Semantics(hint: disabledNote, child: row),
+    );
+  }
+}
+
+/// A row that turns something on and off with a check box at its end ("始终经
+/// 中继连接" in the device menu). Like [LgMenuSwitchItem], the menu stays open.
+class LgMenuCheckItem extends StatelessWidget {
+  const LgMenuCheckItem({
+    super.key,
+    required this.label,
+    required this.value,
+    required this.onChanged,
+    this.disabledNote,
+  });
+
+  final String label;
+  final bool value;
+  final ValueChanged<bool>? onChanged;
+  final String? disabledNote;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = LgTokens.of(context);
+    final enabled = onChanged != null;
+    final row = LgPressable(
+      onPressed: enabled ? () => onChanged!(!value) : null,
+      semanticLabel: label,
+      toggled: value,
+      builder: (context, states) => Opacity(
+        opacity: enabled ? 1 : .6,
+        child: _Row(
+          states: states,
+          height: t.sizes.row,
+          child: ExcludeSemantics(
+            child: Row(
+              children: [
+                Expanded(child: LgEllipsisText(label)),
+                const SizedBox(width: LgSpace.s3),
+                LgCheckGlyph(value: value, enabled: enabled),
               ],
             ),
           ),
@@ -204,7 +287,7 @@ class LgMenuSliderItem extends StatelessWidget {
     super.key,
     required this.value,
     required this.onChanged,
-    required this.valueText,
+    required this.format,
     required this.semanticLabel,
     this.min = 0,
     this.max = 1,
@@ -220,8 +303,9 @@ class LgMenuSliderItem extends StatelessWidget {
   final double max;
   final double? step;
 
-  /// The value as written ("100%", "1.5×"); the caller formats it.
-  final String valueText;
+  /// Writes a value as shown at the end of the row ("100%", "1.5×"), and as a
+  /// screen reader says it.
+  final String Function(double value) format;
 
   /// Accessible name of the slider ("自定义缩放").
   final String semanticLabel;
@@ -253,7 +337,7 @@ class LgMenuSliderItem extends StatelessWidget {
               onChanged: onChanged,
               onChangeEnd: onChangeEnd,
               semanticLabel: semanticLabel,
-              semanticValue: valueText,
+              format: format,
               verticalArrows: false,
             ),
           ),
@@ -262,7 +346,7 @@ class LgMenuSliderItem extends StatelessWidget {
             width: 40,
             child: ExcludeSemantics(
               child: Text(
-                valueText,
+                format(value),
                 textAlign: TextAlign.right,
                 maxLines: 1,
                 style: small.copyWith(
