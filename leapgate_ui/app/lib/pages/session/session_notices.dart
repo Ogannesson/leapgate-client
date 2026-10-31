@@ -57,6 +57,14 @@ String noticeText(AppLocalizations l10n, SessionNotice notice) {
       _ => l10n.noticeRevokedPrivacyMode,
     };
   }
+  // The text is the remote device's reason, or "Failed" without one (`io_loop.rs`
+  // `handle_back_msg_block_input`).
+  switch (notice.args['title']) {
+    case 'Block user input':
+      return l10n.noticeBlockInputFailed(notice.key);
+    case 'Unblock user input':
+      return l10n.noticeUnblockInputFailed(notice.key);
+  }
   final privacy = notice.args['title'] == 'Privacy mode';
   final text = switch (notice.key) {
     'screenshot-action-tip' => l10n.noticeScreenshotDone,

@@ -227,7 +227,6 @@ class _SessionToolbarState extends State<SessionToolbar> {
       listenable: Listenable.merge([
         _ffi.connection,
         _ffi.ffiModel,
-        _ffi.canvasModel,
         // The chat's unread count on "更多" is read when the bar builds.
         _ffi.chatModel,
         _ffi.notices,

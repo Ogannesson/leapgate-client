@@ -177,6 +177,13 @@ void main() {
       await _emit(bind, s, {'name': 'on_voice_call_closed', 'reason': ''});
       expect(s.chatModel.voiceCallStatus, VoiceCallStatus.notStarted);
     });
+
+    test('a reconnection ends the voice call', () async {
+      final (:bind, :s) = _session();
+      await _emit(bind, s, {'name': 'on_voice_call_started'});
+      await _emit(bind, s, _peerInfo);
+      expect(s.chatModel.voiceCallStatus, VoiceCallStatus.notStarted);
+    });
   });
 
   group('notices with buttons', () {

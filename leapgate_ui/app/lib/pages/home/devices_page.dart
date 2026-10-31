@@ -454,19 +454,24 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
   Widget _selectionBar(AppLocalizations l10n) {
     final category = _tabs.current;
     final ids = _selection.ids;
-    final (label, title, toast) = switch (category) {
+    // Removing from favorites or from the LAN list neither asks nor looks dangerous, as in the
+    // menu of one device (01 P1 block F); deleting asks with [title].
+    final (label, icon, title, toast) = switch (category) {
       PeerCategory.favorites => (
           l10n.peersRemoveFavorites,
-          l10n.peersRemoveFavoritesMany(ids.length),
+          LgIcons.star,
+          null,
           'peersToastRemovedFavorites',
         ),
       PeerCategory.lan => (
           l10n.peersRemove,
-          l10n.peersRemoveMany(ids.length),
+          LgIcons.x,
+          null,
           'peersToastRemoved',
         ),
       _ => (
           l10n.peersDelete,
+          LgIcons.trash,
           l10n.peersDeleteMany(ids.length),
           'peersToastDeleted',
         ),
@@ -482,13 +487,14 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
       actions: [
         LgSelectionAction(
           label: label,
-          icon: LgIcons.trash,
-          danger: true,
+          icon: icon,
+          danger: title != null,
           onPressed: ids.isEmpty
               ? null
               : () async {
-                  if (!await confirmOnHome(widget.overlays,
-                      title: title, action: label, cancel: l10n.homeCancel)) {
+                  if (title != null &&
+                      !await confirmOnHome(widget.overlays,
+                          title: title, action: label, cancel: l10n.homeCancel)) {
                     return;
                   }
                   await deletePeers(category, ids);

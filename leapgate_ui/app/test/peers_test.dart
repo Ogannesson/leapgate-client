@@ -309,6 +309,23 @@ void main() {
   );
 
   testWidgets(
+    'multiple selection in favorites removes them without asking',
+    (tester) async {
+      await pumpPeers(tester, recent: [], fav: [_shufang, _mama]);
+      await tapText(tester, '收藏');
+      await tapText(tester, '多选');
+      await tapText(tester, '全选');
+      await tapText(tester, '移出收藏');
+
+      expect(find.text('取消'), findsNothing);
+      expect(appCore.toasts.current?.key, 'peersToastRemovedFavorites');
+      await unmount(tester);
+      await toastGone(tester);
+    },
+    variant: _windows,
+  );
+
+  testWidgets(
     'the search covers the three categories, each device once with its source',
     (tester) async {
       bind.flutter['peer-card-ui-type'] = '2';

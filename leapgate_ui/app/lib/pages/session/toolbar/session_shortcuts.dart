@@ -57,7 +57,7 @@ void registerSessionShortcuts(
   );
   shortcuts.register(
     kShortcutActionToggleRecording,
-    () => ffi.recordingModel.toggle(),
+    () => ffi.requests.toggleRecording(),
   );
   shortcuts.register(
     kShortcutActionSwitchDisplayNext,

@@ -165,8 +165,9 @@ class FfiModel with ChangeNotifier {
     if (hadKeyboardPerm && !hasKeyboardPerm) {
       final inputModel = parent.target?.inputModel;
       if (inputModel != null && inputModel.relativeMouseMode.value) {
+        // Upstream also toasts 'rel-mouse-permission-lost-tip'; the session's notice that the
+        // remote user turned off keyboard and mouse control says the same (01 §7.6).
         inputModel.setRelativeMouseMode(false);
-        appCore.toasts.show('rel-mouse-permission-lost-tip');
       }
     }
 
@@ -336,6 +337,9 @@ class FfiModel with ChangeNotifier {
   /// ([isCache] true) is gone, so it is always false here; the parameter stays to keep the
   /// body comparable with upstream.
   handlePeerInfo(Map<String, dynamic> evt, String peerId, bool isCache) async {
+    // Upstream :1342 sets the voice call back to notStarted here.
+    parent.target?.chatModel.onVoiceCallClosed('');
+
     // Recent peer is updated by handle_peer_info(ui_session_interface.rs) --> handle_peer_info(client.rs) --> save_config(client.rs)
     bind.mainLoadRecentPeers();
 

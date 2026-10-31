@@ -7,9 +7,11 @@ import 'package:flutter_hbb/leapgate/session.dart';
 import 'package:flutter_hbb/leapgate/session_route.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:leapgate_ui/l10n/app_localizations.dart';
 import 'package:leapgate_ui/pages/session/session_notices.dart';
 import 'package:leapgate_ui/shell/navigation.dart';
 import 'package:leapgate_ui/shell/tab_menu.dart';
+import 'package:leapgate_ui/shell/toast_view.dart';
 import 'package:leapgate_ui/widgets/lg_selection.dart';
 import 'package:leapgate_ui/widgets/lg_session_toolbar.dart';
 import 'package:leapgate_ui/widgets/lg_status.dart';
@@ -308,6 +310,46 @@ void main() {
       expect(find.text('远程设备上正在显示用户账户控制（UAC）窗口'), findsNothing);
     });
 
+    testMainWindow('"请求提升权限" on the UAC notice opens the elevation dialog', (
+      tester,
+    ) async {
+      await pumpMainWindow(tester);
+      final s = await connected(tester);
+      await emit(
+        tester,
+        fakes,
+        s,
+        msgbox('on-uac', 'Prompt', 'Please wait for confirmation of UAC...'),
+      );
+      await tester.tap(find.text('请求提升权限'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('请对方确认'), findsOneWidget);
+      expect(find.text('输入管理员账户和密码'), findsOneWidget);
+    });
+
+    testMainWindow('blocking user input that failed says which and why', (
+      tester,
+    ) async {
+      await pumpMainWindow(tester);
+      final s = await connected(tester);
+      await emit(
+        tester,
+        fakes,
+        s,
+        msgbox('custom-error', 'Block user input', 'Failed'),
+      );
+      await emit(
+        tester,
+        fakes,
+        s,
+        msgbox('custom-error', 'Unblock user input', 'Driver missing'),
+      );
+
+      expect(find.text('无法阻止远程设备的本地输入'), findsOneWidget);
+      expect(find.text('无法取消阻止远程设备的本地输入（Driver missing）'), findsOneWidget);
+    });
+
     testMainWindow('a permission taken away is told', (tester) async {
       await pumpMainWindow(tester);
       // Given permissions are never sent; the remote user turns one off after the login.
@@ -416,7 +458,7 @@ void main() {
       expect(find.text('挂断'), findsOneWidget);
     });
 
-    testMainWindow('waiting for the answer: "等待接听…" with "取消"', (tester) async {
+    testMainWindow('waiting for the answer: "正在等待接听…" with "取消"', (tester) async {
       await pumpMainWindow(tester);
       final s = await connected(tester);
       await tester.tap(find.text('聊天'));
@@ -426,7 +468,7 @@ void main() {
       expect(callsTo(fakes, #sessionRequestVoiceCall), hasLength(1));
 
       await emit(tester, fakes, s, {'name': 'on_voice_call_waiting'});
-      expect(find.text('等待接听…'), findsOneWidget);
+      expect(find.text('正在等待接听…'), findsOneWidget);
     });
   });
 
@@ -477,5 +519,11 @@ void main() {
       expect(copied, _id);
       expect(find.text('已复制'), findsOneWidget);
     });
+  });
+
+  test('the relative mouse mode toasts have their own copy', () {
+    final l10n = lookupAppLocalizations(const Locale('zh'));
+    expect(toastText(l10n, 'rel-mouse-not-supported-peer-tip'), '远程设备不支持相对鼠标模式');
+    expect(toastText(l10n, 'rel-mouse-exit-{Ctrl+Alt}-tip'), '按 Ctrl+Alt 退出鼠标锁定');
   });
 }

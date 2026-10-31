@@ -34,6 +34,9 @@
   "sessionDirectEstablished": "Direct connection established",
   "sessionRelayEstablished": "Relayed connection established",
   "sessionToastCopied": "Copied",
+  "sessionToastRelMouseUnsupported": "The remote device doesn't support relative mouse mode",
+  "sessionToastRelMouseNotReady": "Relative mouse mode isn't ready. Try again later.",
+  "sessionToastRelMouseLockFailed": "Can't lock the mouse. Relative mouse mode is off.",
   "sessionNoticePrivacyOn": "Privacy mode turned on",
   "sessionNoticePrivacyOff": "Exited privacy mode",
   "sessionNoticePrivacyUnsupported": "The remote device doesn't support privacy mode",
@@ -224,10 +227,10 @@
   "menuResolutionLocal": "Same as this device",
   "menuResolutionSupported": "Supported by the remote device",
   "menuResolutionCustom": "Custom…",
-  "menuVirtualDisplay": "Virtual displays",
-  "menuVirtualDisplayN": "Virtual display {n}",
+  "menuVirtualDisplay": "Virtual monitors",
+  "menuVirtualDisplayN": "Virtual monitor {n}",
   "@menuVirtualDisplayN": {"placeholders": {"n": {"type": "int"}}},
-  "menuVirtualDisplayCount": "Number of virtual displays",
+  "menuVirtualDisplayCount": "Number of virtual monitors",
   "menuDecrease": "Decrease",
   "menuIncrease": "Increase",
   "menuRemoveAll": "Remove all",
@@ -288,7 +291,7 @@
   "menuLockAfterEnd": "Lock remote device after session ends",
   "menuPrivacyMode": "Privacy mode",
   "menuPrivacyMag": "Block screen",
-  "menuPrivacyVirtual": "Use virtual display",
+  "menuPrivacyVirtual": "Use virtual monitor",
   "menuDlgClose": "Close",
   "menuDlgApply": "Apply",
   "menuDlgSave": "Save",
@@ -310,7 +313,7 @@
   "menuDlgAutoLogin": "Sign in automatically",
   "menuDlgAutoLoginNote": "Works only when “Lock remote device after session ends” is on",
   "menuDlgElevAsk": "Ask the remote user to confirm",
-  "menuDlgElevAskNote": "Choose this when the remote account is an administrator",
+  "menuDlgElevAskNote": "Available when the remote device is signed in with an administrator account",
   "menuDlgElevLogon": "Enter an administrator account and password",
   "menuDlgElevNote": "The remote user still needs to confirm in the User Account Control (UAC) prompt.",
   "menuDlgUsername": "User name",
@@ -400,22 +403,6 @@
     "placeholders": {
       "name": {
         "type": "String"
-      }
-    }
-  },
-  "peersRemoveMany": "Remove {count} devices?",
-  "@peersRemoveMany": {
-    "placeholders": {
-      "count": {
-        "type": "int"
-      }
-    }
-  },
-  "peersRemoveFavoritesMany": "Remove {count} devices from favorites?",
-  "@peersRemoveFavoritesMany": {
-    "placeholders": {
-      "count": {
-        "type": "int"
       }
     }
   },
@@ -524,6 +511,10 @@
   "noticeElevated": "Elevated",
   "noticeElevationFailed": "Can't elevate ({reason})",
   "@noticeElevationFailed": {"placeholders": {"reason": {"type": "String"}}},
+  "noticeBlockInputFailed": "{reason, select, Failed{Can't block user input} other{Can't block user input ({reason})}}",
+  "@noticeBlockInputFailed": {"description": "reason is the remote device's own text; Rust sends Failed when there is none.", "placeholders": {"reason": {"type": "String"}}},
+  "noticeUnblockInputFailed": "{reason, select, Failed{Can't unblock user input} other{Can't unblock user input ({reason})}}",
+  "@noticeUnblockInputFailed": {"placeholders": {"reason": {"type": "String"}}},
   "noticeForegroundElevated": "The active window on the remote device needs higher privileges. Keyboard and mouse can't be used for now.",
   "noticeAutoRecording": "Recording this session automatically",
   "noticeStop": "Stop",
