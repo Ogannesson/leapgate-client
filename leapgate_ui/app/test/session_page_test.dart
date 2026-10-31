@@ -88,6 +88,8 @@ void main() {
       final s = await _open(tester);
       await emit(tester, fakes, s, connectionReady());
       await emit(tester, fakes, s, msgbox('input-password', 'Password Required', ''));
+      // The card grows to the password's size (160 ms) before its buttons are all in view.
+      await tester.pump(const Duration(milliseconds: 200));
 
       // The route shows from "waiting for the image" on (01 P2 block A).
       expect(_mark('正在连接…'), findsOneWidget);

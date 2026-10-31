@@ -11,6 +11,7 @@ import 'package:leapgate_ui/pages/session/session_notices.dart';
 import 'package:leapgate_ui/shell/navigation.dart';
 import 'package:leapgate_ui/shell/tab_menu.dart';
 import 'package:leapgate_ui/widgets/lg_selection.dart';
+import 'package:leapgate_ui/widgets/lg_session_toolbar.dart';
 import 'package:leapgate_ui/widgets/lg_status.dart';
 
 import 'session_fakes.dart';
@@ -98,7 +99,8 @@ void main() {
 
   group('connection details', () {
     Future<void> openDetails(WidgetTester tester) async {
-      await tester.tap(find.bySemanticsLabel(RegExp('连接方式详情')));
+      // The toolbar's mark ("经中继") opens them.
+      await tester.tap(find.byType(LgToolbarRouteButton));
       await tester.pumpAndSettle();
     }
 
@@ -321,6 +323,47 @@ void main() {
 
   group('chat', () {
     testMainWindow(
+      'the pointer back on the image leaves the keyboard to the chat input; a click takes it',
+      (tester) async {
+        await pumpMainWindow(tester);
+        final s = await connected(tester);
+        await emit(tester, fakes, s, {
+          'name': 'chat_client_mode',
+          'text': '你好',
+        });
+        await tester.tap(find.byType(EditableText));
+        await tester.pump();
+        final input = tester
+            .widget<EditableText>(find.byType(EditableText))
+            .focusNode;
+        expect(input.hasFocus, true);
+
+        // A frame, so the image takes the pointer.
+        await tester.runAsync(() async {
+          s.canvasModel.updateSize();
+          await s.imageModel.update(
+            await createTestImage(width: 1920, height: 1080),
+          );
+        });
+        await tester.pump();
+
+        // A spot of the image, away from the toolbar and the panel.
+        const spot = Offset(80, 500);
+        final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+        await mouse.addPointer(location: const Offset(1270, 790));
+        await mouse.moveTo(spot);
+        await tester.pump();
+        expect(input.hasFocus, true);
+
+        await tester.tapAt(spot);
+        await tester.pump();
+        expect(input.hasFocus, false);
+        expect(callsTo(fakes, #sessionEnterOrLeave).last[#enter], true);
+        await mouse.removePointer();
+      },
+    );
+
+    testMainWindow(
       'a message opens the panel; sending shows it on the right side',
       (tester) async {
         await pumpMainWindow(tester);
@@ -332,6 +375,8 @@ void main() {
 
         expect(find.text('你好'), findsOneWidget);
         await tester.enterText(find.byType(EditableText), ' 好的 ');
+        // "发送" turns on with the text.
+        await tester.pump();
         await tester.tap(find.text('发送'));
         await tester.pump();
 

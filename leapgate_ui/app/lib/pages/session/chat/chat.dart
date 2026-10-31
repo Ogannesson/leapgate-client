@@ -7,10 +7,9 @@ import '../../../icons/lg_icon.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../shell/tab_overlays.dart';
 import '../../../theme/lg_tokens.dart';
-import '../../../widgets/lg_button.dart';
+import '../../../widgets/lg_chat.dart';
 import '../../../widgets/lg_menu.dart';
 import '../../../widgets/lg_session_toolbar.dart';
-import '../../../widgets/lg_text_field.dart';
 
 /// Chat and voice calls (01 P2 block F). The toolbar places [chatToolbarButtons] after the
 /// "会话" menu; the session page stacks [ChatLayer] above the notices (01 P2 block C).
@@ -18,13 +17,22 @@ import '../../../widgets/lg_text_field.dart';
 /// One button whose menu follows the voice call (upstream had a chat menu and a separate voice
 /// call button, `desktop/widgets/remote_toolbar.dart` `_ChatMenu`, `_VoiceCallMenu`): text chat
 /// and voice call; while waiting for an answer "等待接听…" with "取消"; in a call "通话中" with
-/// the microphones and "挂断" (`u-voice-wait`, `u-voice-call`).
+/// the microphones and "挂断" (`u-voice-wait`, `u-voice-call`). Folded into "更多", the same
+/// menu is a submenu row.
 List<Widget> chatToolbarButtons(
   BuildContext context,
   FFI ffi,
   TabOverlays overlays,
-) =>
-    [_ChatButton(chat: ffi.chatModel)];
+) {
+  final chat = ffi.chatModel;
+  return [
+    LgToolbarFoldable(
+      badge: chat.unread,
+      inline: _ChatButton(chat: chat),
+      menuItem: _ChatButton(chat: chat, asMenuRow: true),
+    ),
+  ];
+}
 
 /// The chat and voice call shortcuts (upstream `shortcut_model.dart:455-474`): text chat opens
 /// or closes the panel as "文字聊天" does; voice call hangs up or cancels while one is waiting or
@@ -45,10 +53,12 @@ void registerChatShortcuts(FFI ffi) {
     });
 }
 
+/// The chat menu as a toolbar button, or as a submenu row of "更多" ([asMenuRow]).
 class _ChatButton extends StatelessWidget {
-  const _ChatButton({required this.chat});
+  const _ChatButton({required this.chat, this.asMenuRow = false});
 
   final ChatModel chat;
+  final bool asMenuRow;
 
   @override
   Widget build(BuildContext context) {
@@ -56,30 +66,27 @@ class _ChatButton extends StatelessWidget {
       listenable: chat,
       builder: (context, _) {
         final l10n = AppLocalizations.of(context)!;
-        // The number is a stand-in for the designer's badge.
-        final unread = chat.unread;
-        String withUnread(String label) =>
-            unread > 0 ? '$label $unread' : label;
         final textChat = LgMenuItem(
           label: l10n.chatText,
           checked: chat.open,
           onPressed: () => chat.setOpen(!chat.open),
         );
-        switch (chat.voiceCallStatus) {
-          case VoiceCallStatus.waitingForResponse:
-            return LgToolbarMenuButton(
-              label: withUnread(l10n.chatWaitingAnswer),
-              icon: LgIcons.call,
-              items: [
-                LgMenuItem(label: l10n.connCancel, onPressed: chat.closeVoiceCall),
-              ],
-            );
-          case VoiceCallStatus.connected:
-            // Text chat stays at hand during a call, as upstream's separate chat menu.
-            return LgToolbarMenuButton(
-              label: withUnread(l10n.chatInCall),
-              icon: LgIcons.call,
-              items: [
+        final (label, icon, state, items) = switch (chat.voiceCallStatus) {
+          VoiceCallStatus.waitingForResponse => (
+              l10n.chatWaitingAnswer,
+              LgIcons.call,
+              LgToolbarMenuState.pending,
+              <Widget>[
+                LgMenuItem(
+                    label: l10n.connCancel, onPressed: chat.closeVoiceCall),
+              ]
+            ),
+          // Text chat stays at hand during a call, as upstream's separate chat menu.
+          VoiceCallStatus.connected => (
+              l10n.chatInCall,
+              LgIcons.call,
+              LgToolbarMenuState.live,
+              <Widget>[
                 textChat,
                 LgMenuGroup(l10n.chatMicrophone),
                 _Microphones(chat: chat),
@@ -89,21 +96,34 @@ class _ChatButton extends StatelessWidget {
                   danger: true,
                   onPressed: chat.closeVoiceCall,
                 ),
-              ],
-            );
-          case VoiceCallStatus.notStarted:
-          case VoiceCallStatus.incoming:
-            return LgToolbarMenuButton(
-              label: withUnread(l10n.chatMenu),
-              icon: LgIcons.chat,
-              items: [
+              ]
+            ),
+          VoiceCallStatus.notStarted || VoiceCallStatus.incoming => (
+              l10n.chatMenu,
+              LgIcons.chat,
+              LgToolbarMenuState.normal,
+              <Widget>[
                 textChat,
                 LgMenuItem(
                     label: l10n.chatVoiceCall,
                     onPressed: chat.requestVoiceCall),
-              ],
-            );
+              ]
+            ),
+        };
+        if (asMenuRow) {
+          return LgSubmenu(
+              label: label,
+              icon: icon,
+              badge: chat.unread > 0 ? chat.unread : null,
+              items: items);
         }
+        return LgToolbarMenuButton(
+          label: label,
+          icon: icon,
+          state: state,
+          badge: chat.unread,
+          items: items,
+        );
       },
     );
   }
@@ -167,7 +187,7 @@ class _MicrophonesState extends State<_Microphones> {
 /// The chat panel over the image (01 P2 block F, `u-chat`): shown while [ChatModel.open], below
 /// the toolbar until dragged. Messages from the remote device open it without taking the
 /// keyboard from the image; "文字聊天" opens it with the focus in the input. While its tab shows,
-/// what came is read. A stand-in for the designer's `LgChatPanel`.
+/// what came is read. Drawn by [LgChatPanel].
 class ChatLayer extends StatefulWidget {
   const ChatLayer({super.key, required this.ffi});
 
@@ -178,8 +198,10 @@ class ChatLayer extends StatefulWidget {
 }
 
 class _ChatLayerState extends State<ChatLayer> {
-  static const _width = 320.0;
-  static const _height = 400.0;
+  static const _width = 360.0;
+
+  /// About the panel's height with its list, to keep it on the image while dragged.
+  static const _height = 360.0;
 
   final _input = TextEditingController();
   final _inputFocus = FocusNode();
@@ -232,8 +254,8 @@ class _ChatLayerState extends State<ChatLayer> {
     if (mounted) setState(() {});
   }
 
-  void _send() {
-    if (_chat.send(_input.text)) _input.clear();
+  void _send(String text) {
+    if (_chat.send(text)) _input.clear();
     _inputFocus.requestFocus();
   }
 
@@ -241,8 +263,8 @@ class _ChatLayerState extends State<ChatLayer> {
   Widget build(BuildContext context) {
     if (!_chat.open) return const SizedBox.shrink();
     final t = LgTokens.of(context);
-    final c = t.colors;
     final l10n = AppLocalizations.of(context)!;
+    String two(int v) => v.toString().padLeft(2, '0');
     return LayoutBuilder(builder: (context, box) {
       final pos = _position ??
           Offset((box.maxWidth - _width) / 2 + 120,
@@ -251,95 +273,30 @@ class _ChatLayerState extends State<ChatLayer> {
         Positioned(
           left: pos.dx.clamp(0, (box.maxWidth - _width).clamp(0, double.infinity)),
           top: pos.dy.clamp(0, (box.maxHeight - _height).clamp(0, double.infinity)),
-          width: _width,
-          height: _height,
-          child: Material(
-            color: c.float,
-            elevation: 8,
-            borderRadius: BorderRadius.circular(LgRadius.r16),
-            clipBehavior: Clip.antiAlias,
-            child: Column(children: [
-              GestureDetector(
-                onPanUpdate: (d) => setState(() => _position = pos + d.delta),
-                child: Container(
-                  height: 44,
-                  padding: const EdgeInsets.only(left: LgSpace.s4),
-                  child: Row(children: [
-                    Expanded(
-                      child: Semantics(
-                        header: true,
-                        child: Text(l10n.chatMenu,
-                            style: t.text.copyWith(fontWeight: FontWeight.w700)),
-                      ),
-                    ),
-                    LgIconButton(
-                      icon: LgIcons.x,
-                      label: l10n.chatClose,
-                      onPressed: () => _chat.setOpen(false),
-                    ),
-                  ]),
+          child: LgChatPanel(
+            title: l10n.chatMenu,
+            messages: [
+              for (final m in _chat.messages)
+                LgChatMessage(
+                  text: m.text,
+                  time: '${two(m.at.hour)}:${two(m.at.minute)}',
+                  mine: m.isOut,
                 ),
-              ),
-              Expanded(
-                child: ListView(
-                  reverse: true,
-                  padding: const EdgeInsets.all(LgSpace.s3),
-                  children: [
-                    for (final m in _chat.messages.reversed) _bubble(t, m),
-                  ],
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(LgSpace.s3),
-                child: Row(children: [
-                  Expanded(
-                    child: LgTextField(
-                      controller: _input,
-                      focusNode: _inputFocus,
-                      placeholder: l10n.chatPlaceholder,
-                      semanticLabel: l10n.chatPlaceholder,
-                      onSubmitted: (_) => _send(),
-                    ),
-                  ),
-                  const SizedBox(width: LgSpace.s2),
-                  LgButton(
-                    label: l10n.chatSend,
-                    kind: LgButtonKind.primary,
-                    onPressed: _send,
-                  ),
-                ]),
-              ),
-            ]),
+            ],
+            controller: _input,
+            focusNode: _inputFocus,
+            placeholder: l10n.chatPlaceholder,
+            sendLabel: l10n.chatSend,
+            closeLabel: l10n.chatClose,
+            mineLabel: l10n.chatMine,
+            theirsLabel: l10n.chatTheirs,
+            width: _width,
+            onSend: _send,
+            onClose: () => _chat.setOpen(false),
+            onDrag: (d) => setState(() => _position = pos + d),
           ),
         ),
       ]);
     });
-  }
-
-  Widget _bubble(LgTokens t, ChatMessage m) {
-    final c = t.colors;
-    String two(int v) => v.toString().padLeft(2, '0');
-    return Align(
-      alignment: m.isOut ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: LgSpace.s1),
-        padding: const EdgeInsets.symmetric(
-            horizontal: LgSpace.s3, vertical: LgSpace.s2),
-        constraints: const BoxConstraints(maxWidth: 240),
-        decoration: BoxDecoration(
-          color: m.isOut ? c.active : c.surface2,
-          borderRadius: BorderRadius.circular(LgRadius.r12),
-        ),
-        child: Column(
-          crossAxisAlignment:
-              m.isOut ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-          children: [
-            Text(m.text, style: t.text),
-            Text('${two(m.at.hour)}:${two(m.at.minute)}',
-                style: t.textS.copyWith(color: c.text2)),
-          ],
-        ),
-      ),
-    );
   }
 }

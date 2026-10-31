@@ -179,7 +179,8 @@ class _SessionPageState extends State<SessionPage>
     // (Alt+Tab, taskbar), so enterView() never fires again.
     if (_cursorOverImage.value &&
         _canFocusRemoteInput &&
-        !_rawKeyFocusNode.hasFocus) {
+        !_rawKeyFocusNode.hasFocus &&
+        !_textInputFocused) {
       _rawKeyFocusNode.requestFocus();
     }
     if (_ffi.inputModel.relativeMouseMode.value) {
@@ -199,10 +200,19 @@ class _SessionPageState extends State<SessionPage>
     // keys. onFocusChange does enterOrLeave.
     if (!_isWindowBlur &&
         _canFocusRemoteInput &&
-        !_rawKeyFocusNode.hasFocus) {
+        !_rawKeyFocusNode.hasFocus &&
+        !_textInputFocused) {
       _rawKeyFocusNode.requestFocus();
     }
   }
+
+  /// A text field over the image (the chat input) has the keyboard: the pointer coming back to
+  /// the image or the window coming back does not take it away; a click on the image does
+  /// (`onPointerDown`).
+  bool get _textInputFocused =>
+      FocusManager.instance.primaryFocus?.context
+          ?.findAncestorWidgetOfExactType<EditableText>() !=
+      null;
 
   void _leaveView(PointerExitEvent evt) {
     _ffi.canvasModel.disableEdgeScroll();
@@ -299,7 +309,7 @@ class _SessionPageState extends State<SessionPage>
             Positioned(
               top: LgSpace.s3 + t.sizes.bar + LgSpace.s3,
               right: LgSpace.s4,
-              child: SessionNoticesView(ffi: _ffi),
+              child: SessionNoticesView(ffi: _ffi, overlays: widget.overlays),
             ),
             Positioned.fill(child: ChatLayer(ffi: _ffi)),
             // The panel dims the last frame itself while the remote device restarts.
