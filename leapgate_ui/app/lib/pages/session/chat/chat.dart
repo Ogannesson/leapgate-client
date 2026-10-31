@@ -17,13 +17,22 @@ import '../../../widgets/lg_session_toolbar.dart';
 /// One button whose menu follows the voice call (upstream had a chat menu and a separate voice
 /// call button, `desktop/widgets/remote_toolbar.dart` `_ChatMenu`, `_VoiceCallMenu`): text chat
 /// and voice call; while waiting for an answer "等待接听…" with "取消"; in a call "通话中" with
-/// the microphones and "挂断" (`u-voice-wait`, `u-voice-call`).
+/// the microphones and "挂断" (`u-voice-wait`, `u-voice-call`). Folded into "更多", the same
+/// menu is a submenu row.
 List<Widget> chatToolbarButtons(
   BuildContext context,
   FFI ffi,
   TabOverlays overlays,
-) =>
-    [_ChatButton(chat: ffi.chatModel)];
+) {
+  final chat = ffi.chatModel;
+  return [
+    LgToolbarFoldable(
+      badge: chat.unread,
+      inline: _ChatButton(chat: chat),
+      menuItem: _ChatButton(chat: chat, asMenuRow: true),
+    ),
+  ];
+}
 
 /// The chat and voice call shortcuts (upstream `shortcut_model.dart:455-474`): text chat opens
 /// or closes the panel as "文字聊天" does; voice call hangs up or cancels while one is waiting or
@@ -44,10 +53,12 @@ void registerChatShortcuts(FFI ffi) {
     });
 }
 
+/// The chat menu as a toolbar button, or as a submenu row of "更多" ([asMenuRow]).
 class _ChatButton extends StatelessWidget {
-  const _ChatButton({required this.chat});
+  const _ChatButton({required this.chat, this.asMenuRow = false});
 
   final ChatModel chat;
+  final bool asMenuRow;
 
   @override
   Widget build(BuildContext context) {
@@ -55,31 +66,27 @@ class _ChatButton extends StatelessWidget {
       listenable: chat,
       builder: (context, _) {
         final l10n = AppLocalizations.of(context)!;
-        final unread = chat.unread;
         final textChat = LgMenuItem(
           label: l10n.chatText,
           checked: chat.open,
           onPressed: () => chat.setOpen(!chat.open),
         );
-        switch (chat.voiceCallStatus) {
-          case VoiceCallStatus.waitingForResponse:
-            return LgToolbarMenuButton(
-              label: l10n.chatWaitingAnswer,
-              icon: LgIcons.call,
-              state: LgToolbarMenuState.pending,
-              badge: unread,
-              items: [
-                LgMenuItem(label: l10n.connCancel, onPressed: chat.closeVoiceCall),
-              ],
-            );
-          case VoiceCallStatus.connected:
-            // Text chat stays at hand during a call, as upstream's separate chat menu.
-            return LgToolbarMenuButton(
-              label: l10n.chatInCall,
-              icon: LgIcons.call,
-              state: LgToolbarMenuState.live,
-              badge: unread,
-              items: [
+        final (label, icon, state, items) = switch (chat.voiceCallStatus) {
+          VoiceCallStatus.waitingForResponse => (
+              l10n.chatWaitingAnswer,
+              LgIcons.call,
+              LgToolbarMenuState.pending,
+              <Widget>[
+                LgMenuItem(
+                    label: l10n.connCancel, onPressed: chat.closeVoiceCall),
+              ]
+            ),
+          // Text chat stays at hand during a call, as upstream's separate chat menu.
+          VoiceCallStatus.connected => (
+              l10n.chatInCall,
+              LgIcons.call,
+              LgToolbarMenuState.live,
+              <Widget>[
                 textChat,
                 LgMenuGroup(l10n.chatMicrophone),
                 _Microphones(chat: chat),
@@ -89,22 +96,34 @@ class _ChatButton extends StatelessWidget {
                   danger: true,
                   onPressed: chat.closeVoiceCall,
                 ),
-              ],
-            );
-          case VoiceCallStatus.notStarted:
-          case VoiceCallStatus.incoming:
-            return LgToolbarMenuButton(
-              label: l10n.chatMenu,
-              icon: LgIcons.chat,
-              badge: unread,
-              items: [
+              ]
+            ),
+          VoiceCallStatus.notStarted || VoiceCallStatus.incoming => (
+              l10n.chatMenu,
+              LgIcons.chat,
+              LgToolbarMenuState.normal,
+              <Widget>[
                 textChat,
                 LgMenuItem(
                     label: l10n.chatVoiceCall,
                     onPressed: chat.requestVoiceCall),
-              ],
-            );
+              ]
+            ),
+        };
+        if (asMenuRow) {
+          return LgSubmenu(
+              label: label,
+              icon: icon,
+              badge: chat.unread > 0 ? chat.unread : null,
+              items: items);
         }
+        return LgToolbarMenuButton(
+          label: label,
+          icon: icon,
+          state: state,
+          badge: chat.unread,
+          items: items,
+        );
       },
     );
   }

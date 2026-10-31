@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/common.dart';
-import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/bridge.dart';
 import 'package:flutter_hbb/leapgate/notices.dart';
 import 'package:flutter_hbb/leapgate/session.dart';
@@ -89,13 +88,13 @@ String noticeText(AppLocalizations l10n, SessionNotice notice) {
 /// screenshot, print job, elevation, a recording started by itself, privacy mode on another
 /// monitor) get them here by tag and type; those that ask stay until answered or closed.
 class SessionNoticesView extends StatefulWidget {
-  const SessionNoticesView({super.key, required this.ffi, this.overlays});
+  const SessionNoticesView(
+      {super.key, required this.ffi, required this.overlays});
 
   final FFI ffi;
 
-  /// Where the printer choice opens: this tab. The session page does not pass it yet; until it
-  /// does, the shell's overlays are taken from its prompter.
-  final TabOverlays? overlays;
+  /// Where the printer choice and the elevation dialog open: over this tab.
+  final TabOverlays overlays;
 
   @override
   State<SessionNoticesView> createState() => _SessionNoticesViewState();
@@ -146,8 +145,7 @@ class _SessionNoticesViewState extends State<SessionNoticesView> {
 
   SessionRequests get _requests => widget.ffi.requests;
 
-  TabOverlays get _overlays =>
-      widget.overlays ?? (appCore.prompter as ShellPrompter).overlays;
+  TabOverlays get _overlays => widget.overlays;
 
   /// The buttons of a notice that asks, by its tag or type; the others' own actions.
   List<LgNoticeAction> _buttonsOf(AppLocalizations l10n, SessionNotice n) {
