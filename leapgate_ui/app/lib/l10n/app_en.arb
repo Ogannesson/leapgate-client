@@ -249,5 +249,7 @@
   "cmExpand": "Expand",
   "cmBlockedRemotely": "This action can't be performed remotely",
   "cmCloseAllTitle": "Disconnect all sessions?",
-  "cmCancel": "Cancel"
+  "cmCancel": "Cancel",
+  "cmTabName": "{name}, {type}",
+  "@cmTabName": {"placeholders": {"name": {"type": "String"}, "type": {"type": "String"}}}
 }

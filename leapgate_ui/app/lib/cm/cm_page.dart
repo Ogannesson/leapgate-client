@@ -213,6 +213,7 @@ class _CmPageState extends State<CmPage> with WindowListener {
               unread: c.unreadChatMessageCount.value,
               gone: c.disconnected,
               tooltip: l10n.cmConnectionNumber(c.id),
+              semanticLabel: l10n.cmTabName(c.name, cmKindLabel(l10n, c)),
             ),
         ],
         selected: client == null ? 0 : clients.indexOf(client),

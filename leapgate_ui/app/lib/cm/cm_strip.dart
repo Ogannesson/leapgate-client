@@ -32,8 +32,7 @@ class CmStrip extends StatelessWidget {
   final VoidCallback onExpand;
 
   /// The drag follows the cursor on the screen: the pointer's own deltas are in window
-  /// coordinates, which move with the window. The strip starts it; the moves and the end come
-  /// from the raw pointer events, which the window ignores while no drag is going on.
+  /// coordinates, which move with the window, so the window places the strip itself.
   final VoidCallback onDragStart;
   final VoidCallback onDrag;
   final VoidCallback onDragEnd;
@@ -44,11 +43,10 @@ class CmStrip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final Widget pill;
     if (clients.length == 1) {
       final client = clients.single;
       final connected = client.authorized && !client.disconnected;
-      pill = LgCmPill.single(
+      return LgCmPill.single(
         person: cmPillPerson(client),
         title: connected ? cmStripLabel(l10n, client) : client.name,
         time: connected
@@ -62,27 +60,26 @@ class CmStrip extends StatelessWidget {
             : client.authorized
             ? l10n.cmDisconnect
             : l10n.cmDecline,
+        // Only "断开" is the danger kind, as in the full window.
+        danger: connected,
         onAction: onButton,
         onRestore: onExpand,
         onStartDrag: onDragStart,
-      );
-    } else {
-      pill = LgCmPill.group(
-        people: [for (final c in clients) cmPillPerson(c)],
-        title: l10n.cmPillSessions(
-          clients.where((c) => c.authorized && !c.disconnected).length,
-        ),
-        actionLabel: l10n.cmExpand,
-        onAction: onExpand,
-        onRestore: onExpand,
-        onStartDrag: onDragStart,
+        onDrag: (_) => onDrag(),
+        onDragEnd: onDragEnd,
       );
     }
-    return Listener(
-      onPointerMove: (_) => onDrag(),
-      onPointerUp: (_) => onDragEnd(),
-      onPointerCancel: (_) => onDragEnd(),
-      child: pill,
+    return LgCmPill.group(
+      people: [for (final c in clients) cmPillPerson(c)],
+      title: l10n.cmPillSessions(
+        clients.where((c) => c.authorized && !c.disconnected).length,
+      ),
+      actionLabel: l10n.cmExpand,
+      onAction: onExpand,
+      onRestore: onExpand,
+      onStartDrag: onDragStart,
+      onDrag: (_) => onDrag(),
+      onDragEnd: onDragEnd,
     );
   }
 }

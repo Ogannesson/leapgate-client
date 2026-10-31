@@ -712,7 +712,11 @@ void main() {
       VoidCallback? onAction,
       VoidCallback? onRestore,
       VoidCallback? onStartDrag,
+      GestureDragUpdateCallback? onDrag,
+      VoidCallback? onDragEnd,
       String? blocked,
+      String actionLabel = '断开',
+      bool danger = true,
     }) => SizedBox(
       width: kLgCmWidth,
       child: LgCmPill.single(
@@ -720,10 +724,13 @@ void main() {
         title: '李四 正在远程控制本机',
         time: '00:12:34',
         blockedHint: blocked,
-        actionLabel: '断开',
+        actionLabel: actionLabel,
+        danger: danger,
         onAction: onAction ?? () {},
         onRestore: onRestore,
         onStartDrag: onStartDrag,
+        onDrag: onDrag,
+        onDragEnd: onDragEnd,
       ),
     );
 
@@ -756,13 +763,37 @@ void main() {
     });
 
     testWidgets('dragging the empty part moves the strip', (tester) async {
-      var drags = 0;
-      await pumpLg(tester, single(onStartDrag: () => drags++));
+      var drags = 0, moves = 0, ends = 0;
+      await pumpLg(
+        tester,
+        single(
+          onStartDrag: () => drags++,
+          onDrag: (_) => moves++,
+          onDragEnd: () => ends++,
+        ),
+      );
       await tester.dragFrom(
         tester.getTopLeft(find.byType(LgCmPill)) + const Offset(4, 24),
         const Offset(60, 0),
       );
       expect(drags, 1);
+      expect(moves, greaterThan(0));
+      expect(ends, 1);
+    });
+
+    testWidgets('the button is the danger kind unless told otherwise', (
+      tester,
+    ) async {
+      await pumpLg(tester, single());
+      expect(
+        tester.widget<LgButton>(find.widgetWithText(LgButton, '断开')).kind,
+        LgButtonKind.danger,
+      );
+      await pumpLg(tester, single(actionLabel: '拒绝', danger: false));
+      expect(
+        tester.widget<LgButton>(find.widgetWithText(LgButton, '拒绝')).kind,
+        LgButtonKind.secondary,
+      );
     });
 
     testWidgets('the hint replaces the time while a click is refused', (

@@ -27,25 +27,31 @@ class LgCmPillPerson {
 
 /// The strip. Pressing the title part or the empty part restores the window
 /// ([onRestore]); the title part is a real button, so the keyboard can do it
-/// too. Dragging the empty part calls [onStartDrag] (the strip slides along the
-/// top edge of the screen).
+/// too. Dragging the empty part calls [onStartDrag], then [onDrag] for each
+/// move and [onDragEnd] (the strip slides along the top edge of the screen;
+/// where it goes is the caller's to work out).
 class LgCmPill extends StatelessWidget {
   /// One connection: [title] is the whole line, [time] the time connected, and
-  /// the button disconnects. [blockedHint] replaces the time while a click that
-  /// came from the remote side is being refused ("无法远程执行此操作").
+  /// the button acts on the connection: the danger "断开" while connected, a
+  /// plain button otherwise ([danger] false: "拒绝" while the visitor waits,
+  /// "关闭" after they left), as in the full window's action area.
+  /// [blockedHint] replaces the time while a click that came from the remote
+  /// side is being refused ("无法远程执行此操作").
   const LgCmPill.single({
     super.key,
     required LgCmPillPerson person,
     required this.title,
     required this.actionLabel,
     required this.onAction,
+    this.danger = true,
     this.time,
     this.blockedHint,
     this.onRestore,
     this.onStartDrag,
+    this.onDrag,
+    this.onDragEnd,
   }) : people = const [],
-       _person = person,
-       danger = true;
+       _person = person;
 
   /// Several connections: up to three avatars overlap, [title] is "N 个会话
   /// 进行中", the button expands the window.
@@ -57,6 +63,8 @@ class LgCmPill extends StatelessWidget {
     required this.onAction,
     this.onRestore,
     this.onStartDrag,
+    this.onDrag,
+    this.onDragEnd,
   }) : _person = null,
        time = null,
        blockedHint = null,
@@ -72,8 +80,14 @@ class LgCmPill extends StatelessWidget {
   final VoidCallback? onRestore;
   final VoidCallback? onStartDrag;
 
-  /// True for one connection (the button is the danger "断开"), false for the
-  /// group (the plain "展开").
+  /// A move of the drag, in the strip's own coordinates (which move with the
+  /// window).
+  final GestureDragUpdateCallback? onDrag;
+
+  /// The drag ended or was cancelled.
+  final VoidCallback? onDragEnd;
+
+  /// The button is drawn as the danger kind; the group's "展开" never is.
   final bool danger;
 
   @override
@@ -85,6 +99,9 @@ class LgCmPill extends StatelessWidget {
       behavior: HitTestBehavior.opaque,
       onTap: onRestore,
       onPanStart: onStartDrag == null ? null : (_) => onStartDrag!(),
+      onPanUpdate: onDrag,
+      onPanEnd: onDragEnd == null ? null : (_) => onDragEnd!(),
+      onPanCancel: onDragEnd,
       child: Container(
         height: kLgCmPillHeight,
         color: c.surface,

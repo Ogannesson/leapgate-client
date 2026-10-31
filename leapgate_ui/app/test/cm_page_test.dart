@@ -494,15 +494,24 @@ void main() {
   testWidgets(
     'several visitors: a tab each, the newest selected, another one on a click',
     (tester) async {
+      final handle = tester.ensureSemantics();
       final cm = await pumpCm(tester);
       await arrive(tester, visitor(1));
-      await arrive(tester, visitor(2, name: '王五', peerId: '147258369'));
+      await arrive(
+        tester,
+        visitor(2, name: '王五', peerId: '147258369', fileTransfer: true),
+      );
       expect(find.text('147'), findsOneWidget);
-      await tester.tap(find.text('李四'));
+      expect(
+        tester.getSemantics(find.bySemanticsLabel('王五，文件传输')),
+        isSemantics(isSelected: true),
+      );
+      await tester.tap(find.bySemanticsLabel('李四，远程桌面'));
       await tester.pump();
       expect(find.text('912'), findsOneWidget);
       expect(find.text('147'), findsNothing);
       await finish(tester, cm);
+      handle.dispose();
     },
   );
 
@@ -640,7 +649,11 @@ void main() {
     expect(find.text('李四'), findsOneWidget);
     expect(find.text('李四 正在远程控制本机'), findsNothing);
     expect(find.text('正在请求连接本机…'), findsOneWidget);
-    expect(find.text('拒绝'), findsOneWidget);
+    // A plain button, as "拒绝" in the full window; only "断开" is the danger kind.
+    expect(
+      tester.widget<LgButton>(find.widgetWithText(LgButton, '拒绝')).kind,
+      LgButtonKind.secondary,
+    );
     await finish(tester, cm);
   });
 }
