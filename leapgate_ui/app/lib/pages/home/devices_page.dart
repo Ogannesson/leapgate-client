@@ -454,8 +454,8 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
   Widget _selectionBar(AppLocalizations l10n) {
     final category = _tabs.current;
     final ids = _selection.ids;
-    // Removing from favorites or from the LAN list neither asks nor looks dangerous, as in the
-    // menu of one device (01 P1 block F); deleting asks with [title].
+    // Removing from favorites neither asks nor looks dangerous, as in the menu of one device
+    // (01 P1 block F); removing from the LAN list and deleting ask with [title].
     final (label, icon, title, toast) = switch (category) {
       PeerCategory.favorites => (
           l10n.peersRemoveFavorites,
@@ -465,8 +465,8 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
         ),
       PeerCategory.lan => (
           l10n.peersRemove,
-          LgIcons.x,
-          null,
+          LgIcons.trash,
+          l10n.peersRemoveMany(ids.length),
           'peersToastRemoved',
         ),
       _ => (

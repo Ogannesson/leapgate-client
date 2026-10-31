@@ -406,6 +406,14 @@
       }
     }
   },
+  "peersRemoveMany": "Remove {count} devices?",
+  "@peersRemoveMany": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "peerMenu": "Device menu",
   "peerMenuDevice": "Device",
   "peerMenuManage": "Manage",

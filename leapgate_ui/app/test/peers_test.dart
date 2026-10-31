@@ -326,6 +326,21 @@ void main() {
   );
 
   testWidgets(
+    'multiple selection in LAN asks before removing',
+    (tester) async {
+      await pumpPeers(tester, recent: [], lan: [_mini]);
+      await tapText(tester, '局域网');
+      await tapText(tester, '多选');
+      await tapText(tester, '全选');
+      await tapText(tester, '移除');
+
+      expect(find.text('移除 1 台设备？'), findsOneWidget);
+      await unmount(tester);
+    },
+    variant: _windows,
+  );
+
+  testWidgets(
     'the search covers the three categories, each device once with its source',
     (tester) async {
       bind.flutter['peer-card-ui-type'] = '2';

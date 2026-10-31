@@ -344,6 +344,7 @@
   "peersDeleteOne": "删除“{name}”？",
   "peersDeleteMany": "删除 {count} 台设备？",
   "peersRemoveOne": "移除“{name}”？",
+  "peersRemoveMany": "移除 {count} 台设备？",
   "peerMenu": "设备菜单",
   "peerMenuDevice": "设备",
   "peerMenuManage": "管理",
