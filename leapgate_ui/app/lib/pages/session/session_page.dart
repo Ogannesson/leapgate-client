@@ -12,8 +12,11 @@ import 'package:window_manager/window_manager.dart';
 import '../../shell/tab_overlays.dart';
 import '../../shell/toast_view.dart';
 import '../../theme/lg_tokens.dart';
+import 'canvas_hints.dart';
+import 'chat/chat.dart';
 import 'connection_panel.dart';
 import 'image_paint.dart';
+import 'quality_overlay.dart';
 import 'remote_input.dart';
 import 'session_notices.dart';
 import 'session_toolbar.dart';
@@ -276,6 +279,9 @@ class _SessionPageState extends State<SessionPage>
                 ),
               ),
             ),
+            // Above the image, in 01 P2 block C's order; each fills the area and places itself.
+            Positioned.fill(child: QualityOverlay(ffi: _ffi)),
+            Positioned.fill(child: CanvasHints(ffi: _ffi)),
             if (_ffi.ffiModel.pi.isSet.isTrue)
               Positioned(
                 top: 0,
@@ -294,6 +300,7 @@ class _SessionPageState extends State<SessionPage>
               right: LgSpace.s4,
               child: SessionNoticesView(ffi: _ffi),
             ),
+            Positioned.fill(child: ChatLayer(ffi: _ffi)),
             // The panel dims the last frame itself while the remote device restarts.
             if (conn.stage != ConnStage.connected) ...[
               const ModalBarrier(dismissible: false),

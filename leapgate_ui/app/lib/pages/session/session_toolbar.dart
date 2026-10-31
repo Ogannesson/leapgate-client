@@ -18,7 +18,9 @@ import '../../widgets/lg_feedback.dart';
 import '../../widgets/lg_menu.dart';
 import '../../widgets/lg_session_toolbar.dart';
 import '../../widgets/lg_status.dart';
-import '../../widgets/lg_tooltip.dart';
+import 'chat/chat.dart';
+import 'recording.dart';
+import 'route_details.dart';
 import 'session_names.dart';
 
 /// Unpinned, the toolbar collapses this long after the pointer enters the image (upstream
@@ -153,9 +155,13 @@ class _SessionToolbarState extends State<SessionToolbar> {
     final route = conn.direct == true ? LgRoute.direct : LgRoute.relay;
     final routeLabel =
         conn.direct == true ? l10n.sessionDirect : l10n.sessionRelayed;
-    final routeTip =
-        conn.direct == true ? l10n.sessionDirectTip : l10n.sessionRelayedTip;
     final encrypted = conn.secure != false;
+    final routeMark = sessionRouteMark(context, _ffi, widget.overlays);
+    final record = recordButton(context, _ffi);
+    final chatAndRecord = [
+      ...chatToolbarButtons(context, _ffi, widget.overlays),
+      if (record != null) record,
+    ];
     final viewStyle = _ffi.canvasModel.viewStyle.style;
     final actions = [
       if (_ffi.canSendCtrlAltDel)
@@ -254,23 +260,8 @@ class _SessionToolbarState extends State<SessionToolbar> {
               items: actions,
             ),
         ],
-        if (shown)
-          [
-            LgTooltip(
-              message: encrypted
-                  ? routeTip
-                  : '$routeTip\n${l10n.sessionUnencryptedTip}',
-              // The connection details open from here in M2b.
-              child: LgToolbarStatus(
-                child: LgRouteMark(
-                  route: route,
-                  label: routeLabel,
-                  encrypted: encrypted,
-                  unencryptedLabel: l10n.sessionUnencrypted,
-                ),
-              ),
-            ),
-          ],
+        if (chatAndRecord.isNotEmpty) chatAndRecord,
+        if (routeMark != null) [routeMark],
         [
           LgToolbarButton(
             icon: LgIcons.power,

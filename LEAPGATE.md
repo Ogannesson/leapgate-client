@@ -805,3 +805,83 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 - core 的新代码有单测；app 每个页面状态一个行为测试（03 §8.3）：面板的每一种（用假的连接状态）、最近列表空和加载中、连接框几种默认高亮、关窗确认的几种组合（有无会话 × 便携或安装 × 是否勾过不再提示）。
 - 合入前：`git diff main -- flutter/` 为空；core 的 `flutter analyze --no-fatal-infos` 不超出 92 条基线，app 0 条；复制件不跑格式化（10.1）。
 - 审查重点：会话块看焦点和按键释放、钩子开关的先后、关闭流程、注册表参数、复制件和上游原件的差异；主页块看回车规则和匹配；组件看样稿对照的必修项（03 §8.4）。
+
+### 10.9 M2b 的分工约定
+
+依据：总仓库 `docs/新界面/05-M2b拆法.md`（下称"05"；维护者 2026-10-31 四条全部按推荐定）。界面行为以 01 为准（P1 区块 A~C、E、F、J、K，P2 区块 A~C、E、F，§2.1、§2.3、§4.2、§4.4），界面模式和工具栏、显示器的几项设置看 02；样稿 `A-P1.html`、`A-P2.html`，令牌和图标以 `A-基础.html` 为准，画框名见 05 §2.2。05 §1.3 列的项等对应的块做完再加，§7 列的不做。
+
+**分支和文件边界**（都从 `ui/m2b` 切，做完合回 `ui/m2b`；`ui/m2b` 上已有下面"挂载点"的骨架）
+
+| 分支 | 谁 | 只改这些 |
+|---|---|---|
+| `ui/rust-q3` | coder R | Q3、本机显示名两个块 2 导出和 `src/client.rs` 的挂钩（10.4） |
+| `ui/m2b-ds` | designer | `app/lib/widgets/`、`app/lib/gallery_main.dart`、`app/test/` 里组件的测试 |
+| `ui/m2b-toolbar` | coder A（会话·工具栏） | `app/lib/pages/session/session_toolbar.dart`、新目录 `app/lib/pages/session/toolbar/`、`canvas_hints.dart`、`app/lib/shell/tab_shortcuts.dart`；core 新复制的 `models/shortcut_model.dart`、`models/input_model.dart` 里 10.6 暂删的几处、`models/state_model.dart`；它们的测试 |
+| `ui/m2b-session` | coder B（会话·其余） | `app/lib/pages/session/` 下的 `route_details.dart`、`quality_overlay.dart`、`recording.dart`、`chat/`、`session_notices.dart`、`connection_panel.dart`，`app/lib/shell/tab_menu.dart`；core 改写的 `models/chat_model.dart` 和新文件（延迟统计等）；`app/pubspec.yaml` 和锁文件（只加 `file_picker`）；它们的测试 |
+| `ui/m2b-home` | coder C（主页） | `app/lib/pages/home/`；`app/lib/main.dart` 里界面模式接到主题的那几行；`app/lib/theme/` 里按选项切 `LgMode` 要的（不改令牌值）；core 的 `leapgate/local_status.dart`、`leapgate/app_core.dart`（只加分类的 `Peers`）、`leapgate/recent_peers.dart` 和新文件；它们的测试 |
+
+- A、B 都可能要改 core 的 `leapgate/session.dart`：A 加 `shortcutModel` 和 `kShortcutEventName` 的登记，B 加聊天 model 和 6 个聊天语音事件、`screenshot`、`printer_request`、`switch_back` 的登记。只在字段表和构造函数里追加，整合时合并相邻行。其余文件不越界；确实要改别人的文件时写进汇报，由主会话协调。
+- ARB 的键按前缀分：A 用 `toolbar`、`menu`、`shortcut`；B 用 `route`、`notice`、`chat`、`record`、`tabMenu`、`conn`；C 用 `home`、`peers`、`peerMenu`、`pwd`、`uiMode`。加在文件末尾，中英文同时加，文案照 01 §7.6：01 里写好的句子逐字照抄，没写的按 §7.6 写，并在提交说明里列出新写的句子。已有的键能用就用。
+- 三个 coder 先用 M0、M2a 的组件和简单的占位控件把逻辑写通，整合时换成 designer 的组件。占位控件不求好看，但行为测试要能按文字和语义标签找到它们。
+
+**挂载点**（`ui/m2b` 上的骨架提交，行为和 M2a 相同）
+
+| 文件 | 现在的内容 | 谁填 |
+|---|---|---|
+| `pages/session/route_details.dart` | `sessionRouteMark(context, ffi, overlays)`：工具栏上的连接方式标记，连接就绪前是 null；现在是 M2a 的标记加悬停说明，要改成能点开详情（01 §4.2） | B |
+| `pages/session/chat/chat.dart` | `chatToolbarButtons(context, ffi, overlays)`（现在是空表）、`ChatLayer`（会话页里通知之上的一层，现在不画东西） | B |
+| `pages/session/recording.dart` | `recordButton(context, ffi)`，现在是 null | B |
+| `pages/session/quality_overlay.dart` | `QualityOverlay`，画面之上第一层 | B |
+| `pages/session/canvas_hints.dart` | `CanvasHints`：相对鼠标模式的提示、Android 导航浮条，在质量数据浮层之上 | A |
+| `shell/tab_menu.dart` | `tabUnread(view)`、`showSessionTabMenu(context, device, position)`；主窗口已经接到标签的未读数和右键 | B |
+| `shell/tab_shortcuts.dart` | `TabShortcuts(onNext:, onPrevious:, child:)` 包着整个主窗口；切到下一个 / 上一个标签的逻辑（主页算第一个，首尾循环）在主窗口的 `_selectBy` 里已经写好 | A |
+
+- 工具栏里的顺序已经放好：A 现有和要加的菜单（视图、显示器、画面、输入、操作、会话）之后，是 `chatToolbarButtons` 和 `recordButton` 一组，然后 `sessionRouteMark`，最后"断开"。"更多"按"录制、聊天、会话"的顺序收（01 P2 区块 B），A 按这一组的位置判断，B 的函数不用另外返回什么。
+- 会话页的层（从下往上）：画面 → `QualityOverlay` → `CanvasHints` → 工具栏 → 通知 → `ChatLayer` → 连接状态面板。每层都是 `Positioned.fill`，自己定位；没画东西的地方要让鼠标事件落到画面上，所以层里不铺满底色、不加整块的手势监听。菜单和详情弹层用现有的菜单浮层或这个标签的 `TabOverlays`。
+
+**组件（designer）**：规则同 10.8"组件约定"（只管画、文字由调用方传、带语义标签、两套主题和两套尺寸、画廊里每种状态一项、有行为测试）。要做的组件和样稿画框见 05 §2.2。接口补充：
+
+- 设备卡片 `LgDeviceCard` 和列表视图 `LgDeviceTable`：数据同 `LgDeviceRow`，另有星标、来源分类、选中、多选时的勾选、`onMore`（"⋯"）；表格的列、可排序的列和当前排序由调用方给。卡片网格每列至少 300 宽（01 区块 F）。
+- 菜单：在 `LgMenuItem`、`LgMenuGroup` 上补滑块项（标签、值、范围、步长、显示值的格式化、`onChanged`）、步进器项、右侧的快捷键文字、灰显项的悬停说明、危险项、组标题旁的说明（例如"此地址簿为只读"）。
+- 工具栏：`LgSessionToolbar` 加沿边拖动（回调给出新位置，0~1 的相对值）、停靠的边（上下左右）、左右两边竖排只显示图标、拖动时的落点预览、"更多"（调用方给出可以收进去的项和顺序，组件按宽度决定收几个）、显示器平铺按钮、收起后拖动条上的切屏按钮。位置记忆和吸附规则由 A 算，组件只画。
+- 连接方式详情 `LgRouteDetails`：分组的键值行、可复制的值（指纹）、延迟表（每行名字、当前值、最低、平均、最高）、折线 `LgSparkline`（多条线，颜色加线型，图例文字由调用方传）、开关行。
+- 聊天面板 `LgChatPanel`：消息列表（自己 / 对方、时间、文字）、输入框、发送、关闭、拖动；语音通话的几种状态。
+- 通知：`LgNoticeStack` 加按钮组、勾选（"记住此选择"）、一直保留直到处理。
+- 对话框：设置固定密码 `LgPasswordDialog`（两个输入框、强度条、规则逐条通过、错误、按钮）；其他小对话框用 `LgConfirmDialog` 加输入件拼，不另做。
+- 本机提示卡、被控时的遮罩、多选条、分类分段、列表工具条。
+- 详细模式：组件已经支持两套尺寸；`LgRouteMark` 详细模式下的路径标记画法、工具栏菜单按钮的"图标加文字"按 `LgTokens.of(context).mode` 切换，不另加参数（01 §2.3）。
+
+**会话·工具栏（coder A）**
+
+- 菜单：05 §1.1 会话页表的"显示器""画面""输入""操作""会话"五行和"灰显和快捷键"一行。每项的出现条件和动作照上游 `flutter/lib/common/widgets/toolbar.dart`、`flutter/lib/desktop/widgets/remote_toolbar.dart`（01 P2 区块 B 有行号），分组照 01 的表，不搬上游的菜单结构；权限不够、仅查看模式时灰显并给说明（01 的文案），隐私模式和录制两处例外照上游。菜单文件放 `pages/session/toolbar/`，文件头注明对应的上游出处。
+- 菜单打开的小对话框（自定义分辨率、键盘布局 ANSI / ISO、系统登录密码、请求提升权限的方式、交换控制方向确认、Wayland 授权确认、添加备注）也放 `pages/session/toolbar/`，挂在这个标签的 `TabOverlays` 上。"请求提升权限的方式"做成能从外面调的函数，B 的提权通知按钮也调它。
+- 工具栏拖动和停靠、"更多"；显示器的三种形态（读 `show_monitors_toolbar` 等现有选项，01 P2 区块 B）和"全部显示器"（`kAllDisplayValue`，同一个标签里合并显示）。
+- 快捷键：把 `flutter/lib/models/shortcut_model.dart` 复制进 core（只删界面调用），补回 10.6"暂删、`shortcut_model` 改写时补回"的几处；菜单项右侧显示绑定的组合键（默认绑定见 01 P2 区块 B）；`TabShortcuts` 实现切标签，按键照上游 `shortcut_model` 的切标签动作。
+- `StateGlobal` 补回分辨率菜单记的上次选择（10.6 末尾）。
+- `CanvasHints`：相对鼠标模式的提示（这时工具栏隐藏，上游 `remote_page.dart:782-792`）、Android 导航浮条。
+- `待调.md` 第 29 条（自动收起后点"展开"会把收起设置存成开）对照上游行为判断，改不改写进汇报。
+
+**会话·其余（coder B）**
+
+- 连接方式详情（01 §4.2 第二级）：路径、中继名用 Q3 的导出 `leapgate_session_connection(session_id)`（10.4；coder R 在 `ui/rust-q3` 上做，合进 `ui/m2b` 之前用一个测试里能换掉的取值函数，返回值照 10.4 的 JSON），每次连接就绪后重新取，返回 `{}` 时不显示"路径""中继服务器"两行。指纹、画面数据来自 core 已有的 `FfiModel`、`QualityMonitorModel`。延迟只有"端到端"一行（Q13 之前，01 §4.2）：core 里每个会话记近 60 秒每 2 秒一个点和本次会话的最低、平均、最高，重连后接着记。"在画面上显示质量数据"照上游的会话选项；界面模式是详细时默认开（02 R2-Q11）。
+- "服务器拒绝了此连接："：连接阶段出错、原因码是 `other` 时调同一个导出，有 `refused` 就照 01 §4.3 显示前缀加原文。
+- 通知：登记 `screenshot`、`printer_request`、`switch_back`（10.6），做 01 P2 区块 E 里带按钮的几种。截图"另存为"要选位置，加 `file_picker`（版本先用上游 `flutter/pubspec.lock` 锁的，解析不了时选能和 frb 1.80.1 的 `uuid ^3.0.6`、`js ^0.6.4` 共存的版本）；提权通知的"请求提升权限"调 A 的选方式对话框；录屏通知的"停止"。权限中途被收回时加一条通知。
+- 聊天和语音：`chat_model` 改写进 core（只留消息存储、未读数、语音状态；消息类型用 core 自己的，不带 `dash_chat_2`），登记 6 个事件；`ChatLayer` 里的面板、`chatToolbarButtons` 的聊天菜单（文字聊天、语音通话、等待接听、通话中的麦克风选择和挂断）、`tabUnread`。
+- 录制：`recordButton` 和录制态，权限例外照上游。
+- 标签右键菜单：`showSessionTabMenu`，"复制设备 ID""关闭其他标签""关闭"。
+- 连接状态面板：等对方接受时加"显示给对方的名称：‹本机名›"（块 2 导出 `leapgate_local_display_name()`，coder R 做，取值方式同上）；`待调.md` 第 30 条（密码错误后保留输入、带"输入密码"标签）、第 33 条（关掉确认框后密码框拿回焦点）照样稿改。
+
+**主页（coder C）**
+
+- 分类：最近、收藏、局域网三类。`AppCore` 加收藏、局域网两份 `Peers`（照 M2a 的 `recentPeers`），加载用 `bind.mainLoadFavPeers`、`bind.mainLoadLanPeers`，事件 `load_fav_peers`、`load_lan_peers`。哪些分类显示、顺序照上游的选项（`peer_tab_page.dart` 的读法），在"视图"菜单里改。
+- 卡片和列表视图、排序（修掉上游按在线状态排序那个不合法的比较函数，`peers_view.dart:389-391`）、多选、设备菜单（四组，出现条件照上游 `peer_card.dart:958-1348`，地址簿相关的项不出现）、各分类的空状态、1000 台上限；在线状态查询照 M2a。网络唤醒、创建桌面快捷方式、始终经中继、重命名（别名）、收藏、清除保存的密码、删除（最近）、移除（局域网）各照上游的调用。
+- 连接框：搜索扩到三类（同一个 ID 只出现一次，标出来源，顺序最近、收藏、局域网）；"连接到"行尾的"⋯"（远程桌面、经中继连接）；结果按当前视图显示（`待调.md` 第 25 条）。"输入看起来像地址"的判断和回车规则不变。
+- 本机区：密码行"刷新"（一次性密码）、"修改"（只在便携版显示，打开设置固定密码对话框，校验和保存照上游 `desktop_home_page.dart:890-1126`）；服务已停止时的"启动服务"；"正在被远程控制（N 个会话）"，N 用现有的远程桌面连接数，"查看"不显示（M3）；提示卡只显示系统错误那张。
+- 被控时的遮罩：照上游 `canBeBlocked`、`shouldBeBlocked`（`flutter/lib/common.dart:3138-3205`），只盖主页。
+- 界面模式：02 §4.1 的新选项，键 `leapgate-ui-mode`（值 `detail` 是详细，其余是简洁），Leapgate 自己的 LocalConfig 键放在用它的文件里（10.7 接入办法第 2 条）；"视图"菜单里切换；`main.dart` 把它接到 `buildLgTheme` 的 `mode`，切换立即生效；设备页默认视图跟着它，用户手动选过视图后按用户选的。
+
+**测试和合入**
+
+- core 的新代码有单测（延迟统计、分类合并搜索、排序、遮罩判断、聊天消息存储）；app 每个页面状态一个行为测试（05 §6.1）。
+- 合入前：`git diff main -- flutter/` 为空；core 的 `flutter analyze --no-fatal-infos` 在 3.44.9 下不超出 92 条 info 的基线，新复制的 `shortcut_model` 带来的上游提示单列；app 0 条；复制件不跑格式化。改已有文件时不对整个文件跑 `dart format`：M2a 的文件不是按当前格式化器的样式排的，整文件格式化会把差异放大到几百行；只格式化新文件。
+- 审查重点见 05 §3 第 2 步。
