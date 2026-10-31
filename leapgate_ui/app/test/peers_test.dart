@@ -1,6 +1,7 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/local_status.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:leapgate_ui/pages/home/peer_views.dart';
@@ -214,8 +215,25 @@ void main() {
       bind.callsTo(#mainRemovePeer).single.namedArguments[#id],
       '123456789',
     );
+    // Its own toast, not upstream's "Successful".
+    expect(appCore.toasts.current?.key, 'peersToastDeleted');
     await unmount(tester);
     await toastGone(tester);
+  }, variant: _windows);
+
+  testWidgets('multiple selection leaves the search results alone', (
+    tester,
+  ) async {
+    await pumpPeers(tester, recent: [_shufang, _mama]);
+    await tapText(tester, '多选');
+    await tester.enterText(find.byType(EditableText), '书房');
+    await tester.pump();
+    await tester.tap(find.text('书房台式机'));
+    await settle(tester);
+    await tester.enterText(find.byType(EditableText), '');
+    await tester.pump();
+    expect(find.text('已选择 0 台'), findsOneWidget);
+    await unmount(tester);
   }, variant: _windows);
 
   testWidgets('rename sets the alias, an always-relay tick saves', (

@@ -322,5 +322,12 @@
   "pwdRemove": "Remove",
   "uiModeTitle": "Interface mode",
   "uiModeSimple": "Simple",
-  "uiModeDetail": "Detailed"
+  "uiModeDetail": "Detailed",
+  "peersToastAddedFavorites": "Added to favorites",
+  "peersToastRemovedFavorites": "Removed from favorites",
+  "peersToastDeleted": "Deleted",
+  "peersToastRemoved": "Removed",
+  "peerMenuToastRenamed": "Renamed",
+  "peerMenuToastPasswordCleared": "Saved password cleared",
+  "peerMenuToastShortcutCreated": "Desktop shortcut created"
 }

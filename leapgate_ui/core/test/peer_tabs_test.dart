@@ -78,6 +78,29 @@ void main() {
           bind.flutter[kOptionPeerTabVisible], '[true,false,true,true,true]');
     });
 
+    test('showing the only shown category selects it', () {
+      final t = tabs()
+        ..setVisible(PeerCategory.recent, false)
+        ..setVisible(PeerCategory.favorites, false)
+        ..setVisible(PeerCategory.lan, false);
+      expect(t.shown, isEmpty);
+      expect(t.current, PeerCategory.lan);
+      t.setVisible(PeerCategory.favorites, true);
+      expect(t.current, PeerCategory.favorites);
+    });
+
+    test(
+        'a stored category this build lacks, all hidden: '
+        'the first of the user order', () {
+      bind.flutter
+        ..[kOptionPeerTabOrder] = '[3,2,0,1,4]'
+        ..[kOptionPeerTabVisible] = '[false,false,false,true,true]'
+        ..[kOptionPeerTabIndex] = '3';
+      final t = tabs();
+      expect(t.shown, isEmpty);
+      expect(t.current, PeerCategory.lan);
+    });
+
     test('moving keeps the slots of the categories not in this build', () {
       final t = tabs()..move(PeerCategory.lan, 0);
       expect(t.ordered,
@@ -97,9 +120,12 @@ void main() {
       expect(bind.flutter[kOptionPeerCardUiType], '0');
     });
 
-    test("upstream's two tile sizes are cards", () {
-      bind.flutter[kOptionPeerCardUiType] = '1';
+    test("upstream's big tiles are cards, its small tiles and list the list",
+        () {
+      bind.flutter[kOptionPeerCardUiType] = '0';
       expect(tabs().view, PeerView.cards);
+      bind.flutter[kOptionPeerCardUiType] = '1';
+      expect(tabs().view, PeerView.list);
       bind.flutter[kOptionPeerCardUiType] = '2';
       expect(tabs().view, PeerView.list);
     });

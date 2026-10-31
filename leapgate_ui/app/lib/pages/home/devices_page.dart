@@ -462,17 +462,27 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
   Widget _selectionBar(AppLocalizations l10n) {
     final category = _tabs.current;
     final ids = _selection.ids;
-    final (label, title) = switch (category) {
+    final (label, title, toast) = switch (category) {
       PeerCategory.favorites => (
           l10n.peersRemoveFavorites,
           l10n.peersRemoveFavoritesMany(ids.length),
+          'peersToastRemovedFavorites',
         ),
-      PeerCategory.lan => (l10n.peersRemove, l10n.peersRemoveMany(ids.length)),
-      _ => (l10n.peersDelete, l10n.peersDeleteMany(ids.length)),
+      PeerCategory.lan => (
+          l10n.peersRemove,
+          l10n.peersRemoveMany(ids.length),
+          'peersToastRemoved',
+        ),
+      _ => (
+          l10n.peersDelete,
+          l10n.peersDeleteMany(ids.length),
+          'peersToastDeleted',
+        ),
     };
-    void done() {
+    // The toast keys are ARB keys; the shell's `toastText` shows them.
+    void done(String toast) {
       _selection.finish();
-      appCore.toasts.show('Successful');
+      appCore.toasts.show(toast);
     }
 
     return Row(
@@ -489,7 +499,7 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
                     return;
                   }
                   await deletePeers(category, ids);
-                  done();
+                  done(toast);
                 },
         ),
         if (category == PeerCategory.recent) ...[
@@ -502,7 +512,7 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
                 ? null
                 : () async {
                     await addFavorites(ids);
-                    done();
+                    done('peersToastAddedFavorites');
                   },
           ),
         ],
@@ -640,14 +650,16 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
 
   PeerItemActions _actions(PeerItem item, List<PeerItem> items, bool current) {
     final id = item.peer.id;
+    // The search results are not picked: the selection bar acts on the selected category.
+    final selecting = _selection.active && _input.isEmpty;
     return PeerItemActions(
       overlays: widget.overlays,
-      selecting: _selection.active,
-      selected: _selection.contains(id),
+      selecting: selecting,
+      selected: selecting && _selection.contains(id),
       current: current,
       onConnect: () => _connect(id),
       onTap: () {
-        if (_selection.active) {
+        if (selecting) {
           _selection.tap(id, [for (final i in items) i.peer.id],
               shift: shiftPressed);
           return;

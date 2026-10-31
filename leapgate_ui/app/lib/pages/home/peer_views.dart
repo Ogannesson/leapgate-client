@@ -315,7 +315,8 @@ List<Widget> peerMenuItems(
 }) {
   final id = item.peer.id;
   final name = peerDisplayName(item.peer);
-  void done() => appCore.toasts.show('Successful');
+  // The toast keys are ARB keys; the shell's `toastText` shows them.
+  void done(String toast) => appCore.toasts.show(toast);
   final groups = peerMenu(
     item.category,
     favorite: item.favorite,
@@ -348,10 +349,7 @@ List<Widget> peerMenuItems(
     PeerAction.alwaysRelay => LgMenuItem(
       label: l10n.peerMenuAlwaysRelay,
       checked: alwaysRelay(id),
-      onPressed: () async {
-        await setAlwaysRelay(id, !alwaysRelay(id));
-        done();
-      },
+      onPressed: () => setAlwaysRelay(id, !alwaysRelay(id)),
     ),
     PeerAction.wakeOnLan => LgMenuItem(
       label: l10n.peerMenuWakeOnLan,
@@ -361,7 +359,7 @@ List<Widget> peerMenuItems(
       label: l10n.peerMenuCreateShortcut,
       onPressed: () async {
         await createShortcut(id);
-        done();
+        done('peerMenuToastShortcutCreated');
       },
     ),
     PeerAction.rename => LgMenuItem(
@@ -371,28 +369,28 @@ List<Widget> peerMenuItems(
         final alias = await askAlias(overlays, l10n, alias: old);
         if (alias == null || alias == old) return;
         await renamePeer(id, alias);
-        done();
+        done('peerMenuToastRenamed');
       },
     ),
     PeerAction.addFavorite => LgMenuItem(
       label: l10n.peersAddFavorites,
       onPressed: () async {
         await addFavorites([id]);
-        done();
+        done('peersToastAddedFavorites');
       },
     ),
     PeerAction.removeFavorite => LgMenuItem(
       label: l10n.peersRemoveFavorites,
       onPressed: () async {
         await removeFavorites([id]);
-        done();
+        done('peersToastRemovedFavorites');
       },
     ),
     PeerAction.clearPassword => LgMenuItem(
       label: l10n.peerMenuClearPassword,
       onPressed: () async {
         await clearSavedPassword(id);
-        done();
+        done('peerMenuToastPasswordCleared');
       },
     ),
     PeerAction.delete || PeerAction.remove => LgMenuItem(
@@ -409,7 +407,7 @@ List<Widget> peerMenuItems(
           return;
         }
         await deletePeers(item.category, [id]);
-        done();
+        done(delete ? 'peersToastDeleted' : 'peersToastRemoved');
       },
     ),
   };

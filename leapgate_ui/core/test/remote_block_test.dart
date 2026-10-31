@@ -75,6 +75,16 @@ void main() {
       });
     });
 
+    test('remote input 60 ms before entering blocks as well', () {
+      fakeAsync((async) {
+        final block = RemoteBlock();
+        bind.mouseTime = clock.now().millisecondsSinceEpoch.toDouble() - 60;
+        block.check();
+        async.elapse(const Duration(milliseconds: 200));
+        expect(block.blocked, isTrue);
+      });
+    });
+
     test('local input does not block', () {
       fakeAsync((async) {
         final block = RemoteBlock();

@@ -157,7 +157,7 @@ void main() {
     await pumpWith(tester, status: ServiceStatus.stopped);
     await tapText(tester, '启动服务');
     final set = bind.callsTo(#mainSetOption).single.namedArguments;
-    expect((set[#key], set[#value]), ('stop-service', 'N'));
+    expect((set[#key], set[#value]), ('stop-service', ''));
     await unmount(tester);
   });
 

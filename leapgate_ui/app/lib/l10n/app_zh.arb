@@ -250,5 +250,12 @@
   "pwdRemove": "移除",
   "uiModeTitle": "界面模式",
   "uiModeSimple": "简洁",
-  "uiModeDetail": "详细"
+  "uiModeDetail": "详细",
+  "peersToastAddedFavorites": "已加入收藏",
+  "peersToastRemovedFavorites": "已移出收藏",
+  "peersToastDeleted": "已删除",
+  "peersToastRemoved": "已移除",
+  "peerMenuToastRenamed": "已重命名",
+  "peerMenuToastPasswordCleared": "已清除保存的密码",
+  "peerMenuToastShortcutCreated": "已创建桌面快捷方式"
 }

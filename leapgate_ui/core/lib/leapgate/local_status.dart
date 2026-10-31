@@ -89,7 +89,7 @@ class LocalStatusModel extends ChangeNotifier {
   /// "Start service" (upstream `common.dart` `start_service(true)`; the superuser check there
   /// is macOS only). Rust starts the service when `stop-service` is cleared.
   Future<void> startService() =>
-      bind.mainSetOption(key: kOptionStopService, value: 'N');
+      bind.mainSetOption(key: kOptionStopService, value: '');
 
   Future<void> _poll() async {
     final id = await bind.mainGetMyId();

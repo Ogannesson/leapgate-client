@@ -16,8 +16,8 @@ const _kOptionDisableDiscoveryPanel = 'disable-discovery-panel';
 enum PeerView { cards, list }
 
 // `peer-card-ui-type` as upstream stores it (`common/widgets/peer_tab_page.dart` `PeerUiType`):
-// 0 big tiles, 1 small tiles, 2 list. The new UI has cards and the list (01 P1 block F merges
-// the two tile sizes).
+// 0 big tiles, 1 small tiles, 2 list. The new UI has cards (big tiles) and the list (small tiles
+// and the list, which 01 P1 block F merges).
 const _uiTypeCards = '0';
 const _uiTypeList = '2';
 
@@ -107,16 +107,12 @@ class PeerTabs extends ChangeNotifier {
   }
 
   /// As upstream `setTabVisible`: hiding the selected category selects the first shown one,
-  /// showing the only one selects it.
+  /// showing the only one selects it (both by [_keepCurrentShown]).
   void setVisible(PeerCategory category, bool visible) {
     if (_visible[category.index] == visible) return;
     _visible[category.index] = visible;
     _flutter.set(kOptionPeerTabVisible, jsonEncode(_visible));
-    if (visible && shown.length == 1) {
-      _current = category;
-    } else {
-      _keepCurrentShown();
-    }
+    _keepCurrentShown();
     notifyListeners();
   }
 
@@ -135,17 +131,22 @@ class PeerTabs extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// The selected category is one this build has, and a shown one while any is shown.
   void _keepCurrentShown() {
+    if (!isEnabled(_current)) {
+      _current = ordered.firstOrNull ?? PeerCategory.recent;
+    }
     final s = shown;
     if (!s.contains(_current) && s.isNotEmpty) _current = s.first;
   }
 
   /// Cards or the list. Until the user picks one it follows the interface mode: the list in the
-  /// detail mode, cards otherwise (01 §2.3).
+  /// detail mode, cards otherwise (01 §2.3). Upstream's small tiles are the list: 01 P1 block F
+  /// merges them, as their content is nearly the same.
   PeerView get view => switch (_flutter.get(kOptionPeerCardUiType)) {
         '' => isDetailMode(_options.local) ? PeerView.list : PeerView.cards,
-        _uiTypeList => PeerView.list,
-        _ => PeerView.cards,
+        _uiTypeCards => PeerView.cards,
+        _ => PeerView.list,
       };
 
   void setView(PeerView view) {
