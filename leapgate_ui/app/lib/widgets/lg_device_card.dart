@@ -108,8 +108,18 @@ class _LgDeviceCardState extends State<LgDeviceCard> {
   Duration? _lastDown;
   bool _within = false;
 
+  // Set by the buttons at the corner, which hear the press before the card
+  // does: a press on them neither starts nor completes a double click on the
+  // card, so two quick presses on "⋯" open the menu twice and never connect.
+  bool _onButtons = false;
+
   void _onPointerDown(PointerDownEvent e) {
     if (e.buttons != kPrimaryButton) return;
+    if (_onButtons) {
+      _onButtons = false;
+      _lastDown = null;
+      return;
+    }
     final last = _lastDown;
     if (last != null && e.timeStamp - last <= _doubleClick) {
       _lastDown = null;
@@ -237,7 +247,12 @@ class _LgDeviceCardState extends State<LgDeviceCard> {
                   Positioned(
                     right: LgSpace.s3,
                     top: LgSpace.s3,
-                    child: _CardActions(card: w),
+                    child: Listener(
+                      onPointerDown: (e) {
+                        if (e.buttons == kPrimaryButton) _onButtons = true;
+                      },
+                      child: _CardActions(card: w),
+                    ),
                   ),
               ],
             ),

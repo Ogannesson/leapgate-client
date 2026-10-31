@@ -7,6 +7,7 @@ import 'package:leapgate_ui/widgets/lg_menu.dart';
 import 'package:leapgate_ui/widgets/lg_menu_items.dart';
 import 'package:leapgate_ui/widgets/lg_selection.dart';
 import 'package:leapgate_ui/widgets/lg_slider.dart';
+import 'package:leapgate_ui/widgets/lg_tooltip.dart';
 
 import 'helpers.dart';
 
@@ -482,6 +483,187 @@ void main() {
         ),
       );
       expect(find.text('100%'), findsOneWidget);
+    });
+
+    Widget reporting(ValueNotifier<double> value, List<double> ends) =>
+        SizedBox(
+          width: 220,
+          child: ValueListenableBuilder<double>(
+            valueListenable: value,
+            builder: (context, v, _) => LgSlider(
+              value: v,
+              min: 0,
+              max: 10,
+              step: 1,
+              semanticLabel: '缩放',
+              format: (x) => '${x.round()}%',
+              onChanged: (x) => value.value = x,
+              onChangeEnd: ends.add,
+            ),
+          ),
+        );
+
+    testWidgets('a press after an outside change reports the value shown', (
+      tester,
+    ) async {
+      final ends = <double>[];
+      final value = ValueNotifier(0.0);
+      await pumpLg(tester, reporting(value, ends));
+      final box = tester.getRect(find.byType(LgSlider));
+      double at(double v) => box.left + 10 + v / 10 * (box.width - 20);
+      await tester.tapAt(Offset(at(8), box.center.dy));
+      expect(ends, [8]);
+      // Set from outside (a reset), then pressed where the knob now is: that
+      // is no change, and what is reported is what the knob shows.
+      value.value = 2;
+      await tester.pump();
+      await tester.tapAt(Offset(at(2), box.center.dy));
+      expect(ends, [8, 2]);
+    });
+
+    testWidgets('"increase" from a screen reader is a finished change', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      final ends = <double>[];
+      final value = ValueNotifier(5.0);
+      await pumpLg(tester, reporting(value, ends));
+      tester.semantics.performAction(
+        find.semantics.byLabel('缩放'),
+        SemanticsAction.increase,
+      );
+      expect(ends, [6]);
+      handle.dispose();
+    });
+
+    testWidgets('a greyed slider row says why, dims its words, does not move', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      await pumpLg(
+        tester,
+        LgMenuPanel(
+          items: [
+            LgMenuSliderItem(
+              value: 100,
+              min: 5,
+              max: 1000,
+              format: (v) => '${v.round()}%',
+              semanticLabel: '触控板速度',
+              startLabel: '慢',
+              onChanged: null,
+              disabledNote: '未获得键盘和鼠标控制权限',
+            ),
+          ],
+        ),
+      );
+      final node = tester.getSemantics(find.byType(LgSlider));
+      expect(node.hint, contains('未获得键盘和鼠标控制权限'));
+      expect(node.label, contains('触控板速度'));
+      await hover(tester, find.byType(LgSlider));
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.text('未获得键盘和鼠标控制权限'), findsOneWidget);
+      final dimmed = find.ancestor(
+        of: find.text('100%'),
+        matching: find.byWidgetPredicate((w) => w is Opacity && w.opacity < 1),
+      );
+      expect(dimmed, findsOneWidget);
+      handle.dispose();
+    });
+
+    testWidgets('an enabled slider row shows no note', (tester) async {
+      await pumpLg(
+        tester,
+        LgMenuPanel(
+          items: [
+            LgMenuSliderItem(
+              value: 100,
+              min: 5,
+              max: 1000,
+              format: (v) => '${v.round()}%',
+              semanticLabel: '触控板速度',
+              onChanged: (_) {},
+              disabledNote: '未获得键盘和鼠标控制权限',
+            ),
+          ],
+        ),
+      );
+      await hover(tester, find.byType(LgSlider));
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.text('未获得键盘和鼠标控制权限'), findsNothing);
+    });
+  });
+
+  group('the note of a greyed row', () {
+    Widget menu({LgNoteSide? side, Alignment at = Alignment.center}) {
+      final panel = LgMenuPanel(
+        items: [
+          const LgMenuGroup('输入'),
+          const LgMenuItem(
+            label: '锁定远程设备',
+            onPressed: null,
+            disabledNote: '仅查看模式下不可用',
+          ),
+          LgMenuItem(label: '下一行', onPressed: () {}),
+        ],
+      );
+      return SizedBox.expand(
+        child: Align(
+          alignment: at,
+          child: side == null
+              ? panel
+              : LgNoteSideScope(side: side, child: panel),
+        ),
+      );
+    }
+
+    Future<(Rect row, Rect tip)> hoverRow(WidgetTester tester) async {
+      await hover(tester, find.text('锁定远程设备'));
+      await tester.pump(const Duration(seconds: 1));
+      return (
+        tester.getRect(find.byType(MenuItemButton).first),
+        tester.getRect(find.byType(LgTooltipBox)),
+      );
+    }
+
+    testWidgets('opens beside the menu, level with its row, not under it', (
+      tester,
+    ) async {
+      await pumpLg(tester, menu());
+      final (row, tip) = await hoverRow(tester);
+      expect(tip.left, row.right + 8);
+      expect(tip.top, row.top);
+      // The row below stays uncovered.
+      expect(
+        tip.overlaps(tester.getRect(find.byType(MenuItemButton).last)),
+        isFalse,
+      );
+    });
+
+    testWidgets('opens on the left when the scope says so', (tester) async {
+      await pumpLg(tester, menu(side: LgNoteSide.left));
+      final (row, tip) = await hoverRow(tester);
+      expect(tip.right, row.left - 8);
+      expect(tip.top, row.top);
+    });
+
+    testWidgets('a menu at the right edge puts it on the left whatever', (
+      tester,
+    ) async {
+      await pumpLg(tester, menu(at: Alignment.centerRight));
+      final (row, tip) = await hoverRow(tester);
+      expect(tip.right, row.left - 8);
+    });
+
+    testWidgets('a menu at the left edge keeps it on the right', (
+      tester,
+    ) async {
+      await pumpLg(
+        tester,
+        menu(side: LgNoteSide.left, at: Alignment.centerLeft),
+      );
+      final (row, tip) = await hoverRow(tester);
+      expect(tip.left, row.right + 8);
     });
   });
 }

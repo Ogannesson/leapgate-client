@@ -317,10 +317,11 @@ Widget? _tail(
 }
 
 /// Greyed rows explain themselves on hover and to a screen reader ("需要被控端
-/// 允许键盘和鼠标", 01 P2 block B).
+/// 允许键盘和鼠标", 01 P2 block B). The note opens beside the menu, level with
+/// the row, not under the row where it would cover the next one.
 Widget _explained(String? note, bool disabled, Widget item) {
   if (note == null || !disabled) return item;
-  return LgTooltip(
+  return LgNoteTip(
     message: note,
     child: Semantics(hint: note, child: item),
   );

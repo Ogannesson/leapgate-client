@@ -289,8 +289,12 @@ LgSparkline _spark({bool relay = false}) => LgSparkline(
   series: [
     LgSparkSeries(_delaySeries(), LgLineStyle.primary),
     if (relay) ...[
-      LgSparkSeries([for (final v in _delaySeries()) v * .45], LgLineStyle.accent),
-      LgSparkSeries([for (final v in _delaySeries()) v * .5], LgLineStyle.relay),
+      LgSparkSeries([
+        for (final v in _delaySeries()) v * .45,
+      ], LgLineStyle.accent),
+      LgSparkSeries([
+        for (final v in _delaySeries()) v * .5,
+      ], LgLineStyle.relay),
     ],
   ],
   unit: 'ms',
@@ -633,6 +637,71 @@ Widget _lifted(
   picture: true,
 );
 
+/// A menu with the note of one of its greyed rows drawn beside it, level with
+/// that row (`x-view-only`, `x-no-perm`, `x-revoked` in A-P2.html): what a
+/// pointer on the row shows. [groupsAbove] titles and [rowsAbove] rows lie over
+/// that row inside the panel.
+Widget _menuWithNote({
+  required List<Widget> items,
+  required String note,
+  int groupsAbove = 0,
+  int rowsAbove = 0,
+  LgNoteSide side = LgNoteSide.right,
+  double width = 300,
+}) => Builder(
+  builder: (context) {
+    final t = LgTokens.of(context);
+    final panel = LgMenuPanel(items: items, width: width);
+    final tip = Padding(
+      padding: EdgeInsets.only(
+        top:
+            LgSpace.s2 +
+            groupsAbove * t.sizes.menuGroup +
+            rowsAbove * t.sizes.row,
+      ),
+      child: LgTooltipBox(child: Text(note)),
+    );
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: side == LgNoteSide.right
+          ? [panel, const SizedBox(width: LgSpace.s2), tip]
+          : [tip, const SizedBox(width: LgSpace.s2), panel],
+    );
+  },
+);
+
+/// The rows of the input menu, all greyed with the same [note] (`x-no-perm`).
+List<Widget> _inputMenuGreyed(String note) => [
+  const LgMenuGroup('键盘模式'),
+  LgMenuItem(label: '传统', checked: false, onPressed: null, disabledNote: note),
+  LgMenuItem(label: '映射', checked: true, onPressed: null, disabledNote: note),
+  LgMenuItem(label: '翻译', checked: false, onPressed: null, disabledNote: note),
+  const LgMenuDivider(),
+  LgMenuSwitchItem(
+    label: '仅查看模式',
+    value: false,
+    onChanged: null,
+    disabledNote: note,
+  ),
+  LgMenuSwitchItem(
+    label: '相对鼠标模式',
+    value: false,
+    onChanged: null,
+    disabledNote: note,
+  ),
+  const LgMenuGroup('触控板速度'),
+  LgMenuSliderItem(
+    value: 100,
+    min: 5,
+    max: 1000,
+    format: _pct,
+    semanticLabel: '触控板速度',
+    onChanged: null,
+    disabledNote: note,
+  ),
+];
+
 // ---- the specimens ----------------------------------------------------------------
 
 List<Specimen> _m2bSpecimens() {
@@ -657,9 +726,20 @@ List<Specimen> _m2bSpecimens() {
       menu('view-menu', _viewToolMenu(true, true), size: const Size(360, 640)),
     )
     ..add(
-      menu('view-menu-folded', _viewToolMenu(false, false), size: const Size(360, 330)),
+      menu(
+        'view-menu-folded',
+        _viewToolMenu(false, false),
+        size: const Size(360, 330),
+      ),
     )
-    ..add(menu('sort-menu', _sortToolMenu(), size: const Size(280, 260), width: 240))
+    ..add(
+      menu(
+        'sort-menu',
+        _sortToolMenu(),
+        size: const Size(280, 260),
+        width: 240,
+      ),
+    )
     ..add(
       menu('picture-zoom', [
         const LgMenuGroup('缩放'),
@@ -716,37 +796,42 @@ List<Specimen> _m2bSpecimens() {
       ], size: const Size(360, 700)),
     )
     ..add(
-      menu('action-menu', [
-        const LgMenuItem(
-          label: '发送 Ctrl+Alt+Del',
-          shortcut: 'Ctrl+Alt+Shift+Delete',
-          onPressed: _noop,
-        ),
-        const LgMenuItem(label: '锁定远程设备', onPressed: _noop),
-        const LgMenuItem(label: '重启远程设备', onPressed: _noop),
-        const LgMenuDivider(),
-        const LgMenuItem(
-          label: '阻止远程设备的本地输入',
-          shortcut: 'Ctrl+Alt+Shift+I',
-          onPressed: _noop,
-        ),
-        const LgMenuItem(label: '请求提升权限', onPressed: _noop),
-        const LgMenuItem(
-          label: '输入系统登录密码',
-          onPressed: _noop,
-          trailing: LgIcon(LgIcons.edit, size: 18, color: Color(0xFF6B7F7D)),
-        ),
-        const LgMenuItem(label: '键入剪贴板文本', onPressed: _noop),
-        const LgMenuDivider(),
-        const LgMenuItem(label: '刷新画面', onPressed: _noop),
-        const LgMenuItem(
-          label: '截图',
-          shortcut: 'Ctrl+Alt+Shift+P',
-          onPressed: _noop,
-        ),
-        const LgMenuItem(label: '交换控制方向', onPressed: _noop),
-        const LgMenuItem(label: '添加备注', onPressed: _noop),
-      ], size: const Size(420, 640), width: 380),
+      menu(
+        'action-menu',
+        [
+          const LgMenuItem(
+            label: '发送 Ctrl+Alt+Del',
+            shortcut: 'Ctrl+Alt+Shift+Delete',
+            onPressed: _noop,
+          ),
+          const LgMenuItem(label: '锁定远程设备', onPressed: _noop),
+          const LgMenuItem(label: '重启远程设备', onPressed: _noop),
+          const LgMenuDivider(),
+          const LgMenuItem(
+            label: '阻止远程设备的本地输入',
+            shortcut: 'Ctrl+Alt+Shift+I',
+            onPressed: _noop,
+          ),
+          const LgMenuItem(label: '请求提升权限', onPressed: _noop),
+          const LgMenuItem(
+            label: '输入系统登录密码',
+            onPressed: _noop,
+            trailing: LgIcon(LgIcons.edit, size: 18, color: Color(0xFF6B7F7D)),
+          ),
+          const LgMenuItem(label: '键入剪贴板文本', onPressed: _noop),
+          const LgMenuDivider(),
+          const LgMenuItem(label: '刷新画面', onPressed: _noop),
+          const LgMenuItem(
+            label: '截图',
+            shortcut: 'Ctrl+Alt+Shift+P',
+            onPressed: _noop,
+          ),
+          const LgMenuItem(label: '交换控制方向', onPressed: _noop),
+          const LgMenuItem(label: '添加备注', onPressed: _noop),
+        ],
+        size: const Size(420, 640),
+        width: 380,
+      ),
     )
     ..add(
       menu(
@@ -754,45 +839,51 @@ List<Specimen> _m2bSpecimens() {
         width: 380,
         size: const Size(420, 240),
         const [
-        LgMenuItem(
-          label: '发送 Ctrl+Alt+Del',
-          shortcut: 'Ctrl+Alt+Shift+Delete',
-          onPressed: null,
-          disabledNote: '仅查看模式下不可用',
-        ),
-        LgMenuItem(
-          label: '锁定远程设备',
-          onPressed: null,
-          disabledNote: '仅查看模式下不可用',
-        ),
-        LgMenuItem(label: '刷新画面', onPressed: _noop),
-        LgMenuItem(
-          label: '截图',
-          shortcut: 'Ctrl+Alt+Shift+P',
-          onPressed: _noop,
-        ),
-      ]),
+          LgMenuItem(
+            label: '发送 Ctrl+Alt+Del',
+            shortcut: 'Ctrl+Alt+Shift+Delete',
+            onPressed: null,
+            disabledNote: '仅查看模式下不可用',
+          ),
+          LgMenuItem(
+            label: '锁定远程设备',
+            onPressed: null,
+            disabledNote: '仅查看模式下不可用',
+          ),
+          LgMenuItem(label: '刷新画面', onPressed: _noop),
+          LgMenuItem(
+            label: '截图',
+            shortcut: 'Ctrl+Alt+Shift+P',
+            onPressed: _noop,
+          ),
+        ],
+      ),
     )
     ..add(
-      menu('session-menu', [
-        LgMenuSwitchItem(
-          label: '静音',
-          shortcut: 'Ctrl+Alt+Shift+S',
-          value: false,
-          onChanged: (_) {},
-        ),
-        LgMenuSwitchItem(label: '同步剪贴板', value: true, onChanged: (_) {}),
-        LgMenuSwitchItem(label: '允许复制粘贴文件', value: true, onChanged: (_) {}),
-        LgMenuSwitchItem(
-          label: '会话结束后锁定远程设备',
-          value: false,
-          onChanged: (_) {},
-        ),
-        const LgSubmenu(
-          label: '隐私模式',
-          items: [LgMenuItem(label: '遮挡屏幕', onPressed: _noop)],
-        ),
-      ], size: const Size(380, 320), width: 340),
+      menu(
+        'session-menu',
+        [
+          LgMenuSwitchItem(
+            label: '静音',
+            shortcut: 'Ctrl+Alt+Shift+S',
+            value: false,
+            onChanged: (_) {},
+          ),
+          LgMenuSwitchItem(label: '同步剪贴板', value: true, onChanged: (_) {}),
+          LgMenuSwitchItem(label: '允许复制粘贴文件', value: true, onChanged: (_) {}),
+          LgMenuSwitchItem(
+            label: '会话结束后锁定远程设备',
+            value: false,
+            onChanged: (_) {},
+          ),
+          const LgSubmenu(
+            label: '隐私模式',
+            items: [LgMenuItem(label: '遮挡屏幕', onPressed: _noop)],
+          ),
+        ],
+        size: const Size(380, 320),
+        width: 340,
+      ),
     )
     ..add(
       menu('switch-disabled', [
@@ -814,20 +905,38 @@ List<Specimen> _m2bSpecimens() {
       ], size: const Size(360, 240)),
     )
     ..add(
-      menu('resolution', [
-        const LgMenuItem(label: '原始分辨率', checked: true, onPressed: _noop),
-        const LgMenuItem(label: '与本机相同', checked: false, onPressed: _noop),
-        const LgMenuDivider(),
-        const LgMenuGroup('远程设备支持的分辨率'),
-        const LgMenuItem(label: '1920×1080', checked: false, onPressed: _noop),
-        const LgMenuItem(label: '1680×1050', checked: false, onPressed: _noop),
-        const LgMenuItem(label: '1600×900', checked: false, onPressed: _noop),
-        const LgMenuItem(label: '1440×900', checked: false, onPressed: _noop),
-      ], size: const Size(320, 520), width: 280),
+      menu(
+        'resolution',
+        [
+          const LgMenuItem(label: '原始分辨率', checked: true, onPressed: _noop),
+          const LgMenuItem(label: '与本机相同', checked: false, onPressed: _noop),
+          const LgMenuDivider(),
+          const LgMenuGroup('远程设备支持的分辨率'),
+          const LgMenuItem(
+            label: '1920×1080',
+            checked: false,
+            onPressed: _noop,
+          ),
+          const LgMenuItem(
+            label: '1680×1050',
+            checked: false,
+            onPressed: _noop,
+          ),
+          const LgMenuItem(label: '1600×900', checked: false, onPressed: _noop),
+          const LgMenuItem(label: '1440×900', checked: false, onPressed: _noop),
+        ],
+        size: const Size(320, 520),
+        width: 280,
+      ),
     )
     ..add(
       menu('picture-menu-rows', const [
-        LgMenuItem(label: '显示远程光标', checked: true, shortcut: 'Ctrl+Alt+Shift+M', onPressed: _noop),
+        LgMenuItem(
+          label: '显示远程光标',
+          checked: true,
+          shortcut: 'Ctrl+Alt+Shift+M',
+          onPressed: _noop,
+        ),
         LgMenuItem(label: '跟随远程光标', checked: false, onPressed: _noop),
         LgSubmenu(
           label: '分辨率',
@@ -836,7 +945,9 @@ List<Specimen> _m2bSpecimens() {
         ),
         LgSubmenu(
           label: '虚拟显示器',
-          items: [LgMenuItem(label: '虚拟显示器 1', checked: true, onPressed: _noop)],
+          items: [
+            LgMenuItem(label: '虚拟显示器 1', checked: true, onPressed: _noop),
+          ],
         ),
       ], size: const Size(360, 260)),
     )
@@ -848,8 +959,17 @@ List<Specimen> _m2bSpecimens() {
     )
     ..add(
       menu('more-menu', const [
-        LgSubmenu(label: '会话', icon: LgIcons.toggles, items: [LgMenuItem(label: '静音', onPressed: _noop)]),
-        LgSubmenu(label: '聊天', icon: LgIcons.chat, badge: 1, items: [LgMenuItem(label: '文字聊天', onPressed: _noop)]),
+        LgSubmenu(
+          label: '会话',
+          icon: LgIcons.toggles,
+          items: [LgMenuItem(label: '静音', onPressed: _noop)],
+        ),
+        LgSubmenu(
+          label: '聊天',
+          icon: LgIcons.chat,
+          badge: 1,
+          items: [LgMenuItem(label: '文字聊天', onPressed: _noop)],
+        ),
         LgMenuItem(label: '录制', icon: LgIcons.record, onPressed: _noop),
       ], size: const Size(360, 200)),
     )
@@ -930,7 +1050,11 @@ List<Specimen> _m2bSpecimens() {
       ),
     );
   }
-  for (final e in {'normal': <WidgetState>{}, 'hover': _hover, 'focus': _focus}.entries) {
+  for (final e in {
+    'normal': <WidgetState>{},
+    'hover': _hover,
+    'focus': _focus,
+  }.entries) {
     list.add(
       Specimen(
         'menu-rows',
@@ -1090,12 +1214,19 @@ List<Specimen> _m2bSpecimens() {
   }) => Specimen('device-card', name, cardCell, states: states, build);
   list
     ..add(
-      card('normal', (c) => SizedBox(width: 360, child: _card(c, _devices[0], favorite: true, actions: true))),
+      card(
+        'normal',
+        (c) => SizedBox(
+          width: 360,
+          child: _card(c, _devices[0], favorite: true, actions: true),
+        ),
+      ),
     )
     ..add(
       card(
         'hover',
-        (c) => SizedBox(width: 360, child: _card(c, _devices[0], favorite: true)),
+        (c) =>
+            SizedBox(width: 360, child: _card(c, _devices[0], favorite: true)),
         states: _hover,
       ),
     )
@@ -1111,14 +1242,16 @@ List<Specimen> _m2bSpecimens() {
     ..add(
       card(
         'focus',
-        (c) => SizedBox(width: 360, child: _card(c, _devices[0], favorite: true)),
+        (c) =>
+            SizedBox(width: 360, child: _card(c, _devices[0], favorite: true)),
         states: _focus,
       ),
     )
     ..add(
       card(
         'pressed',
-        (c) => SizedBox(width: 360, child: _card(c, _devices[0], favorite: true)),
+        (c) =>
+            SizedBox(width: 360, child: _card(c, _devices[0], favorite: true)),
         states: _pressed,
       ),
     )
@@ -1205,28 +1338,29 @@ List<Specimen> _m2bSpecimens() {
     );
 
   // Card grid
-  Widget grid(BuildContext c, int count, {bool picked = false}) => LgDeviceCardGrid(
-    semanticLabel: '最近连接的设备',
-    children: [
-      for (var i = 0; i < count; i++)
-        _card(
-          c,
-          _devices[i % _devices.length],
-          tags: i == 0 || i == 1
-              ? const [0]
-              : i == 2
-              ? const [1]
-              : i == 7
-              ? const [1, 2]
-              : const [],
-          favorite: i == 0,
-          savedPassword: i == 6,
-          selected: !picked && i == 0,
-          picked: picked ? i < 3 : null,
-          actions: !picked,
-        ),
-    ],
-  );
+  Widget grid(BuildContext c, int count, {bool picked = false}) =>
+      LgDeviceCardGrid(
+        semanticLabel: '最近连接的设备',
+        children: [
+          for (var i = 0; i < count; i++)
+            _card(
+              c,
+              _devices[i % _devices.length],
+              tags: i == 0 || i == 1
+                  ? const [0]
+                  : i == 2
+                  ? const [1]
+                  : i == 7
+                  ? const [1, 2]
+                  : const [],
+              favorite: i == 0,
+              savedPassword: i == 6,
+              selected: !picked && i == 0,
+              picked: picked ? i < 3 : null,
+              actions: !picked,
+            ),
+        ],
+      );
   list
     ..add(
       Specimen(
@@ -1270,7 +1404,9 @@ List<Specimen> _m2bSpecimens() {
           child: Semantics(
             label: '正在加载',
             child: LgDeviceCardGrid(
-              children: [for (var i = 0; i < 6; i++) const LgDeviceCardSkeleton()],
+              children: [
+                for (var i = 0; i < 6; i++) const LgDeviceCardSkeleton(),
+              ],
             ),
           ),
         ),
@@ -1296,7 +1432,11 @@ List<Specimen> _m2bSpecimens() {
         'sorted-descending',
         (c) => SizedBox(
           width: wide,
-          child: _table(c, sort: const LgTableSort(LgDeviceColumn.status, ascending: false), count: 4),
+          child: _table(
+            c,
+            sort: const LgTableSort(LgDeviceColumn.status, ascending: false),
+            count: 4,
+          ),
         ),
         size: const Size(1072, 260),
       ),
@@ -1318,7 +1458,10 @@ List<Specimen> _m2bSpecimens() {
     ..add(
       table(
         'with-source',
-        (c) => SizedBox(width: wide, child: _table(c, sort: null, source: true, count: 4)),
+        (c) => SizedBox(
+          width: wide,
+          child: _table(c, sort: null, source: true, count: 4),
+        ),
         size: const Size(1072, 260),
       ),
     )
@@ -1361,10 +1504,8 @@ List<Specimen> _m2bSpecimens() {
         'list-chrome',
         'toolbar-favorites',
         const Size(1072, 76),
-        (_) => SizedBox(
-          width: wide,
-          child: _listToolbar(selected: 1, sort: true),
-        ),
+        (_) =>
+            SizedBox(width: wide, child: _listToolbar(selected: 1, sort: true)),
       ),
     )
     ..add(
@@ -1372,10 +1513,7 @@ List<Specimen> _m2bSpecimens() {
         'list-chrome',
         'toolbar-view-open',
         const Size(1072, 76),
-        (_) => SizedBox(
-          width: wide,
-          child: _listToolbar(viewOpen: true),
-        ),
+        (_) => SizedBox(width: wide, child: _listToolbar(viewOpen: true)),
       ),
     )
     ..add(
@@ -1639,10 +1777,7 @@ List<Specimen> _m2bSpecimens() {
         const Size(280, 140),
         (_) => const SizedBox(
           width: 208,
-          child: LgLocalNotice(
-            tone: LgTone.info,
-            text: '当前以免安装方式运行。',
-          ),
+          child: LgLocalNotice(tone: LgTone.info, text: '当前以免安装方式运行。'),
         ),
       ),
     )
@@ -1686,9 +1821,7 @@ List<Specimen> _m2bSpecimens() {
             child: SizedBox(
               width: 700,
               child: LgDeviceCardGrid(
-                children: [
-                  for (var i = 0; i < 4; i++) _card(c, _devices[i]),
-                ],
+                children: [for (var i = 0; i < 4; i++) _card(c, _devices[i])],
               ),
             ),
           ),
@@ -1709,9 +1842,7 @@ List<Specimen> _m2bSpecimens() {
             child: SizedBox(
               width: 700,
               child: LgDeviceCardGrid(
-                children: [
-                  for (var i = 0; i < 4; i++) _card(c, _devices[i]),
-                ],
+                children: [for (var i = 0; i < 4; i++) _card(c, _devices[i])],
               ),
             ),
           ),
@@ -1745,7 +1876,11 @@ List<Specimen> _m2bSpecimens() {
                         _card(
                           c,
                           _devices[i],
-                          tags: i < 2 ? const [0] : i == 2 ? const [1] : const [],
+                          tags: i < 2
+                              ? const [0]
+                              : i == 2
+                              ? const [1]
+                              : const [],
                           favorite: i == 0,
                           savedPassword: i == 6,
                           selected: i == 0,
@@ -1790,7 +1925,11 @@ List<Specimen> _m2bSpecimens() {
                         _card(
                           c,
                           _devices[i],
-                          tags: i < 2 ? const [0] : i == 2 ? const [1] : const [],
+                          tags: i < 2
+                              ? const [0]
+                              : i == 2
+                              ? const [1]
+                              : const [],
                           picked: i < 3,
                         ),
                     ],
@@ -1947,13 +2086,7 @@ List<Specimen> _m2bSpecimens() {
   );
   list
     ..add(password('empty'))
-    ..add(
-      password(
-        'already-set',
-        note: '已设置的密码不会显示',
-        remove: true,
-      ),
-    )
+    ..add(password('already-set', note: '已设置的密码不会显示', remove: true))
     ..add(
       password(
         'typing',
@@ -2003,7 +2136,13 @@ List<Specimen> _m2bSpecimens() {
       ),
     )
     ..add(details('no-route-rows', _details(noRoute: true)))
-    ..add(details('three-lines', _details(withPeers: true), size: const Size(512, 960)))
+    ..add(
+      details(
+        'three-lines',
+        _details(withPeers: true),
+        size: const Size(512, 960),
+      ),
+    )
     ..add(
       details(
         'scrolls-in-low-window',
@@ -2029,13 +2168,16 @@ List<Specimen> _m2bSpecimens() {
           child: LgSparkline(
             series: [
               LgSparkSeries([
-                for (var i = 0; i < 31; i++) i > 10 && i < 15 ? null : 20 + (i % 7) * 3,
+                for (var i = 0; i < 31; i++)
+                  i > 10 && i < 15 ? null : 20 + (i % 7) * 3,
               ], LgLineStyle.primary),
               LgSparkSeries([
-                for (var i = 0; i < 31; i++) i > 10 && i < 15 ? null : 9 + (i % 5) * 2,
+                for (var i = 0; i < 31; i++)
+                  i > 10 && i < 15 ? null : 9 + (i % 5) * 2,
               ], LgLineStyle.accent),
               LgSparkSeries([
-                for (var i = 0; i < 31; i++) i > 10 && i < 15 ? null : 11 + (i % 4) * 2,
+                for (var i = 0; i < 31; i++)
+                  i > 10 && i < 15 ? null : 11 + (i % 4) * 2,
               ], LgLineStyle.relay),
             ],
             unit: 'ms',
@@ -2066,7 +2208,12 @@ List<Specimen> _m2bSpecimens() {
   // Chat -----------------------------------------------------------------------
   list
     ..add(
-      Specimen('chat-panel', 'messages', const Size(392, 380), (_) => _chatPanel()),
+      Specimen(
+        'chat-panel',
+        'messages',
+        const Size(392, 380),
+        (_) => _chatPanel(),
+      ),
     )
     ..add(
       Specimen(
@@ -2147,7 +2294,11 @@ List<Specimen> _m2bSpecimens() {
         'collapsed-relay',
         const Size(640, 160),
         padding: 0,
-        (_) => _placed(top, _toolbar2(collapsed: true), size: const Size(640, 160)),
+        (_) => _placed(
+          top,
+          _toolbar2(collapsed: true),
+          size: const Size(640, 160),
+        ),
       ),
     )
     ..add(
@@ -2173,6 +2324,21 @@ List<Specimen> _m2bSpecimens() {
           const LgToolbarPlacement(LgToolbarDock.left, .3),
           _toolbar2(dock: LgToolbarDock.left),
           size: const Size(1280, 520),
+        ),
+      ),
+    )
+    ..add(
+      Specimen(
+        'toolbar-m2b',
+        // As high as the 1200×790 window of the mockup: nothing folds, and the
+        // unread count of the chat sits on the corner of its icon.
+        'dock-left-tall',
+        const Size(1280, 760),
+        padding: 0,
+        (_) => _placed(
+          const LgToolbarPlacement(LgToolbarDock.left, .5),
+          _toolbar2(dock: LgToolbarDock.left, route: LgRoute.direct),
+          size: const Size(1280, 760),
         ),
       ),
     )
@@ -2252,11 +2418,8 @@ List<Specimen> _m2bSpecimens() {
         'narrow-folds-into-more',
         const Size(960, 200),
         padding: 0,
-        (_) => _placed(
-          top,
-          _toolbar2(display: true),
-          size: const Size(960, 200),
-        ),
+        (_) =>
+            _placed(top, _toolbar2(display: true), size: const Size(960, 200)),
       ),
     )
     ..add(
@@ -2265,11 +2428,8 @@ List<Specimen> _m2bSpecimens() {
         'narrower-folds-more',
         const Size(840, 200),
         padding: 0,
-        (_) => _placed(
-          top,
-          _toolbar2(display: true),
-          size: const Size(840, 200),
-        ),
+        (_) =>
+            _placed(top, _toolbar2(display: true), size: const Size(840, 200)),
       ),
     )
     ..add(
@@ -2460,6 +2620,159 @@ List<Specimen> _m2bSpecimens() {
           icon: LgIcons.chat,
           items: _viewMenu(),
           badge: 3,
+        ),
+      ),
+    )
+    ..add(
+      Specimen(
+        'toolbar-menu-button',
+        'greyed-with-note',
+        const Size(220, 76),
+        (_) => const LgToolbarMenuButton(
+          label: '输入',
+          icon: LgIcons.pointer,
+          enabled: false,
+          disabledNote: '未获得键盘和鼠标控制权限',
+          items: [LgMenuItem(label: '映射', onPressed: null)],
+        ),
+      ),
+    )
+    ..add(
+      Specimen(
+        'toolbar-menu-button',
+        'greyed-open',
+        const Size(600, 540),
+        (_) => Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // The open look of the button is forced; the menu is drawn in place
+            // with the note beside it (`x-no-perm`).
+            const LgStateOverride(
+              states: {WidgetState.selected},
+              child: LgToolbarMenuButton(
+                label: '输入',
+                icon: LgIcons.pointer,
+                enabled: false,
+                disabledNote: '未获得键盘和鼠标控制权限',
+                items: [],
+              ),
+            ),
+            const SizedBox(height: LgSpace.s2),
+            _menuWithNote(
+              items: _inputMenuGreyed('未获得键盘和鼠标控制权限'),
+              note: '未获得键盘和鼠标控制权限',
+              groupsAbove: 1,
+            ),
+          ],
+        ),
+      ),
+    );
+
+  // The note of a greyed row, beside the menu (`x-view-only`, `x-revoked`).
+  list
+    ..add(
+      Specimen(
+        'menu-notes',
+        'view-only',
+        const Size(600, 360),
+        (_) => _menuWithNote(
+          items: [
+            const LgMenuGroup('输入'),
+            LgMenuSwitchItem(label: '仅查看模式', value: true, onChanged: (_) {}),
+            LgMenuSwitchItem(
+              label: '显示本机光标',
+              value: true,
+              indent: true,
+              onChanged: (_) {},
+            ),
+            const LgMenuSwitchItem(
+              label: '相对鼠标模式',
+              value: false,
+              onChanged: null,
+              disabledNote: '仅查看模式下不可用',
+            ),
+            const LgMenuSwitchItem(
+              label: '反转滚动方向',
+              value: false,
+              onChanged: null,
+              disabledNote: '仅查看模式下不可用',
+            ),
+            const LgMenuGroup('触控板速度'),
+            const LgMenuSliderItem(
+              value: 100,
+              min: 5,
+              max: 1000,
+              format: _pct,
+              semanticLabel: '触控板速度',
+              onChanged: null,
+              disabledNote: '仅查看模式下不可用',
+            ),
+          ],
+          note: '仅查看模式下不可用',
+          groupsAbove: 1,
+          rowsAbove: 2,
+        ),
+      ),
+    )
+    ..add(
+      Specimen(
+        'menu-notes',
+        'revoked-on-the-left',
+        const Size(900, 280),
+        padding: 0,
+        (_) => _stage(
+          const Size(900, 280),
+          (_) => Stack(
+            children: [
+              Positioned(
+                left: 40,
+                top: 16,
+                child: _menuWithNote(
+                  side: LgNoteSide.left,
+                  width: 340,
+                  items: [
+                    LgMenuSwitchItem(
+                      label: '静音',
+                      shortcut: 'Ctrl+Alt+Shift+S',
+                      value: false,
+                      onChanged: (_) {},
+                    ),
+                    const LgMenuSwitchItem(
+                      label: '同步剪贴板',
+                      value: false,
+                      onChanged: null,
+                      disabledNote: '未获得剪贴板权限',
+                    ),
+                    LgMenuSwitchItem(
+                      label: '允许复制粘贴文件',
+                      value: true,
+                      onChanged: (_) {},
+                    ),
+                  ],
+                  note: '未获得剪贴板权限',
+                  rowsAbove: 1,
+                ),
+              ),
+              Positioned(
+                right: LgSpace.s4,
+                top: LgSpace.s4,
+                width: 280,
+                child: LgNoticeStack(
+                  notices: const [
+                    LgNotice(
+                      id: 'clip',
+                      text: '对方已关闭剪贴板同步',
+                      tone: LgTone.warning,
+                    ),
+                  ],
+                  dismissLabel: '关闭',
+                  onDismiss: (_) {},
+                ),
+              ),
+            ],
+          ),
+          picture: true,
         ),
       ),
     );

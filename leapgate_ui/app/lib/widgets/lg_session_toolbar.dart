@@ -250,6 +250,7 @@ class LgToolbarMenuButton extends StatelessWidget {
     this.icon,
     this.width = kLgMenuWidth,
     this.enabled = true,
+    this.disabledNote,
     this.badge = 0,
     this.state = LgToolbarMenuState.normal,
   });
@@ -262,8 +263,15 @@ class LgToolbarMenuButton extends StatelessWidget {
   final LgIcons? icon;
   final double width;
 
-  /// False greys the whole menu (no permission for it).
+  /// False greys the button. Without [disabledNote] it also does not open; with
+  /// one it still opens, so that the greyed rows inside show what there is
+  /// (`x-no-perm`: no keyboard and mouse permission), and the note shows on
+  /// hover and to a screen reader.
   final bool enabled;
+  final String? disabledNote;
+
+  /// The count of unread messages: after the name, or on the corner of the icon
+  /// when the bar is at a side.
   final int badge;
   final LgToolbarMenuState state;
 
@@ -273,11 +281,13 @@ class LgToolbarMenuButton extends StatelessWidget {
     final c = t.colors;
     final dock = LgToolbarScope.of(context);
     final vertical = dock.vertical;
-    return LgMenuAnchor(
+    final greyed = !enabled;
+    final explained = greyed && disabledNote != null;
+    final button = LgMenuAnchor(
       items: items,
       width: width,
       builder: (context, controller) => LgPressable(
-        onPressed: !enabled
+        onPressed: greyed && !explained
             ? null
             : () {
                 if (controller.isOpen) {
@@ -321,7 +331,7 @@ class LgToolbarMenuButton extends StatelessWidget {
                   : null,
           };
           return Opacity(
-            opacity: states.contains(WidgetState.disabled) ? .6 : 1,
+            opacity: greyed || states.contains(WidgetState.disabled) ? .6 : 1,
             child: LgFocusRing(
               show: states.contains(WidgetState.focused),
               radius: radius,
@@ -341,33 +351,46 @@ class LgToolbarMenuButton extends StatelessWidget {
                   borderRadius: radius,
                 ),
                 child: ExcludeSemantics(
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
+                  child: Stack(
+                    clipBehavior: Clip.none,
                     children: [
-                      if (lead != null) ...[
-                        lead,
-                        if (!vertical) SizedBox(width: t.sizes.toolGap),
-                      ],
-                      if (!vertical) ...[
-                        Text(
-                          label,
-                          maxLines: 1,
-                          softWrap: false,
-                          style: t.text.copyWith(
-                            color: fg,
-                            fontWeight: bold
-                                ? FontWeight.w700
-                                : FontWeight.w400,
-                          ),
-                        ),
-                        if (badge > 0) ...[
-                          SizedBox(width: t.sizes.toolGap),
-                          LgBadge(badge),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (lead != null) ...[
+                            lead,
+                            if (!vertical) SizedBox(width: t.sizes.toolGap),
+                          ],
+                          if (!vertical) ...[
+                            Text(
+                              label,
+                              maxLines: 1,
+                              softWrap: false,
+                              style: t.text.copyWith(
+                                color: fg,
+                                fontWeight: bold
+                                    ? FontWeight.w700
+                                    : FontWeight.w400,
+                              ),
+                            ),
+                            if (badge > 0) ...[
+                              SizedBox(width: t.sizes.toolGap),
+                              LgBadge(badge),
+                            ],
+                            SizedBox(width: t.sizes.toolGap),
+                            LgIcon(LgIcons.chevD, size: 16, color: fg),
+                          ] else if (lead == null)
+                            LgIcon(
+                              LgIcons.chevD,
+                              size: t.sizes.icon,
+                              color: fg,
+                            ),
                         ],
-                        SizedBox(width: t.sizes.toolGap),
-                        LgIcon(LgIcons.chevD, size: 16, color: fg),
-                      ] else if (lead == null)
-                        LgIcon(LgIcons.chevD, size: t.sizes.icon, color: fg),
+                      ),
+                      // On a bar at a side there is no room after the name: the
+                      // count sits on the corner of the icon.
+                      if (vertical && badge > 0)
+                        Positioned(top: -8, right: -12, child: LgBadge(badge)),
                     ],
                   ),
                 ),
@@ -376,6 +399,11 @@ class LgToolbarMenuButton extends StatelessWidget {
           );
         },
       ),
+    );
+    if (!explained) return button;
+    return LgTooltip(
+      message: disabledNote!,
+      child: Semantics(hint: disabledNote, child: button),
     );
   }
 }
@@ -429,18 +457,25 @@ class _MoreButton extends StatelessWidget {
                 borderRadius: radius,
               ),
               child: ExcludeSemantics(
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
+                child: Stack(
+                  clipBehavior: Clip.none,
                   children: [
-                    LgIcon(
-                      LgIcons.more,
-                      size: t.sizes.icon,
-                      color: open ? c.accent : c.text,
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        LgIcon(
+                          LgIcons.more,
+                          size: t.sizes.icon,
+                          color: open ? c.accent : c.text,
+                        ),
+                        if (badge > 0 && !dock.vertical) ...[
+                          SizedBox(width: t.sizes.toolGap),
+                          LgBadge(badge),
+                        ],
+                      ],
                     ),
-                    if (badge > 0 && !dock.vertical) ...[
-                      SizedBox(width: t.sizes.toolGap),
-                      LgBadge(badge),
-                    ],
+                    if (badge > 0 && dock.vertical)
+                      Positioned(top: -8, right: -12, child: LgBadge(badge)),
                   ],
                 ),
               ),
@@ -731,6 +766,7 @@ class LgSessionToolbar extends StatefulWidget {
     this.deviceName,
     this.deviceId,
     this.onMinimize,
+    this.noteSide,
   }) : assert(route == null || routeLabel != null),
        assert(encrypted || unencryptedLabel != null);
 
@@ -775,6 +811,12 @@ class LgSessionToolbar extends StatefulWidget {
 
   /// "Minimize" at the end of the bar, shown in full screen only.
   final VoidCallback? onMinimize;
+
+  /// The side of a menu on which the note of a greyed row opens. Null: the
+  /// right, or the left for a bar on the right edge. Give [LgNoteSide.left]
+  /// when a notice sits at the right of the picture, so that a note does not
+  /// cover it (`x-revoked`).
+  final LgNoteSide? noteSide;
 
   @override
   State<LgSessionToolbar> createState() => _LgSessionToolbarState();
@@ -830,6 +872,14 @@ class _LgSessionToolbarState extends State<LgSessionToolbar> {
     final vertical = dock.vertical;
     final drag = LgToolbarDragScope.maybeOf(context);
     final lifted = drag?.dragging ?? false;
+    assert(
+      w.groups.every(
+            (g) => g.every((item) => item is! LgToolbarFoldable),
+          ) ||
+          (w.labels.more != null && w.labels.drag != null),
+      'A bar with foldable buttons needs labels.more (the "更多" button) and '
+      'labels.drag (the grip): without them both would be named after the bar.',
+    );
 
     final minimize = w.fullscreen && w.onMinimize != null
         ? LgToolbarButton(
@@ -973,18 +1023,28 @@ class _LgSessionToolbarState extends State<LgSessionToolbar> {
           }
         }
       }
-      // The bar's own padding, along its axis, and the 12 px of the edge.
-      final room = extent - (vertical ? 2 * LgSpace.s2 : 12.0) - LgSpace.s3;
+      // What the bar's own padding takes along its axis. The 12 px of the edge
+      // lie across the axis, and the distance from the ends of the edge is
+      // already out of [extent] (the placer pads it).
+      final room = extent - (vertical ? 2 * LgSpace.s2 : 12.0);
       bar = _Pill(
         vertical: vertical,
         dock: dock,
         lifted: lifted,
-        child: LgFoldRow(
-          axis: vertical ? Axis.vertical : Axis.horizontal,
-          maxExtent: room,
-          slots: slots,
-          onFolded: (k) => _folded.value = k,
-          more: ValueListenableBuilder<int>(
+        child: ValueListenableBuilder<int>(
+          valueListenable: _folded,
+          // The row compares what it lays out with the count held here, so a
+          // reset of the count (a new edge) is answered even when the row would
+          // fold the same number as before.
+          builder: (context, count, more) => LgFoldRow(
+            axis: vertical ? Axis.vertical : Axis.horizontal,
+            maxExtent: room,
+            slots: slots,
+            folded: count,
+            onFolded: (k) => _folded.value = k,
+            more: more!,
+          ),
+          child: ValueListenableBuilder<int>(
             valueListenable: _folded,
             builder: (context, k, _) {
               final folded = k == 0
@@ -1007,13 +1067,20 @@ class _LgSessionToolbarState extends State<LgSessionToolbar> {
     }
     return LgToolbarScope(
       dock: dock,
-      child: Semantics(
-        container: true,
-        explicitChildNodes: true,
-        label: w.labels.toolbar,
-        child: FittedBox(
-          fit: BoxFit.scaleDown,
-          child: w.collapsed ? bar : _Edge(dock: dock, child: bar),
+      child: LgNoteSideScope(
+        // A menu of a bar on the right edge opens to the left, so its notes
+        // would land on the bar if they opened to the right.
+        side:
+            w.noteSide ??
+            (dock == LgToolbarDock.right ? LgNoteSide.left : LgNoteSide.right),
+        child: Semantics(
+          container: true,
+          explicitChildNodes: true,
+          label: w.labels.toolbar,
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: w.collapsed ? bar : _Edge(dock: dock, child: bar),
+          ),
         ),
       ),
     );
