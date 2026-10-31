@@ -28,6 +28,9 @@ dependencies:
   # The connection state's 30 s offline retry window reads the time through it, so tests can
   # move it with fake_async.
   clock: ^1.1.1
+  # The strength bar of the permanent password dialog, as upstream's (same version as
+  # flutter/pubspec.lock).
+  password_strength: 0.2.0
   # Same forks and refs as flutter/pubspec.yaml: the Rust core loads the two texture plugins by
   # dll name and C symbol (docs/新界面/03-实施方案.md §1.6).
   texture_rgba_renderer:

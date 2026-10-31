@@ -29,12 +29,16 @@ final _windows = TargetPlatformVariant.only(TargetPlatform.windows);
 late FakeBind bind;
 late FakeNavigation nav;
 
+/// The list view (the M2a tests read `LgDeviceRow`), favorites and LAN loaded and empty.
 Future<void> pumpDevices(
   WidgetTester tester, {
   ServiceStatus status = ServiceStatus.ready,
 }) async {
+  bind.flutter['peer-card-ui-type'] = '2';
   await pumpHome(tester, id: '135792468', status: status);
   await loadRecent(_recent);
+  await loadCategory('load_fav_peers', []);
+  await loadCategory('load_lan_peers', []);
   await tester.pump();
 }
 

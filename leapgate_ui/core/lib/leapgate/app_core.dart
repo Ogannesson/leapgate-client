@@ -24,8 +24,10 @@ class AppCore {
   final toasts = Toasts();
   final options = OptionsModel();
 
-  /// "Recent" on the home page (M2a); favorites, LAN and the address book join with M4.
-  final recentPeers = RecentPeers();
+  /// The home page's categories (M2a, M2b); the address book and team devices join with M4.
+  final recentPeers = CategoryPeers.recent();
+  final favPeers = CategoryPeers.favorites();
+  final lanPeers = CategoryPeers.lan();
 
   /// The global event stream's table. The connection manager (M3) and the address book (M4)
   /// register their events here, not on a session's.

@@ -37,8 +37,13 @@ class AppFakeBind extends FakeBind {
       case #sessionToggleOption:
       case #mainOnMainWindowClose:
       case #queryOnlines:
+      // The home page's other categories (M2b).
+      case #mainLoadFavPeers:
+      case #mainLoadLanPeers:
         calls.add(invocation);
         return Future<void>.value();
+      case #mainIsOptionFixed:
+        return false;
       case #sessionEnterOrLeave:
       case #mainInitInputSource:
         calls.add(invocation);
