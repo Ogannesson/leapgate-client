@@ -80,6 +80,8 @@ class _SessionPageState extends State<SessionPage>
     // started it before the page.
     _ffi.showRemoteCursor.value = _ffi.options.getToggle('show-remote-cursor');
     _zoomCursor = _ffi.options.getToggle(kOptionZoomCursor).obs;
+    // "光标随画面缩放" in the toolbar's "画面" menu.
+    _ffi.options.listenable(kOptionZoomCursor).addListener(_onZoomCursor);
     windowManager.addListener(this);
     appCore.sessions.addListener(_onRegistry);
     _ffi.connection.addListener(_onConnection);
@@ -97,8 +99,12 @@ class _SessionPageState extends State<SessionPage>
     _ffi.setVisible(widget.active);
   }
 
+  void _onZoomCursor() =>
+      _zoomCursor.value = _ffi.options.getToggle(kOptionZoomCursor);
+
   @override
   void dispose() {
+    _ffi.options.listenable(kOptionZoomCursor).removeListener(_onZoomCursor);
     windowManager.removeListener(this);
     appCore.sessions.removeListener(_onRegistry);
     _ffi.connection.removeListener(_onConnection);
@@ -283,16 +289,11 @@ class _SessionPageState extends State<SessionPage>
             Positioned.fill(child: QualityOverlay(ffi: _ffi)),
             Positioned.fill(child: CanvasHints(ffi: _ffi)),
             if (_ffi.ffiModel.pi.isSet.isTrue)
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: Center(
-                  child: SessionToolbar(
-                      ffi: _ffi,
-                      cursorOverImage: _cursorOverImage,
-                      overlays: widget.overlays),
-                ),
+              Positioned.fill(
+                child: SessionToolbar(
+                    ffi: _ffi,
+                    cursorOverImage: _cursorOverImage,
+                    overlays: widget.overlays),
               ),
             // At the right below the toolbar (`LgNoticeStack`: right 16, top 12 + bar + 12).
             Positioned(

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -23,6 +24,14 @@ class AppFakeBind extends FakeBind {
   bool installed = false;
   final localOptions = <String, String>{};
   final flutterOptions = <String, String>{};
+  final userDefaults = <String, String>{};
+  final peerOptions = <String, String>{};
+
+  /// `sessionGetCommonSync` by key, e.g. `is_screenshot_supported`.
+  final commonSync = <String, String>{};
+
+  /// `sessionAlternativeCodecs`, Rust's JSON.
+  String codecs = '{}';
 
   @override
   dynamic noSuchMethod(Invocation invocation) {
@@ -67,6 +76,49 @@ class AppFakeBind extends FakeBind {
         return '';
       case #mainIsInstalled:
         return installed;
+      // The device's options as the session holds them (the toolbar's place, the OS password).
+      case #sessionPeerOption:
+        calls.add(invocation);
+        peerOptions[args[#name]] = args[#value];
+        return Future<void>.value();
+      case #sessionGetOption:
+        return Future<String?>.value(peerOptions[args[#arg]]);
+      // What the toolbar's menus read (`pages/session/toolbar/`), as for a fresh device.
+      case #mainGetUserDefaultOption:
+        return userDefaults[args[#key]] ?? '';
+      case #sessionGetCommonSync:
+        return commonSync[args[#key]];
+      case #sessionAlternativeCodecs:
+        return Future.value(codecs);
+      case #sessionIsMultiUiSession:
+      case #mainCurrentIsWayland:
+      case #mainHasFileClipboard:
+      case #isDisableAccount:
+        return false;
+      case #mainIsUsingPublicServer:
+        return Future.value(false);
+      case #sessionGetReverseMouseWheelSync:
+      case #mainGetMainDisplay:
+      case #mainSupportedInputSource:
+      case #getLocalKbLayoutType:
+        return '';
+      case #sessionGetCustomImageQuality:
+        return Future<Int32List?>.value();
+      case #sessionLockScreen:
+      case #sessionTakeScreenshot:
+      case #sessionToggleVirtualDisplay:
+      case #sessionTogglePrivacyMode:
+      case #sessionSetReverseMouseWheel:
+      case #sessionChangeResolution:
+      case #sessionSwitchSides:
+      case #sessionElevateDirect:
+      case #sessionElevateWithLogon:
+      case #sessionInputString:
+      case #sessionSetTrackpadSpeed:
+      case #sessionSetScrollStyle:
+      case #sessionChangePreferCodec:
+        calls.add(invocation);
+        return Future<void>.value();
     }
     return super.noSuchMethod(invocation);
   }
