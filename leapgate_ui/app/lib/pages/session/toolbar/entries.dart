@@ -11,7 +11,6 @@ import 'package:flutter_hbb/models/shortcut_model.dart';
 
 import '../../../widgets/lg_menu.dart';
 import '../../../widgets/lg_menu_items.dart';
-import '../../../widgets/lg_tooltip.dart';
 
 sealed class TbEntry {
   const TbEntry();
@@ -239,8 +238,7 @@ Widget _buildItem(TbItem e) {
   );
 }
 
-/// [LgMenuSliderItem] with upstream's 300 ms wait before a value is applied; the slider has
-/// no note of its own, so a greyed one says why with a tooltip.
+/// [LgMenuSliderItem] with upstream's 300 ms wait before a value is applied.
 class _SliderRow extends StatefulWidget {
   const _SliderRow(this.entry, {super.key});
 
@@ -289,21 +287,14 @@ class _SliderRowState extends State<_SliderRow> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    final slider = LgMenuSliderItem(
-      value: _position.clamp(0.0, 1.0),
-      format: (p) => _e.format(_valueAt(p)),
-      semanticLabel: _e.label,
-      startLabel: _e.startLabel,
-      onChanged: _e.onChanged == null ? null : _changed,
-    );
-    final reason = _e.disabledReason;
-    if (_e.onChanged != null || reason == null) return slider;
-    return LgTooltip(
-      message: reason,
-      child: Semantics(hint: reason, child: slider),
-    );
-  }
+  Widget build(BuildContext context) => LgMenuSliderItem(
+    value: _position.clamp(0.0, 1.0),
+    format: (p) => _e.format(_valueAt(p)),
+    semanticLabel: _e.label,
+    startLabel: _e.startLabel,
+    onChanged: _e.onChanged == null ? null : _changed,
+    disabledNote: _e.disabledReason,
+  );
 }
 
 /// A menu's rows, built when it opens and again after a change ([refresh]), since several of

@@ -231,6 +231,7 @@ class _SessionToolbarState extends State<SessionToolbar> {
         _ffi.ffiModel,
         _ffi.canvasModel,
         _ffi.chatModel,
+        _ffi.notices,
         _env!.changed,
         appCore.options.flutter.listenable(kOptionRemoteMenubarState),
       ]),
@@ -262,22 +263,20 @@ class _SessionToolbarState extends State<SessionToolbar> {
     );
   }
 
-  /// A menu of the bar. [disabledReason] greys the whole button and is said on hover;
-  /// [refresh] also rebuilds the open menu besides the env's own changes.
+  /// A menu of the bar. [disabledReason] greys the button and is said on hover; the menu still
+  /// opens, its rows greyed (A-P2 `x-no-perm`). [refresh] also rebuilds the open menu besides
+  /// the env's own changes.
   Widget _menu(String label, LgIcons icon,
-      Future<List<TbEntry>> Function(ToolbarEnv) entries,
-      {String? disabledReason, Listenable? refresh, double? width}) {
-    final button = LgToolbarMenuButton(
-      label: label,
-      icon: icon,
-      width: width ?? kLgMenuWidth,
-      enabled: disabledReason == null,
-      items: [_content(entries, refresh: refresh)],
-    );
-    return disabledReason == null
-        ? button
-        : LgTooltip(message: disabledReason, child: button);
-  }
+          Future<List<TbEntry>> Function(ToolbarEnv) entries,
+          {String? disabledReason, Listenable? refresh, double? width}) =>
+      LgToolbarMenuButton(
+        label: label,
+        icon: icon,
+        width: width ?? kLgMenuWidth,
+        enabled: disabledReason == null,
+        disabledNote: disabledReason,
+        items: [_content(entries, refresh: refresh)],
+      );
 
   Widget _content(Future<List<TbEntry>> Function(ToolbarEnv) entries,
           {Listenable? refresh}) =>
@@ -361,6 +360,8 @@ class _SessionToolbarState extends State<SessionToolbar> {
       encrypted: encrypted,
       unencryptedLabel: l10n.sessionUnencrypted,
       collapsedActions: [?collapsedSwitch],
+      // The notices sit at the top right of the image: notes open on the left (`x-revoked`).
+      noteSide: _ffi.notices.items.isEmpty ? null : LgNoteSide.left,
       groups: [
         [
           LgToolbarMenuButton(

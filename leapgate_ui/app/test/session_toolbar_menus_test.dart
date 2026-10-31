@@ -4,6 +4,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
+import 'package:flutter_hbb/leapgate/notices.dart';
 import 'package:flutter_hbb/leapgate/session.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:leapgate_ui/pages/session/session_toolbar.dart';
@@ -58,8 +59,12 @@ bool _enabled(WidgetTester tester, String label) =>
       _ => throw StateError(label),
     };
 
-Finder _reason(String text) =>
-    find.byWidgetPredicate((w) => w is LgTooltip && w.message == text);
+/// The note of a greyed row (beside the menu) or of a greyed button.
+Finder _reason(String text) => find.byWidgetPredicate(
+  (w) =>
+      (w is LgNoteTip && w.message == text) ||
+      (w is LgTooltip && w.message == text),
+);
 
 Map<String, dynamic> _withPrivacy(Map<String, dynamic> info) => {
   ...info,
@@ -83,16 +88,18 @@ void main() {
       await emit(tester, fakes, s, {'name': 'permission', 'keyboard': 'false'});
       await tester.pumpAndSettle();
 
-      final input = find.byWidgetPredicate(
-        (w) => w is LgToolbarMenuButton && w.label == '输入',
+      // Greyed with the reason, and still opens on its greyed rows (`x-no-perm`).
+      final input = tester.widget<LgToolbarMenuButton>(
+        find.byWidgetPredicate(
+          (w) => w is LgToolbarMenuButton && w.label == '输入',
+        ),
       );
-      expect(tester.widget<LgToolbarMenuButton>(input).enabled, false);
-      expect(
-        find.ancestor(of: input, matching: _reason('未获得键盘和鼠标控制权限')),
-        findsOneWidget,
-      );
+      expect(input.enabled, false);
+      expect(input.disabledNote, '未获得键盘和鼠标控制权限');
       await _openMenu(tester, '输入');
-      expect(_item('仅查看模式'), findsNothing);
+      for (final label in ['仅查看模式', '显示本机光标', '反转滚动方向', '交换鼠标左右键']) {
+        expect(_enabled(tester, label), false, reason: label);
+      }
     });
 
     testMainWindow(
@@ -198,6 +205,14 @@ void main() {
         'clipboard': 'false',
         'restart': 'false',
       });
+
+      // A notice in the corner sends the notes of greyed rows to the left (`x-revoked`).
+      s.notices.add(SessionNotice('Remote reboot'));
+      await tester.pump();
+      expect(
+        tester.widget<LgSessionToolbar>(find.byType(LgSessionToolbar)).noteSide,
+        LgNoteSide.left,
+      );
 
       await _openMenu(tester, '会话');
       expect(_enabled(tester, '静音'), true);
