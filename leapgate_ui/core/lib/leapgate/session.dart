@@ -10,6 +10,7 @@ import 'package:flutter_hbb/models/file_model.dart';
 import 'package:flutter_hbb/models/input_model.dart';
 import 'package:flutter_hbb/models/model.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
+import 'package:flutter_hbb/models/shortcut_model.dart';
 import 'package:get/get.dart';
 import 'package:uuid/uuid.dart';
 
@@ -53,6 +54,12 @@ class FFI {
     textureModel = TextureModel(WeakReference(this));
     connection = ConnectionModel(WeakReference(this));
     _registerEvents();
+    shortcutModel = ShortcutModel(WeakReference(this));
+    // Rust's shortcut matcher (`src/keyboard/shortcuts.rs`, upstream `model.dart:473-477`).
+    events.on(kShortcutEventName, (evt) {
+      final action = evt['action'];
+      if (action is String) shortcutModel.onTriggered(action);
+    });
   }
 
   /// The events of the copied models (upstream `FfiModel.startEventListener`,
@@ -98,6 +105,7 @@ class FFI {
   late final ElevationModel elevationModel;
   late final TextureModel textureModel;
   late final ConnectionModel connection;
+  late final ShortcutModel shortcutModel;
 
   /// The device ID.
   final String id;

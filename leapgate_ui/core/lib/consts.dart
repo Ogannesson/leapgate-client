@@ -2,6 +2,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/common.dart';
 
+export 'common/widgets/keyboard_shortcuts/shortcut_constants.dart';
+
+const int kMaxVirtualDisplayCount = 4;
+const int kAllVirtualDisplay = -1;
+
 const double kDesktopRemoteTabBarHeight = 28.0;
 
 const kAllDisplayValue = -1;
@@ -23,6 +28,13 @@ const String kPlatformAdditionsRustDeskVirtualDisplays =
 
 const String kPlatformAdditionsAmyuniVirtualDisplays =
     "amyuni_virtual_displays";
+const String kPlatformAdditionsHasFileClipboard = "has_file_clipboard";
+const String kPlatformAdditionsSupportedPrivacyModeImpl =
+    "supported_privacy_mode_impl";
+
+const String kPrivacyModeImplMag = 'privacy_mode_impl_mag';
+const String kPrivacyModeImplExcludeFromCapture =
+    'privacy_mode_impl_exclude_from_capture';
 
 const String kPeerPlatformWindows = "Windows";
 
@@ -41,14 +53,26 @@ const String kOptionVerificationMethod = "verification-method";
 const String kOptionApproveMode = "approve-mode";
 const String kOptionCollapseToolbar = "collapse_toolbar";
 const String kOptionZoomCursor = "zoom-cursor";
+const String kOptionEnableFileCopyPaste = "enable-file-copy-paste";
 const String kOptionTouchMode = "touch-mode";
+const String kOptionCodecPreference = "codec-preference";
+const String kOptionRemoteMenubarDragLeft = "remote-menubar-drag-left";
+const String kOptionRemoteMenubarDragRight = "remote-menubar-drag-right";
+const String kOptionRemoteMenubarEdge = "remote-menubar-edge";
+const String kOptionRemoteMenubarFraction = "remote-menubar-frac";
+const String kOptionAllowMultiEdgeToolbarDock =
+    "allow-multi-edge-toolbar-dock";
 const String kOptionRemoteMenubarState = "remoteMenubarState";
 const String kOptionEnableConfirmClosingTabs = "enable-confirm-closing-tabs";
 const String kOptionStopService = "stop-service";
+const String kOptionAllowMonitorSwitchMainToolbar = "allow-monitor-switch-main-toolbar";
+const String kOptionAllowMonitorSwitchMinToolbar = "allow-monitor-switch-min-toolbar";
 
 const String kOptionToggleViewOnly = "view-only";
 
 const String kOptionToggleShowMyCursor = "show-my-cursor";
+
+const String kOptionShowMobileAction = "showMobileActions";
 
 const String kPointerEventKindTouch = "touch";
 
@@ -68,6 +92,9 @@ const String kMouseEventTypeUp = "up";
 
 const String kKeyFlutterKey = "flutter_key";
 
+const String kKeyShowMonitorsToolbar = 'show_monitors_toolbar';
+const String kKeyReverseMouseWheel = "reverse_mouse_wheel";
+
 const String kMsgboxTextWaitingForImage = 'Connected, waiting for image...';
 
 const int kMobileDefaultDisplayWidth = 720;
@@ -77,6 +104,15 @@ const int kMobileDefaultDisplayHeight = 1280;
 const int kDesktopDefaultDisplayWidth = 1080;
 
 const int kDesktopDefaultDisplayHeight = 720;
+
+const double kMinFps = 5;
+const double kDefaultFps = 30;
+const double kMaxFps = 120;
+
+const double kMinQuality = 10;
+const double kDefaultQuality = 50;
+const double kMaxQuality = 100;
+const double kMaxMoreQuality = 2000;
 
 const int kMinTrackpadSpeed = 10;
 
@@ -158,14 +194,22 @@ const kRemoteImageQualityBalanced = 'balanced';
 /// [kRemoteImageQualityLow] Low image quality, better performance.
 const kRemoteImageQualityLow = 'low';
 
+/// [kRemoteImageQualityCustom] Custom image quality.
+const kRemoteImageQualityCustom = 'custom';
+
 const kIgnoreDpi = true;
 
 // Scale custom related constants
 const String kCustomScalePercentKey =
     'custom_scale_percent'; // Flutter option key for storing custom scale percent (integer 5-1000)
 const int kScaleCustomMinPercent = 5;
+const int kScaleCustomPivotPercent = 100; // 100% should be at 1/3 of track
 
 const int kScaleCustomMaxPercent = 1000;
+const double kScaleCustomPivotPos = 1.0 / 3.0; // first 1/3 → up to 100%
+const double kScaleCustomDetentEpsilon =
+    0.006; // snap range around pivot (~0.6%)
+const Duration kDebounceCustomScaleDuration = Duration(milliseconds: 300);
 
 /// Android channel invoke type key
 class AndroidChannel {

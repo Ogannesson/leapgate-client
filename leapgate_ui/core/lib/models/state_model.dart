@@ -1,4 +1,5 @@
 // 上游：flutter/lib/models/state_model.dart@bd9262397（改写：只留复制进来的 models 和 FfiModel 用到的成员；全屏经 appCore.window；tabBarHeight 取新界面顶栏的高度。上游改了这些成员时人工移植）
+import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:get/get.dart';
 
@@ -17,10 +18,28 @@ class StateGlobal {
   // Kept per device as upstream does: a device has at most one remote desktop view.
   final RxMap<String, bool> relativeMouseModeState = <String, bool>{}.obs;
 
+  final Map<String, Map<int, String?>> _lastResolutionGroupValues = {};
+
   RxBool get fullscreen => _fullscreen;
   // The canvas sits right below the app's title bar, which full screen hides.
   double get tabBarHeight => fullscreen.isTrue ? 0 : kLeapgateTitleBarHeight;
   RxDouble get windowBorderWidth => _windowBorderWidth;
+
+  resetLastResolutionGroupValues(String peerId) {
+    _lastResolutionGroupValues[peerId] = {};
+  }
+
+  setLastResolutionGroupValue(
+      String peerId, int currentDisplay, String? value) {
+    if (!_lastResolutionGroupValues.containsKey(peerId)) {
+      _lastResolutionGroupValues[peerId] = {};
+    }
+    _lastResolutionGroupValues[peerId]![currentDisplay] = value;
+  }
+
+  String? getLastResolutionGroupValue(String peerId, int currentDisplay) {
+    return _lastResolutionGroupValues[peerId]?[currentDisplay];
+  }
 
   setFullscreen(bool v) {
     if (_fullscreen.value != v) {
@@ -35,6 +54,11 @@ class StateGlobal {
       _inputSource = bind.mainGetInputSource();
     }
     return _inputSource;
+  }
+
+  setInputSource(SessionID sessionId, String v) async {
+    await bind.mainSetInputSource(sessionId: sessionId, value: v);
+    _inputSource = bind.mainGetInputSource();
   }
 
   StateGlobal._();
