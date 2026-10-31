@@ -167,11 +167,6 @@ class _SessionNoticesViewState extends State<SessionNoticesView> {
         LgNoticeAction(l10n.noticeChoosePrinter, () => _choosePrinter(n)),
         LgNoticeAction(l10n.noticeDontPrint,
             () => _answerPrint(n, print: false, remember: remember)),
-        // A stand-in for the designer's check box on the notice.
-        LgNoticeAction(
-            '${remember ? '☑' : '☐'} ${l10n.noticeRememberChoice}',
-            () => setState(() => _rememberPrint[n] = !remember),
-            semanticLabel: l10n.noticeRememberChoice),
       ];
     }
     if (type == 'on-uac' || type == 'on-foreground-elevated') {
@@ -297,6 +292,13 @@ class _SessionNoticesViewState extends State<SessionNoticesView> {
                 ? LgIcons.printer
                 : null,
             actions: _buttonsOf(l10n, n),
+            check: (n.tag ?? '').startsWith(kNoticeTagPrinterPrefix)
+                ? LgNoticeCheck(
+                    label: l10n.noticeRememberChoice,
+                    value: _rememberPrint[n] ?? false,
+                    onChanged: (v) => setState(() => _rememberPrint[n] = v),
+                  )
+                : null,
           ),
       ],
       onDismiss: (id) =>

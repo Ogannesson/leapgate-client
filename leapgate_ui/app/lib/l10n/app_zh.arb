@@ -475,5 +475,13 @@
   "tabMenuClose": "关闭",
   "menuToastWaylandReset": "已重置键盘授权",
   "menuToastWaylandResetFailed": "无法重置键盘授权",
-  "menuFollowingCursor": "跟随远程光标时始终显示"
+  "menuFollowingCursor": "跟随远程光标时始终显示",
+  "routeQualityData": "质量数据",
+  "routeChart60s": "60 秒前",
+  "routeChart30s": "30 秒前",
+  "routeChartNow": "现在",
+  "routeLatencyChartCurrent": "近 60 秒的端到端延迟，当前 {ms} ms",
+  "@routeLatencyChartCurrent": {"placeholders": {"ms": {"type": "int"}}},
+  "chatMine": "我",
+  "chatTheirs": "对方"
 }

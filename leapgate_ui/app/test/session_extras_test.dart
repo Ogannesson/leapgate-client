@@ -11,6 +11,7 @@ import 'package:leapgate_ui/pages/session/session_notices.dart';
 import 'package:leapgate_ui/shell/navigation.dart';
 import 'package:leapgate_ui/shell/tab_menu.dart';
 import 'package:leapgate_ui/widgets/lg_selection.dart';
+import 'package:leapgate_ui/widgets/lg_session_toolbar.dart';
 import 'package:leapgate_ui/widgets/lg_status.dart';
 
 import 'session_fakes.dart';
@@ -98,7 +99,8 @@ void main() {
 
   group('connection details', () {
     Future<void> openDetails(WidgetTester tester) async {
-      await tester.tap(find.bySemanticsLabel(RegExp('连接方式详情')));
+      // The toolbar's mark ("经中继") opens them.
+      await tester.tap(find.byType(LgToolbarRouteButton));
       await tester.pumpAndSettle();
     }
 
@@ -332,6 +334,8 @@ void main() {
 
         expect(find.text('你好'), findsOneWidget);
         await tester.enterText(find.byType(EditableText), ' 好的 ');
+        // "发送" turns on with the text.
+        await tester.pump();
         await tester.tap(find.text('发送'));
         await tester.pump();
 
