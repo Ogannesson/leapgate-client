@@ -148,6 +148,20 @@ class FakeLeapgate implements lg.Leapgate {
           {required SessionID sessionId, required bool visible, dynamic hint}) =>
       this.visible.add((sessionId, visible));
 
+  /// Q3's answer for every session.
+  String connection = '{}';
+
+  @override
+  String leapgateSessionConnection(
+          {required SessionID sessionId, dynamic hint}) =>
+      connection;
+
+  /// The name the remote user sees.
+  String displayName = '';
+
+  @override
+  String leapgateLocalDisplayName({dynamic hint}) => displayName;
+
   @override
   dynamic noSuchMethod(Invocation invocation) =>
       super.noSuchMethod(invocation);

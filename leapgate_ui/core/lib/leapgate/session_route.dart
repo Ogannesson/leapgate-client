@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter_hbb/common.dart';
 
+import 'bridge.dart';
 import 'session.dart';
 
 /// What Q3's export says about a session's connection (`LEAPGATE.md` §10.4 "Q3 挂钩方案"):
@@ -33,14 +34,13 @@ class SessionRoute {
   final String? refused;
 }
 
-/// Block 2's `leapgate_session_connection(session_id)`. It is not in the bridge yet (coder R,
-/// `ui/rust-q3`): until it is, this answers `{}`; tests set their own.
-/// When merging: `(id) => lgBind.leapgateSessionConnection(sessionId: id)`.
-String Function(SessionID sessionId) readSessionConnection = (_) => '{}';
+/// Block 2's `leapgate_session_connection(session_id)`; tests set their own.
+String Function(SessionID sessionId) readSessionConnection =
+    (id) => lgBind.leapgateSessionConnection(sessionId: id);
 
 /// Block 2's `leapgate_local_display_name()`, the name the remote user sees for this device;
-/// stand-in as [readSessionConnection]. When merging: `() => lgBind.leapgateLocalDisplayName()`.
-String Function() readLocalDisplayName = () => '';
+/// tests set their own.
+String Function() readLocalDisplayName = () => lgBind.leapgateLocalDisplayName();
 
 /// Read each time it is shown, so a reconnect's new path shows once it is connected again.
 SessionRoute sessionRoute(FFI ffi) =>
