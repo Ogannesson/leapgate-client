@@ -12,6 +12,7 @@ import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:uni_links/uni_links.dart';
 import 'package:window_manager/window_manager.dart';
 
+import 'cm/cm_main.dart';
 import 'l10n/app_localizations.dart';
 import 'shell/app_window.dart';
 import 'shell/links.dart';
@@ -27,11 +28,7 @@ Future<void> main(List<String> args) async {
   _logUncaughtErrors();
 
   if (args.isNotEmpty && args.first == '--cm') {
-    // The connection manager is M3; until then the process only shows an empty window.
-    desktopType = DesktopType.cm;
-    await windowManager.ensureInitialized();
-    runApp(const LeapgateApp(home: Scaffold()));
-    windowManager.waitUntilReadyToShow(null, () => windowManager.show());
+    await runConnectionManager();
   } else if (args.contains('--install')) {
     // The install page is round 3.
     lgBind.leapgateLog(
