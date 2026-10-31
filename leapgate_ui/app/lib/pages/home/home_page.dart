@@ -21,6 +21,10 @@ const double _shortWindow = 700;
 
 const double _sideWidth = 240;
 
+/// Side padding of a text button (`.btn.txt`), passed explicitly so the ID's "Copy" can be
+/// moved back by exactly that much.
+const double _textButtonPadding = 10;
+
 /// Home tab: left column (this device, navigation) and the selected page.
 /// M2a fills the password row and the devices page; the account area and the
 /// other pages come with later blocks.
@@ -173,8 +177,9 @@ class _SideColumn extends StatelessWidget {
                   children: [
                     status.id.isEmpty
                         ? _IdGenerating(text: l10n.idGenerating)
-                        // Double-click the ID or "Copy" under it (01 P1 block A), the same
-                        // button as the password's.
+                        // Double-click the ID or "Copy" under it (01 P1 block A): a text
+                        // button with the icon, as in `p1-ben-both` (`.cpid`). It sits
+                        // under the ID because the 240 column has no room beside it.
                         : Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
@@ -182,13 +187,19 @@ class _SideColumn extends StatelessWidget {
                                 onDoubleTap: () => copyWithToast(status.id),
                                 child: _IdGroups(status.id),
                               ),
-                              const SizedBox(height: LgSpace.s2),
-                              LgButton(
-                                label: l10n.homeCopy,
-                                semanticLabel: l10n.homeCopyId,
-                                icon: LgIcons.copy,
-                                kind: LgButtonKind.primary,
-                                onPressed: () => copyWithToast(status.id),
+                              if (!short) const SizedBox(height: LgSpace.s2),
+                              // Its text lines up with the ID: back by the text button's
+                              // own side padding.
+                              Transform.translate(
+                                offset: const Offset(-_textButtonPadding, 0),
+                                child: LgButton(
+                                  label: l10n.homeCopy,
+                                  semanticLabel: l10n.homeCopyId,
+                                  icon: LgIcons.copy,
+                                  kind: LgButtonKind.text,
+                                  horizontalPadding: _textButtonPadding,
+                                  onPressed: () => copyWithToast(status.id),
+                                ),
                               ),
                             ],
                           ),
