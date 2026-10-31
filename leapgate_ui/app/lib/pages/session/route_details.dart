@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_hbb/consts.dart' show kShortcutActionToggleQualityMonitor;
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/latency.dart';
 import 'package:flutter_hbb/leapgate/session.dart';
@@ -55,6 +56,15 @@ Widget _mark(FFI ffi, AppLocalizations l10n) {
     unencryptedLabel: l10n.sessionUnencrypted,
   );
 }
+
+/// The quality data shortcut (upstream `toolbar.dart:1061-1071`): flips what the switch in the
+/// details shows. [detailMode] is read when the keys are pressed.
+void registerQualityMonitorShortcut(FFI ffi, bool Function() detailMode) =>
+    ffi.shortcutModel.register(
+      kShortcutActionToggleQualityMonitor,
+      () => setShowsQualityMonitor(
+          ffi, !showsQualityMonitor(ffi, detailMode: detailMode())),
+    );
 
 /// The path names of Q3's codes (01 §4.2); null for a code this version does not know.
 String? routePathName(AppLocalizations l10n, String? path) => switch (path) {

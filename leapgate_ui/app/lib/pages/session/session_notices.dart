@@ -17,6 +17,7 @@ import '../../widgets/lg_button.dart';
 import '../../widgets/lg_feedback.dart';
 import '../../widgets/lg_panel_inputs.dart';
 import '../../widgets/lg_selection.dart';
+import 'toolbar/dialogs.dart';
 
 /// At most this many notices show, later ones wait (01 P2 block E): [LgNoticeStack] draws this
 /// many, and a waiting notice starts its time only when it shows.
@@ -267,7 +268,8 @@ class _SessionNoticesViewState extends State<SessionNoticesView> {
     }
   }
 
-  void _requestElevation() => showRequestElevation(context, widget.ffi);
+  void _requestElevation() => showRequestElevationDialog(
+      _overlays, widget.ffi, AppLocalizations.of(context)!);
 
   /// Closing the screenshot notice drops the image in Rust.
   void _dismiss(SessionNotice n) {
@@ -314,14 +316,6 @@ bool _asks(SessionNotice n) {
       type == 'on-uac' ||
       type == 'on-foreground-elevated' ||
       (type == 'elevation-error' && n.key != 'No permission');
-}
-
-/// Stand-in for the toolbar's "请求提升权限" dialog (choose how: ask the remote user, or send an
-/// administrator's account and password), which coder A makes in `pages/session/toolbar/`;
-/// replaced by it when the branches come together.
-void showRequestElevation(BuildContext context, FFI ffi) {
-  lgBind.leapgateLog(
-      level: 2, msg: 'leapgate ui: no elevation request dialog yet');
 }
 
 /// Something that did not go as asked (privacy mode refused or lost, a monitor gone) is a

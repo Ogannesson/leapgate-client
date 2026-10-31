@@ -7,7 +7,6 @@
 
 import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/consts.dart';
-import 'package:flutter_hbb/leapgate/notices.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 
 import 'entries.dart';
@@ -133,19 +132,7 @@ List<TbEntry> _privacyMode(ToolbarEnv env) {
             !bind.sessionIsMultiUiSession(sessionId: env.sessionId))) {
       return true;
     }
-    late final SessionNotice notice;
-    notice = SessionNotice(
-      'Please switch to Display 1 first',
-      args: const {'type': 'custom-nook-nocancel-hasclose', 'title': 'info'},
-      tag: 'privacy-mode-display-1',
-      actions: [
-        NoticeAction('Switch to Display 1', () {
-          ffi.notices.dismiss(notice);
-          openMonitorInTheSameTab(0, ffi, pi);
-        }),
-      ],
-    );
-    ffi.notices.add(notice);
+    ffi.requests.showSwitchToFirstMonitor();
     return false;
   }
 
@@ -204,7 +191,9 @@ List<TbEntry> _privacyMode(ToolbarEnv env) {
       ),
     ];
   }
-  // Without the permission only the one that is on is listed, so it can be turned off.
+  // Without the permission only the one that is on is listed, so it can be turned off. One that
+  // is off needs the keyboard and mouse permission to be turned on
+  // (`remote_toolbar.dart:1783-1787`, `shortcut_model.dart:578-598`).
   final rows = <TbEntry>[];
   for (final e in impls) {
     final implKey = (e as List<dynamic>)[0] as String;
@@ -213,7 +202,9 @@ List<TbEntry> _privacyMode(ToolbarEnv env) {
     final on = active == implKey;
     final rowReason = model.viewOnly
         ? l10n.menuViewOnlyUnavailable
-        : (permitted || on ? null : l10n.menuNoPrivacy);
+        : (on
+              ? null
+              : env.keyboardReason ?? (permitted ? null : l10n.menuNoPrivacy));
     rows.add(
       TbItem(
         label: switch (name) {

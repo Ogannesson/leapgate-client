@@ -75,9 +75,15 @@ class _CustomResolutionState extends State<_CustomResolution> {
     super.dispose();
   }
 
+  /// Digits only, at most 4 (upstream's input formatters, `remote_toolbar.dart:2496-2500`).
+  static int? _parse(String text) {
+    final t = text.trim();
+    return RegExp(r'^\d{1,4}$').hasMatch(t) ? int.parse(t) : null;
+  }
+
   void _apply() {
-    final w = int.tryParse(_w.text.trim());
-    final h = int.tryParse(_h.text.trim());
+    final w = _parse(_w.text);
+    final h = _parse(_h.text);
     if (w == null || h == null || w <= 0 || h <= 0) {
       setState(() => _invalid = true);
       return;

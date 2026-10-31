@@ -18,6 +18,7 @@ import '../../theme/lg_tokens.dart';
 import '../../widgets/lg_menu.dart';
 import '../../widgets/lg_session_toolbar.dart';
 import '../../widgets/lg_status.dart';
+import '../../widgets/lg_tooltip.dart';
 import 'chat/chat.dart';
 import 'recording.dart';
 import 'route_details.dart';
@@ -132,6 +133,7 @@ class _SessionToolbarState extends State<SessionToolbar> {
           mounted ? TabShortcuts.of(context)?.previous() : null,
       onToggleCollapsed: () => _setCollapsed(!_collapsed),
       onTogglePin: () => _setPinned(!_pinned),
+      detailMode: () => mounted && LgTokens.of(context).detail,
     );
   }
 
@@ -225,15 +227,7 @@ class _SessionToolbarState extends State<SessionToolbar> {
       fit: StackFit.expand,
       children: [
         if (preview != null) _dropPreview(preview, constraints.biggest),
-        Align(
-          alignment: alignmentForEdge(dock.edge, dock.fraction),
-          child: GestureDetector(
-            onPanStart: _dragStart,
-            onPanUpdate: _dragUpdate,
-            onPanEnd: _dragEnd,
-            child: bar,
-          ),
-        ),
+        Align(alignment: alignmentForEdge(dock.edge, dock.fraction), child: bar),
       ],
     );
   }
@@ -260,15 +254,28 @@ class _SessionToolbarState extends State<SessionToolbar> {
     );
   }
 
+  /// A menu of the bar. [disabledReason] greys the whole button and is said on hover;
+  /// [refresh] also rebuilds the open menu besides the env's own changes.
   Widget _menu(String label, LgIcons icon,
-          Future<List<TbEntry>> Function(ToolbarEnv) entries) =>
-      LgToolbarMenuButton(
-        label: label,
-        icon: icon,
-        items: [
-          TbMenuContent(build: () => entries(_env!), refresh: _env!.changed),
-        ],
-      );
+      Future<List<TbEntry>> Function(ToolbarEnv) entries,
+      {String? disabledReason, Listenable? refresh}) {
+    final button = LgToolbarMenuButton(
+      label: label,
+      icon: icon,
+      enabled: disabledReason == null,
+      items: [
+        TbMenuContent(
+          build: () => entries(_env!),
+          refresh: refresh == null
+              ? _env!.changed
+              : Listenable.merge([_env!.changed, refresh]),
+        ),
+      ],
+    );
+    return disabledReason == null
+        ? button
+        : LgTooltip(message: disabledReason, child: button);
+  }
 
   Widget _bar(BuildContext context, BoxConstraints constraints) {
     final env = _env!;
@@ -348,9 +355,13 @@ class _SessionToolbarState extends State<SessionToolbar> {
         ],
         [
           _menu(l10n.toolbarDisplay, LgIcons.image, displayMenuEntries),
+          // Upstream hides the keyboard menu without the keyboard permission
+          // (`remote_toolbar.dart` `_KeyboardMenu`); 01 greys it with the reason.
           if (_ffi.connType == ConnType.defaultConn)
-            _menu(l10n.toolbarInput, LgIcons.keyboard, inputMenuEntries),
-          _menu(l10n.toolbarActions, LgIcons.bolt, actionMenuEntries),
+            _menu(l10n.toolbarInput, LgIcons.keyboard, inputMenuEntries,
+                disabledReason: env.keyboardReason),
+          _menu(l10n.toolbarActions, LgIcons.bolt, actionMenuEntries,
+              refresh: _ffi.requests.screenshotPending),
           if (fold) more else sessionMenu,
         ],
         if (!fold && (chat.isNotEmpty || record != null)) [...chat, ?record],
@@ -362,15 +373,23 @@ class _SessionToolbarState extends State<SessionToolbar> {
             danger: true,
             onPressed: () => appCore.sessions.close(_ffi),
           ),
+          // Only the handle drags the bar, as upstream's drag button
+          // (`remote_toolbar.dart` `_DraggableShowHide`): a press on a button that slips a few
+          // pixels still opens its menu.
           Semantics(
             label: l10n.toolbarMove,
             child: ExcludeSemantics(
-              child: MouseRegion(
-                cursor: SystemMouseCursors.move,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
-                  child: LgIcon(LgIcons.grip,
-                      size: t.sizes.icon, color: t.colors.text2),
+              child: GestureDetector(
+                onPanStart: _dragStart,
+                onPanUpdate: _dragUpdate,
+                onPanEnd: _dragEnd,
+                child: MouseRegion(
+                  cursor: SystemMouseCursors.move,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: LgIcon(LgIcons.grip,
+                        size: t.sizes.icon, color: t.colors.text2),
+                  ),
                 ),
               ),
             ),

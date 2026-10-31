@@ -175,7 +175,11 @@ Widget _buildEntry(TbEntry e) => switch (e) {
   TbGroup() => LgMenuGroup(e.title),
   TbDivider() => const Divider(height: 9, indent: 16, endIndent: 16),
   TbItem() => _buildItem(e),
-  TbSlider() => _withReason(e.disabledReason, _SliderRow(e)),
+  // Keyed by its label, so a slider's state never passes to another when rows come and go.
+  TbSlider() => _withReason(
+    e.disabledReason,
+    _SliderRow(e, key: ValueKey('slider:${e.label}')),
+  ),
   TbStepper() => _StepperRow(e),
   TbSubmenu() => _withReason(
     e.disabledReason,
@@ -211,7 +215,7 @@ Widget _buildItem(TbItem e) {
 // Material controls, labelled for the tests and screen readers.
 
 class _SliderRow extends StatefulWidget {
-  const _SliderRow(this.entry);
+  const _SliderRow(this.entry, {super.key});
 
   final TbSlider entry;
 
@@ -231,9 +235,13 @@ class _SliderRowState extends State<_SliderRow> {
     if (_apply == null) _value = _e.value;
   }
 
+  /// The menu closing within the 300 ms still sends the last value.
   @override
   void dispose() {
-    _apply?.cancel();
+    if (_apply != null) {
+      _apply!.cancel();
+      _e.onChanged?.call(_value);
+    }
     super.dispose();
   }
 

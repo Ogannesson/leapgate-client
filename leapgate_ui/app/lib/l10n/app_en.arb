@@ -301,7 +301,7 @@
   "menuDlgCustomResTitle": "Custom resolution",
   "menuDlgWidth": "Width",
   "menuDlgHeight": "Height",
-  "menuDlgResInvalid": "Width and height must be positive whole numbers.",
+  "menuDlgResInvalid": "Width and height must be whole numbers from 1 to 9999.",
   "menuDlgKbTitle": "Keyboard layout of this device",
   "menuDlgKbAnsi": "Enter is a horizontal bar.",
   "menuDlgKbIso": "Enter is an inverted L, with an extra key next to left Shift.",
@@ -548,5 +548,8 @@
   "recordNoPermission": "No permission to record",
   "tabMenuCopyId": "Copy device ID",
   "tabMenuCloseOthers": "Close other tabs",
-  "tabMenuClose": "Close"
+  "tabMenuClose": "Close",
+  "menuToastWaylandReset": "Keyboard permission reset",
+  "menuToastWaylandResetFailed": "Couldn't reset keyboard permission",
+  "menuFollowingCursor": "Shown while following the remote cursor"
 }

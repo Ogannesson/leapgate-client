@@ -193,6 +193,18 @@ Future<List<TbEntry>> displayMenuEntries(ToolbarEnv env) async {
   // Image quality.
   Future<void> setQuality(String value) async {
     await bind.sessionSetImageQuality(sessionId: sid, value: value);
+    // Custom: the remote device gets the values the sliders start from, as upstream's dialog
+    // sends them when it closes (`dialog.dart:1845-1866`).
+    if (value == kRemoteImageQualityCustom) {
+      final custom = await _readCustomQuality(env);
+      await bind.sessionSetCustomImageQuality(
+        sessionId: sid,
+        value: custom.quality,
+      );
+      if (!custom.hideFps) {
+        await bind.sessionSetCustomFps(sessionId: sid, fps: custom.fps);
+      }
+    }
     env.notifyChanged();
   }
 
@@ -326,15 +338,17 @@ Future<_Codecs?> _codecs(ToolbarEnv env) async {
   }
 }
 
-/// The custom quality and frame rate (`dialog.dart:1828-1900`). The frame rate is hidden on a
-/// public server without a direct connection and for peers before 1.2.0.
-Future<List<TbEntry>> _customQuality(ToolbarEnv env) async {
-  final l10n = env.l10n;
+/// The saved custom quality and frame rate, or upstream's defaults (`dialog.dart:1828-1891`).
+/// The frame rate is hidden on a public server without a direct connection and for peers
+/// before 1.2.0.
+Future<({int quality, int fps, bool hideFps})> _readCustomQuality(
+  ToolbarEnv env,
+) async {
   final sid = env.sessionId;
-  final pi = env.pi;
   final public = await bind.mainIsUsingPublicServer();
   final direct = env.ffi.connection.direct == true;
-  final hideFps = (public && !direct) || versionCmp(pi.version, '1.2.0') < 0;
+  final hideFps =
+      (public && !direct) || versionCmp(env.pi.version, '1.2.0') < 0;
   final q = await bind.sessionGetCustomImageQuality(sessionId: sid);
   var quality = q != null && q.isNotEmpty ? q[0] : kDefaultQuality.toInt();
   if (quality < kMinQuality || quality > kMaxQuality) {
@@ -343,6 +357,14 @@ Future<List<TbEntry>> _customQuality(ToolbarEnv env) async {
   final fpsOption = await env.ffi.options.get('custom-fps');
   var fps = (double.tryParse(fpsOption ?? '') ?? kDefaultFps).toInt();
   if (fps < kMinFps || fps > kMaxFps) fps = kDefaultFps.toInt();
+  return (quality: quality, fps: fps, hideFps: hideFps);
+}
+
+/// The two sliders of the custom quality.
+Future<List<TbEntry>> _customQuality(ToolbarEnv env) async {
+  final l10n = env.l10n;
+  final sid = env.sessionId;
+  final (:quality, :fps, :hideFps) = await _readCustomQuality(env);
   return [
     TbSlider(
       label: l10n.toolbarQuality,
@@ -569,7 +591,9 @@ Future<List<TbEntry>> _cursorEntries(ToolbarEnv env, String viewStyle) async {
         label: l10n.menuShowRemoteCursor,
         checked: ffi.showRemoteCursor.value,
         actionId: kShortcutActionToggleShowRemoteCursor,
-        disabledReason: model.viewOnly ? l10n.menuViewOnlyUnavailable : null,
+        disabledReason: model.viewOnly
+            ? l10n.menuViewOnlyUnavailable
+            : (following ? l10n.menuFollowingCursor : null),
         onPressed: model.viewOnly || following
             ? null
             : () async {

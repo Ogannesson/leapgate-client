@@ -382,5 +382,6 @@ TbItem _toggle(
 /// The image of an Android peer takes the navigation bar only once it shows.
 bool androidNavBarApplies(FFI ffi) =>
     ffi.ffiModel.isPeerAndroid &&
+    ffi.ffiModel.keyboard &&
     ffi.ffiModel.pi.isSet.isTrue &&
     ffi.ffiModel.waitForFirstImage.isFalse;

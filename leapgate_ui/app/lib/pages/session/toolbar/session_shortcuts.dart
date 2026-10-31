@@ -3,11 +3,14 @@
 // `flutter/lib/common/widgets/toolbar.dart:1421-1459`), rewritten for one window with tabs:
 // the menu actions run the rows of the menus (built again when the keys are pressed), the
 // others are wired here. "收起 / 展开工具栏" takes the place of upstream's hide-the-toolbar
-// (02 §1.4.6). The chat and voice call actions come with the chat (`chat/`).
+// (02 §1.4.6). The chat, voice call and quality monitor actions live beside what they toggle.
 
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/models/state_model.dart';
+
+import '../chat/chat.dart';
+import '../route_details.dart';
 
 import 'action_menu.dart';
 import 'display_menu.dart';
@@ -23,6 +26,7 @@ void registerSessionShortcuts(
   required void Function() onPreviousTab,
   required void Function() onToggleCollapsed,
   required void Function() onTogglePin,
+  required bool Function() detailMode,
 }) {
   final ffi = env.ffi;
   final shortcuts = ffi.shortcutModel;
@@ -81,4 +85,6 @@ void registerSessionShortcuts(
   );
   shortcuts.register(kShortcutActionToggleToolbar, onToggleCollapsed);
   shortcuts.register(kShortcutActionPinToolbar, onTogglePin);
+  registerQualityMonitorShortcut(ffi, detailMode);
+  registerChatShortcuts(ffi);
 }

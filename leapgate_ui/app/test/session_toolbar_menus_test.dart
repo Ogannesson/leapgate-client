@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
@@ -72,13 +73,93 @@ void main() {
       await pumpMainWindow(tester);
       final s = await _open(tester, fakes);
       await emit(tester, fakes, s, {'name': 'permission', 'keyboard': 'false'});
+      await tester.pumpAndSettle();
 
+      final input = find.byWidgetPredicate(
+        (w) => w is LgToolbarMenuButton && w.label == '输入',
+      );
+      expect(tester.widget<LgToolbarMenuButton>(input).enabled, false);
+      expect(
+        find.ancestor(of: input, matching: _reason('未获得键盘和鼠标控制权限')),
+        findsOneWidget,
+      );
       await _openMenu(tester, '输入');
-      for (final label in ['仅查看模式', '显示本机光标', '反转滚动方向', '交换鼠标左右键']) {
-        expect(_enabled(tester, label), false, reason: label);
-      }
-      expect(_reason('未获得键盘和鼠标控制权限'), findsWidgets);
+      expect(_item('仅查看模式'), findsNothing);
     });
+
+    testMainWindow(
+      'several privacy modes: one that is off needs the keyboard permission',
+      (tester) async {
+        await pumpMainWindow(tester);
+        final s = await _open(
+          tester,
+          fakes,
+          info: {
+            ..._withPrivacy(peerInfo()),
+            'platform_additions': jsonEncode({
+              kPlatformAdditionsSupportedPrivacyModeImpl: [
+                [kPrivacyModeImplMag, 'privacy_mode_impl_mag_tip'],
+                [
+                  'privacy_mode_impl_virtual_display',
+                  'privacy_mode_impl_virtual_display_tip',
+                ],
+              ],
+            }),
+          },
+        );
+        s.privacyMode.value = kPrivacyModeImplMag;
+        await emit(tester, fakes, s, {
+          'name': 'permission',
+          'keyboard': 'false',
+        });
+
+        await _openMenu(tester, '会话');
+        await tester.tap(find.text('隐私模式'));
+        await tester.pumpAndSettle();
+        expect(_enabled(tester, '遮挡屏幕'), true);
+        expect(_enabled(tester, '使用虚拟显示器'), false);
+        expect(
+          find.ancestor(
+            of: _item('使用虚拟显示器'),
+            matching: _reason('未获得键盘和鼠标控制权限'),
+          ),
+          findsOneWidget,
+        );
+
+        // Its shortcut does nothing either.
+        await emit(tester, fakes, s, {
+          'name': kShortcutEventName,
+          'action': kShortcutActionPrivacyMode2,
+        });
+        await tester.pumpAndSettle();
+        expect(callsTo(fakes, #sessionTogglePrivacyMode), isEmpty);
+      },
+    );
+
+    testMainWindow(
+      'choosing "custom" quality sends the quality and frame rate it starts from',
+      (tester) async {
+        await pumpMainWindow(tester);
+        await _open(tester, fakes);
+        await _openMenu(tester, '画面');
+        // The scale has a "自定义" too, before the quality.
+        await tester.tap(_item('自定义').last);
+        await tester.pumpAndSettle();
+
+        expect(
+          callsTo(fakes, #sessionSetImageQuality).last[#value],
+          kRemoteImageQualityCustom,
+        );
+        expect(
+          callsTo(fakes, #sessionSetCustomImageQuality).single[#value],
+          kDefaultQuality.toInt(),
+        );
+        expect(
+          callsTo(fakes, #sessionSetCustomFps).single[#fps],
+          kDefaultFps.toInt(),
+        );
+      },
+    );
 
     testMainWindow(
       'view-only: input rows grey out, view-only and its cursor stay usable',
@@ -294,6 +375,25 @@ void main() {
           tester.getTopLeft(find.byType(LgSessionToolbar)).dx,
           moreOrLessEquals(after, epsilon: 1),
         );
+      },
+    );
+
+    testMainWindow(
+      'a press on a button that slips a few pixels still opens its menu',
+      (tester) async {
+        await pumpMainWindow(tester);
+        await _open(tester, fakes);
+        final before = tester.getTopLeft(find.byType(LgSessionToolbar));
+        final gesture = await tester.startGesture(
+          tester.getCenter(find.text('操作')),
+          kind: PointerDeviceKind.mouse,
+        );
+        await gesture.moveBy(const Offset(5, 0));
+        await gesture.up();
+        await gesture.removePointer();
+        await tester.pumpAndSettle();
+        expect(_item('刷新画面'), findsOneWidget);
+        expect(tester.getTopLeft(find.byType(LgSessionToolbar)), before);
       },
     );
 

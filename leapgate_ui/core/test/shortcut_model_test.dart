@@ -137,14 +137,34 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
   });
 
-  test('the resolution menu remembers its choice per device and display', () {
-    stateGlobal.resetLastResolutionGroupValues('100200300');
+  test('the resolution menu remembers its choice until the next peer info',
+      () async {
+    final s = await _open(bind);
     stateGlobal.setLastResolutionGroupValue('100200300', 0, 'custom');
+    stateGlobal.setLastResolutionGroupValue('400500600', 0, 'custom');
     expect(stateGlobal.getLastResolutionGroupValue('100200300', 0), 'custom');
     expect(stateGlobal.getLastResolutionGroupValue('100200300', 1), isNull);
-    expect(stateGlobal.getLastResolutionGroupValue('400500600', 0), isNull);
-    // A new peer info starts over (upstream `model.dart:1487`).
-    stateGlobal.resetLastResolutionGroupValues('100200300');
+
+    // A new peer info starts this device over (upstream `model.dart:1487`).
+    _emit(bind, s, {
+      'name': 'peer_info',
+      'version': '1.4.6',
+      'username': 'user',
+      'hostname': 'host',
+      'platform': 'Windows',
+      'sas_enabled': 'false',
+      'current_display': '0',
+      'displays': jsonEncode([
+        {'x': 0, 'y': 0, 'width': 1920, 'height': 1080, 'cursor_embedded': 0},
+      ]),
+      'features': jsonEncode({'privacy_mode': false}),
+      'resolutions': jsonEncode([]),
+      'platform_additions': '',
+    });
+    await settle();
+    expect(s.ffiModel.pi.isSet.value, true);
     expect(stateGlobal.getLastResolutionGroupValue('100200300', 0), isNull);
+    expect(stateGlobal.getLastResolutionGroupValue('400500600', 0), 'custom');
+    stateGlobal.resetLastResolutionGroupValues('400500600');
   });
 }

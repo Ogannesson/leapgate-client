@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/leapgate/session.dart';
 import 'package:flutter_hbb/models/chat_model.dart';
 
@@ -24,6 +25,25 @@ List<Widget> chatToolbarButtons(
   TabOverlays overlays,
 ) =>
     [_ChatButton(chat: ffi.chatModel)];
+
+/// The chat and voice call shortcuts (upstream `shortcut_model.dart:455-474`): text chat opens
+/// or closes the panel as "文字聊天" does; voice call hangs up or cancels while one is waiting or
+/// on, and asks for one otherwise.
+void registerChatShortcuts(FFI ffi) {
+  final chat = ffi.chatModel;
+  ffi.shortcutModel
+    ..register(kShortcutActionToggleChat, () => chat.setOpen(!chat.open))
+    ..register(kShortcutActionToggleVoiceCall, () {
+      switch (chat.voiceCallStatus) {
+        case VoiceCallStatus.connected:
+        case VoiceCallStatus.waitingForResponse:
+          chat.closeVoiceCall();
+        case VoiceCallStatus.notStarted:
+        case VoiceCallStatus.incoming:
+          chat.requestVoiceCall();
+      }
+    });
+}
 
 class _ChatButton extends StatelessWidget {
   const _ChatButton({required this.chat});

@@ -122,6 +122,8 @@ class AppFakeBind extends FakeBind {
       case #sessionSetTrackpadSpeed:
       case #sessionSetScrollStyle:
       case #sessionChangePreferCodec:
+      case #sessionSetCustomImageQuality:
+      case #sessionSetCustomFps:
         calls.add(invocation);
         return Future<void>.value();
     }

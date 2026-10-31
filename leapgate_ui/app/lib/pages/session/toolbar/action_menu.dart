@@ -6,11 +6,11 @@
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
-import 'package:flutter_hbb/leapgate/notices.dart';
 import 'package:flutter_hbb/leapgate/session.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 
@@ -39,15 +39,10 @@ const _kPeerOptionAllowWaylandKeyboard = 'allow-wayland-keyboard';
 /// (upstream `toolbar.dart:23-47`).
 final _waylandAllowed = <String>{};
 
-/// The 30 s screenshot cooldown of each session (upstream `FfiModel.timerScreenshot`).
-final _screenshotCooldown = Expando<Timer>();
-
-/// Ends the cooldown when the screenshot comes back (upstream `model.dart:486-487`); for the
-/// `screenshot` event handler.
-void endScreenshotCooldown(FFI ffi) {
-  _screenshotCooldown[ffi]?.cancel();
-  _screenshotCooldown[ffi] = null;
-}
+/// The toasts after "重置 Wayland 键盘授权" (upstream shows "Successful" / "Failed"); the keys
+/// are the ARB keys (`shell/toast_view.dart`).
+const kToastWaylandReset = 'menuToastWaylandReset';
+const kToastWaylandResetFailed = 'menuToastWaylandResetFailed';
 
 Future<List<TbEntry>> actionMenuEntries(ToolbarEnv env) async {
   final l10n = env.l10n;
@@ -187,12 +182,13 @@ Future<List<TbEntry>> actionMenuEntries(ToolbarEnv env) async {
             param: '',
           ) ==
           'true') {
-    final cooling = _screenshotCooldown[ffi] != null;
+    // The 30 s wait and the merged view of all monitors are the requests' (`session_requests`).
+    final pending = ffi.requests.screenshotPending.value;
     entries.add(
       TbItem(
-        label: cooling ? l10n.menuScreenshotTaking : l10n.menuScreenshot,
+        label: pending ? l10n.menuScreenshotTaking : l10n.menuScreenshot,
         actionId: kShortcutActionScreenshot,
-        onPressed: cooling ? null : () => _screenshot(env),
+        onPressed: pending ? null : ffi.requests.takeScreenshot,
       ),
     );
   }
@@ -304,46 +300,25 @@ Future<void> _typeClipboard(ToolbarEnv env, bool isWayland) async {
   await send();
 }
 
-/// `toolbar.dart:536-564`.
+/// `toolbar.dart:536-564`: the saved choice is cleared and this connection asks again.
 Future<void> _resetWayland(ToolbarEnv env) async {
   final ffi = env.ffi;
-  await appCore.options
-      .peer(ffi.id)
-      .set(
-        _kPeerOptionAllowWaylandKeyboard,
-        bool2option(_kPeerOptionAllowWaylandKeyboard, false),
-      );
-  _waylandAllowed.remove('${env.sessionId}');
-  ffi.inputModel.keyboardInputAllowed = false;
-  appCore.toasts.show('Successful');
-  env.notifyChanged();
-}
-
-/// `toolbar.dart:739-778`. A merged view of all monitors cannot be captured.
-void _screenshot(ToolbarEnv env) {
-  final ffi = env.ffi;
-  final pi = env.pi;
-  if (_screenshotCooldown[ffi] != null) return;
-  if (pi.currentDisplay == kAllDisplayValue) {
-    ffi.notices.add(
-      SessionNotice(
-        'screenshot-merged-screen-not-supported-tip',
-        args: const {
-          'type': 'custom-nook-nocancel-hasclose-info',
-          'title': 'Take screenshot',
-        },
-      ),
-    );
-    return;
+  var cleared = false;
+  try {
+    await appCore.options
+        .peer(ffi.id)
+        .set(
+          _kPeerOptionAllowWaylandKeyboard,
+          bool2option(_kPeerOptionAllowWaylandKeyboard, false),
+        );
+    cleared = true;
+  } catch (e) {
+    debugPrint('Failed to clear the Wayland keyboard permission: $e');
+  } finally {
+    _waylandAllowed.remove('${env.sessionId}');
+    ffi.inputModel.keyboardInputAllowed = false;
   }
-  bind.sessionTakeScreenshot(
-    sessionId: env.sessionId,
-    display: pi.currentDisplay,
-  );
-  _screenshotCooldown[ffi] = Timer(const Duration(seconds: 30), () {
-    _screenshotCooldown[ffi] = null;
-    env.notifyChanged();
-  });
+  appCore.toasts.show(cleared ? kToastWaylandReset : kToastWaylandResetFailed);
   env.notifyChanged();
 }
 

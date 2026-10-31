@@ -281,7 +281,7 @@
   "menuDlgCustomResTitle": "自定义分辨率",
   "menuDlgWidth": "宽",
   "menuDlgHeight": "高",
-  "menuDlgResInvalid": "宽和高须为正整数。",
+  "menuDlgResInvalid": "宽和高须为 1~9999 的整数。",
   "menuDlgKbTitle": "本机键盘布局",
   "menuDlgKbAnsi": "回车键为横条形。",
   "menuDlgKbIso": "回车键为倒 L 形，左 Shift 键旁多一个键。",
@@ -472,5 +472,8 @@
   "recordNoPermission": "未获得录制权限",
   "tabMenuCopyId": "复制设备 ID",
   "tabMenuCloseOthers": "关闭其他标签",
-  "tabMenuClose": "关闭"
+  "tabMenuClose": "关闭",
+  "menuToastWaylandReset": "已重置键盘授权",
+  "menuToastWaylandResetFailed": "无法重置键盘授权",
+  "menuFollowingCursor": "跟随远程光标时始终显示"
 }
