@@ -204,7 +204,7 @@ where
     }
 }
 
-async fn won(peer: &str, c: &Connected, ice: Option<IpAddr>) -> leapgate::session::Won<'static> {
+async fn won(peer: &str, c: &Connected, ice: Option<IpAddr>) -> leapgate::session::Won {
     use leapgate::session::Won;
     let ((stream, direct, _, _, typ), _, _) = c;
     if crate::common::is_direct_ip_access(peer) {

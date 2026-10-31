@@ -126,14 +126,14 @@ pub fn note_refusal(reason: &str) {
 }
 
 /// The connection that won, as `classify` needs it.
-pub enum Won<'a> {
+pub enum Won {
     /// Upstream's direct IP or `domain:port` access.
     DirectIp,
     /// Leapgate's ICE, with the selected pair's remote address.
     Ice(IpAddr),
     /// One of upstream's paths, by the label it returns.
     Upstream {
-        typ: &'a str,
+        typ: &'static str,
         direct: bool,
         websocket: bool,
         local: IpAddr,
@@ -260,7 +260,7 @@ mod tests {
         hbb_common::serde_json::to_string(c).unwrap()
     }
 
-    fn upstream(typ: &'static str, direct: bool, websocket: bool, local: &str) -> Won<'static> {
+    fn upstream(typ: &'static str, direct: bool, websocket: bool, local: &str) -> Won {
         Won::Upstream {
             typ,
             direct,
@@ -425,10 +425,11 @@ mod tests {
             Connection::default(),
             "another type"
         );
-        assert!(!CONNECTIONS
-            .lock()
-            .unwrap()
-            .contains_key(&("gone".to_owned(), 0)));
+        assert_eq!(
+            connection("gone", 0, |_, _| true),
+            Connection::default(),
+            "closed session dropped"
+        );
         set_connection("a", 0, None);
         assert_eq!(
             connection("a", 0, alive),
