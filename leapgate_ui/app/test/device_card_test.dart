@@ -112,6 +112,40 @@ void main() {
       expect(calls.more, 1);
     });
 
+    desktopTest(
+      'two quick presses on the buttons never count as a double click',
+      (tester) async {
+        final calls = _Calls();
+        await pumpLg(tester, SizedBox(width: 360, child: _card(calls)));
+        await hover(tester, find.byType(LgDeviceCard));
+        final more = find.byWidgetPredicate(
+          (w) => w is LgIcon && w.icon == LgIcons.more,
+        );
+        // No time passes between the presses, so they are well inside the double
+        // click window; the buttons only show while the pointer is on the card.
+        await tester.tap(more);
+        await tester.tap(more);
+        expect((calls.more, calls.double, calls.connect), (2, 0, 0));
+        // The same on "连接" (it connects once per press, and no more).
+        await tester.tap(find.text('连接'));
+        await tester.tap(find.text('连接'));
+        expect((calls.connect, calls.double), (2, 0));
+      },
+    );
+
+    desktopTest('a press on a button does not complete a click on the card', (
+      tester,
+    ) async {
+      final calls = _Calls();
+      await pumpLg(tester, SizedBox(width: 360, child: _card(calls)));
+      await hover(tester, find.byType(LgDeviceCard));
+      await tester.tap(find.text('书房台式机'));
+      await tester.tap(find.text('连接'));
+      expect(calls.double, 0);
+      await tester.tap(find.text('书房台式机'));
+      expect(calls.double, 0);
+    });
+
     testWidgets('Enter on the focused card connects, and shows the buttons', (
       tester,
     ) async {
@@ -286,6 +320,7 @@ void main() {
       picked: picked,
       topDivider: !first,
       onTap: () => calls.tap++,
+      onDoubleTap: () => calls.double++,
       onConnect: () => calls.connect++,
       connectLabel: '连接',
       onMore: withMore ? () => calls.more++ : null,
@@ -306,6 +341,31 @@ void main() {
         find.byWidgetPredicate((w) => w is LgIcon && w.icon == LgIcons.more),
       );
       expect((calls.connect, calls.more), (1, 1));
+    });
+
+    desktopTest('two quick presses on the buttons of a row never connect it', (
+      tester,
+    ) async {
+      final calls = _Calls();
+      await pumpWide(tester, SizedBox(width: 1040, child: row(calls)));
+      await hover(tester, find.byType(LgDeviceRow));
+      final more = find.byWidgetPredicate(
+        (w) => w is LgIcon && w.icon == LgIcons.more,
+      );
+      await tester.tap(more);
+      await tester.tap(more);
+      expect((calls.more, calls.double), (2, 0));
+    });
+
+    desktopTest('a double click on the row itself still counts', (
+      tester,
+    ) async {
+      final calls = _Calls();
+      await pumpWide(tester, SizedBox(width: 1040, child: row(calls)));
+      await tester.tap(find.text('书房台式机'));
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tap(find.text('书房台式机'));
+      expect(calls.double, 1);
     });
 
     desktopTest('multi-select puts the pick box in front, no buttons', (

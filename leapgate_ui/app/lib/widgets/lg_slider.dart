@@ -89,6 +89,14 @@ class _LgSliderState extends State<LgSlider> {
     widget.onChanged?.call(x);
   }
 
+  // A screen reader's "increase" and "decrease" are one finished change, like a
+  // key press.
+  void _step(int direction) {
+    final next = widget.value + direction * _unit;
+    _set(next);
+    widget.onChangeEnd?.call(_snap(next));
+  }
+
   void _fromDx(double dx, double width) {
     final span = width - _knob;
     final f = span <= 0 ? 0.0 : ((dx - _knob / 2) / span).clamp(0.0, 1.0);
@@ -143,8 +151,8 @@ class _LgSliderState extends State<LgSlider> {
       value: _say(widget.value),
       increasedValue: _say(_snap(widget.value + _unit)),
       decreasedValue: _say(_snap(widget.value - _unit)),
-      onIncrease: enabled ? () => _set(widget.value + _unit) : null,
-      onDecrease: enabled ? () => _set(widget.value - _unit) : null,
+      onIncrease: enabled ? () => _step(1) : null,
+      onDecrease: enabled ? () => _step(-1) : null,
       child: Focus(
         focusNode: widget.focusNode,
         canRequestFocus: enabled,
@@ -161,12 +169,16 @@ class _LgSliderState extends State<LgSlider> {
                 behavior: HitTestBehavior.opaque,
                 onTapDown: enabled
                     ? (d) {
+                        // The value may have been changed from outside since
+                        // the last press: start from what is shown.
+                        _last = widget.value;
                         _fromDx(d.localPosition.dx, width);
                         widget.onChangeEnd?.call(_last ?? widget.value);
                       }
                     : null,
                 onHorizontalDragStart: enabled
                     ? (d) {
+                        _last = widget.value;
                         setState(() => _dragging = true);
                         _fromDx(d.localPosition.dx, width);
                       }

@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:leapgate_ui/icons/lg_icon.dart';
 import 'package:leapgate_ui/widgets/lg_menu.dart';
 import 'package:leapgate_ui/widgets/lg_session_toolbar.dart';
 import 'package:leapgate_ui/widgets/lg_status.dart';
+import 'package:leapgate_ui/widgets/lg_tooltip.dart';
 
 import 'helpers.dart';
 
@@ -37,9 +39,12 @@ LgSessionToolbar _bar({
   int unread = 1,
   LgToolbarMenuState chat = LgToolbarMenuState.normal,
   List<String>? log,
+  String? note,
+  LgNoteSide? noteSide,
 }) => LgSessionToolbar(
   labels: _labels,
   dock: dock,
+  noteSide: noteSide,
   pinned: true,
   onTogglePin: () => log?.add('pin'),
   collapsed: collapsed,
@@ -68,6 +73,7 @@ LgSessionToolbar _bar({
             checked: true,
             onPressed: () => log?.add('fit'),
           ),
+          LgMenuItem(label: '原始大小', onPressed: null, disabledNote: note),
         ],
       ),
       const LgToolbarFoldable(
@@ -713,6 +719,305 @@ void main() {
         expect(find.bySemanticsLabel(label), findsOneWidget, reason: label);
       }
       handle.dispose();
+    });
+  });
+
+  group('moving the bar to another edge', () {
+    final recordButton = find.byWidgetPredicate(
+      (w) => w is LgToolbarButton && w.label == '录制',
+      skipOffstage: false,
+    );
+
+    Future<void> narrow(WidgetTester tester, LgToolbarDock dock) => _stage(
+      tester,
+      Align(
+        alignment: Alignment.topLeft,
+        child: SizedBox(width: 560, child: _bar(dock: dock)),
+      ),
+      size: const Size(2000, 400),
+    );
+
+    testWidgets('keeps "更多" and the Tab order in step with what is folded', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      await narrow(tester, LgToolbarDock.top);
+      await tester.pump();
+      await tester.pump();
+      expect(find.bySemanticsLabel('更多'), findsOneWidget);
+      // The same number folds on the other edge, so the row has nothing new
+      // to report, but the bar has dropped its count on the move.
+      await narrow(tester, LgToolbarDock.bottom);
+      await tester.pump();
+      await tester.pump();
+      expect(find.bySemanticsLabel('更多'), findsOneWidget);
+      expect(
+        tester
+            .widgetList<ExcludeFocus>(
+              find.ancestor(
+                of: recordButton,
+                matching: find.byType(ExcludeFocus),
+              ),
+            )
+            .any((e) => e.excluding),
+        isTrue,
+      );
+      await tester.tap(find.bySemanticsLabel('更多'));
+      await tester.pumpAndSettle();
+      expect(find.text('录制'), findsOneWidget); // the menu is not empty
+      handle.dispose();
+    });
+
+    testWidgets('and back to the first edge', (tester) async {
+      final handle = tester.ensureSemantics();
+      await narrow(tester, LgToolbarDock.top);
+      await tester.pump();
+      await narrow(tester, LgToolbarDock.bottom);
+      await tester.pump();
+      await tester.pump();
+      await narrow(tester, LgToolbarDock.top);
+      await tester.pump();
+      await tester.pump();
+      await tester.tap(find.bySemanticsLabel('更多'));
+      await tester.pumpAndSettle();
+      expect(find.text('录制'), findsOneWidget);
+      handle.dispose();
+    });
+  });
+
+  group('the unread count on a bar at a side', () {
+    final chat = find.byWidgetPredicate(
+      (w) => w is LgToolbarMenuButton && w.label == '聊天',
+    );
+
+    testWidgets('sits on the corner of the chat icon', (tester) async {
+      await _stage(
+        tester,
+        _placed(
+          _bar(dock: LgToolbarDock.left, unread: 3),
+          placement: const LgToolbarPlacement(LgToolbarDock.left),
+        ),
+        size: const Size(800, 900),
+      );
+      expect(find.text('3'), findsOneWidget);
+      final button = tester.getRect(chat);
+      final badge = tester.getRect(find.text('3'));
+      expect(badge.center.dx, greaterThan(button.center.dx));
+      expect(badge.center.dy, lessThan(button.center.dy));
+      expect(button.overlaps(badge), isTrue);
+    });
+
+    testWidgets('a folded chat shows it on "更多"', (tester) async {
+      await _stage(
+        tester,
+        _placed(
+          _bar(dock: LgToolbarDock.left, unread: 3),
+          placement: const LgToolbarPlacement(LgToolbarDock.left),
+        ),
+        size: const Size(800, 300),
+      );
+      await tester.pump();
+      await tester.pump();
+      // The hidden chat button keeps its own count; "更多" shows one too.
+      expect(find.text('3').evaluate().length, 2);
+    });
+  });
+
+  group('a menu button that is greyed', () {
+    LgToolbarMenuButton button({String? note}) => LgToolbarMenuButton(
+      label: '输入',
+      icon: LgIcons.sliders,
+      enabled: false,
+      disabledNote: note,
+      items: [
+        LgMenuItem(
+          label: '映射',
+          checked: true,
+          onPressed: null,
+          disabledNote: note,
+        ),
+      ],
+    );
+
+    testWidgets('with a note it still opens', (tester) async {
+      await _stage(
+        tester,
+        Align(
+          alignment: Alignment.topCenter,
+          child: button(note: '未获得键盘和鼠标控制权限'),
+        ),
+      );
+      await tester.tap(find.text('输入'));
+      await tester.pumpAndSettle();
+      expect(find.text('映射'), findsOneWidget);
+    });
+
+    testWidgets('it is dimmed and says why on hover and to a screen reader', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      await _stage(
+        tester,
+        Align(
+          alignment: Alignment.topCenter,
+          child: button(note: '未获得键盘和鼠标控制权限'),
+        ),
+      );
+      expect(
+        find.ancestor(
+          of: find.text('输入'),
+          matching: find.byWidgetPredicate(
+            (w) => w is Opacity && w.opacity < 1,
+          ),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        tester.getSemantics(find.text('输入')).hint,
+        contains('未获得键盘和鼠标控制权限'),
+      );
+      await hover(tester, find.text('输入'));
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.text('未获得键盘和鼠标控制权限'), findsOneWidget);
+      handle.dispose();
+    });
+
+    testWidgets('without a note it stays shut, as before', (tester) async {
+      await _stage(
+        tester,
+        Align(alignment: Alignment.topCenter, child: button()),
+      );
+      await tester.tap(find.text('输入'));
+      await tester.pumpAndSettle();
+      expect(find.text('映射'), findsNothing);
+    });
+  });
+
+  group('the note of a greyed row in the bar\'s menu', () {
+    Future<(Rect row, Rect tip)> open(
+      WidgetTester tester,
+      Widget bar, {
+      LgToolbarPlacement? at,
+    }) async {
+      await _stage(
+        tester,
+        at == null
+            ? Align(alignment: Alignment.topCenter, child: bar)
+            : _placed(bar, placement: at),
+      );
+      await tester.tap(
+        find.text('画面').evaluate().isNotEmpty
+            ? find.text('画面')
+            : find.byWidgetPredicate(
+                (w) => w is LgToolbarMenuButton && w.label == '画面',
+              ),
+      );
+      await tester.pumpAndSettle();
+      await hover(tester, find.text('原始大小'));
+      await tester.pump(const Duration(seconds: 1));
+      return (
+        tester.getRect(find.byType(MenuItemButton).at(1)),
+        tester.getRect(find.byType(LgTooltipBox)),
+      );
+    }
+
+    testWidgets('opens on the right of the menu, level with the row', (
+      tester,
+    ) async {
+      final (row, tip) = await open(tester, _bar(note: '无权限'));
+      expect(tip.left, row.right + 8);
+      expect(tip.top, row.top);
+    });
+
+    testWidgets('opens on the left when a notice sits at the right', (
+      tester,
+    ) async {
+      final (row, tip) = await open(
+        tester,
+        _bar(note: '无权限', noteSide: LgNoteSide.left),
+      );
+      expect(tip.right, row.left - 8);
+    });
+
+    testWidgets('a bar on the right edge puts it on the left by itself', (
+      tester,
+    ) async {
+      final (row, tip) = await open(
+        tester,
+        _bar(note: '无权限', dock: LgToolbarDock.right),
+        at: const LgToolbarPlacement(LgToolbarDock.right, .1),
+      );
+      expect(tip.right, row.left - 8);
+    });
+  });
+
+  group('the grip for a screen reader', () {
+    testWidgets('"increase" and "decrease" move the bar a step', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      final ends = <LgToolbarPlacement>[];
+      await _stage(tester, _placed(_bar(), onMoveEnd: ends.add));
+      tester.semantics.performAction(
+        find.semantics.byLabel('移动工具栏'),
+        SemanticsAction.increase,
+      );
+      tester.semantics.performAction(
+        find.semantics.byLabel('移动工具栏'),
+        SemanticsAction.decrease,
+      );
+      expect(ends.map((e) => e.position), [
+        closeTo(.55, .001),
+        closeTo(.45, .001),
+      ]);
+      handle.dispose();
+    });
+  });
+
+  group('the labels of a bar with foldable buttons', () {
+    LgSessionToolbar bare(LgToolbarLabels labels) => LgSessionToolbar(
+      labels: labels,
+      pinned: true,
+      onTogglePin: () {},
+      collapsed: false,
+      onToggleCollapsed: () {},
+      fullscreen: false,
+      onToggleFullscreen: () {},
+      groups: const [
+        [
+          LgToolbarFoldable(
+            inline: LgToolbarButton(
+              icon: LgIcons.record,
+              label: '录制',
+              onPressed: null,
+            ),
+            menuItem: LgMenuItem(label: '录制', onPressed: null),
+          ),
+        ],
+      ],
+    );
+
+    testWidgets('must name "更多" and the grip', (tester) async {
+      await _stage(
+        tester,
+        bare(
+          const LgToolbarLabels(
+            toolbar: '会话工具栏',
+            pin: '固定工具栏',
+            fullscreen: '全屏',
+            exitFullscreen: '退出全屏',
+            minimize: '最小化',
+            collapse: '收起工具栏',
+            expand: '展开工具栏',
+          ),
+        ),
+      );
+      expect(tester.takeException(), isA<AssertionError>());
+    });
+
+    testWidgets('with both given it builds', (tester) async {
+      await _stage(tester, bare(_labels));
+      expect(tester.takeException(), isNull);
     });
   });
 }

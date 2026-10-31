@@ -14,7 +14,8 @@ import 'lg_button.dart';
 import 'lg_text_field.dart';
 
 /// One message: the text, the time as written ("10:24") and whether this
-/// computer sent it.
+/// computer sent it. Two messages with the same three values are equal.
+@immutable
 class LgChatMessage {
   const LgChatMessage({
     required this.text,
@@ -25,6 +26,16 @@ class LgChatMessage {
   final String text;
   final String time;
   final bool mine;
+
+  @override
+  bool operator ==(Object other) =>
+      other is LgChatMessage &&
+      other.text == text &&
+      other.time == time &&
+      other.mine == mine;
+
+  @override
+  int get hashCode => Object.hash(text, time, mine);
 }
 
 class LgChatPanel extends StatefulWidget {
@@ -81,15 +92,35 @@ class _LgChatPanelState extends State<LgChatPanel> {
   final _scroll = ScrollController();
 
   @override
+  void initState() {
+    super.initState();
+    _toEnd();
+  }
+
+  @override
   void didUpdateWidget(LgChatPanel old) {
     super.didUpdateWidget(old);
-    if (old.messages.length != widget.messages.length) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (_scroll.hasClients) {
-          _scroll.jumpTo(_scroll.position.maxScrollExtent);
-        }
-      });
+    // The caller may keep only the last N messages, so the count can stay the
+    // same while the list moves on: look at the last one too.
+    final before = old.messages;
+    final now = widget.messages;
+    if (before.length != now.length ||
+        (now.isNotEmpty && before.last != now.last)) {
+      _toEnd();
     }
+  }
+
+  // Open at the newest message and follow new ones. The extent of a long list
+  // is an estimate until its end has been laid out, so go on until the jump
+  // lands (each jump schedules the next frame itself).
+  void _toEnd([int again = 3]) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scroll.hasClients) return;
+      final end = _scroll.position.maxScrollExtent;
+      if (_scroll.position.pixels == end) return;
+      _scroll.jumpTo(end);
+      if (again > 0) _toEnd(again - 1);
+    });
   }
 
   @override
@@ -283,16 +314,11 @@ class _Bubble extends StatelessWidget {
                   ),
                   child: Text(
                     message.text,
-                    style: t.text.copyWith(
-                      color: mine ? c.onAccent : c.text,
-                    ),
+                    style: t.text.copyWith(color: mine ? c.onAccent : c.text),
                   ),
                 ),
                 const SizedBox(height: LgSpace.s1),
-                Text(
-                  message.time,
-                  style: t.textS.copyWith(color: c.text2),
-                ),
+                Text(message.time, style: t.textS.copyWith(color: c.text2)),
               ],
             ),
           ),
