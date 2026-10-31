@@ -12,6 +12,7 @@ import 'package:leapgate_ui/shell/navigation.dart';
 import 'package:leapgate_ui/widgets/lg_menu.dart';
 import 'package:leapgate_ui/widgets/lg_menu_items.dart';
 import 'package:leapgate_ui/widgets/lg_session_toolbar.dart';
+import 'package:leapgate_ui/widgets/lg_status.dart';
 import 'package:leapgate_ui/widgets/lg_title_bar.dart';
 import 'package:leapgate_ui/widgets/lg_tooltip.dart';
 
@@ -470,6 +471,34 @@ void main() {
       for (final name in ['画面', '输入', '操作']) {
         expect(find.text(name), findsWidgets, reason: name);
       }
+    });
+
+    testMainWindow('chat in "更多": the count follows new messages', (
+      tester,
+    ) async {
+      await pumpMainWindow(tester);
+      final s = await _open(tester, fakes);
+      tester.view.physicalSize = const Size(700, 600);
+      await tester.pumpAndSettle();
+      // On "更多", the folded chat's button out of reach (the tab has its own count).
+      Finder count(int n) => find
+          .descendant(
+            of: find.byType(LgSessionToolbar),
+            matching: find.byWidgetPredicate(
+              (w) => w is LgBadge && w.count == n,
+            ),
+          )
+          .hitTestable();
+      expect(count(1), findsNothing);
+
+      // Unread while the session is out of sight (`ChatModel`).
+      s.setVisible(false);
+      await emit(tester, fakes, s, {'name': 'chat_client_mode', 'text': 'a'});
+      await tester.pump();
+      expect(count(1), findsOneWidget);
+      await emit(tester, fakes, s, {'name': 'chat_client_mode', 'text': 'b'});
+      await tester.pump();
+      expect(count(2), findsOneWidget);
     });
 
     testMainWindow(

@@ -11,7 +11,6 @@ import 'package:window_manager/window_manager.dart';
 
 import '../../icons/lg_icon.dart';
 import '../../l10n/app_localizations.dart';
-import '../../shell/tab_menu.dart';
 import '../../shell/tab_overlays.dart';
 import '../../shell/tab_shortcuts.dart';
 import '../../theme/lg_tokens.dart';
@@ -29,7 +28,6 @@ import 'toolbar/dock.dart';
 import 'toolbar/entries.dart';
 import 'toolbar/input_menu.dart';
 import 'toolbar/monitor_menu.dart';
-import 'toolbar/more_items.dart';
 import 'toolbar/session_menu.dart';
 import 'toolbar/session_shortcuts.dart';
 import 'toolbar/toolbar_env.dart';
@@ -230,6 +228,7 @@ class _SessionToolbarState extends State<SessionToolbar> {
         _ffi.connection,
         _ffi.ffiModel,
         _ffi.canvasModel,
+        // The chat's unread count on "更多" is read when the bar builds.
         _ffi.chatModel,
         _ffi.notices,
         _env!.changed,
@@ -315,22 +314,9 @@ class _SessionToolbarState extends State<SessionToolbar> {
         items: [_content(sessionMenuEntries)],
       ),
     );
-    // The session lane's buttons become foldable on their own (`LEAPGATE.md` §10.9); until
-    // they do, `toolbar/more_items.dart` gives them their rows.
-    final talk = <Widget>[
-      for (final button in chat)
-        button is LgToolbarFoldable
-            ? button
-            : LgToolbarFoldable(
-                inline: button,
-                menuItem: chatMoreItem(_ffi),
-                badge: tabUnread(_ffi),
-              ),
-      if (record != null)
-        record is LgToolbarFoldable
-            ? record
-            : LgToolbarFoldable(inline: record, menuItem: recordMoreItem(_ffi)),
-    ];
+    // Chat and recording come foldable, with their rows for "更多"; the chat's count is read
+    // when the bar builds, which it does on every chat change (see [build]).
+    final talk = <Widget>[...chat, ?record];
 
     return LgSessionToolbar(
       labels: LgToolbarLabels(
