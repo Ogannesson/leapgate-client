@@ -9,6 +9,12 @@ import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/session.dart';
 
+import '../../../theme/lg_tokens.dart';
+import '../../../widgets/lg_toolbar_dock.dart';
+
+/// What the placer keeps between the toolbar and the ends of its edge.
+const kToolbarEdgeMargin = LgSpace.s3;
+
 enum ToolbarEdge { top, right, bottom, left }
 
 /// Where upstream kept the place before docking on any edge.
@@ -28,18 +34,24 @@ ToolbarEdge parseToolbarEdge(String? s) => switch (s) {
 bool isHorizontalEdge(ToolbarEdge e) =>
     e == ToolbarEdge.top || e == ToolbarEdge.bottom;
 
-/// [fraction] 0 is the start of the edge, 1 its end.
-Alignment alignmentForEdge(ToolbarEdge edge, double fraction) {
-  final f = fraction * 2 - 1;
-  return switch (edge) {
-    ToolbarEdge.top => Alignment(f, -1),
-    ToolbarEdge.bottom => Alignment(f, 1),
-    ToolbarEdge.left => Alignment(-1, f),
-    ToolbarEdge.right => Alignment(1, f),
-  };
-}
-
+/// [fraction] 0 is the start of the edge, 1 its end: the share of the way the toolbar can
+/// travel along it, as upstream's and as [LgToolbarPlacement.position].
 typedef ToolbarDock = ({ToolbarEdge edge, double fraction});
+
+LgToolbarPlacement placementOf(ToolbarDock dock) => LgToolbarPlacement(
+  LgToolbarDock.values.byName(dock.edge.name),
+  dock.fraction,
+);
+
+/// A place the toolbar's placer gives back (a drop, an arrow key), kept inside the bounds.
+ToolbarDock dockOf(LgToolbarPlacement placement) {
+  final edge = ToolbarEdge.values.byName(placement.dock.name);
+  final bounds = _boundsFor(edge);
+  return (
+    edge: edge,
+    fraction: placement.position.clamp(bounds.left, bounds.right),
+  );
+}
 
 bool multiEdgeDocking() =>
     appCore.options.local.getBool(kOptionAllowMultiEdgeToolbarDock);
@@ -136,18 +148,6 @@ ToolbarEdge nearestToolbarEdge(
 Size toolbarSizeOn(ToolbarEdge edge, Size measured) => isHorizontalEdge(edge)
     ? Size(measured.longestSide, measured.shortestSide)
     : Size(measured.shortestSide, measured.longestSide);
-
-/// The top-left corner of the toolbar placed at [dock] in [area].
-Offset toolbarOffset(ToolbarDock dock, Size area, Size toolbar) {
-  final x = area.width - toolbar.width;
-  final y = area.height - toolbar.height;
-  return switch (dock.edge) {
-    ToolbarEdge.top => Offset(x * dock.fraction, 0),
-    ToolbarEdge.bottom => Offset(x * dock.fraction, y),
-    ToolbarEdge.left => Offset(0, y * dock.fraction),
-    ToolbarEdge.right => Offset(x, y * dock.fraction),
-  };
-}
 
 /// Where along [edge] the toolbar lands when the pointer is at [cursor], [grab] from the
 /// toolbar's start along the edge (`remote_toolbar.dart:97-111`, `:3445-3475`).

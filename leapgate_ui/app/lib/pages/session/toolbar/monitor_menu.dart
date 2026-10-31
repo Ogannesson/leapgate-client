@@ -16,7 +16,7 @@ import 'package:flutter_hbb/models/platform_model.dart';
 
 import '../../../icons/lg_icon.dart';
 import '../../../l10n/app_localizations.dart';
-import '../../../widgets/lg_menu.dart';
+import '../../../widgets/lg_menu_items.dart';
 import '../../../widgets/lg_session_toolbar.dart';
 import 'toolbar_env.dart';
 
@@ -70,11 +70,19 @@ String _nextLabel(FFI ffi, AppLocalizations l10n) {
   );
 }
 
-Widget _nextMonitorButton(FFI ffi, AppLocalizations l10n) => LgToolbarButton(
-  icon: LgIcons.displays,
-  label: _nextLabel(ffi, l10n),
-  onPressed: () => switchMonitorBy(ffi, 1, updateCursorPos: false),
-);
+/// "2/3", named in full for a screen reader ("下一个显示器（2/3）").
+Widget _nextMonitorButton(FFI ffi, AppLocalizations l10n) {
+  final pi = ffi.ffiModel.pi;
+  final current = pi.currentDisplay;
+  final inRange = current >= 0 && current < pi.displays.length;
+  return LgToolbarButton(
+    icon: LgIcons.displays,
+    label: '${inRange ? current + 1 : '*'}/${pi.displays.length}',
+    semanticLabel: _nextLabel(ffi, l10n),
+    showText: true,
+    onPressed: () => switchMonitorBy(ffi, 1, updateCursorPos: false),
+  );
+}
 
 /// The monitor buttons of the open toolbar, left to right.
 List<Widget> monitorToolbarItems(ToolbarEnv env) {
@@ -83,32 +91,57 @@ List<Widget> monitorToolbarItems(ToolbarEnv env) {
   if (!monitorsShown(ffi)) return const [];
   final pi = ffi.ffiModel.pi;
   final current = pi.currentDisplay;
-  final monitors = [
-    for (var i = 0; i < pi.displays.length; i++)
-      (i, l10n.toolbarMonitorN(i + 1)),
-    if (_allShown(ffi)) (kAllDisplayValue, l10n.toolbarAllMonitors),
-  ];
+  final all = _allShown(ffi);
   return [
     if (_nextButton) _nextMonitorButton(ffi, l10n),
-    if (_flat)
-      for (final (i, label) in monitors)
-        _MonitorButton(
-          label: label,
-          short: i == kAllDisplayValue ? null : '${i + 1}',
+    if (_flat) ...[
+      for (var i = 0; i < pi.displays.length; i++)
+        LgToolbarTextButton(
+          label: '${i + 1}',
+          semanticLabel: l10n.toolbarMonitorN(i + 1),
           selected: current == i,
           onPressed: () => openMonitor(ffi, i, updateCursorPos: false),
-        )
-    else
+        ),
+      if (all)
+        LgToolbarButton(
+          icon: LgIcons.displays,
+          label: l10n.toolbarAllMonitors,
+          toggled: current == kAllDisplayValue,
+          onPressed: () =>
+              openMonitor(ffi, kAllDisplayValue, updateCursorPos: false),
+        ),
+    ] else
       LgToolbarMenuButton(
         label: l10n.toolbarMonitor,
         icon: LgIcons.displays,
         items: [
-          for (final (i, label) in monitors)
-            LgMenuItem(
-              label: label,
-              checked: current == i,
-              onPressed: () => openMonitor(ffi, i),
+          // The remote arrangement, the one shown tinted (A-P2 `m-display`).
+          LgDisplayMap(
+            tiles: [
+              for (final (i, d) in pi.displays.indexed)
+                LgDisplayTile(
+                  rect: Rect.fromLTWH(
+                    d.x,
+                    d.y,
+                    d.width.toDouble(),
+                    d.height.toDouble(),
+                  ),
+                  label: '${i + 1}',
+                  semanticLabel: l10n.toolbarMonitorN(i + 1),
+                ),
+            ],
+            current: current == kAllDisplayValue ? null : current,
+            onSelect: (i) => openMonitor(ffi, i),
+          ),
+          if (all) ...[
+            const LgMenuDivider(),
+            LgMenuSwitchItem(
+              label: l10n.toolbarAllMonitors,
+              value: current == kAllDisplayValue,
+              // Off shows the first display; the map above picks any other.
+              onChanged: (on) => openMonitor(ffi, on ? kAllDisplayValue : 0),
             ),
+          ],
         ],
       ),
   ];
@@ -124,37 +157,4 @@ Widget? collapsedMonitorSwitch(ToolbarEnv env) {
     return null;
   }
   return _nextMonitorButton(ffi, env.l10n);
-}
-
-/// A monitor button on the toolbar: its number, the monitor's name for screen readers.
-/// Placeholder for the designer's flat monitor button.
-class _MonitorButton extends StatelessWidget {
-  const _MonitorButton({
-    required this.label,
-    required this.short,
-    required this.selected,
-    required this.onPressed,
-  });
-
-  final String label;
-  final String? short;
-  final bool selected;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) => Semantics(
-    label: label,
-    selected: selected,
-    button: true,
-    onTap: onPressed,
-    child: ExcludeSemantics(
-      child: LgToolbarButton(
-        icon: short == null ? LgIcons.displays : LgIcons.monitor,
-        label: short ?? label,
-        showText: short != null,
-        toggled: selected,
-        onPressed: onPressed,
-      ),
-    ),
-  );
 }

@@ -204,7 +204,7 @@
   "toolbarAllMonitors": "All monitors",
   "toolbarRelativeMouseHint": "Press Ctrl+Alt to release the mouse",
   "toolbarAndroidNav": "Android navigation bar",
-  "toolbarHideNav": "Hide navigation bar",
+  "toolbarMoveNav": "Move navigation bar",
   "menuCustom": "Custom",
   "menuScaleRange": "5%–1000%",
   "menuCustomScale": "Custom scale",

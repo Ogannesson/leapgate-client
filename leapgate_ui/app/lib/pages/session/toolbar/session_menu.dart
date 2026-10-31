@@ -39,6 +39,7 @@ Future<List<TbEntry>> sessionMenuEntries(ToolbarEnv env) async {
     bool inverted = false,
   }) => TbItem(
     label: label,
+    switchRow: true,
     checked: inverted
         ? !(ffi.options.getToggle(option) || model.viewOnly)
         : ffi.options.getToggle(option),
@@ -149,6 +150,7 @@ List<TbEntry> _privacyMode(ToolbarEnv env) {
     return [
       TbItem(
         label: l10n.menuPrivacyMode,
+        switchRow: true,
         checked: active.isNotEmpty,
         actionId: kShortcutActionPrivacyMode1,
         disabledReason: reason,
@@ -174,6 +176,7 @@ List<TbEntry> _privacyMode(ToolbarEnv env) {
     return [
       TbItem(
         label: l10n.menuPrivacyMode,
+        switchRow: true,
         checked: active.isNotEmpty,
         actionId: actionOf(name),
         disabledReason: reason,

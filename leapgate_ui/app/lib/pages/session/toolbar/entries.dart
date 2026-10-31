@@ -10,17 +10,19 @@ import 'package:flutter_hbb/common/widgets/keyboard_shortcuts/display.dart';
 import 'package:flutter_hbb/models/shortcut_model.dart';
 
 import '../../../widgets/lg_menu.dart';
+import '../../../widgets/lg_menu_items.dart';
 import '../../../widgets/lg_tooltip.dart';
 
 sealed class TbEntry {
   const TbEntry();
 }
 
-/// A group title.
+/// A group title. [note] is a short remark at its end.
 class TbGroup extends TbEntry {
-  const TbGroup(this.title);
+  const TbGroup(this.title, {this.note});
 
   final String title;
+  final String? note;
 }
 
 class TbDivider extends TbEntry {
@@ -28,8 +30,9 @@ class TbDivider extends TbEntry {
 }
 
 /// A row. [onPressed] null greys it out; [disabledReason] is then said on hover (01 P2 block B).
-/// [checked] marks the current choice of a group or the state of a switch. [actionId] binds it
-/// to a session shortcut, whose keys show at the right.
+/// [checked] marks the current choice of a group, or with [switchRow] is the state of the switch
+/// at the row's end (A-P2 draws on/off settings as switches, choices with a check mark).
+/// [actionId] binds it to a session shortcut, whose keys show at the right.
 class TbItem extends TbEntry {
   const TbItem({
     required this.label,
@@ -40,6 +43,8 @@ class TbItem extends TbEntry {
     this.indent = false,
     this.hint,
     this.trailing,
+    this.switchRow = false,
+    this.keepOpen = false,
   });
 
   final String label;
@@ -47,6 +52,12 @@ class TbItem extends TbEntry {
   final bool? checked;
   final String? actionId;
   final String? disabledReason;
+
+  /// Drawn as a switch; the menu stays open after it is turned.
+  final bool switchRow;
+
+  /// The menu stays open after the row is used (a choice that shows more rows under it).
+  final bool keepOpen;
 
   /// Drawn one level in, as an option of the row above ("显示本机光标" under "仅查看模式").
   final bool indent;
@@ -70,8 +81,10 @@ class TbSlider extends TbEntry {
     this.toPosition,
     this.fromPosition,
     this.disabledReason,
+    this.startLabel,
   });
 
+  /// The slider's name for a screen reader ("自定义缩放").
   final String label;
   final int value;
   final int min;
@@ -83,37 +96,46 @@ class TbSlider extends TbEntry {
   final double Function(int value)? toPosition;
   final int Function(double position)? fromPosition;
   final String? disabledReason;
+
+  /// A short word before the track ("画质", "帧率").
+  final String? startLabel;
 }
 
-/// "− count +" (the Amyuni virtual display driver).
+/// "− count +" (the Amyuni virtual display driver): [onChanged] gets the count asked for.
 class TbStepper extends TbEntry {
   const TbStepper({
     required this.label,
     required this.value,
-    required this.onDecrease,
-    required this.onIncrease,
+    required this.min,
+    required this.max,
+    required this.onChanged,
     required this.decreaseLabel,
     required this.increaseLabel,
   });
 
+  /// The count's name for a screen reader.
   final String label;
   final int value;
-  final VoidCallback? onDecrease;
-  final VoidCallback? onIncrease;
+  final int min;
+  final int max;
+  final ValueChanged<int>? onChanged;
   final String decreaseLabel;
   final String increaseLabel;
 }
 
+/// A second-level menu. [value] is what is chosen inside, shown before the arrow.
 class TbSubmenu extends TbEntry {
   const TbSubmenu({
     required this.label,
     required this.items,
     this.disabledReason,
+    this.value,
   });
 
   final String label;
   final List<TbEntry> items;
   final String? disabledReason;
+  final String? value;
 }
 
 /// The bound keys of [actionId] ("Ctrl+Alt+Shift+P"), null when unbound or shortcuts are off.
@@ -168,52 +190,57 @@ List<Widget> buildEntries(List<TbEntry> entries) => [
   for (final e in entries) _buildEntry(e),
 ];
 
-Widget _withReason(String? reason, Widget child) =>
-    reason == null ? child : LgTooltip(message: reason, child: child);
-
 Widget _buildEntry(TbEntry e) => switch (e) {
-  TbGroup() => LgMenuGroup(e.title),
-  TbDivider() => const Divider(height: 9, indent: 16, endIndent: 16),
+  TbGroup() => LgMenuGroup(e.title, note: e.note),
+  TbDivider() => const LgMenuDivider(),
   TbItem() => _buildItem(e),
   // Keyed by its label, so a slider's state never passes to another when rows come and go.
-  TbSlider() => _withReason(
-    e.disabledReason,
-    _SliderRow(e, key: ValueKey('slider:${e.label}')),
+  TbSlider() => _SliderRow(e, key: ValueKey('slider:${e.label}')),
+  TbStepper() => LgMenuStepperItem(
+    value: e.value,
+    min: e.min,
+    max: e.max,
+    onChanged: e.onChanged,
+    decreaseLabel: e.decreaseLabel,
+    increaseLabel: e.increaseLabel,
+    valueLabel: e.label,
   ),
-  TbStepper() => _StepperRow(e),
-  TbSubmenu() => _withReason(
-    e.disabledReason,
-    LgSubmenu(
-      label: e.label,
-      items: e.disabledReason == null ? buildEntries(e.items) : const [],
-    ),
+  TbSubmenu() => LgSubmenu(
+    label: e.label,
+    value: e.value,
+    disabledNote: e.disabledReason,
+    items: e.disabledReason == null ? buildEntries(e.items) : const [],
   ),
 };
 
 Widget _buildItem(TbItem e) {
-  Widget row = LgMenuItem(
-    label: e.label,
-    onPressed: e.onPressed,
-    checked: e.checked,
-    hint: shortcutHint(e.actionId) ?? e.hint,
-  );
-  if (e.trailing != null) {
-    row = Row(
-      children: [
-        Expanded(child: row),
-        e.trailing!,
-      ],
+  final onPressed = e.onPressed;
+  final note = onPressed == null ? e.disabledReason : null;
+  if (e.switchRow) {
+    return LgMenuSwitchItem(
+      label: e.label,
+      value: e.checked ?? false,
+      onChanged: onPressed == null ? null : (_) => onPressed(),
+      shortcut: shortcutHint(e.actionId),
+      indent: e.indent,
+      disabledNote: note,
     );
   }
-  if (e.indent) {
-    row = Padding(padding: const EdgeInsets.only(left: 24), child: row);
-  }
-  return _withReason(e.onPressed == null ? e.disabledReason : null, row);
+  return LgMenuItem(
+    label: e.label,
+    onPressed: onPressed,
+    checked: e.checked,
+    hint: e.hint,
+    shortcut: shortcutHint(e.actionId),
+    trailing: e.trailing,
+    indent: e.indent,
+    keepOpen: e.keepOpen,
+    disabledNote: note,
+  );
 }
 
-// Placeholders for the designer's slider and stepper rows (`LEAPGATE.md` §10.9): plain
-// Material controls, labelled for the tests and screen readers.
-
+/// [LgMenuSliderItem] with upstream's 300 ms wait before a value is applied; the slider has
+/// no note of its own, so a greyed one says why with a tooltip.
 class _SliderRow extends StatefulWidget {
   const _SliderRow(this.entry, {super.key});
 
@@ -262,58 +289,21 @@ class _SliderRowState extends State<_SliderRow> {
   }
 
   @override
-  Widget build(BuildContext context) => Semantics(
-    label: _e.label,
-    value: _e.format(_value),
-    child: Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Row(
-        children: [
-          Text(_e.label),
-          Expanded(
-            child: ExcludeSemantics(
-              child: Slider(
-                value: _position.clamp(0.0, 1.0),
-                onChanged: _e.onChanged == null ? null : _changed,
-              ),
-            ),
-          ),
-          Text(_e.format(_value)),
-        ],
-      ),
-    ),
-  );
-}
-
-class _StepperRow extends StatelessWidget {
-  const _StepperRow(this.entry);
-
-  final TbStepper entry;
-
-  @override
-  Widget build(BuildContext context) => Semantics(
-    label: entry.label,
-    value: '${entry.value}',
-    child: Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Row(
-        children: [
-          Expanded(child: Text(entry.label)),
-          IconButton(
-            tooltip: entry.decreaseLabel,
-            onPressed: entry.onDecrease,
-            icon: const Icon(Icons.remove),
-          ),
-          Text('${entry.value}'),
-          IconButton(
-            tooltip: entry.increaseLabel,
-            onPressed: entry.onIncrease,
-            icon: const Icon(Icons.add),
-          ),
-        ],
-      ),
-    ),
-  );
+  Widget build(BuildContext context) {
+    final slider = LgMenuSliderItem(
+      value: _position.clamp(0.0, 1.0),
+      format: (p) => _e.format(_valueAt(p)),
+      semanticLabel: _e.label,
+      startLabel: _e.startLabel,
+      onChanged: _e.onChanged == null ? null : _changed,
+    );
+    final reason = _e.disabledReason;
+    if (_e.onChanged != null || reason == null) return slider;
+    return LgTooltip(
+      message: reason,
+      child: Semantics(hint: reason, child: slider),
+    );
+  }
 }
 
 /// A menu's rows, built when it opens and again after a change ([refresh]), since several of

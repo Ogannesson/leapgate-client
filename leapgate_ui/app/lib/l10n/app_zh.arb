@@ -187,7 +187,7 @@
   "toolbarAllMonitors": "全部显示器",
   "toolbarRelativeMouseHint": "按 Ctrl+Alt 退出鼠标锁定",
   "toolbarAndroidNav": "Android 导航浮条",
-  "toolbarHideNav": "隐藏导航浮条",
+  "toolbarMoveNav": "移动导航浮条",
   "menuCustom": "自定义",
   "menuScaleRange": "5%~1000%",
   "menuCustomScale": "自定义缩放",

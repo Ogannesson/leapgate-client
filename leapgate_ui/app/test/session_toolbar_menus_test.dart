@@ -6,10 +6,10 @@ import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/session.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:leapgate_ui/icons/lg_icon.dart';
 import 'package:leapgate_ui/pages/session/session_toolbar.dart';
 import 'package:leapgate_ui/shell/navigation.dart';
 import 'package:leapgate_ui/widgets/lg_menu.dart';
+import 'package:leapgate_ui/widgets/lg_menu_items.dart';
 import 'package:leapgate_ui/widgets/lg_session_toolbar.dart';
 import 'package:leapgate_ui/widgets/lg_title_bar.dart';
 import 'package:leapgate_ui/widgets/lg_tooltip.dart';
@@ -43,12 +43,20 @@ Future<void> _openMenu(WidgetTester tester, String name) async {
   await tester.pumpAndSettle();
 }
 
-Finder _item(String label) =>
-    find.byWidgetPredicate((w) => w is LgMenuItem && w.label == label);
+/// A menu row by its label: a plain row or one with a switch.
+Finder _item(String label) => find.byWidgetPredicate(
+  (w) =>
+      (w is LgMenuItem && w.label == label) ||
+      (w is LgMenuSwitchItem && w.label == label),
+);
 
 /// Whether the row can be used; it is greyed out when not.
 bool _enabled(WidgetTester tester, String label) =>
-    tester.widget<LgMenuItem>(_item(label)).onPressed != null;
+    switch (tester.widget(_item(label))) {
+      LgMenuItem(:final onPressed) => onPressed != null,
+      LgMenuSwitchItem(:final onChanged) => onChanged != null,
+      _ => throw StateError(label),
+    };
 
 Finder _reason(String text) =>
     find.byWidgetPredicate((w) => w is LgTooltip && w.message == text);
@@ -119,11 +127,8 @@ void main() {
         expect(_enabled(tester, '遮挡屏幕'), true);
         expect(_enabled(tester, '使用虚拟显示器'), false);
         expect(
-          find.ancestor(
-            of: _item('使用虚拟显示器'),
-            matching: _reason('未获得键盘和鼠标控制权限'),
-          ),
-          findsOneWidget,
+          tester.widget<LgMenuItem>(_item('使用虚拟显示器')).disabledNote,
+          '未获得键盘和鼠标控制权限',
         );
 
         // Its shortcut does nothing either.
@@ -274,7 +279,10 @@ void main() {
       await pumpMainWindow(tester);
       await _open(tester, fakes);
       await _openMenu(tester, '操作');
-      expect(tester.widget<LgMenuItem>(_item('发送 Ctrl+Alt+Del')).hint, isNull);
+      expect(
+        tester.widget<LgMenuItem>(_item('发送 Ctrl+Alt+Del')).shortcut,
+        isNull,
+      );
       await tester.tapAt(Offset.zero);
       await tester.pumpAndSettle();
 
@@ -287,7 +295,7 @@ void main() {
       ]);
       await _openMenu(tester, '操作');
       expect(
-        tester.widget<LgMenuItem>(_item('发送 Ctrl+Alt+Del')).hint,
+        tester.widget<LgMenuItem>(_item('发送 Ctrl+Alt+Del')).shortcut,
         'Ctrl+Alt+Shift+Del',
       );
     });
@@ -345,8 +353,7 @@ void main() {
   });
 
   group('the toolbar', () {
-    Finder grip() =>
-        find.byWidgetPredicate((w) => w is LgIcon && w.icon == LgIcons.grip);
+    Finder grip() => find.byType(LgToolbarGrip);
 
     testMainWindow(
       'dragged along the top edge, the place is kept for the device',
@@ -420,16 +427,30 @@ void main() {
     testMainWindow('narrow: session, chat and recording go into "更多"', (
       tester,
     ) async {
+      // A folded button stays in the tree, out of sight and out of reach.
+      Finder shown(Finder f) => f.hitTestable();
       await pumpMainWindow(tester);
       await _open(tester, fakes);
-      expect(find.text('更多'), findsNothing);
-      expect(find.text('会话'), findsOneWidget);
+      expect(shown(find.bySemanticsLabel('更多')), findsNothing);
+      expect(shown(find.text('会话')), findsOneWidget);
 
-      tester.view.physicalSize = const Size(900, 600);
+      // A little short: recording goes first.
+      tester.view.physicalSize = const Size(920, 600);
       await tester.pumpAndSettle();
-      expect(find.text('会话'), findsNothing);
-      await _openMenu(tester, '更多');
-      expect(find.text('会话'), findsOneWidget);
+      expect(shown(find.bySemanticsLabel('更多')), findsOneWidget);
+      expect(shown(find.text('会话')), findsOneWidget);
+      expect(shown(find.bySemanticsLabel('录制')), findsNothing);
+
+      tester.view.physicalSize = const Size(700, 600);
+      await tester.pumpAndSettle();
+      expect(shown(find.text('会话')), findsNothing);
+      await tester.tap(find.bySemanticsLabel('更多'));
+      await tester.pumpAndSettle();
+      // In the bar's order (A-P2 `min-s`).
+      double row(String label) =>
+          tester.getTopLeft(shown(find.text(label)).last).dy;
+      expect(row('会话'), lessThan(row('聊天')));
+      expect(row('聊天'), lessThan(row('录制')));
       // What always stays.
       for (final name in ['画面', '输入', '操作']) {
         expect(find.text(name), findsWidgets, reason: name);
@@ -509,18 +530,22 @@ void main() {
   );
 
   testMainWindow(
-    'an Android peer gets the navigation bar, hidden from it or the input menu',
+    'an Android peer gets the navigation bar, switched in the input menu',
     (tester) async {
       await pumpMainWindow(tester);
       final s = await _open(tester, fakes, info: peerInfo(platform: 'Android'));
       s.ffiModel.waitForFirstImage.value = false;
       await tester.pump();
       expect(find.bySemanticsLabel('Android 导航浮条'), findsOneWidget);
-      await tester.tap(find.bySemanticsLabel('隐藏导航浮条'));
+      await tester.tap(find.bySemanticsLabel('返回'));
       await tester.pump();
-      expect(find.bySemanticsLabel('Android 导航浮条'), findsNothing);
+      expect(callsTo(fakes, #sessionSendMouse), isNotEmpty);
 
+      // The switch row leaves the menu open.
       await _openMenu(tester, '输入');
+      await tester.tap(_item('显示导航浮条'));
+      await tester.pumpAndSettle();
+      expect(find.bySemanticsLabel('Android 导航浮条'), findsNothing);
       await tester.tap(_item('显示导航浮条'));
       await tester.pumpAndSettle();
       expect(find.bySemanticsLabel('Android 导航浮条'), findsOneWidget);

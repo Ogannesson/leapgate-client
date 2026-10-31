@@ -115,6 +115,8 @@ Future<List<TbEntry>> displayMenuEntries(ToolbarEnv env) async {
         checked: viewStyle == style,
         actionId: action,
         hint: style == kRemoteViewStyleCustom ? l10n.menuScaleRange : null,
+        // Its slider shows under it.
+        keepOpen: style == kRemoteViewStyleCustom,
         onPressed: () => setViewStyle(style),
       ),
     );
@@ -161,11 +163,14 @@ Future<List<TbEntry>> displayMenuEntries(ToolbarEnv env) async {
         TbItem(
           label: label,
           checked: scrollStyle == style,
+          keepOpen: style == kRemoteScrollStyleEdge,
           onPressed: overflow ? () => setScrollStyle(style) : null,
         ),
       );
     }
     if (scrollStyle == kRemoteScrollStyleEdge) {
+      // The slider row has no name of its own; a group title gives it one, as 触控板速度.
+      entries.add(TbGroup(l10n.menuEdgeWidth));
       entries.add(
         TbSlider(
           label: l10n.menuEdgeWidth,
@@ -232,6 +237,7 @@ Future<List<TbEntry>> displayMenuEntries(ToolbarEnv env) async {
         label: label,
         checked: quality == value,
         actionId: action,
+        keepOpen: value == kRemoteImageQualityCustom,
         onPressed: () => setQuality(value),
       ),
     );
@@ -285,6 +291,7 @@ Future<List<TbEntry>> displayMenuEntries(ToolbarEnv env) async {
     entries.add(
       TbItem(
         label: l10n.menuTrueColor,
+        switchRow: true,
         checked: ffi.options.getToggle('i444'),
         actionId: kShortcutActionToggleTrueColor,
         onPressed: () async {
@@ -368,6 +375,7 @@ Future<List<TbEntry>> _customQuality(ToolbarEnv env) async {
   return [
     TbSlider(
       label: l10n.toolbarQuality,
+      startLabel: l10n.toolbarQuality,
       value: quality,
       min: kMinQuality.toInt(),
       max: kMaxQuality.toInt(),
@@ -378,6 +386,7 @@ Future<List<TbEntry>> _customQuality(ToolbarEnv env) async {
     if (!hideFps)
       TbSlider(
         label: l10n.menuFps,
+        startLabel: l10n.menuFps,
         value: fps,
         min: kMinFps.toInt(),
         max: kMaxFps.toInt(),
@@ -495,7 +504,11 @@ TbSubmenu? _resolutionMenu(ToolbarEnv env) {
         },
       ),
   ];
-  return TbSubmenu(label: l10n.menuResolution, items: items);
+  return TbSubmenu(
+    label: l10n.menuResolution,
+    value: rect == null ? null : '$width×$height',
+    items: items,
+  );
 }
 
 /// One switch per virtual display (RustDesk's driver) or a count (Amyuni's), and "全部移除";
@@ -538,10 +551,12 @@ List<TbEntry> _virtualDisplays(ToolbarEnv env) {
     TbStepper(
       label: l10n.menuVirtualDisplayCount,
       value: count,
+      min: 0,
+      max: 4,
       decreaseLabel: l10n.menuDecrease,
       increaseLabel: l10n.menuIncrease,
-      onDecrease: privacy || count == 0 ? null : () => toggle(0, false),
-      onIncrease: privacy || count == 4 ? null : () => toggle(0, true),
+      // One step at a time: Rust plugs one in or out per call.
+      onChanged: privacy ? null : (n) => toggle(0, n > count),
     ),
     const TbDivider(),
     TbItem(
