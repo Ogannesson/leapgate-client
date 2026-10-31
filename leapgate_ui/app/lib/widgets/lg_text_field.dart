@@ -23,6 +23,7 @@ class LgTextField extends StatefulWidget {
     this.onChanged,
     this.onSubmitted,
     this.semanticLabel,
+    this.dense = false,
   });
 
   final TextEditingController? controller;
@@ -41,6 +42,10 @@ class LgTextField extends StatefulWidget {
   final ValueChanged<String>? onChanged;
   final ValueChanged<String>? onSubmitted;
   final String? semanticLabel;
+
+  /// A button high instead of an input high, with the medium text: the field
+  /// of a chat box or of a bar (`.chatp .cf .field`).
+  final bool dense;
 
   @override
   State<LgTextField> createState() => _LgTextFieldState();
@@ -95,13 +100,16 @@ class _LgTextFieldState extends State<LgTextField> {
     } else {
       border = Border.all(color: c.borderStrong, width: 1.5);
     }
+    final base = widget.dense ? t.textM : t.text;
     final textStyle = widget.obscureText
         // `.mask`: dots at the number size, spaced .14em.
         ? t.textN.copyWith(color: c.text, letterSpacing: t.sizes.fsN * .14)
-        : t.text.copyWith(color: c.text);
+        : base.copyWith(color: c.text);
     final field = Container(
-      height: t.sizes.main,
-      padding: const EdgeInsets.symmetric(horizontal: LgSpace.s4),
+      height: widget.dense ? t.sizes.button : t.sizes.main,
+      padding: EdgeInsets.symmetric(
+        horizontal: widget.dense ? LgSpace.s3 : LgSpace.s4,
+      ),
       decoration: BoxDecoration(
         color: widget.enabled ? c.surface : c.disabled,
         borderRadius: radius,
@@ -131,7 +139,7 @@ class _LgTextFieldState extends State<LgTextField> {
               maxLines: 1,
               decoration: InputDecoration.collapsed(
                 hintText: widget.placeholder,
-                hintStyle: t.text.copyWith(
+                hintStyle: base.copyWith(
                   color: c.text2,
                   overflow: TextOverflow.ellipsis,
                 ),
