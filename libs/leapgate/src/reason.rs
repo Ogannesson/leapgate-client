@@ -82,6 +82,7 @@ const MAX_LOGGED: usize = 64;
 pub fn classify(msgtype: &str, title: &str, text: &str) -> Reason {
     let reason = match_reason(msgtype, title, text);
     if reason == Reason::Other {
+        let text = clip(text);
         let mut logged = LOGGED.lock().unwrap();
         if logged.len() < MAX_LOGGED && logged.insert(text.to_owned()) {
             log::info!(
@@ -93,6 +94,16 @@ pub fn classify(msgtype: &str, title: &str, text: &str) -> Reason {
         }
     }
     reason
+}
+
+/// At most this many characters of an unrecognized text are kept and logged.
+const MAX_LOGGED_CHARS: usize = 200;
+
+fn clip(text: &str) -> &str {
+    match text.char_indices().nth(MAX_LOGGED_CHARS) {
+        Some((end, _)) => &text[..end],
+        None => text,
+    }
 }
 
 fn match_reason(msgtype: &str, title: &str, text: &str) -> Reason {
@@ -412,6 +423,14 @@ mod tests {
         ] {
             assert_eq!(classify(msgtype, title, text), Other, "{text}");
         }
+    }
+
+    #[test]
+    fn unrecognized_text_is_clipped_on_a_char_boundary() {
+        // Some texts come from the peer: keep and log at most MAX_LOGGED_CHARS of them.
+        let long = "错".repeat(MAX_LOGGED_CHARS + 5);
+        assert_eq!(clip(&long), "错".repeat(MAX_LOGGED_CHARS));
+        assert_eq!(clip("short"), "short");
     }
 
     #[test]

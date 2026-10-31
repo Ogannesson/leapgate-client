@@ -18,6 +18,7 @@ class LgTextField extends StatefulWidget {
     this.enabled = true,
     this.obscureText = false,
     this.autofocus = false,
+    this.leading,
     this.trailing,
     this.onChanged,
     this.onSubmitted,
@@ -31,6 +32,9 @@ class LgTextField extends StatefulWidget {
   final bool enabled;
   final bool obscureText;
   final bool autofocus;
+
+  /// Widget at the left end, e.g. the search icon of the connection box.
+  final Widget? leading;
 
   /// Widget at the right end, e.g. the show-password button.
   final Widget? trailing;
@@ -107,6 +111,10 @@ class _LgTextFieldState extends State<LgTextField> {
           : BoxDecoration(borderRadius: radius, border: border),
       child: Row(
         children: [
+          if (widget.leading != null) ...[
+            widget.leading!,
+            const SizedBox(width: LgSpace.s3),
+          ],
           Expanded(
             child: TextField(
               controller: widget.controller,
@@ -144,34 +152,47 @@ class _LgTextFieldState extends State<LgTextField> {
         validationResult: error
             ? SemanticsValidationResult.invalid
             : SemanticsValidationResult.none,
-        child: error ? _withError(t, c, field) : field,
+        child: error ? _withError(field) : field,
       ),
     );
   }
 
-  Widget _withError(LgTokens t, LgColors c, Widget field) {
+  Widget _withError(Widget field) {
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         field,
         const SizedBox(height: LgSpace.s2),
-        // `.ferr`
-        DefaultTextStyle(
-          style: t.textS.copyWith(color: c.error, fontWeight: FontWeight.w700),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.only(top: 1),
-                child: LgIcon(LgIcons.err, size: 16, color: c.error),
-              ),
-              const SizedBox(width: LgSpace.s2),
-              Expanded(child: Text(widget.errorText!)),
-            ],
-          ),
-        ),
+        LgFieldError(widget.errorText!),
       ],
+    );
+  }
+}
+
+/// The red line under a field (`.ferr`): error icon and text.
+class LgFieldError extends StatelessWidget {
+  const LgFieldError(this.text, {super.key});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = LgTokens.of(context);
+    final c = t.colors;
+    return DefaultTextStyle(
+      style: t.textS.copyWith(color: c.error, fontWeight: FontWeight.w700),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 1),
+            child: LgIcon(LgIcons.err, size: 16, color: c.error),
+          ),
+          const SizedBox(width: LgSpace.s2),
+          Expanded(child: Text(text)),
+        ],
+      ),
     );
   }
 }

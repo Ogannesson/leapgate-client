@@ -138,7 +138,9 @@ class LgCheckbox extends StatelessWidget {
                 ),
                 const SizedBox(width: LgSpace.s3),
                 Flexible(
-                  child: Text(label, style: t.text.copyWith(color: c.text)),
+                  child: ExcludeSemantics(
+                    child: Text(label, style: t.text.copyWith(color: c.text)),
+                  ),
                 ),
               ],
             ),
@@ -158,12 +160,17 @@ class LgRadio<T> extends StatelessWidget {
     required this.groupValue,
     required this.onChanged,
     required this.label,
+    this.description,
   });
 
   final T value;
   final T? groupValue;
   final ValueChanged<T>? onChanged;
   final String label;
+
+  /// Small explanation under the label (the "quit" choice of the close
+  /// question, 01 §8 Q6); read together with the label.
+  final String? description;
 
   @override
   Widget build(BuildContext context) {
@@ -172,7 +179,7 @@ class LgRadio<T> extends StatelessWidget {
     final on = value == groupValue;
     return LgPressable(
       onPressed: onChanged == null ? null : () => onChanged!(value),
-      semanticLabel: label,
+      semanticLabel: description == null ? label : '$label. $description',
       selected: on,
       builder: (context, states) {
         final overlay = lgStateOverlay(c, states);
@@ -182,41 +189,73 @@ class LgRadio<T> extends StatelessWidget {
             constraints: BoxConstraints(minHeight: t.sizes.button),
             child: Row(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: description == null
+                  ? CrossAxisAlignment.center
+                  : CrossAxisAlignment.start,
               children: [
-                LgFocusRing(
-                  show: states.contains(WidgetState.focused),
-                  radius: const BorderRadius.all(Radius.circular(10)),
-                  child: Container(
-                    width: 20,
-                    height: 20,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: overlay,
-                      border: Border.all(
-                        color: on ? c.accent : c.borderStrong,
-                        width: on ? 2 : 1.5,
+                Padding(
+                  // With a description the row is top aligned: centre the
+                  // ring on the first line of the label.
+                  padding: EdgeInsets.only(
+                    top: description == null
+                        ? 0
+                        : LgSpace.s1 + (t.sizes.lh - 20) / 2,
+                  ),
+                  child: LgFocusRing(
+                    show: states.contains(WidgetState.focused),
+                    radius: const BorderRadius.all(Radius.circular(10)),
+                    child: Container(
+                      width: 20,
+                      height: 20,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: overlay,
+                        border: Border.all(
+                          color: on ? c.accent : c.borderStrong,
+                          width: on ? 2 : 1.5,
+                        ),
                       ),
+                      child: on
+                          ? Container(
+                              width: 10,
+                              height: 10,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: c.accent,
+                              ),
+                            )
+                          : null,
                     ),
-                    child: on
-                        ? Container(
-                            width: 10,
-                            height: 10,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: c.accent,
-                            ),
-                          )
-                        : null,
                   ),
                 ),
                 const SizedBox(width: LgSpace.s3),
                 Flexible(
-                  child: Text(
-                    label,
-                    style: t.text.copyWith(
-                      color: c.text,
-                      fontWeight: on ? FontWeight.w700 : FontWeight.w400,
+                  child: Padding(
+                    padding: description == null
+                        ? EdgeInsets.zero
+                        : const EdgeInsets.symmetric(vertical: LgSpace.s1),
+                    child: ExcludeSemantics(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            label,
+                            style: t.text.copyWith(
+                              color: c.text,
+                              fontWeight: on
+                                  ? FontWeight.w700
+                                  : FontWeight.w400,
+                            ),
+                          ),
+                          if (description != null)
+                            Text(
+                              description!,
+                              style: t.textS.copyWith(color: c.text2),
+                            ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -296,13 +335,15 @@ class LgSegmented<T> extends StatelessWidget {
                         borderRadius: segRadius,
                       ),
                       alignment: Alignment.center,
-                      child: Text(
-                        s.label,
-                        maxLines: 1,
-                        softWrap: false,
-                        style: t.text.copyWith(
-                          color: fg,
-                          fontWeight: on ? FontWeight.w700 : FontWeight.w400,
+                      child: ExcludeSemantics(
+                        child: Text(
+                          s.label,
+                          maxLines: 1,
+                          softWrap: false,
+                          style: t.text.copyWith(
+                            color: fg,
+                            fontWeight: on ? FontWeight.w700 : FontWeight.w400,
+                          ),
                         ),
                       ),
                     ),

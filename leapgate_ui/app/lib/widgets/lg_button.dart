@@ -6,8 +6,9 @@ import 'lg_pressable.dart';
 import 'lg_tooltip.dart';
 
 /// Button kinds of `.btn` in A-基础.html: primary (`.pri`), secondary
-/// (`.out`), text (`.txt`) and danger (`.dng`).
-enum LgButtonKind { primary, secondary, text, danger }
+/// (`.out`), text (`.txt`) and danger (`.dng`). [dangerSolid] is the filled
+/// destructive button of a confirmation (`.btn.dngf` in A-P2.html).
+enum LgButtonKind { primary, secondary, text, danger, dangerSolid }
 
 /// A text button, optionally with a leading icon.
 ///
@@ -23,6 +24,9 @@ class LgButton extends StatelessWidget {
     this.icon,
     this.large = false,
     this.focusNode,
+    this.autofocus = false,
+    this.horizontalPadding,
+    this.semanticLabel,
   });
 
   final String label;
@@ -31,6 +35,16 @@ class LgButton extends StatelessWidget {
   final LgIcons? icon;
   final bool large;
   final FocusNode? focusNode;
+  final bool autofocus;
+
+  /// Side padding when the 14 px (text buttons 10 px) of `.btn` is not right,
+  /// e.g. the 24 px of the buttons in dialogs and panels (`.sheet .btn.h48`).
+  final double? horizontalPadding;
+
+  /// The accessible name when it must differ from [label]: two buttons that
+  /// both read "复制" next to each other are "复制 ID" and "复制密码" to a
+  /// screen reader and to a UI Automation script.
+  final String? semanticLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -40,7 +54,8 @@ class LgButton extends StatelessWidget {
     return LgPressable(
       onPressed: onPressed,
       focusNode: focusNode,
-      semanticLabel: label,
+      autofocus: autofocus,
+      semanticLabel: semanticLabel ?? label,
       builder: (context, states) {
         final disabled = states.contains(WidgetState.disabled);
         Color? bg;
@@ -58,6 +73,9 @@ class LgButton extends StatelessWidget {
           case LgButtonKind.danger:
             fg = c.error;
             border = c.error;
+          case LgButtonKind.dangerSolid:
+            bg = c.error;
+            fg = c.onAccent;
         }
         // Disabled: `.btn.dis` fills primary with the disabled ground; outlined
         // buttons keep the strong border (`.btn.out.dis`) and, like text
@@ -65,7 +83,8 @@ class LgButton extends StatelessWidget {
         var opacity = 1.0;
         if (disabled) {
           fg = c.text2;
-          if (kind == LgButtonKind.primary) {
+          if (kind == LgButtonKind.primary ||
+              kind == LgButtonKind.dangerSolid) {
             bg = c.disabled;
           } else {
             opacity = .6;
@@ -79,7 +98,8 @@ class LgButton extends StatelessWidget {
           child: Container(
             height: large ? t.sizes.main : t.sizes.button,
             padding: EdgeInsets.symmetric(
-              horizontal: kind == LgButtonKind.text ? 10 : 14,
+              horizontal:
+                  horizontalPadding ?? (kind == LgButtonKind.text ? 10 : 14),
             ),
             decoration: BoxDecoration(
               color: overlay == null
@@ -98,14 +118,17 @@ class LgButton extends StatelessWidget {
               style: t.text.copyWith(color: fg, fontWeight: FontWeight.w700),
               maxLines: 1,
               softWrap: false,
+              overflow: TextOverflow.ellipsis,
               child: Row(
                 mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   if (icon != null) ...[
                     LgIcon(icon!, size: 20),
                     const SizedBox(width: LgSpace.s2),
                   ],
-                  Text(label),
+                  // The name comes from the pressable; the text would read it twice.
+                  Flexible(child: ExcludeSemantics(child: Text(label))),
                 ],
               ),
             ),
