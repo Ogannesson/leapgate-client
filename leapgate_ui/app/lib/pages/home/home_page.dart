@@ -173,8 +173,8 @@ class _SideColumn extends StatelessWidget {
                   children: [
                     status.id.isEmpty
                         ? _IdGenerating(text: l10n.idGenerating)
-                        // Double-click the ID or "Copy" under it (01 P1 block A), the same
-                        // button as the password's.
+                        // Double-click the ID or "Copy" under it (01 P1 block A): a text
+                        // button with the icon, as in `p1-ben-both`.
                         : Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
@@ -187,7 +187,7 @@ class _SideColumn extends StatelessWidget {
                                 label: l10n.homeCopy,
                                 semanticLabel: l10n.homeCopyId,
                                 icon: LgIcons.copy,
-                                kind: LgButtonKind.primary,
+                                kind: LgButtonKind.text,
                                 onPressed: () => copyWithToast(status.id),
                               ),
                             ],
