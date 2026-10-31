@@ -3,16 +3,20 @@ import 'package:flutter/services.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/local_status.dart';
 
+import '../../icons/lg_icon.dart';
 import '../../l10n/app_localizations.dart';
+import '../../widgets/lg_button.dart';
 import '../../widgets/lg_password_row.dart';
 
 /// The password row of this device (01 P1 block A): label, content, the note when both
-/// passwords work, "Copy" while there is a one-time password to copy. "Refresh" and "Change"
-/// come with M2b.
+/// passwords work, "Copy" and "Refresh" while there is a one-time password, "Change" for the
+/// permanent one on the portable version ([onChange] null hides it: the installed version
+/// unlocks first, M6).
 class PasswordRowView extends StatelessWidget {
-  const PasswordRowView({super.key, required this.status});
+  const PasswordRowView({super.key, required this.status, this.onChange});
 
   final LocalStatusModel status;
+  final VoidCallback? onChange;
 
   @override
   Widget build(BuildContext context) {
@@ -36,10 +40,29 @@ class PasswordRowView extends StatelessWidget {
         onCopy: () => copyWithToast(password),
         copyLabel: l10n.homeCopy,
         copySemanticLabel: l10n.homeCopyPassword,
+        actions: [
+          LgButton(
+            label: l10n.homeRefresh,
+            semanticLabel: l10n.homeRefreshPassword,
+            icon: LgIcons.refresh,
+            kind: LgButtonKind.text,
+            onPressed: status.refreshOneTimePassword,
+          ),
+        ],
       ),
       PasswordRow.permanent => LgPasswordRow(
         label: l10n.homePermanentPassword,
         value: l10n.homePasswordSet,
+        actions: [
+          if (onChange != null)
+            LgButton(
+              label: l10n.homeChange,
+              semanticLabel: l10n.homeChangePassword,
+              icon: LgIcons.edit,
+              kind: LgButtonKind.text,
+              onPressed: onChange,
+            ),
+        ],
       ),
       PasswordRow.acceptOnly => LgPasswordRow(
         label: l10n.homeApprovalMode,

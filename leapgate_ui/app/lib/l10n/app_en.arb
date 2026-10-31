@@ -194,5 +194,133 @@
   "recentColumnName": "Name",
   "recentColumnId": "ID",
   "recentColumnUserHost": "User@host",
-  "recentColumnSource": "Source"
+  "recentColumnSource": "Source",
+  "homeRefresh": "Refresh",
+  "homeRefreshPassword": "Refresh one-time password",
+  "homeChange": "Change",
+  "homeChangePassword": "Change permanent password",
+  "homeStartService": "Start service",
+  "homeRemoteControlled": "{count, plural, =1{Remote control in progress (1 session)} other{Remote control in progress ({count} sessions)}}",
+  "@homeRemoteControlled": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "homeLocked": "Settings can't be changed during remote control",
+  "homeCancel": "Cancel",
+  "homeOk": "OK",
+  "peersFavorites": "Favorites",
+  "peersLan": "LAN",
+  "peersView": "View",
+  "peersSort": "Sort",
+  "peersSelect": "Select",
+  "peersCards": "Cards",
+  "peersList": "List",
+  "peersAdjustCategories": "Adjust the categories shown and their order",
+  "peersMoveCategory": "Reorder “{category}”",
+  "@peersMoveCategory": {
+    "placeholders": {
+      "category": {
+        "type": "String"
+      }
+    }
+  },
+  "peersFixed": "This option is fixed by an administrator or a preset configuration and can't be changed",
+  "peersSortName": "Name",
+  "peersSortId": "ID",
+  "peersSortUsername": "User name",
+  "peersSortStatus": "Online status",
+  "peersEmptyFavorites": "No favorite devices",
+  "peersEmptyLan": "No devices found on the LAN",
+  "peersOver1000": "Only the first 1,000 devices are shown. Use search to narrow the results.",
+  "peersLoadingOther": "Loading other categories…",
+  "peersFavorite": "Favorite",
+  "peersOtherConnectionTypes": "Other connection types",
+  "peersSelected": "{count} selected",
+  "@peersSelected": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "peersSelectAll": "Select all",
+  "peersDone": "Done",
+  "peersDelete": "Delete",
+  "peersRemove": "Remove",
+  "peersAddFavorites": "Add to favorites",
+  "peersRemoveFavorites": "Remove from favorites",
+  "peersDeleteOne": "Delete “{name}”?",
+  "@peersDeleteOne": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "peersDeleteMany": "Delete {count} devices?",
+  "@peersDeleteMany": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "peersRemoveOne": "Remove “{name}”?",
+  "@peersRemoveOne": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "peersRemoveMany": "Remove {count} devices?",
+  "@peersRemoveMany": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "peersRemoveFavoritesMany": "Remove {count} devices from favorites?",
+  "@peersRemoveFavoritesMany": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "peerMenu": "Device menu",
+  "peerMenuDevice": "Device",
+  "peerMenuManage": "Manage",
+  "peerMenuDanger": "Danger zone",
+  "peerMenuAlwaysRelay": "Always connect via relay",
+  "peerMenuWakeOnLan": "Wake on LAN",
+  "peerMenuCreateShortcut": "Create desktop shortcut",
+  "peerMenuRename": "Rename",
+  "peerMenuClearPassword": "Clear saved password",
+  "pwdTitle": "Set permanent password",
+  "pwdNotShown": "The password that is set isn't shown",
+  "pwdClearsTrustedDevices": "Saving or removing the permanent password clears all trusted devices.",
+  "pwdPassword": "Password",
+  "pwdConfirm": "Confirm password",
+  "pwdEnter": "Enter a password",
+  "pwdEnterNew": "Enter a new password",
+  "pwdEnterAgain": "Enter the password again",
+  "pwdRuleDigit": "Contains a digit",
+  "pwdRuleUppercase": "Contains an uppercase letter",
+  "pwdRuleLowercase": "Contains a lowercase letter",
+  "pwdRuleLength": "At least 8 characters",
+  "pwdStrengthWeak": "Password strength: weak",
+  "pwdStrengthMedium": "Password strength: medium",
+  "pwdStrengthStrong": "Password strength: strong",
+  "pwdRulesNotMet": "The password doesn't meet the requirements",
+  "pwdMismatch": "The passwords don't match",
+  "pwdSaveFailed": "Can't save the password",
+  "pwdRemove": "Remove",
+  "uiModeTitle": "Interface mode",
+  "uiModeSimple": "Simple",
+  "uiModeDetail": "Detailed"
 }

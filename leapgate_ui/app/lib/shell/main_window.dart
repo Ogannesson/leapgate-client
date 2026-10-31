@@ -338,7 +338,7 @@ class _MainWindowState extends State<MainWindow>
                   sizing: StackFit.expand,
                   children: [
                     _scope(null, _selected == null,
-                        HomePage(status: widget.status)),
+                        HomePage(status: widget.status, overlays: _overlays)),
                     for (final s in views)
                       KeyedSubtree(
                         key: ObjectKey(s),
