@@ -1,14 +1,16 @@
 import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/cm_core.dart';
 import 'package:window_manager/window_manager.dart';
 
-// The connection manager's window (01 §3.3): about 300×490 at the top right of the primary
-// display's work area, on top of other windows, not resizable; collapsed, the same window becomes
-// a strip along the top edge of that display. Upstream: `flutter/lib/main.dart:285-351`.
+import '../widgets/lg_cm_frame.dart';
+import '../widgets/lg_cm_pill.dart';
+
+// The connection manager's window (01 §3.3): 320×500 at the top right of the primary display's
+// work area, on top of other windows, not resizable; collapsed, the same window becomes a strip
+// along the top edge of that display. Upstream: `flutter/lib/main.dart:285-351`.
 
 /// Where the strip was left: its distance from the right edge of the work area, in logical
 /// pixels (a LocalConfig key of Leapgate's own).
@@ -16,8 +18,10 @@ const kOptionLeapgateCmStripOffset = 'leapgate-cm-strip-offset';
 
 enum CmView { hidden, full, strip }
 
-/// The strip, 48 high, as wide as the full window (A-P3.html `p3-pill-*`).
-const Size kCmStripSize = Size(300, 48);
+const Size _fullSize = Size(kLgCmWidth, kLgCmHeight);
+
+/// The strip, as wide as the full window (A-P3.html `p3-pill-*`).
+const Size kCmStripSize = Size(kLgCmWidth, kLgCmPillHeight);
 
 /// What the page does with the window besides what the copied ServerModel does.
 abstract class CmShellWindow implements CmWindow {
@@ -171,11 +175,7 @@ class LgCmWindow implements CmShellWindow {
   /// distance from the right edge it was left at.
   Future<void> _place(CmView v) async {
     final (:work, :scale) = cmPrimaryWorkArea();
-    final size =
-        (v == CmView.strip
-            ? kCmStripSize
-            : kConnectionManagerWindowSizeClosedChat) *
-        scale;
+    final size = (v == CmView.strip ? kCmStripSize : _fullSize) * scale;
     var right = work.right;
     if (v == CmView.strip) {
       final offset =

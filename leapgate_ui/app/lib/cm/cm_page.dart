@@ -4,17 +4,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter_hbb/leapgate/cm_core.dart';
 import 'package:flutter_hbb/leapgate/recent_peers.dart' show formatPeerId;
 import 'package:flutter_hbb/models/server_model.dart';
-import 'package:get/get.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../icons/lg_icon.dart';
 import '../l10n/app_localizations.dart';
-import '../theme/lg_tokens.dart';
 import '../widgets/lg_button.dart';
+import '../widgets/lg_cm_actions.dart';
+import '../widgets/lg_cm_close_confirm.dart';
+import '../widgets/lg_cm_frame.dart';
+import '../widgets/lg_cm_head.dart';
+import '../widgets/lg_cm_permissions.dart';
+import '../widgets/lg_cm_tabs.dart';
 import '../widgets/lg_feedback.dart';
-import '../widgets/lg_pressable.dart';
-import '../widgets/lg_selection.dart';
-import '../widgets/lg_tooltip.dart';
 import 'cm_parts.dart';
 import 'cm_strip.dart';
 import 'cm_window.dart';
@@ -24,8 +25,10 @@ import 'cm_window.dart';
 // Upstream: `flutter/lib/desktop/pages/server_page.dart`. The chat and file log side panels
 // come with the second stage; their header buttons are there and do nothing yet.
 
-/// Where a dropped remote click is reported: next to what was clicked (01 §3.3).
-enum _HintPlace { header, permissions, actions, strip }
+/// Where a dropped remote click is reported (01 §3.3): over the panel for the header button,
+/// the permissions and closing; on the strip; or over the button itself (`action:` + label).
+const _hintPanel = 'panel';
+const _hintStrip = 'strip';
 
 class CmPage extends StatefulWidget {
   const CmPage({super.key, required this.model, required this.window});
@@ -48,7 +51,7 @@ class _CmPageState extends State<CmPage> with WindowListener {
   final _seconds = <int, int>{};
   Timer? _clock;
 
-  _HintPlace? _blocked;
+  String? _blocked;
   Timer? _blockedTimer;
 
   bool _confirmingClose = false;
@@ -123,14 +126,14 @@ class _CmPageState extends State<CmPage> with WindowListener {
     }
   }
 
-  VoidCallback _guarded(Client client, _HintPlace place, VoidCallback action) =>
+  VoidCallback _guarded(Client client, String place, VoidCallback action) =>
       () => cmCheckClickTime(
         client.id,
         action,
         onBlocked: () => _showBlocked(place),
       );
 
-  void _showBlocked(_HintPlace place) {
+  void _showBlocked(String place) {
     if (!mounted) return;
     _blockedTimer?.cancel();
     setState(() => _blocked = place);
@@ -140,13 +143,13 @@ class _CmPageState extends State<CmPage> with WindowListener {
   }
 
   /// Closing ends every session, so it is guarded too, against the selected visitor's input
-  /// (upstream leaves its close button unguarded); the hint goes under the header.
+  /// (upstream leaves its close button unguarded); the hint goes over the panel.
   void _guardClose(VoidCallback action) {
     final client = _model.clients.where((c) => c.id == _selected).firstOrNull;
     if (client == null) {
       action();
     } else {
-      _guarded(client, _HintPlace.header, action)();
+      _guarded(client, _hintPanel, action)();
     }
   }
 
@@ -166,17 +169,18 @@ class _CmPageState extends State<CmPage> with WindowListener {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final clients = _model.clients;
     final client = clients.where((c) => c.id == _selected).firstOrNull;
     if (widget.window.view.value == CmView.strip) {
       return Scaffold(
-        // As the card's: the remote user's keyboard cannot reach the button.
+        // As the panel's: the remote user's keyboard cannot reach the button.
         body: ExcludeFocus(
           excluding: !allowRemoteCmModification(),
           child: CmStrip(
             clients: clients,
             seconds: _seconds,
-            blocked: _blocked == _HintPlace.strip,
+            blocked: _blocked == _hintStrip,
             onExpand: widget.window.expand,
             onDragStart: widget.window.startStripDrag,
             onDrag: widget.window.dragStrip,
@@ -184,7 +188,7 @@ class _CmPageState extends State<CmPage> with WindowListener {
             onButton: clients.length == 1
                 ? _guarded(
                     clients.single,
-                    _HintPlace.strip,
+                    _hintStrip,
                     () => _stripButton(clients.single),
                   )
                 : () {},
@@ -192,62 +196,72 @@ class _CmPageState extends State<CmPage> with WindowListener {
         ),
       );
     }
-    final l10n = AppLocalizations.of(context)!;
-    Widget body = Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _titleArea(l10n),
-        if (clients.isNotEmpty) _tabs(clients, l10n),
-        if (client != null)
-          Expanded(
-            // Upstream `_buildKeyEventBlock`: the remote user's keyboard cannot reach the
-            // buttons through the focus.
-            child: ExcludeFocus(
-              excluding: !allowRemoteCmModification(),
-              child: _card(client, l10n),
+    Widget frame = LgCmFrame(
+      title: l10n.appName,
+      collapseLabel: l10n.cmCollapse,
+      closeLabel: l10n.cmClose,
+      onCollapse: widget.window.collapse,
+      onClose: _onClose,
+      onStartDrag: widget.window.startDragging,
+      tabs: LgCmTabStrip(
+        tabs: [
+          for (final c in clients)
+            LgCmTab(
+              kind: cmTabKind(c),
+              name: c.name,
+              identity: cmIdentity(c),
+              unread: c.unreadChatMessageCount.value,
+              gone: c.disconnected,
+              tooltip: l10n.cmConnectionNumber(c.id),
             ),
-          ),
-      ],
+        ],
+        selected: client == null ? 0 : clients.indexOf(client),
+        onSelect: (i) => setState(() => _selected = clients[i].id),
+      ),
+      panel: client == null
+          ? const SizedBox.shrink()
+          // Upstream `_buildKeyEventBlock`: the remote user's keyboard cannot reach the
+          // buttons through the focus.
+          : ExcludeFocus(
+              excluding: !allowRemoteCmModification(),
+              child: LgCmTipAnchor(
+                tip: _blocked == _hintPanel ? l10n.cmBlockedRemotely : null,
+                child: _panel(client, l10n),
+              ),
+            ),
+      overlay: _confirmingClose
+          ? LgCmCloseConfirm(
+              title: l10n.cmCloseAllTitle,
+              onEscape: () => setState(() => _confirmingClose = false),
+              actions: [
+                LgDialogAction(
+                  label: l10n.cmCancel,
+                  isDefault: true,
+                  onPressed: () => setState(() => _confirmingClose = false),
+                ),
+                LgDialogAction(
+                  label: l10n.cmDisconnect,
+                  kind: LgButtonKind.danger,
+                  onPressed: () => _guardClose(() {
+                    setState(() => _confirmingClose = false);
+                    widget.window.close();
+                  }),
+                ),
+              ],
+            )
+          : null,
     );
     if (clients.isNotEmpty) {
       // Upstream listens to down and move only, and Flutter's move is a drag; 01 §3.3 cancels
       // on any mouse movement too.
-      body = Listener(
+      frame = Listener(
         onPointerDown: _onPointer,
         onPointerMove: _onPointer,
         onPointerHover: _onPointer,
-        child: body,
+        child: frame,
       );
     }
-    return Scaffold(
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          body,
-          if (_confirmingClose)
-            LgDialogScrim(
-              onEscape: () => setState(() => _confirmingClose = false),
-              child: LgConfirmDialog(
-                title: l10n.cmCloseAllTitle,
-                actions: [
-                  LgDialogAction(
-                    label: l10n.cmCancel,
-                    onPressed: () => setState(() => _confirmingClose = false),
-                  ),
-                  LgDialogAction(
-                    label: l10n.cmDisconnect,
-                    kind: LgButtonKind.dangerSolid,
-                    onPressed: () => _guardClose(() {
-                      setState(() => _confirmingClose = false);
-                      widget.window.close();
-                    }),
-                  ),
-                ],
-              ),
-            ),
-        ],
-      ),
-    );
+    return Scaffold(body: frame);
   }
 
   void _stripButton(Client client) {
@@ -258,185 +272,67 @@ class _CmPageState extends State<CmPage> with WindowListener {
     }
   }
 
-  Widget _titleArea(AppLocalizations l10n) {
-    final t = LgTokens.of(context);
-    return SizedBox(
-      height: t.sizes.button + LgSpace.s2,
-      child: Row(
-        children: [
-          Expanded(
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onPanStart: (_) => widget.window.startDragging(),
-              child: Padding(
-                padding: const EdgeInsets.only(left: LgSpace.s3),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    l10n.appName,
-                    style: t.textS.copyWith(color: t.colors.text2),
-                  ),
-                ),
-              ),
-            ),
-          ),
-          LgIconButton(
-            icon: LgIcons.dockTop,
-            label: l10n.cmCollapse,
-            onPressed: widget.window.collapse,
-          ),
-          LgIconButton(
-            icon: LgIcons.x,
-            label: l10n.cmClose,
-            onPressed: _onClose,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _tabs(List<Client> clients, AppLocalizations l10n) {
-    final t = LgTokens.of(context);
-    final c = t.colors;
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.symmetric(horizontal: LgSpace.s2),
-      child: Row(
-        children: [
-          for (final client in clients)
-            LgTooltip(
-              message: l10n.cmConnectionNumber(client.id),
-              child: LgPressable(
-                onPressed: () => setState(() => _selected = client.id),
-                selected: client.id == _selected,
-                semanticLabel: client.name,
-                builder: (context, states) => Container(
-                  height: t.sizes.button,
-                  padding: const EdgeInsets.symmetric(horizontal: LgSpace.s2),
-                  decoration: BoxDecoration(
-                    color: client.id == _selected ? c.cmBand : null,
-                    borderRadius: const BorderRadius.vertical(
-                      top: Radius.circular(LgRadius.r10),
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      LgIcon(
-                        cmKindIcon(client),
-                        size: 16,
-                        color: client.disconnected ? c.text2 : c.text,
-                      ),
-                      const SizedBox(width: LgSpace.s1),
-                      ExcludeSemantics(
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 100),
-                          child: Text(
-                            client.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: t.textS.copyWith(
-                              color: client.disconnected ? c.text2 : c.text,
-                            ),
-                          ),
-                        ),
-                      ),
-                      Obx(() {
-                        final unread = client.unreadChatMessageCount.value;
-                        if (unread == 0) return const SizedBox.shrink();
-                        return Padding(
-                          padding: const EdgeInsets.only(left: LgSpace.s1),
-                          child: Text(
-                            '$unread',
-                            style: t.textS.copyWith(color: c.accent),
-                          ),
-                        );
-                      }),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _card(Client client, AppLocalizations l10n) {
-    final t = LgTokens.of(context);
+  Widget _panel(Client client, AppLocalizations l10n) {
     final permissions = cmPermissionsOf(client);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Expanded(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(LgSpace.s2),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _header(client, l10n),
-                if (_blocked == _HintPlace.header)
-                  Padding(
-                    padding: const EdgeInsets.only(top: LgSpace.s1),
-                    child: CmBlockedHint(l10n.cmBlockedRemotely),
+    final kind = cmSessionKind(client);
+    return LgCmPanel(
+      header: _header(client, l10n),
+      body: kind == CmSessionKind.exit
+          ? LgCmNoteBlock(text: l10n.cmExitNote)
+          : permissions.isEmpty
+          ? null
+          : LgCmPermissions(
+              title: l10n.cmPermissions,
+              readOnly: !cmCanModifyPermissions(),
+              items: [
+                for (final p in permissions)
+                  LgCmPermission(
+                    label: cmPermissionLabel(l10n, p),
+                    value: cmPermissionValue(client, p),
+                    onChanged: (v) => _guarded(
+                      client,
+                      _hintPanel,
+                      () => setState(() => cmSwitchPermission(client, p, v)),
+                    )(),
                   ),
-                if (cmSessionKind(client) == CmSessionKind.exit)
-                  Padding(
-                    padding: const EdgeInsets.only(top: LgSpace.s3),
-                    child: Text(
-                      l10n.cmExitNote,
-                      style: t.textS.copyWith(color: t.colors.text),
-                    ),
-                  ),
-                if (permissions.isNotEmpty)
-                  _permissions(client, permissions, l10n),
               ],
             ),
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(
-            LgSpace.s2,
-            0,
-            LgSpace.s2,
-            LgSpace.s2,
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (_blocked == _HintPlace.actions)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: LgSpace.s1),
-                  child: CmBlockedHint(l10n.cmBlockedRemotely),
-                ),
-              for (final row in _actions(client, l10n))
-                Padding(
-                  padding: const EdgeInsets.only(top: LgSpace.s1),
-                  child: row,
-                ),
-            ],
-          ),
-        ),
-      ],
+      actions: LgCmActions(children: _actions(client, l10n)),
     );
   }
 
   Widget _header(Client client, AppLocalizations l10n) {
-    final t = LgTokens.of(context);
-    final c = t.colors;
-    String status;
+    final LgCmStatusLine status;
+    final time = cmDuration(_seconds[client.id] ?? 0);
     if (!client.authorized) {
-      status = l10n.cmStatusRequesting;
+      status = LgCmStatusLine(
+        phase: LgCmPhase.requesting,
+        label: l10n.cmStatusRequesting,
+      );
     } else if (client.disconnected) {
-      status = l10n.cmStatusDisconnected;
+      status = LgCmStatusLine(
+        phase: LgCmPhase.disconnected,
+        label: l10n.cmStatusDisconnected,
+      );
     } else if (client.incomingVoiceCall) {
-      status = l10n.cmStatusVoiceRequest;
+      status = LgCmStatusLine(
+        phase: LgCmPhase.voiceRequesting,
+        label: l10n.cmStatusVoiceRequest,
+        time: time,
+      );
     } else if (client.inVoiceCall) {
-      status = l10n.cmStatusInVoiceCall;
+      status = LgCmStatusLine(
+        phase: LgCmPhase.voiceActive,
+        label: l10n.cmStatusInVoiceCall,
+        time: time,
+      );
     } else {
-      status = l10n.cmStatusConnected;
+      status = LgCmStatusLine(
+        phase: LgCmPhase.connected,
+        label: l10n.cmStatusConnected,
+        time: time,
+      );
     }
-    final counting = client.authorized && !client.disconnected;
     final kind = cmSessionKind(client);
     // Upstream `server_page.dart:562-581`: the chat (or, for file transfer, the file log) once
     // authorized; terminal, port forwarding and exit nodes have neither.
@@ -445,227 +341,116 @@ class _CmPageState extends State<CmPage> with WindowListener {
         (kind == CmSessionKind.remoteDesktop ||
             kind == CmSessionKind.fileTransfer ||
             kind == CmSessionKind.camera);
-    return Container(
-      padding: const EdgeInsets.all(LgSpace.s3),
-      decoration: BoxDecoration(
-        color: c.cmBand,
-        borderRadius: BorderRadius.circular(LgRadius.r12),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          CmAvatar(client: client, size: 56),
-          const SizedBox(width: LgSpace.s3),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  client.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: t.textM.copyWith(
-                    color: c.text,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                Text(
-                  formatPeerId(client.peerId),
-                  style: t.textS.copyWith(color: c.text2),
-                ),
-                Text(
-                  cmKindLabel(l10n, client),
-                  style: t.textS.copyWith(color: c.text),
-                ),
-                Text(
-                  counting
-                      ? '$status ${cmDuration(_seconds[client.id] ?? 0)}'
-                      : status,
-                  style: t.textS.copyWith(color: c.text2),
-                ),
-              ],
-            ),
-          ),
-          if (side)
-            kind == CmSessionKind.fileTransfer
-                ? LgIconButton(
-                    icon: LgIcons.files,
-                    label: l10n.cmFileLog,
-                    onPressed: _guarded(client, _HintPlace.header, () {}),
-                  )
-                : LgIconButton(
-                    icon: LgIcons.chat,
-                    label: l10n.cmChat,
-                    onPressed: _guarded(client, _HintPlace.header, () {}),
-                  ),
-        ],
-      ),
-    );
-  }
-
-  Widget _permissions(
-    Client client,
-    List<CmPermission> permissions,
-    AppLocalizations l10n,
-  ) {
-    final t = LgTokens.of(context);
-    final canModify = cmCanModifyPermissions();
-    Widget cell(CmPermission p) {
-      final label = cmPermissionLabel(l10n, p);
-      final value = cmPermissionValue(client, p);
-      return Row(
-        children: [
-          LgSwitch(
-            value: value,
-            semanticLabel: label,
-            onChanged: canModify
-                ? (v) => _guarded(
-                    client,
-                    _HintPlace.permissions,
-                    () => setState(() => cmSwitchPermission(client, p, v)),
-                  )()
-                : null,
-          ),
-          const SizedBox(width: LgSpace.s2),
-          Expanded(
-            child: ExcludeSemantics(
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: t.textS.copyWith(color: t.colors.text),
-              ),
-            ),
-          ),
-        ],
-      );
-    }
-
-    return Padding(
-      padding: const EdgeInsets.only(top: LgSpace.s3),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            l10n.cmPermissions,
-            style: t.textS.copyWith(
-              color: t.colors.text2,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          if (_blocked == _HintPlace.permissions)
-            Padding(
-              padding: const EdgeInsets.only(top: LgSpace.s1),
-              child: CmBlockedHint(l10n.cmBlockedRemotely),
-            ),
-          for (var i = 0; i < permissions.length; i += 2)
-            Padding(
-              padding: const EdgeInsets.only(top: LgSpace.s2),
-              child: Row(
-                children: [
-                  Expanded(child: cell(permissions[i])),
-                  const SizedBox(width: LgSpace.s2),
-                  Expanded(
-                    child: i + 1 < permissions.length
-                        ? cell(permissions[i + 1])
-                        : const SizedBox.shrink(),
-                  ),
-                ],
-              ),
-            ),
-        ],
-      ),
+    return LgCmHeader(
+      name: client.name,
+      id: formatPeerId(client.peerId),
+      identity: cmIdentity(client),
+      type: cmKindLabel(l10n, client),
+      status: status,
+      avatarText: cmLetter(client),
+      avatarImage: cmAvatarImage(client),
+      sideButton: side
+          ? LgCmSideButton(
+              icon: kind == CmSessionKind.fileTransfer
+                  ? LgIcons.files
+                  : LgIcons.chat,
+              label: kind == CmSessionKind.fileTransfer
+                  ? l10n.cmFileLog
+                  : l10n.cmChat,
+              onPressed: _guarded(client, _hintPanel, () {}),
+            )
+          : null,
     );
   }
 
   /// The buttons of 01 §3.3's table, each guarded against the remote user's clicks
-  /// (`server_page.dart:873-1235`).
+  /// (`server_page.dart:873-1235`), the hint over the button that was clicked.
   List<Widget> _actions(Client client, AppLocalizations l10n) {
-    VoidCallback g(VoidCallback action) =>
-        _guarded(client, _HintPlace.actions, action);
-    Widget wide(
+    LgCmAction action(
       String label,
       VoidCallback onPressed, {
-      LgButtonKind kind = LgButtonKind.secondary,
-    }) => SizedBox(
-      width: double.infinity,
-      child: LgButton(label: label, kind: kind, onPressed: g(onPressed)),
-    );
-    Widget pair(Widget a, Widget b) => Row(
-      children: [
-        Expanded(child: a),
-        const SizedBox(width: LgSpace.s2),
-        Expanded(child: b),
-      ],
-    );
+      LgCmActionKind kind = LgCmActionKind.secondary,
+      LgIcons? icon,
+    }) {
+      final place = 'action:$label';
+      return LgCmAction(
+        label: label,
+        kind: kind,
+        icon: icon,
+        tip: _blocked == place ? l10n.cmBlockedRemotely : null,
+        onPressed: _guarded(client, place, onPressed),
+      );
+    }
+
+    LgCmActionRow row(LgCmAction a) => LgCmActionRow(actions: [a]);
 
     if (client.disconnected) {
-      return [
-        wide(
-          l10n.cmClose,
-          () => _closeDisconnected(client),
-          kind: LgButtonKind.primary,
-        ),
-      ];
+      return [row(action(l10n.cmClose, () => _closeDisconnected(client)))];
     }
     if (!client.authorized) {
-      final decline = wide(l10n.cmDecline, () => cmDisconnect(client));
+      final decline = action(l10n.cmDecline, () => cmDisconnect(client));
       if (_model.approveMode == 'password') {
-        final t = LgTokens.of(context);
-        return [
-          Text(
-            l10n.cmWaitingForPassword,
-            textAlign: TextAlign.center,
-            style: t.textS.copyWith(color: t.colors.text2),
-          ),
-          decline,
-        ];
+        return [LgCmNote(text: l10n.cmWaitingForPassword), row(decline)];
       }
       return [
-        wide(l10n.cmAccept, () {
-          _model.sendLoginResponse(client, true);
-          widget.window.collapse();
-        }, kind: LgButtonKind.primary),
+        row(
+          action(l10n.cmAccept, () {
+            _model.sendLoginResponse(client, true);
+            widget.window.collapse();
+          }, kind: LgCmActionKind.primary),
+        ),
         if (cmShowAcceptAndElevate(_model, client))
-          pair(
-            wide(l10n.cmAcceptAndElevate, () {
-              _model.sendLoginResponse(client, true);
-              cmElevate(_model, client);
-              widget.window.collapse();
-            }),
-            decline,
+          LgCmActionRow(
+            flex: const [2, 1],
+            actions: [
+              action(l10n.cmAcceptAndElevate, () {
+                _model.sendLoginResponse(client, true);
+                cmElevate(_model, client);
+                widget.window.collapse();
+              }, icon: LgIcons.shield),
+              decline,
+            ],
           )
         else
-          decline,
+          row(decline),
       ];
     }
     return [
       if (client.incomingVoiceCall)
-        pair(
-          wide(
-            l10n.cmAnswer,
-            () => _model.handleVoiceCall(client, true),
-            kind: LgButtonKind.primary,
-          ),
-          wide(l10n.cmDecline, () => _model.handleVoiceCall(client, false)),
+        LgCmActionRow(
+          actions: [
+            action(
+              l10n.cmAnswer,
+              () => _model.handleVoiceCall(client, true),
+              kind: LgCmActionKind.primary,
+              icon: LgIcons.call,
+            ),
+            action(l10n.cmDecline, () => _model.handleVoiceCall(client, false)),
+          ],
         ),
       if (client.inVoiceCall)
-        wide(
-          l10n.cmHangUp,
-          () => cmCloseVoiceCall(client),
-          kind: LgButtonKind.danger,
+        row(
+          action(
+            l10n.cmHangUp,
+            () => cmCloseVoiceCall(client),
+            icon: LgIcons.callEnd,
+          ),
         ),
       if (client.fromSwitch)
-        wide(l10n.cmSwitchBack, () => cmSwitchBack(client)),
+        row(action(l10n.cmSwitchBack, () => cmSwitchBack(client))),
       if (cmShowElevate(_model, client))
-        wide(l10n.cmElevate, () {
-          cmElevate(_model, client);
-          widget.window.collapse();
-        }),
-      wide(
-        l10n.cmDisconnect,
-        () => cmDisconnect(client),
-        kind: LgButtonKind.danger,
+        row(
+          action(l10n.cmElevate, () {
+            cmElevate(_model, client);
+            widget.window.collapse();
+          }, icon: LgIcons.shield),
+        ),
+      row(
+        action(
+          l10n.cmDisconnect,
+          () => cmDisconnect(client),
+          kind: LgCmActionKind.danger,
+        ),
       ),
     ];
   }

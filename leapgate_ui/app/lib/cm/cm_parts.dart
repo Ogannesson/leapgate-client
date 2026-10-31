@@ -5,12 +5,11 @@ import 'package:flutter_hbb/leapgate/cm_core.dart';
 import 'package:flutter_hbb/leapgate/identity_color.dart';
 import 'package:flutter_hbb/models/server_model.dart';
 
-import '../icons/lg_icon.dart';
 import '../l10n/app_localizations.dart';
-import '../theme/lg_tokens.dart';
+import '../widgets/lg_cm_pill.dart';
+import '../widgets/lg_cm_tabs.dart';
 
-// Copy and small pieces the CM's full window and its strip share. The pieces are placeholders
-// until the CM components (A-P3.html) replace them.
+// Copy and values the CM's full window and its strip share.
 
 /// The session type line of the header (01 §3.3).
 String cmKindLabel(AppLocalizations l10n, Client client) =>
@@ -34,13 +33,13 @@ String cmStripLabel(AppLocalizations l10n, Client client) =>
       CmSessionKind.exit => l10n.cmPillExit(client.name),
     };
 
-LgIcons cmKindIcon(Client client) => switch (cmSessionKind(client)) {
-  CmSessionKind.remoteDesktop => LgIcons.monitor,
-  CmSessionKind.fileTransfer => LgIcons.folder,
-  CmSessionKind.camera => LgIcons.camera,
-  CmSessionKind.terminal => LgIcons.terminal,
-  CmSessionKind.portForward => LgIcons.forward,
-  CmSessionKind.exit => LgIcons.exit,
+LgCmKind cmTabKind(Client client) => switch (cmSessionKind(client)) {
+  CmSessionKind.remoteDesktop => LgCmKind.remote,
+  CmSessionKind.fileTransfer => LgCmKind.file,
+  CmSessionKind.camera => LgCmKind.camera,
+  CmSessionKind.terminal => LgCmKind.terminal,
+  CmSessionKind.portForward => LgCmKind.port,
+  CmSessionKind.exit => LgCmKind.exit,
 };
 
 String cmPermissionLabel(AppLocalizations l10n, CmPermission p) => switch (p) {
@@ -60,88 +59,32 @@ String cmDuration(int seconds) {
   return '${two(seconds ~/ 3600)}:${two(seconds ~/ 60 % 60)}:${two(seconds % 60)}';
 }
 
-/// The visitor's avatar, or the first character of the name (upper case for Latin letters, as
-/// the account area does, 01 §3.1 block D). Upstream `server_page.dart:590-618` and
-/// `common.dart:4254-4284` (`buildAvatarWidget`).
-class CmAvatar extends StatelessWidget {
-  const CmAvatar({super.key, required this.client, required this.size});
+/// The identity colour group of the visitor's device (01 §2.4).
+int cmIdentity(Client client) => identityGroup(client.peerId);
 
-  final Client client;
-  final double size;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = LgTokens.of(context);
-    final identity = t.colors.identity[identityGroup(client.peerId)];
-    final name = client.name.trim();
-    final initial = Container(
-      width: size,
-      height: size,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: identity.tint,
-        borderRadius: BorderRadius.circular(LgRadius.r10),
-      ),
-      child: Text(
-        name.isEmpty ? '?' : name.characters.first.toUpperCase(),
-        style: LgTokens.style(
-          size / 2,
-          size / 2 + 4,
-          FontWeight.w700,
-        ).copyWith(color: identity.ink),
-      ),
-    );
-    final image = _image(client.avatar.trim());
-    if (image == null) return initial;
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(LgRadius.r10),
-      child: Image(
-        image: image,
-        width: size,
-        height: size,
-        fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => initial,
-      ),
-    );
-  }
-
-  static ImageProvider? _image(String avatar) {
-    if (avatar.startsWith('data:image/')) {
-      final comma = avatar.indexOf(',');
-      if (comma > 0) {
-        try {
-          return MemoryImage(base64Decode(avatar.substring(comma + 1)));
-        } catch (_) {}
-      }
-    } else if (avatar.startsWith('http://') || avatar.startsWith('https://')) {
-      return NetworkImage(avatar);
-    }
-    return null;
-  }
+/// The letter of the avatar: the first character of the name (the components put Latin letters
+/// in upper case, as the account area does, 01 §3.1 block D).
+String cmLetter(Client client) {
+  final name = client.name.trim();
+  return name.isEmpty ? '?' : name.characters.first;
 }
 
-/// "无法远程执行此操作" where a click of the remote user was dropped (01 §3.3).
-class CmBlockedHint extends StatelessWidget {
-  const CmBlockedHint(this.text, {super.key});
+LgCmPillPerson cmPillPerson(Client client) =>
+    LgCmPillPerson(letter: cmLetter(client), identity: cmIdentity(client));
 
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = LgTokens.of(context);
-    return Semantics(
-      liveRegion: true,
-      child: Container(
-        padding: const EdgeInsets.symmetric(
-          horizontal: LgSpace.s2,
-          vertical: LgSpace.s1,
-        ),
-        decoration: BoxDecoration(
-          color: t.colors.warningBg,
-          borderRadius: BorderRadius.circular(LgRadius.r6),
-        ),
-        child: Text(text, style: t.textS.copyWith(color: t.colors.text)),
-      ),
-    );
+/// The visitor's picture, when the account has one (upstream `common.dart:4254-4284`,
+/// `buildAvatarWidget`).
+ImageProvider? cmAvatarImage(Client client) {
+  final avatar = client.avatar.trim();
+  if (avatar.startsWith('data:image/')) {
+    final comma = avatar.indexOf(',');
+    if (comma > 0) {
+      try {
+        return MemoryImage(base64Decode(avatar.substring(comma + 1)));
+      } catch (_) {}
+    }
+  } else if (avatar.startsWith('http://') || avatar.startsWith('https://')) {
+    return NetworkImage(avatar);
   }
+  return null;
 }

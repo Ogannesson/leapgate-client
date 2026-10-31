@@ -17,7 +17,7 @@ import 'package:leapgate_ui/l10n/app_localizations.dart';
 import 'package:leapgate_ui/theme/lg_theme.dart';
 import 'package:leapgate_ui/theme/lg_tokens.dart';
 import 'package:leapgate_ui/widgets/lg_button.dart';
-import 'package:leapgate_ui/widgets/lg_selection.dart';
+import 'package:leapgate_ui/widgets/lg_cm_frame.dart';
 
 // The connection manager's page, one test per state of 06 §5.1 in the first stage (A-P3.html).
 // Device IDs and names here are made up.
@@ -177,7 +177,7 @@ Future<void> arrive(WidgetTester tester, Map<String, dynamic> v) =>
     send(tester, {'name': 'add_connection', 'client': jsonEncode(v)});
 
 Future<Cm> pumpCm(WidgetTester tester, {void Function(CmBind)? setUp}) async {
-  tester.view.physicalSize = const Size(300, 490);
+  tester.view.physicalSize = const Size(kLgCmWidth, kLgCmHeight);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
   final bind = CmBind();
@@ -216,21 +216,39 @@ Future<void> click(WidgetTester tester, Finder finder) async {
   await tester.pump(const Duration(milliseconds: 200));
 }
 
+/// The title row's buttons, which have an icon and no text.
 Finder iconButton(String label) =>
     find.byWidgetPredicate((w) => w is LgIconButton && w.label == label);
 
-Finder switchNamed(String label) =>
-    find.byWidgetPredicate((w) => w is LgSwitch && w.semanticLabel == label);
-
-List<String> switchLabels(WidgetTester tester) => [
-  for (final s in tester.widgetList<LgSwitch>(find.byType(LgSwitch)))
-    s.semanticLabel!,
+const _remotePermissions = [
+  '键盘和鼠标',
+  '剪贴板',
+  '声音',
+  '文件复制粘贴',
+  '远程重启',
+  '录制',
+  '阻止本地输入',
+  '隐私模式',
 ];
+
+/// The permission switches a screen reader finds, top to bottom and left to right.
+List<String> permissions(WidgetTester tester) {
+  final found = [
+    for (final label in _remotePermissions)
+      if (find.bySemanticsLabel(label).evaluate().isNotEmpty) label,
+  ];
+  Offset at(String label) => tester.getTopLeft(find.text(label));
+  return found..sort((a, b) {
+    final dy = at(a).dy.compareTo(at(b).dy);
+    return dy != 0 ? dy : at(a).dx.compareTo(at(b).dx);
+  });
+}
 
 void main() {
   testWidgets(
     'remote desktop: header, eight permissions with labels, Disconnect',
     (tester) async {
+      final handle = tester.ensureSemantics();
       final cm = await pumpCm(
         tester,
         setUp: (b) => b.privacyModeImpls = '["x"]',
@@ -239,22 +257,17 @@ void main() {
       await tester.pump(const Duration(seconds: 2));
 
       expect(find.text('李四'), findsWidgets);
-      expect(find.text('912 345 678'), findsOneWidget);
+      expect(find.text('912'), findsOneWidget);
+      expect(find.text('678'), findsOneWidget);
       expect(find.text('远程桌面'), findsOneWidget);
-      expect(find.text('已连接 00:00:02'), findsOneWidget);
+      // The status marker and its words are one rich text.
+      expect(find.textContaining('已连接', findRichText: true), findsOneWidget);
+      expect(find.text('00:00:02'), findsOneWidget);
       expect(find.text('允许对方'), findsOneWidget);
-      expect(switchLabels(tester), [
-        '键盘和鼠标',
-        '剪贴板',
-        '声音',
-        '文件复制粘贴',
-        '远程重启',
-        '录制',
-        '阻止本地输入',
-        '隐私模式',
-      ]);
-      expect(iconButton('聊天'), findsOneWidget);
+      expect(permissions(tester), _remotePermissions);
+      expect(find.bySemanticsLabel('聊天'), findsOneWidget);
       expect(find.text('断开'), findsOneWidget);
+      handle.dispose();
 
       await click(tester, find.text('断开'));
       expect(
@@ -268,15 +281,23 @@ void main() {
   testWidgets(
     'a permission switch tells the connection; read-only when a built-in setting says so',
     (tester) async {
+      final handle = tester.ensureSemantics();
       var cm = await pumpCm(tester);
       await arrive(tester, visitor(1));
-      await click(tester, switchNamed('剪贴板'));
+      expect(
+        tester.getSemantics(find.bySemanticsLabel('剪贴板')),
+        isSemantics(isToggled: true, isEnabled: true),
+      );
+      await click(tester, find.bySemanticsLabel('剪贴板'));
       final call = cm.bind.callsTo(#cmSwitchPermission).single.namedArguments;
       expect(
         (call[#connId], call[#name], call[#enabled]),
         (1, 'clipboard', false),
       );
-      expect(tester.widget<LgSwitch>(switchNamed('剪贴板')).value, false);
+      expect(
+        tester.getSemantics(find.bySemanticsLabel('剪贴板')),
+        isSemantics(isToggled: false),
+      );
       await finish(tester, cm);
 
       cm = await pumpCm(
@@ -285,39 +306,47 @@ void main() {
             b.buildinOptions[kOptionEnablePermChangeInAcceptWindow] = 'N',
       );
       await arrive(tester, visitor(1));
-      expect(
-        tester
-            .widgetList<LgSwitch>(find.byType(LgSwitch))
-            .every((s) => s.onChanged == null),
-        true,
-      );
+      for (final label in ['键盘和鼠标', '剪贴板', '声音']) {
+        expect(
+          tester.getSemantics(find.bySemanticsLabel(label)),
+          isSemantics(isToggled: true, isEnabled: false),
+        );
+      }
+      await click(tester, find.bySemanticsLabel('剪贴板'));
+      expect(cm.bind.callsTo(#cmSwitchPermission), isEmpty);
       await finish(tester, cm);
+      handle.dispose();
     },
   );
 
   testWidgets('camera: audio and recording only', (tester) async {
+    final handle = tester.ensureSemantics();
     final cm = await pumpCm(tester);
     await arrive(tester, visitor(1, camera: true));
     expect(find.text('查看摄像头'), findsOneWidget);
-    expect(switchLabels(tester), ['声音', '录制']);
-    expect(iconButton('聊天'), findsOneWidget);
+    expect(permissions(tester), ['声音', '录制']);
+    expect(find.bySemanticsLabel('聊天'), findsOneWidget);
     await finish(tester, cm);
+    handle.dispose();
   });
 
   testWidgets('file transfer: no permissions, the file log button', (
     tester,
   ) async {
+    final handle = tester.ensureSemantics();
     final cm = await pumpCm(tester);
     await arrive(tester, visitor(1, fileTransfer: true));
     expect(find.text('文件传输'), findsOneWidget);
-    expect(find.byType(LgSwitch), findsNothing);
-    expect(iconButton('文件记录'), findsOneWidget);
+    expect(find.text('允许对方'), findsNothing);
+    expect(find.bySemanticsLabel('文件记录'), findsOneWidget);
     await finish(tester, cm);
+    handle.dispose();
   });
 
   testWidgets(
     'terminal and port forwarding: the type, no permissions, no side button',
     (tester) async {
+      final handle = tester.ensureSemantics();
       final cm = await pumpCm(tester);
       await arrive(tester, visitor(1, terminal: true));
       expect(find.text('终端'), findsOneWidget);
@@ -326,13 +355,15 @@ void main() {
         visitor(2, name: '王五', portForward: '192.0.2.5:8080'),
       );
       expect(find.text('端口转发：192.0.2.5:8080'), findsOneWidget);
-      expect(find.byType(LgSwitch), findsNothing);
-      expect(iconButton('聊天'), findsNothing);
+      expect(find.text('允许对方'), findsNothing);
+      expect(find.bySemanticsLabel('聊天'), findsNothing);
       await finish(tester, cm);
+      handle.dispose();
     },
   );
 
   testWidgets('exit node: its note, no permissions, no chat', (tester) async {
+    final handle = tester.ensureSemantics();
     final cm = await pumpCm(tester);
     await arrive(
       tester,
@@ -340,10 +371,11 @@ void main() {
     );
     expect(find.text('作为出口'), findsOneWidget);
     expect(find.text('对方正在通过本机访问网络（仅 TCP），无法查看本机屏幕。'), findsOneWidget);
-    expect(find.byType(LgSwitch), findsNothing);
-    expect(iconButton('聊天'), findsNothing);
+    expect(find.text('允许对方'), findsNothing);
+    expect(find.bySemanticsLabel('聊天'), findsNothing);
     expect(find.text('断开'), findsOneWidget);
     await finish(tester, cm);
+    handle.dispose();
   });
 
   testWidgets(
@@ -405,7 +437,8 @@ void main() {
       'name': 'update_voice_call_state',
       'client': jsonEncode(visitor(1, incomingVoiceCall: true)),
     });
-    expect(find.text('正在请求语音通话… 00:00:00'), findsOneWidget);
+    expect(find.text('正在请求语音通话…'), findsOneWidget);
+    expect(find.text('00:00:00'), findsOneWidget);
     await click(tester, find.text('接听'));
     final answer = cm.bind
         .callsTo(#cmHandleIncomingVoiceCall)
@@ -417,7 +450,8 @@ void main() {
       'name': 'update_voice_call_state',
       'client': jsonEncode(visitor(1, inVoiceCall: true)),
     });
-    expect(find.text('语音通话中 00:00:00'), findsOneWidget);
+    expect(find.text('语音通话中'), findsOneWidget);
+    expect(find.text('00:00:00'), findsOneWidget);
     await click(tester, find.text('挂断'));
     expect(cm.bind.callsTo(#cmCloseVoiceCall).single.namedArguments[#id], 1);
     await finish(tester, cm);
@@ -447,8 +481,8 @@ void main() {
         'id': '1',
         'close': 'false',
       });
-      expect(find.text('已断开'), findsOneWidget);
-      expect(find.byType(LgSwitch), findsNothing);
+      expect(find.textContaining('已断开', findRichText: true), findsOneWidget);
+      expect(find.text('允许对方'), findsNothing);
 
       await click(tester, find.text('关闭'));
       expect(cm.bind.callsTo(#cmRemoveDisconnectedConnection), hasLength(1));
@@ -463,10 +497,11 @@ void main() {
       final cm = await pumpCm(tester);
       await arrive(tester, visitor(1));
       await arrive(tester, visitor(2, name: '王五', peerId: '147258369'));
-      expect(find.text('147 258 369'), findsOneWidget);
+      expect(find.text('147'), findsOneWidget);
       await tester.tap(find.text('李四'));
       await tester.pump();
-      expect(find.text('912 345 678'), findsOneWidget);
+      expect(find.text('912'), findsOneWidget);
+      expect(find.text('147'), findsNothing);
       await finish(tester, cm);
     },
   );

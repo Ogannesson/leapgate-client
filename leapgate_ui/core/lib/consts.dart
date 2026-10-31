@@ -422,8 +422,5 @@ const String kOptionHideElevateButtonInAcceptWindow =
     "hide-elevate-button-in-accept-window";
 const String kOptionAllowRemoteCmModification = "allow-remote-cm-modification";
 
-const Size kConnectionManagerWindowSizeClosedChat = Size(300, 490);
-const Size kConnectionManagerWindowSizeOpenChat = Size(700, 490);
-
 const kCommConfKeyTheme = 'theme';
 const kCommConfKeyLang = 'lang';

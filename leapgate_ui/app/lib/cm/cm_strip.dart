@@ -2,14 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_hbb/models/server_model.dart';
 
 import '../l10n/app_localizations.dart';
-import '../theme/lg_tokens.dart';
-import '../widgets/lg_button.dart';
+import '../widgets/lg_cm_pill.dart';
 import 'cm_parts.dart';
 
 /// The collapsed CM: the same window as a strip along the top of the primary display
-/// (01 §3.3 "贴边小条", A-P3.html `p3-pill-*`). One visitor: what they are doing, the time and
-/// the main button of their state; several: how many and "展开". A click on its blank space
-/// expands it; dragging moves it along the top edge.
+/// (01 §3.3 "贴边小条", A-P3.html `p3-pill-*`). One visitor: what they are doing once connected
+/// (the name alone while waiting or after leaving), the time or the state, and the main button
+/// of their state; several: how many are connected and "展开".
 class CmStrip extends StatelessWidget {
   const CmStrip({
     super.key,
@@ -33,7 +32,8 @@ class CmStrip extends StatelessWidget {
   final VoidCallback onExpand;
 
   /// The drag follows the cursor on the screen: the pointer's own deltas are in window
-  /// coordinates, which move with the window.
+  /// coordinates, which move with the window. The strip starts it; the moves and the end come
+  /// from the raw pointer events, which the window ignores while no drag is going on.
   final VoidCallback onDragStart;
   final VoidCallback onDrag;
   final VoidCallback onDragEnd;
@@ -44,88 +44,45 @@ class CmStrip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final t = LgTokens.of(context);
-    final c = t.colors;
-    final single = clients.length == 1 ? clients.single : null;
-    // What the visitor is doing only once they are connected; while waiting or after leaving,
-    // the second line says which.
-    final String first;
-    if (single == null) {
-      first = l10n.cmPillSessions(
-        clients.where((c) => c.authorized && !c.disconnected).length,
+    final Widget pill;
+    if (clients.length == 1) {
+      final client = clients.single;
+      final connected = client.authorized && !client.disconnected;
+      pill = LgCmPill.single(
+        person: cmPillPerson(client),
+        title: connected ? cmStripLabel(l10n, client) : client.name,
+        time: connected
+            ? cmDuration(seconds[client.id] ?? 0)
+            : client.authorized
+            ? l10n.cmStatusDisconnected
+            : l10n.cmStatusRequesting,
+        blockedHint: blocked ? l10n.cmBlockedRemotely : null,
+        actionLabel: client.disconnected
+            ? l10n.cmClose
+            : client.authorized
+            ? l10n.cmDisconnect
+            : l10n.cmDecline,
+        onAction: onButton,
+        onRestore: onExpand,
+        onStartDrag: onDragStart,
       );
-    } else if (single.authorized && !single.disconnected) {
-      first = cmStripLabel(l10n, single);
     } else {
-      first = single.name;
-    }
-    String? second;
-    if (single != null) {
-      if (blocked) {
-        second = l10n.cmBlockedRemotely;
-      } else if (!single.authorized) {
-        second = l10n.cmStatusRequesting;
-      } else if (single.disconnected) {
-        second = l10n.cmStatusDisconnected;
-      } else {
-        second = cmDuration(seconds[single.id] ?? 0);
-      }
-    }
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onExpand,
-      onHorizontalDragStart: (_) => onDragStart(),
-      onHorizontalDragUpdate: (_) => onDrag(),
-      onHorizontalDragEnd: (_) => onDragEnd(),
-      child: Container(
-        color: c.surface,
-        padding: const EdgeInsets.symmetric(horizontal: LgSpace.s2),
-        child: Row(
-          children: [
-            for (final client in clients.take(2)) ...[
-              CmAvatar(client: client, size: 28),
-              const SizedBox(width: LgSpace.s1),
-            ],
-            const SizedBox(width: LgSpace.s1),
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    first,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: t.textS.copyWith(
-                      color: c.text,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  if (second != null)
-                    Text(
-                      second,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: t.textS.copyWith(color: c.text2),
-                    ),
-                ],
-              ),
-            ),
-            if (single == null)
-              LgButton(label: l10n.cmExpand, onPressed: onExpand)
-            else if (single.disconnected)
-              LgButton(label: l10n.cmClose, onPressed: onButton)
-            else if (!single.authorized)
-              LgButton(label: l10n.cmDecline, onPressed: onButton)
-            else
-              LgButton(
-                label: l10n.cmDisconnect,
-                kind: LgButtonKind.danger,
-                onPressed: onButton,
-              ),
-          ],
+      pill = LgCmPill.group(
+        people: [for (final c in clients) cmPillPerson(c)],
+        title: l10n.cmPillSessions(
+          clients.where((c) => c.authorized && !c.disconnected).length,
         ),
-      ),
+        actionLabel: l10n.cmExpand,
+        onAction: onExpand,
+        onRestore: onExpand,
+        onStartDrag: onDragStart,
+      );
+    }
+    return Listener(
+      onPointerMove: (_) => onDrag(),
+      onPointerUp: (_) => onDragEnd(),
+      onPointerCancel: (_) => onDragEnd(),
+      child: pill,
     );
   }
 }
