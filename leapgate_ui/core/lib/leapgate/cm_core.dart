@@ -283,3 +283,10 @@ Future<void> cmCheckClickTime(int id, void Function() callback,
         scale: dpiX.value / 96,
       );
     });
+
+/// The cursor's x on the screen in physical pixels, for dragging the strip. Windows only.
+int cmCursorX() => using((arena) {
+      final point = arena<win32.POINT>();
+      win32.GetCursorPos(point);
+      return point.ref.x;
+    });

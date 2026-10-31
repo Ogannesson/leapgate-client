@@ -114,7 +114,10 @@ class FakeCmShell implements CmShellWindow {
   Future<void> startDragging() async {}
 
   @override
-  Future<void> dragStrip(double dx) async => calls.add('drag');
+  void startStripDrag() => calls.add('dragStart');
+
+  @override
+  Future<void> dragStrip() async => calls.add('drag');
 
   @override
   Future<void> endStripDrag() async => calls.add('dragEnd');
@@ -483,30 +486,40 @@ void main() {
     final cm = await pumpCm(tester);
     await arrive(tester, visitor(1));
     final close = iconButton('关闭');
-    await tester.tap(close);
-    await tester.pump();
+    await click(tester, close);
     expect(cm.window.calls, ['close']);
 
     await arrive(tester, visitor(2, name: '王五', peerId: '147258369'));
-    await tester.tap(close);
-    await tester.pump();
+    await click(tester, close);
     expect(find.text('断开全部会话？'), findsOneWidget);
     await tester.tap(find.text('取消'));
     await tester.pump();
     expect(find.text('断开全部会话？'), findsNothing);
     expect(cm.window.calls, ['close']);
 
-    await tester.tap(close);
-    await tester.pump();
-    await tester.tap(
+    await click(tester, close);
+    await click(
+      tester,
       find
           .descendant(of: find.byType(LgButton), matching: find.text('断开'))
           .last,
     );
-    await tester.pump();
     expect(cm.window.calls, ['close', 'close']);
     await finish(tester, cm);
   });
+
+  testWidgets(
+    'a remote click on Close is dropped with a hint under the header',
+    (tester) async {
+      final cm = await pumpCm(tester, setUp: (b) => b.clickTime = 1e15);
+      await arrive(tester, visitor(1));
+      await click(tester, iconButton('关闭'));
+      expect(cm.window.calls, isEmpty);
+      expect(find.text('无法远程执行此操作'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 3));
+      await finish(tester, cm);
+    },
+  );
 
   testWidgets(
     'moving the mouse in the window cancels the collapse after a password login',
@@ -543,18 +556,22 @@ void main() {
   );
 
   testWidgets(
-    'the strip, several visitors: how many and Expand; dragging moves it',
+    'the strip, several visitors: how many are connected and Expand; dragging moves it',
     (tester) async {
       final cm = await pumpCm(tester);
       await arrive(tester, visitor(1));
       await arrive(tester, visitor(2, name: '王五', peerId: '147258369'));
+      await arrive(
+        tester,
+        visitor(3, name: '赵六', peerId: '258369147', authorized: false),
+      );
       cm.window.viewForTest = CmView.strip;
       await tester.pump();
       expect(find.text('2 个会话进行中'), findsOneWidget);
       expect(find.text('断开'), findsNothing);
 
       await tester.drag(find.text('2 个会话进行中'), const Offset(-40, 0));
-      expect(cm.window.calls, containsAll(['drag', 'dragEnd']));
+      expect(cm.window.calls, containsAll(['dragStart', 'drag', 'dragEnd']));
       await tester.tap(find.text('展开'));
       await tester.pump();
       expect(cm.window.view.value, CmView.full);
@@ -577,4 +594,18 @@ void main() {
       await finish(tester, cm);
     },
   );
+
+  testWidgets('the strip, one visitor waiting: the name, then the state', (
+    tester,
+  ) async {
+    final cm = await pumpCm(tester);
+    await arrive(tester, visitor(1, authorized: false));
+    cm.window.viewForTest = CmView.strip;
+    await tester.pump();
+    expect(find.text('李四'), findsOneWidget);
+    expect(find.text('李四 正在远程控制本机'), findsNothing);
+    expect(find.text('正在请求连接本机…'), findsOneWidget);
+    expect(find.text('拒绝'), findsOneWidget);
+    await finish(tester, cm);
+  });
 }

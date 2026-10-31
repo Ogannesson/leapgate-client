@@ -139,15 +139,26 @@ class _CmPageState extends State<CmPage> with WindowListener {
     });
   }
 
+  /// Closing ends every session, so it is guarded too, against the selected visitor's input
+  /// (upstream leaves its close button unguarded); the hint goes under the header.
+  void _guardClose(VoidCallback action) {
+    final client = _model.clients.where((c) => c.id == _selected).firstOrNull;
+    if (client == null) {
+      action();
+    } else {
+      _guarded(client, _HintPlace.header, action)();
+    }
+  }
+
   /// More than one connection: always asked, whatever the main window's close confirmation
   /// is set to (02 R2-Q16).
-  void _onClose() {
+  void _onClose() => _guardClose(() {
     if (_model.clients.length <= 1) {
       widget.window.close();
     } else {
       setState(() => _confirmingClose = true);
     }
-  }
+  });
 
   Future<void> _closeDisconnected(Client client) async {
     if (await cmRemoveDisconnected(client)) await widget.window.close();
@@ -159,20 +170,25 @@ class _CmPageState extends State<CmPage> with WindowListener {
     final client = clients.where((c) => c.id == _selected).firstOrNull;
     if (widget.window.view.value == CmView.strip) {
       return Scaffold(
-        body: CmStrip(
-          clients: clients,
-          seconds: _seconds,
-          blocked: _blocked == _HintPlace.strip,
-          onExpand: widget.window.expand,
-          onDrag: widget.window.dragStrip,
-          onDragEnd: widget.window.endStripDrag,
-          onButton: clients.length == 1
-              ? _guarded(
-                  clients.single,
-                  _HintPlace.strip,
-                  () => _stripButton(clients.single),
-                )
-              : () {},
+        // As the card's: the remote user's keyboard cannot reach the button.
+        body: ExcludeFocus(
+          excluding: !allowRemoteCmModification(),
+          child: CmStrip(
+            clients: clients,
+            seconds: _seconds,
+            blocked: _blocked == _HintPlace.strip,
+            onExpand: widget.window.expand,
+            onDragStart: widget.window.startStripDrag,
+            onDrag: widget.window.dragStrip,
+            onDragEnd: widget.window.endStripDrag,
+            onButton: clients.length == 1
+                ? _guarded(
+                    clients.single,
+                    _HintPlace.strip,
+                    () => _stripButton(clients.single),
+                  )
+                : () {},
+          ),
         ),
       );
     }
@@ -221,10 +237,10 @@ class _CmPageState extends State<CmPage> with WindowListener {
                   LgDialogAction(
                     label: l10n.cmDisconnect,
                     kind: LgButtonKind.dangerSolid,
-                    onPressed: () {
+                    onPressed: () => _guardClose(() {
                       setState(() => _confirmingClose = false);
                       widget.window.close();
-                    },
+                    }),
                   ),
                 ],
               ),

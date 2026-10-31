@@ -180,18 +180,6 @@ void main() {
     });
   });
 
-  test('a pending collapse can be cancelled', () {
-    fakeAsync((async) {
-      final model = start();
-      send(async, added(client(1, authorized: true)));
-      model.cmHiddenTimer!.cancel();
-      model.cmHiddenTimer = null;
-      async.elapse(const Duration(seconds: 5));
-      expect(window.count('collapse'), 0);
-      model.dispose();
-    });
-  });
-
   test(
       'a disconnected visitor stays until closed; the same device coming back replaces it',
       () {

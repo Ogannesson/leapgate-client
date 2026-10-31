@@ -17,6 +17,7 @@ class CmStrip extends StatelessWidget {
     required this.seconds,
     required this.blocked,
     required this.onExpand,
+    required this.onDragStart,
     required this.onDrag,
     required this.onDragEnd,
     required this.onButton,
@@ -30,7 +31,11 @@ class CmStrip extends StatelessWidget {
   /// A click of the remote user on the button was dropped: the hint replaces the time.
   final bool blocked;
   final VoidCallback onExpand;
-  final ValueChanged<double> onDrag;
+
+  /// The drag follows the cursor on the screen: the pointer's own deltas are in window
+  /// coordinates, which move with the window.
+  final VoidCallback onDragStart;
+  final VoidCallback onDrag;
   final VoidCallback onDragEnd;
 
   /// The single visitor's button, already guarded against remote clicks.
@@ -42,6 +47,18 @@ class CmStrip extends StatelessWidget {
     final t = LgTokens.of(context);
     final c = t.colors;
     final single = clients.length == 1 ? clients.single : null;
+    // What the visitor is doing only once they are connected; while waiting or after leaving,
+    // the second line says which.
+    final String first;
+    if (single == null) {
+      first = l10n.cmPillSessions(
+        clients.where((c) => c.authorized && !c.disconnected).length,
+      );
+    } else if (single.authorized && !single.disconnected) {
+      first = cmStripLabel(l10n, single);
+    } else {
+      first = single.name;
+    }
     String? second;
     if (single != null) {
       if (blocked) {
@@ -57,7 +74,8 @@ class CmStrip extends StatelessWidget {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onExpand,
-      onHorizontalDragUpdate: (d) => onDrag(d.delta.dx),
+      onHorizontalDragStart: (_) => onDragStart(),
+      onHorizontalDragUpdate: (_) => onDrag(),
       onHorizontalDragEnd: (_) => onDragEnd(),
       child: Container(
         color: c.surface,
@@ -75,9 +93,7 @@ class CmStrip extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    single != null
-                        ? cmStripLabel(l10n, single)
-                        : l10n.cmPillSessions(clients.length),
+                    first,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: t.textS.copyWith(

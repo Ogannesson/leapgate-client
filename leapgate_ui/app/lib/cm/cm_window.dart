@@ -29,18 +29,23 @@ abstract class CmShellWindow implements CmWindow {
   /// Moves the full window with the pointer (its title area).
   Future<void> startDragging();
 
-  /// Moves the strip along the top edge by [dx] logical pixels.
-  Future<void> dragStrip(double dx);
+  /// A drag of the strip starts at the cursor's current place.
+  void startStripDrag();
 
-  /// Remembers where the strip was left.
+  /// Moves the strip along the top edge with the cursor.
+  Future<void> dragStrip();
+
+  /// Puts the strip where the cursor left it and remembers the place.
   Future<void> endStripDrag();
 }
 
 class LgCmWindow implements CmShellWindow {
   final _view = ValueNotifier(CmView.hidden);
 
-  /// The strip's left edge in physical pixels while it is dragged.
-  double? _stripX;
+  /// While the strip is dragged: the cursor's screen x and the strip's left edge when the drag
+  /// started, in physical pixels. The pointer's own deltas are in window coordinates, which move
+  /// with the window.
+  ({int cursorX, Future<double> left})? _drag;
 
   @override
   ValueListenable<CmView> get view => _view;
@@ -98,25 +103,46 @@ class LgCmWindow implements CmShellWindow {
   Future<void> startDragging() => windowManager.startDragging();
 
   @override
-  Future<void> dragStrip(double dx) async {
+  void startStripDrag() {
     if (_view.value != CmView.strip) return;
+    _drag = (cursorX: cmCursorX(), left: _bounds().then((b) => b.left));
+  }
+
+  @override
+  Future<void> dragStrip() async {
+    final drag = _drag;
+    if (drag == null) return;
+    // The cursor is read before waiting, so that the moves made before the start position is
+    // known are not lost.
+    final cursorX = cmCursorX();
     final (:work, :scale) = cmPrimaryWorkArea();
-    final width = kCmStripSize.width * scale;
-    final x = (_stripX ?? (await _bounds()).left) + dx * scale;
-    _stripX = x.clamp(work.left, work.right - width);
+    final x = (await drag.left + cursorX - drag.cursorX).clamp(
+      work.left,
+      work.right - kCmStripSize.width * scale,
+    );
     await windowManager.setPosition(
-      Offset(_stripX!, work.top),
+      Offset(x, work.top),
       ignoreDevicePixelRatio: true,
     );
   }
 
   @override
   Future<void> endStripDrag() async {
-    final x = _stripX;
-    if (x == null) return;
-    _stripX = null;
+    final drag = _drag;
+    if (drag == null) return;
+    _drag = null;
+    final cursorX = cmCursorX();
     final (:work, :scale) = cmPrimaryWorkArea();
-    final offset = (work.right - kCmStripSize.width * scale - x) / scale;
+    final width = kCmStripSize.width * scale;
+    final x = (await drag.left + cursorX - drag.cursorX).clamp(
+      work.left,
+      work.right - width,
+    );
+    await windowManager.setPosition(
+      Offset(x, work.top),
+      ignoreDevicePixelRatio: true,
+    );
+    final offset = (work.right - width - x) / scale;
     await appCore.options.local.set(
       kOptionLeapgateCmStripOffset,
       offset.round().toString(),
