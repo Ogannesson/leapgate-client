@@ -632,6 +632,11 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 3. **语义树始终为空**（不挡试用，要单独查）。自编引擎上，UI Automation 只看到窗口和 `FLUTTERVIEW`，从第一次查询起就是这样；stderr 每次语义更新都是 "Accessibility bridge rebuilt after failed update: 0 will not be in the tree and is not the new root"（也有 45、64、74 号节点）。根节点 0 被判成不在树里，补丁 0001 随后重建，树一直是空的：讲述人读不到任何控件，04 §6.3 原定的 UI Automation 脚本也用不了。官方引擎上是否也这样没测（不能在官方引擎上开 UI Automation 客户端）。
 4. 对方掉线后重连失败的文案不对（可以记待调）：会话里被控端退出约 20 秒后，Rust 报 "Failed to connect via rendezvous server: Please try later"，按 01 §4.3 的表显示"无法连接服务器。请检查网络连接。"，实际服务器是通的、是对方不在线；这一条不自动重试，所以对方很快回来也不会自己连上。
 
+复验（2026-10-31，`3ca7230f8`，同样的两台端点和做法）：
+- 问题 1（键盘）：通过。会话页创建时补调 `bind.mainInitInputSource()` 后，真实注入的左 Shift、F12 在被控端都收到了按下和抬起；在会话标签按住 Shift 再点另一个标签，被控端在切走的那一刻收到抬起，比真正松开早约 2 秒。另一个标签是 ID 不存在的标签（只有一台被控端有画面），"新标签那台没收到按下"这一半没法用真设备验。
+- 问题 2（关窗确认）：复现不出，判通过。程序停着时 `Leapgate_local.toml` 里没有 `enable-confirm-closing-tabs`，也没有 `leapgate-close-action`；有一个会话时发 WM_CLOSE，出现"断开全部 1 个会话并关闭窗口？"和"不再提示"。照上一轮的顺序（先在没有会话时关窗、取消，再连上、再关窗）也一样。上一轮那次为什么只问"关闭窗口？"没查清：那次两个键是用 `Configure` 写空串删掉的，删掉后才启动程序。
+- 小改：本机区 ID 下面的"复制"是文字按钮，和 ID 左对齐；连接"最近"里有记录的设备时，连接中和要密码时面板标题、会话标签、窗口标题都先显示设备名，副标题是 ID。
+
 ### 10.6 core 的结构（M1）
 
 03 §3.3 第 1、2、4、5、6、8 条在 `core/lib/leapgate/` 落成下面几个文件，复制进来的 models 和改写的 `FfiModel` 接在这上面。
