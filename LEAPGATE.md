@@ -816,7 +816,7 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 
 依据：总仓库 `docs/新界面/06-M3拆法.md`（下称"06"；维护者 2026-10-31 按推荐定）。界面行为以 01 §3.3（P3 全部）为准，02 §0.4 第 2、11 条、R2-Q16 有更正；样稿 `A-P3.html`，画框名见 06 §2.2；令牌和图标以 `A-基础.html` 为准。M3 和 M2b 并行，M2b 的约定在 10.9（在 `ui/m2b` 上，合入后两节并存）。
 
-**两段**：第一段现在做（窗口、来访标签、信息头、权限区、操作区、贴边小条、远程点击保护、关窗确认、主题和语言跟随，加 Rust 三项）；第二段等 M2b 合入 main、main 合进 `ui/m3` 以后做（聊天侧栏、文件记录侧栏、主窗口本机区的连入数和"查看"、界面模式跟随）。
+**两段**：第一段现在做（窗口、来访标签、信息头、权限区、操作区、贴边小条、远程点击保护、关窗确认、主题和语言跟随（2026-11-01 改为和主窗口一样跟随系统，见下面"主题、语言"），加 Rust 三项）；第二段等 M2b 合入 main、main 合进 `ui/m3` 以后做（聊天侧栏、文件记录侧栏、主窗口本机区的连入数和"查看"、界面模式跟随）。
 
 **分支和文件边界**（都从 `ui/m3` 切，做完合回 `ui/m3`）
 
@@ -849,13 +849,13 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 
 **CM 页面（CM coder，第一段）**
 
-- 初始化：`--cm` 分支照上游 `flutter/lib/main.dart:285-302`：先建 `AppCore`，再按 CM 初始化平台接口（`kAppTypeConnectionManager`，它会调 Rust 的 `cm_init`，`core/lib/models/native_model.dart` 里已有这一处），登记 CM 的全局事件 `add_connection`、`on_client_remove`、`show_elevation`、`update_voice_call_state`、`theme`、`language`（登记在 `appCore.events`，10.6），第二段再加 `chat_server_mode`、`cm_file_transfer_log`。不读 `hide_cm`（03 §5.2 M3）。
+- 初始化：`--cm` 分支照上游 `flutter/lib/main.dart:285-302`：先建 `AppCore`，再按 CM 初始化平台接口（`kAppTypeConnectionManager`，它会调 Rust 的 `cm_init`，`core/lib/models/native_model.dart` 里已有这一处），登记 CM 的全局事件 `add_connection`、`on_client_remove`、`show_elevation`、`update_voice_call_state`（登记在 `appCore.events`，10.6；`theme`、`language` 不登记，见下面"主题、语言"），第二段再加 `chat_server_mode`、`cm_file_transfer_log`。不读 `hide_cm`（03 §5.2 M3）。
 - 复制件：`flutter/lib/models/server_model.dart` 复制进 core，CM 用到的部分按"只删界面调用"保留（客户端列表、`addConnection`、`onClientRemove`、接受和拒绝、断开、提权、撤销交换、语音状态、关闭全部、500 ms 的轮询和约 6 秒退出），主窗口和 Android 的部分（密码、ID、起停服务）整段删掉，来源行写明删了什么。标签不用上游的 `DesktopTabController`，用自己的列表。一条连接的两次 `add_connection`、`on_client_remove` 的关闭标记、同一个人重连时删旧的那条，照上游的规则（06 §4.2）。
 - 窗口：紧凑态 320×500、贴主显示器工作区右上角、置顶、不能改大小；展开侧栏时向左展开到 700×500（2026-10-31 组件审查后定：样稿是 320×500，01 §3.3 写"约 300~320 宽"，300 宽时两列权限放不下"阻止本地输入"；尺寸用组件里的 `kLgCmWidth`、`kLgCmHeight`、`kLgCmExpandedWidth`，不另写一套）；隐藏照上游用透明加隐藏、不销毁；runner 里 CM 的初值（现在 800×600）改成和 Dart 一致。
 - 贴边小条：同一个窗口缩成一条，贴主显示器上边、靠右，沿上边左右拖动、位置记住（新的 LocalConfig 键，`leapgate-` 开头，放在用它的文件里，10.7 接入办法第 2 条）；授权后自动收起的时机和取消条件照上游 `server_model.dart:571-590`、`server_page.dart:180-186`（01 §3.3 改成"收成小条"而不是最小化）；新来访时恢复成完整小窗并置顶。
 - 远程点击保护：照上游 `server_page.dart:1237-1253`，被拦下时在按钮旁提示"无法远程执行此操作"；`allow-remote-cm-modification` 开着时放行。小条上的"断开"同样受保护。
-- 关窗：多于一个连接时始终确认"断开全部会话？"，不读 `enable-confirm-closing-tabs`（R2-Q16）；关闭照上游 `closeAll`。
-- 主题、语言：启动时读当前设置，运行中收 `theme`、`language` 事件切换（新界面的主题和 ARB，不用上游的 `MyTheme`）；语言只有简体中文和英文，跟随系统而系统是其他语言时用英文（IQ10）。
+- 关窗：多于一个连接时始终确认"断开全部会话？"，不读 `enable-confirm-closing-tabs`（R2-Q16）；关闭照上游 `closeAll`。标题栏"关闭"和确认里的"断开"也做远程点击保护，问的是任意一个还连着的来访（已断开的问不到、会读到旧值）；一个都没连着时直接执行。整个窗口（标题栏按钮、标签、面板、确认框、小条）都不接键盘焦点（`allow-remote-cm-modification` 开着时除外）：服务端只在左键抬起和回车时更新对方的输入时间，Tab 加空格能绕过点击判断。
+- 主题、语言（2026-11-01 整体审查后定，代替原来"启动时读设置、运行中收事件切换"的写法）：CM 和新主窗口一样跟随系统，不读 LocalConfig 的 `theme`、`lang`，也不登记 `theme`、`language` 事件（新主窗口现在只跟系统、不会发）；到 M6 设置页存下用户的选择时，主窗口和 CM 一起接。语言只有简体中文和英文，系统是其他语言时用英文（IQ10）。
 
 **测试和合入**
 
@@ -869,3 +869,11 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 - 它也挡不住经讲述人或 UI Automation 按语义调用 CM 的按钮。能控制键盘鼠标的人本来就能在本机运行程序，不另做防护。
 - 按 Alt+F4 关闭 CM 不弹"断开全部会话？"，直接断开全部会话（同上游）。
 - 第二位来访者的自动收起计时会覆盖第一位的：在小窗里移动鼠标只取消最后一个，前一个到时照样收起（同上游）。
+
+**第二段要做的**（2026-11-01 第一段整体审查时记下，给第二段接手用）
+
+- 重新生成块 2 的桥：`leapgate_incoming_counts`、`leapgate_show_cm`、`leapgate_ui_mode_changed`、`leapgate_cm_events` 已在 `src/leapgate_ffi.rs`，但 `core/lib/generated_bridge_leapgate.dart` 是第一段之前生成的，里面没有它们，用之前先按 `scripts/windows/build-client.ps1` 的 bridge 步重新生成。
+- 侧栏开着时来了新来访：`bringToFront` 照现在的写法会把窗口按完整小窗放回 320 宽（`cm_window.dart` 的 `_toFront` → `_place`），侧栏开着时要保持 700 宽（`kLgCmExpandedWidth`）。
+- 聊天和文件记录要补的事件和动作：登记 `chat_server_mode`、`cm_file_transfer_log`；`server_model.dart` 的 `_addTab` 里上游有 `chatModel.updateConnIdOfKey`，第一段删掉了，随聊天加回；标签和信息头侧栏按钮的未读数现在只在重绘时读，要跟着未读数变化刷新；侧栏按钮现在点了什么也不做。
+- "查看"：CM 要在启动时就订阅 `leapgate_cm_events`，Rust 在还没订阅时收到的 `show_cm` 直接丢掉。
+- 连入数：`leapgate_incoming_counts` 经进程间通道问一次，最坏约 2 秒才返回，主窗口不要高频轮询它。

@@ -51,7 +51,7 @@ class CmStrip extends StatelessWidget {
         title: connected ? cmStripLabel(l10n, client) : client.name,
         time: connected
             ? cmDuration(seconds[client.id] ?? 0)
-            : client.authorized
+            : client.disconnected
             ? l10n.cmStatusDisconnected
             : l10n.cmStatusRequesting,
         blockedHint: blocked ? l10n.cmBlockedRemotely : null,

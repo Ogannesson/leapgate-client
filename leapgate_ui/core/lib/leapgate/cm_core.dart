@@ -9,8 +9,6 @@ import 'dart:ui';
 
 import 'package:clock/clock.dart';
 import 'package:ffi/ffi.dart';
-import 'package:flutter/material.dart' show ThemeMode;
-import 'package:flutter/foundation.dart';
 import 'package:win32/win32.dart' as win32;
 
 import '../common.dart';
@@ -19,7 +17,6 @@ import '../models/platform_model.dart';
 import '../models/server_model.dart';
 import 'app_core.dart';
 import 'app_window.dart';
-import 'options.dart';
 
 /// The CM's window as the copied [ServerModel] drives it. [bringToFront] (upstream
 /// `windowOnTop(null)`, called for a new visitor and an incoming voice call) also brings a
@@ -39,9 +36,11 @@ abstract class CmWindow implements AppWindow {
   Future<void> close();
 }
 
-/// The global events the CM handles (upstream `models/model.dart:392-430`, `main.dart:556-567`).
-/// `chat_server_mode` and `cm_file_transfer_log` join with the chat and the file log.
-void registerCmEvents(ServerModel model, CmAppearance appearance) {
+/// The global events the CM handles (upstream `models/model.dart:392-430`).
+/// `chat_server_mode` and `cm_file_transfer_log` join with the chat and the file log. `theme`
+/// and `language` are not handled: like the new main window, the CM follows the system until
+/// the settings page (M6) stores a choice.
+void registerCmEvents(ServerModel model) {
   final events = appCore.events;
   events.on('add_connection', model.addConnection);
   events.on('on_client_remove', model.onClientRemove);
@@ -50,53 +49,6 @@ void registerCmEvents(ServerModel model, CmAppearance appearance) {
     model.setShowElevation(show);
   });
   events.on('update_voice_call_state', model.updateVoiceCallState);
-  events.on('theme', (evt) {
-    String? dark = evt['dark'];
-    if (dark != null) appearance.setTheme(dark);
-  });
-  // Rust has saved the language into this process's LocalConfig before it pushes the event
-  // (`src/ui_cm_interface.rs`, `Data::Language`).
-  events.on('language', (_) => appearance.reloadLanguage());
-}
-
-/// The CM's light / dark mode and language: read at start, changed when the main window
-/// changes them (01 §3.3, 02 §1.5.1).
-class CmAppearance extends ChangeNotifier {
-  CmAppearance(this._local)
-      : themeMode = cmThemeMode(_local.get(kCommConfKeyTheme)),
-        locale = cmLocale(_local.get(kCommConfKeyLang));
-
-  final OptionScope _local;
-  ThemeMode themeMode;
-
-  /// Null follows the system.
-  Locale? locale;
-
-  /// [dark] is what the main window sends: `light`, `dark` or `system`.
-  void setTheme(String dark) {
-    themeMode = cmThemeMode(dark);
-    notifyListeners();
-  }
-
-  void reloadLanguage() {
-    locale = cmLocale(_local.get(kCommConfKeyLang));
-    notifyListeners();
-  }
-}
-
-/// Upstream `MyTheme.themeModeFromString` (`common.dart:621-630`).
-ThemeMode cmThemeMode(String v) => switch (v) {
-      'light' => ThemeMode.light,
-      'dark' => ThemeMode.dark,
-      _ => ThemeMode.system,
-    };
-
-/// The UI has Simplified Chinese and English only (03 IQ10): any Chinese is Chinese, any other
-/// language set by the upstream UI is English, unset or `default` follows the system (whose
-/// languages other than Chinese also end up in English).
-Locale? cmLocale(String lang) {
-  if (lang.isEmpty || lang == 'default') return null;
-  return lang.startsWith('zh') ? const Locale('zh') : const Locale('en');
 }
 
 /// The session types the CM tells apart; an exit node is a port forward to the exit sentinel.

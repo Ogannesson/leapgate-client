@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'dart:ui';
 
 import 'package:fake_async/fake_async.dart';
-import 'package:flutter/material.dart' show ThemeMode;
 import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/cm_core.dart';
@@ -25,8 +24,6 @@ class CmFakeBind extends FakeBind {
   /// What `cm_get_clients_state` answers.
   String clientsState = '[]';
 
-  final localOptions = <String, String>{};
-
   @override
   dynamic noSuchMethod(Invocation invocation) {
     switch (invocation.memberName) {
@@ -42,9 +39,6 @@ class CmFakeBind extends FakeBind {
       case #mainGetOption:
         calls.add(invocation);
         return Future<String>.value(approveMode);
-      case #mainGetLocalOption:
-        calls.add(invocation);
-        return localOptions[invocation.namedArguments[#key]] ?? '';
       case #cmLoginRes:
         calls.add(invocation);
         return Future<void>.value();
@@ -116,11 +110,10 @@ Map<String, dynamic> removed(int id, {required bool close}) =>
 void main() {
   late CmFakeBind bind;
   late FakeCmWindow window;
-  late CmAppearance appearance;
 
   ServerModel start() {
     final model = ServerModel(window);
-    registerCmEvents(model, appearance);
+    registerCmEvents(model);
     return model;
   }
 
@@ -135,7 +128,6 @@ void main() {
     platformFFI.setBindingForTesting(bind);
     desktopType = DesktopType.cm;
     window = FakeCmWindow();
-    appearance = CmAppearance(appCore.options.local);
   });
 
   test(
@@ -248,29 +240,13 @@ void main() {
     });
   });
 
-  test('elevation, theme and language events', () {
+  test('the elevation event', () {
     fakeAsync((async) {
       final model = start();
       send(async, {'name': 'show_elevation', 'show': 'true'});
       expect(model.showElevation, true);
-
-      expect(appearance.themeMode, ThemeMode.system);
-      send(async, {'name': 'theme', 'dark': 'dark'});
-      expect(appearance.themeMode, ThemeMode.dark);
-
-      expect(appearance.locale, null);
-      bind.localOptions['lang'] = 'zh-cn';
-      send(async, {'name': 'language'});
-      expect(appearance.locale, const Locale('zh'));
       model.dispose();
     });
-  });
-
-  test('languages other than Chinese are English', () {
-    expect(cmLocale(''), null);
-    expect(cmLocale('default'), null);
-    expect(cmLocale('zh-tw'), const Locale('zh'));
-    expect(cmLocale('fr'), const Locale('en'));
   });
 
   test('an exit node is a port forward to the exit sentinel', () {

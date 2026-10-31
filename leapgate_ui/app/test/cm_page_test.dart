@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/generated_bridge.dart';
@@ -188,7 +189,7 @@ Future<Cm> pumpCm(WidgetTester tester, {void Function(CmBind)? setUp}) async {
   appCore = AppCore(window: window);
   addTearDown(appCore.recentPeers.dispose);
   final model = ServerModel(window);
-  registerCmEvents(model, CmAppearance(appCore.options.local));
+  registerCmEvents(model);
   await tester.pumpWidget(
     MaterialApp(
       locale: const Locale('zh'),
@@ -474,6 +475,7 @@ void main() {
   testWidgets(
     'disconnected: Close removes it, and the window goes with the last one',
     (tester) async {
+      final handle = tester.ensureSemantics();
       final cm = await pumpCm(tester);
       await arrive(tester, visitor(1));
       await send(tester, {
@@ -483,13 +485,87 @@ void main() {
       });
       expect(find.textContaining('已断开', findRichText: true), findsOneWidget);
       expect(find.text('允许对方'), findsNothing);
+      expect(find.bySemanticsLabel('李四，远程桌面，已断开'), findsOneWidget);
 
       await click(tester, find.text('关闭'));
       expect(cm.bind.callsTo(#cmRemoveDisconnectedConnection), hasLength(1));
       expect(cm.window.calls, contains('close'));
       await finish(tester, cm);
+      handle.dispose();
     },
   );
+
+  testWidgets(
+    'a visitor who leaves while waiting shows as gone, here and on the strip',
+    (tester) async {
+      final cm = await pumpCm(tester);
+      await arrive(tester, visitor(1, authorized: false));
+      await send(tester, {
+        'name': 'on_client_remove',
+        'id': '1',
+        'close': 'false',
+      });
+      expect(find.textContaining('已断开', findRichText: true), findsOneWidget);
+      expect(find.text('正在请求连接本机…'), findsNothing);
+      cm.window.viewForTest = CmView.strip;
+      await tester.pump();
+      expect(find.text('已断开'), findsOneWidget);
+      expect(find.text('正在请求连接本机…'), findsNothing);
+      await finish(tester, cm);
+    },
+  );
+
+  testWidgets(
+    'closing is checked against a connected visitor, not a gone one that is selected',
+    (tester) async {
+      final cm = await pumpCm(tester, setUp: (b) => b.clickTime = 1e15);
+      await arrive(tester, visitor(1));
+      await arrive(tester, visitor(2, name: '王五', peerId: '147258369'));
+      await send(tester, {
+        'name': 'on_client_remove',
+        'id': '2',
+        'close': 'false',
+      });
+      // The gone visitor's tab is the selected one.
+      expect(find.text('147'), findsOneWidget);
+      await click(tester, iconButton('关闭'));
+      expect(
+        cm.bind.callsTo(#cmCheckClickTime).single.namedArguments[#connId],
+        1,
+      );
+      expect(find.text('断开全部会话？'), findsNothing);
+      expect(find.text('无法远程执行此操作'), findsOneWidget);
+
+      // Nobody connected: nobody to ask, closing goes on.
+      await send(tester, {
+        'name': 'on_client_remove',
+        'id': '1',
+        'close': 'false',
+      });
+      await click(tester, iconButton('关闭'));
+      expect(cm.bind.callsTo(#cmCheckClickTime), hasLength(1));
+      expect(find.text('断开全部会话？'), findsOneWidget);
+      await finish(tester, cm);
+    },
+  );
+
+  testWidgets('the keyboard cannot reach the window\'s controls', (
+    tester,
+  ) async {
+    final cm = await pumpCm(tester);
+    await arrive(tester, visitor(1));
+    await arrive(tester, visitor(2, name: '王五', peerId: '147258369'));
+    for (var i = 0; i < 8; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.sendKeyEvent(LogicalKeyboardKey.space);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    }
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(find.text('断开全部会话？'), findsNothing);
+    expect(cm.window.calls, isEmpty);
+    expect(cm.bind.callsTo(#cmCheckClickTime), isEmpty);
+    await finish(tester, cm);
+  });
 
   testWidgets(
     'several visitors: a tab each, the newest selected, another one on a click',

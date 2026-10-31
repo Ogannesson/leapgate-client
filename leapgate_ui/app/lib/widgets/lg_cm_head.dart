@@ -209,30 +209,35 @@ class _Avatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ExcludeSemantics(
-      child: Container(
-        width: size,
-        height: size,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: identity.solid,
-          image: image == null
-              ? null
-              : DecorationImage(image: image!, fit: BoxFit.cover),
-        ),
-        child: image != null
-            ? null
-            : Text(
-                text.toUpperCase(),
-                maxLines: 1,
-                style: LgTokens.style(
-                  LgFixed.fsCmAvatar,
-                  LgFixed.fsCmAvatar + 4,
-                  FontWeight.w700,
-                ).copyWith(color: onIdentity),
-              ),
+    final letter = Container(
+      width: size,
+      height: size,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(shape: BoxShape.circle, color: identity.solid),
+      child: Text(
+        text.toUpperCase(),
+        maxLines: 1,
+        style: LgTokens.style(
+          LgFixed.fsCmAvatar,
+          LgFixed.fsCmAvatar + 4,
+          FontWeight.w700,
+        ).copyWith(color: onIdentity),
       ),
+    );
+    return ExcludeSemantics(
+      child: image == null
+          ? letter
+          // A picture that does not load falls back to the letter, as upstream's
+          // `buildAvatarWidget` does.
+          : ClipOval(
+              child: Image(
+                image: image!,
+                width: size,
+                height: size,
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) => letter,
+              ),
+            ),
     );
   }
 }

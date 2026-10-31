@@ -251,5 +251,7 @@
   "cmCloseAllTitle": "Disconnect all sessions?",
   "cmCancel": "Cancel",
   "cmTabName": "{name}, {type}",
-  "@cmTabName": {"placeholders": {"name": {"type": "String"}, "type": {"type": "String"}}}
+  "@cmTabName": {"placeholders": {"name": {"type": "String"}, "type": {"type": "String"}}},
+  "cmTabNameGone": "{name}, {type}, disconnected",
+  "@cmTabNameGone": {"placeholders": {"name": {"type": "String"}, "type": {"type": "String"}}}
 }

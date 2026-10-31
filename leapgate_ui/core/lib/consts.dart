@@ -421,6 +421,3 @@ const String kOptionEnablePermChangeInAcceptWindow =
 const String kOptionHideElevateButtonInAcceptWindow =
     "hide-elevate-button-in-accept-window";
 const String kOptionAllowRemoteCmModification = "allow-remote-cm-modification";
-
-const kCommConfKeyTheme = 'theme';
-const kCommConfKeyLang = 'lang';

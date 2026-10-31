@@ -46,6 +46,10 @@ class _CmPageState extends State<CmPage> with WindowListener {
   int? _selected;
   var _order = <int>[];
 
+  /// Avatar pictures by connection, made once: a new image object each second would load the
+  /// picture again.
+  final _avatars = <int, ImageProvider?>{};
+
   /// Connected seconds by connection, counted while authorized and connected, as upstream's
   /// header does (`server_page.dart:438-444`).
   final _seconds = <int, int>{};
@@ -102,6 +106,7 @@ class _CmPageState extends State<CmPage> with WindowListener {
       _selected = ids.isEmpty ? null : ids[at.clamp(0, ids.length - 1)];
     }
     _seconds.removeWhere((id, _) => !ids.contains(id));
+    _avatars.removeWhere((id, _) => !ids.contains(id));
     _order = ids;
   }
 
@@ -142,10 +147,12 @@ class _CmPageState extends State<CmPage> with WindowListener {
     });
   }
 
-  /// Closing ends every session, so it is guarded too, against the selected visitor's input
-  /// (upstream leaves its close button unguarded); the hint goes over the panel.
+  /// Closing ends every session, so it is guarded too (upstream leaves its close button
+  /// unguarded); the hint goes over the panel. The time is asked of a visitor still connected:
+  /// a disconnected one has no connection to answer, and its stale time would let the remote
+  /// side through. With nobody connected there is no remote side.
   void _guardClose(VoidCallback action) {
-    final client = _model.clients.where((c) => c.id == _selected).firstOrNull;
+    final client = _model.clients.where((c) => !c.disconnected).firstOrNull;
     if (client == null) {
       action();
     } else {
@@ -213,7 +220,9 @@ class _CmPageState extends State<CmPage> with WindowListener {
               unread: c.unreadChatMessageCount.value,
               gone: c.disconnected,
               tooltip: l10n.cmConnectionNumber(c.id),
-              semanticLabel: l10n.cmTabName(c.name, cmKindLabel(l10n, c)),
+              semanticLabel: c.disconnected
+                  ? l10n.cmTabNameGone(c.name, cmKindLabel(l10n, c))
+                  : l10n.cmTabName(c.name, cmKindLabel(l10n, c)),
             ),
         ],
         selected: client == null ? 0 : clients.indexOf(client),
@@ -221,14 +230,9 @@ class _CmPageState extends State<CmPage> with WindowListener {
       ),
       panel: client == null
           ? const SizedBox.shrink()
-          // Upstream `_buildKeyEventBlock`: the remote user's keyboard cannot reach the
-          // buttons through the focus.
-          : ExcludeFocus(
-              excluding: !allowRemoteCmModification(),
-              child: LgCmTipAnchor(
-                tip: _blocked == _hintPanel ? l10n.cmBlockedRemotely : null,
-                child: _panel(client, l10n),
-              ),
+          : LgCmTipAnchor(
+              tip: _blocked == _hintPanel ? l10n.cmBlockedRemotely : null,
+              child: _panel(client, l10n),
             ),
       overlay: _confirmingClose
           ? LgCmCloseConfirm(
@@ -252,6 +256,11 @@ class _CmPageState extends State<CmPage> with WindowListener {
             )
           : null,
     );
+    // Upstream `_buildKeyEventBlock`: the remote user's keyboard cannot reach the buttons
+    // through the focus. The whole window, title buttons, tabs and the confirmation included:
+    // the service only takes the remote side's input time on a left button release and Enter,
+    // so Tab and Space would pass the click guard.
+    frame = ExcludeFocus(excluding: !allowRemoteCmModification(), child: frame);
     if (clients.isNotEmpty) {
       // Upstream listens to down and move only, and Flutter's move is a drag; 01 §3.3 cancels
       // on any mouse movement too.
@@ -305,15 +314,16 @@ class _CmPageState extends State<CmPage> with WindowListener {
   Widget _header(Client client, AppLocalizations l10n) {
     final LgCmStatusLine status;
     final time = cmDuration(_seconds[client.id] ?? 0);
-    if (!client.authorized) {
-      status = LgCmStatusLine(
-        phase: LgCmPhase.requesting,
-        label: l10n.cmStatusRequesting,
-      );
-    } else if (client.disconnected) {
+    // Left before being let in counts as left, as in the action area.
+    if (client.disconnected) {
       status = LgCmStatusLine(
         phase: LgCmPhase.disconnected,
         label: l10n.cmStatusDisconnected,
+      );
+    } else if (!client.authorized) {
+      status = LgCmStatusLine(
+        phase: LgCmPhase.requesting,
+        label: l10n.cmStatusRequesting,
       );
     } else if (client.incomingVoiceCall) {
       status = LgCmStatusLine(
@@ -349,7 +359,7 @@ class _CmPageState extends State<CmPage> with WindowListener {
       type: cmKindLabel(l10n, client),
       status: status,
       avatarText: cmLetter(client),
-      avatarImage: cmAvatarImage(client),
+      avatarImage: _avatars.putIfAbsent(client.id, () => cmAvatarImage(client)),
       sideButton: side
           ? LgCmSideButton(
               icon: kind == CmSessionKind.fileTransfer

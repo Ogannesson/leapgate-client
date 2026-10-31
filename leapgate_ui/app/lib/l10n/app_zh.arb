@@ -225,5 +225,6 @@
   "cmBlockedRemotely": "无法远程执行此操作",
   "cmCloseAllTitle": "断开全部会话？",
   "cmCancel": "取消",
-  "cmTabName": "{name}，{type}"
+  "cmTabName": "{name}，{type}",
+  "cmTabNameGone": "{name}，{type}，已断开"
 }
