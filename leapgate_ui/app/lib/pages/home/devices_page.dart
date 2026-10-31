@@ -22,7 +22,10 @@ import '../../theme/lg_tokens.dart';
 import '../../widgets/lg_button.dart';
 import '../../widgets/lg_connect_box.dart';
 import '../../widgets/lg_device.dart';
+import '../../widgets/lg_device_card.dart';
+import '../../widgets/lg_list_chrome.dart';
 import '../../widgets/lg_menu.dart';
+import '../../widgets/lg_menu_items.dart';
 import '../../widgets/lg_selection.dart';
 import 'home_dialogs.dart';
 import 'peer_views.dart';
@@ -38,6 +41,14 @@ const _helpExamples = (
 
 /// "Connect to ‹input›" as the current row; device IDs are never empty.
 const _connectToRow = '';
+
+/// The list view's column for each sort order (user name sorts the `user@host` column).
+const _sortColumns = {
+  PeerSort.status: LgDeviceColumn.status,
+  PeerSort.name: LgDeviceColumn.name,
+  PeerSort.id: LgDeviceColumn.id,
+  PeerSort.username: LgDeviceColumn.userHost,
+};
 
 /// The devices page (01 P1 blocks E and F): the connect box, the category bar with its tools
 /// (or the multiple selection bar), and the selected category's devices or, while there is
@@ -81,6 +92,9 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
   String? _current;
   bool _windowFocused = true;
   bool _onScreen = true;
+
+  /// "Adjust the categories shown and their order" folded open in the "View" menu.
+  bool _categoriesOpen = false;
   DateTime _restoredAt = DateTime(0);
 
   @override
@@ -349,28 +363,27 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
     );
   }
 
-  /// The category bar and the list tools (01 P1 block F). Placeholder for the designer's
-  /// category segments and list toolbar.
+  /// The category bar and the list tools (01 P1 block F, `p1-menu-view`, `p1-menu-sort`).
   Widget _toolbar(AppLocalizations l10n) {
     final shown = _tabs.shown;
     final fixedText = l10n.peersFixed;
     final viewFixed = _tabs.isFixed(kOptionPeerCardUiType);
+    final sortFixed = _tabs.isFixed(kOptionPeerSorting);
     final categoriesFixed = _tabs.isFixed(kOptionPeerTabVisible);
     final detail = isDetailMode(appCore.options.local);
-    return Row(
-      children: [
-        if (shown.isNotEmpty)
-          LgSegmented<PeerCategory>(
-            segments: [
-              for (final c in shown) LgSegment(c, _categoryName(l10n, c)),
-            ],
-            selected: _tabs.current,
-            onChanged: _selectCategory,
-          ),
-        const Spacer(),
-        _menuButton(
-          label: l10n.peersView,
+    return LgListToolbar(
+      tabs: LgCategoryTabs<PeerCategory>(
+        categories: [
+          for (final c in shown) LgCategory(c, _categoryName(l10n, c)),
+        ],
+        selected: _tabs.current,
+        onSelect: _selectCategory,
+        semanticLabel: l10n.peersCategories,
+      ),
+      tools: [
+        LgListToolMenu(
           icon: LgIcons.grid,
+          label: l10n.peersView,
           items: [
             LgMenuGroup(l10n.peersView),
             for (final (view, label) in [
@@ -380,85 +393,64 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
               LgMenuItem(
                 label: label,
                 checked: _tabs.view == view,
-                description: viewFixed ? fixedText : null,
+                disabledNote: viewFixed ? fixedText : null,
                 onPressed: viewFixed ? null : () => _tabs.setView(view),
               ),
             LgMenuGroup(l10n.uiModeTitle),
-            for (final (on, label) in [
-              (false, l10n.uiModeSimple),
-              (true, l10n.uiModeDetail),
-            ])
-              LgMenuItem(
-                label: label,
-                checked: detail == on,
-                onPressed: () => setDetailMode(appCore.options.local, on),
-              ),
-            LgSubmenu(
-              label: l10n.peersAdjustCategories,
-              items: [
-                CategoryOrderList(
-                  tabs: _tabs,
-                  names: (c) => _categoryName(l10n, c),
-                  enabled: !categoriesFixed,
-                ),
+            LgMenuSegmentedItem<bool>(
+              segments: [
+                LgSegment(false, l10n.uiModeSimple),
+                LgSegment(true, l10n.uiModeDetail),
               ],
+              selected: detail,
+              onChanged: (on) => setDetailMode(appCore.options.local, on),
             ),
+            const LgMenuDivider(),
+            LgMenuExpandRow(
+              label: l10n.peersAdjustCategories,
+              expanded: _categoriesOpen,
+              onToggle: () => setState(() => _categoriesOpen = !_categoriesOpen),
+            ),
+            if (_categoriesOpen)
+              CategoryOrderList(
+                tabs: _tabs,
+                names: (c) => _categoryName(l10n, c),
+                fixedNote: categoriesFixed ? fixedText : null,
+              ),
           ],
         ),
         // "Recent" keeps its time order (01 P1 block F).
-        if (_tabs.current != PeerCategory.recent) ...[
-          const SizedBox(width: LgSpace.s1),
-          _menuButton(
-            label: l10n.peersSort,
+        if (_tabs.current != PeerCategory.recent)
+          LgListToolMenu(
             icon: LgIcons.sort,
+            label: l10n.peersSort,
             items: [
-              for (final (sort, label) in [
-                (PeerSort.name, l10n.peersSortName),
-                (PeerSort.id, l10n.peersSortId),
-                (PeerSort.username, l10n.peersSortUsername),
-                (PeerSort.status, l10n.peersSortStatus),
-              ])
+              for (final (sort, label) in _sortLabels(l10n))
                 LgMenuItem(
                   label: label,
                   checked: _tabs.sort == sort,
-                  description:
-                      _tabs.isFixed(kOptionPeerSorting) ? fixedText : null,
-                  onPressed: _tabs.isFixed(kOptionPeerSorting)
-                      ? null
-                      : () => _tabs.setSort(sort),
+                  disabledNote: sortFixed ? fixedText : null,
+                  onPressed: sortFixed ? null : () => _tabs.setSort(sort),
                 ),
             ],
           ),
-        ],
-        const SizedBox(width: LgSpace.s1),
-        LgButton(
-          label: l10n.peersSelect,
+        LgListToolButton(
           icon: LgIcons.select,
-          kind: LgButtonKind.text,
+          label: l10n.peersSelect,
           onPressed: _selection.start,
         ),
       ],
     );
   }
 
-  Widget _menuButton({
-    required String label,
-    required LgIcons icon,
-    required List<Widget> items,
-  }) =>
-      LgMenuAnchor(
-        items: items,
-        builder: (context, controller) => LgButton(
-          label: label,
-          icon: icon,
-          kind: LgButtonKind.text,
-          onPressed: () =>
-              controller.isOpen ? controller.close() : controller.open(),
-        ),
-      );
+  List<(PeerSort, String)> _sortLabels(AppLocalizations l10n) => [
+    (PeerSort.name, l10n.peersSortName),
+    (PeerSort.id, l10n.peersSortId),
+    (PeerSort.username, l10n.peersSortUsername),
+    (PeerSort.status, l10n.peersSortStatus),
+  ];
 
-  /// The multiple selection bar in place of the category bar (01 P1 block F). Placeholder for
-  /// the designer's `p1-multisel` bar.
+  /// The multiple selection bar in place of the category bar (01 P1 block F, `p1-multisel`).
   Widget _selectionBar(AppLocalizations l10n) {
     final category = _tabs.current;
     final ids = _selection.ids;
@@ -485,12 +477,13 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
       appCore.toasts.show(toast);
     }
 
-    return Row(
-      children: [
-        LgButton(
+    return LgSelectionBar(
+      semanticLabel: l10n.peersSelect,
+      actions: [
+        LgSelectionAction(
           label: label,
           icon: LgIcons.trash,
-          kind: LgButtonKind.danger,
+          danger: true,
           onPressed: ids.isEmpty
               ? null
               : () async {
@@ -502,12 +495,10 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
                   done(toast);
                 },
         ),
-        if (category == PeerCategory.recent) ...[
-          const SizedBox(width: LgSpace.s1),
-          LgButton(
+        if (category == PeerCategory.recent)
+          LgSelectionAction(
             label: l10n.peersAddFavorites,
             icon: LgIcons.star,
-            kind: LgButtonKind.text,
             onPressed: ids.isEmpty
                 ? null
                 : () async {
@@ -515,21 +506,12 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
                     done('peersToastAddedFavorites');
                   },
           ),
-        ],
-        const SizedBox(width: LgSpace.s3),
-        Text(l10n.peersSelected(ids.length)),
-        const Spacer(),
-        LgButton(
-          label: l10n.peersSelectAll,
-          kind: LgButtonKind.text,
-          onPressed: () => _selection.selectAll(_rowIds(null)),
-        ),
-        LgButton(
-          label: l10n.peersDone,
-          kind: LgButtonKind.text,
-          onPressed: _selection.finish,
-        ),
       ],
+      countText: l10n.peersSelected(ids.length),
+      selectAllLabel: l10n.peersSelectAll,
+      onSelectAll: () => _selection.selectAll(_rowIds(null)),
+      doneLabel: l10n.peersDone,
+      onDone: _selection.finish,
     );
   }
 
@@ -539,7 +521,16 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
     // The loading and empty states scroll in a window too short for them.
     if (!peers.loaded) {
       return SingleChildScrollView(
-        child: LgDeviceSkeleton(semanticLabel: l10n.recentLoading),
+        child: _tabs.view == PeerView.cards
+            ? LgDeviceCardGrid(
+                semanticLabel: l10n.recentLoading,
+                children: const [
+                  LgDeviceCardSkeleton(),
+                  LgDeviceCardSkeleton(),
+                  LgDeviceCardSkeleton(),
+                ],
+              )
+            : LgDeviceSkeleton(semanticLabel: l10n.recentLoading),
       );
     }
     final listed = _listed(category);
@@ -582,8 +573,9 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
                 onTap: () => _connect(_input),
               ),
             ),
-            // Placeholder for the "⋯" at the end of `LgConnectToRow`: what was typed has no
-            // known platform, so the connection types are those of M2b (05 §1.3).
+            // The "⋯" at the end of "Connect to" (`p1-cb-conn`; `LgConnectToRow` has no slot for
+            // it, so it stands beside the row). What was typed has no known platform, so the
+            // connection types are those of M2b (05 §1.3).
             LgMenuAnchor(
               items: [
                 LgMenuItem(
@@ -682,8 +674,8 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
     required bool Function(int i) isCurrent,
   }) {
     final notes = [
-      if (over) LgNoResultsNote(l10n.peersOver1000),
-      if (loadingOthers) LgNoResultsNote(l10n.peersLoadingOther),
+      if (over) LgListNote(l10n.peersOver1000),
+      if (loadingOthers) LgListNote(l10n.peersLoadingOther),
     ];
     Widget asked(PeerItem item, Widget child) => _AskedRow(
         key: ValueKey(item.peer.id),
@@ -691,20 +683,17 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
         onlines: _onlines,
         child: child);
     if (_tabs.view == PeerView.cards) {
-      return LayoutBuilder(builder: (context, box) {
-        const gap = LgSpace.s3;
-        final columns =
-            math.max(1, ((box.maxWidth + gap) / (kMinCardWidth + gap)).floor());
-        return CustomScrollView(
+      // Built lazily, so only the cards on screen ask for their online state; the component's
+      // `LgDeviceCardGrid` lays out all of them.
+      return Semantics(
+        container: true,
+        explicitChildNodes: true,
+        label: l10n.peersDeviceList,
+        child: CustomScrollView(
           scrollCacheExtent: const ScrollCacheExtent.pixels(0),
           slivers: [
             SliverGrid.builder(
-              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: columns,
-                mainAxisSpacing: gap,
-                crossAxisSpacing: gap,
-                mainAxisExtent: 148,
-              ),
+              gridDelegate: const LgDeviceCardGridDelegate(),
               itemCount: items.length,
               itemBuilder: (context, i) => asked(
                 items[i],
@@ -715,13 +704,18 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
             ),
             SliverList.list(children: notes),
           ],
-        );
-      });
+        ),
+      );
     }
     final t = LgTokens.of(context);
     final rowHeight = t.sizes.tableRow;
     // The surface's own padding (`LgListSurface`), the column titles and the notes.
     final chrome = LgSpace.s1 + LgSpace.s2 + t.sizes.button;
+    final searching = items.isNotEmpty && items.first.source != null;
+    // Sorting by a title, as the "Sort" menu (not in "Recent", nor in the search results).
+    final sortable = !searching && _tabs.current != PeerCategory.recent;
+    final selecting = _selection.active && _input.isEmpty;
+    // `LgDeviceTable`'s parts, with the rows built lazily for the same reason as the cards.
     return LayoutBuilder(
       builder: (context, box) => Column(
         mainAxisSize: MainAxisSize.min,
@@ -729,15 +723,38 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
           LgListSurface(
             child: Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                LgDeviceListHeader(
-                  status: l10n.recentColumnStatus,
-                  name: l10n.recentColumnName,
-                  id: l10n.recentColumnId,
-                  userHost: l10n.recentColumnUserHost,
-                  source: items.isNotEmpty && items.first.source != null
-                      ? l10n.recentColumnSource
+                LgDeviceTableHeader(
+                  columns: [
+                    LgTableColumn(
+                        LgDeviceColumn.status, l10n.recentColumnStatus,
+                        sortable: sortable),
+                    LgTableColumn(LgDeviceColumn.name, l10n.recentColumnName,
+                        sortable: sortable),
+                    LgTableColumn(LgDeviceColumn.id, l10n.recentColumnId,
+                        sortable: sortable),
+                    LgTableColumn(
+                        LgDeviceColumn.userHost, l10n.recentColumnUserHost,
+                        sortable: sortable),
+                    searching
+                        ? LgTableColumn(
+                            LgDeviceColumn.source, l10n.recentColumnSource)
+                        : LgTableColumn(
+                            LgDeviceColumn.tags, l10n.peersColumnTags),
+                  ],
+                  sort: sortable
+                      ? LgTableSort(_sortColumns[_tabs.sort]!)
                       : null,
+                  onSort: sortable && !_tabs.isFixed(kOptionPeerSorting)
+                      ? (column) => _tabs.setSort(_sortColumns.entries
+                          .firstWhere((e) => e.value == column)
+                          .key)
+                      : null,
+                  pickColumn: selecting,
+                  moreColumn: true,
+                  ascendingLabel: l10n.peersSortAscending,
+                  descendingLabel: l10n.peersSortDescending,
                 ),
                 SizedBox(
                   height: math.max(

@@ -4,8 +4,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/local_status.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:leapgate_ui/pages/home/peer_views.dart';
 import 'package:leapgate_ui/widgets/lg_device.dart';
+import 'package:leapgate_ui/widgets/lg_device_card.dart';
 
 import 'home_fakes.dart';
 
@@ -67,21 +67,41 @@ Future<void> settle(WidgetTester tester) async {
   await tester.pump(const Duration(milliseconds: 300));
 }
 
+/// Clicks with the mouse, as on the desktop: a touch would turn hover effects off (the "⋯" of a
+/// card shows on hover).
 Future<void> tapText(WidgetTester tester, String text) async {
-  await tester.tap(find.text(text).last);
+  await tester.tap(find.text(text).last, kind: PointerDeviceKind.mouse);
   await settle(tester);
 }
 
-/// Opens the "⋯" menu of the only device on screen.
+/// Opens the device menu of the only device on screen with a right click.
 Future<void> openMenu(WidgetTester tester) async {
-  await tester.tap(find.bySemanticsLabel('设备菜单'));
+  await tester.tap(
+    find.byType(LgDeviceCard),
+    kind: PointerDeviceKind.mouse,
+    buttons: kSecondaryMouseButton,
+  );
+  await settle(tester);
+}
+
+/// Opens it with the "⋯" the card shows while the pointer is on it. Only before any other click
+/// of the test (the test's clicks are the same mouse).
+Future<void> openMenuWithMore(WidgetTester tester) async {
+  final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+  await mouse.addPointer(location: Offset.zero);
+  addTearDown(mouse.removePointer);
+  await mouse.moveTo(tester.getCenter(find.byType(LgDeviceCard)));
+  await tester.pump();
+  await tester.tap(find.bySemanticsLabel(RegExp('^设备菜单 ')));
   await settle(tester);
 }
 
 /// The names of the cards in the order shown.
 List<String> cardNames(WidgetTester tester) => [
-  for (final card in tester.widgetList<PeerCard>(find.byType(PeerCard)))
-    card.item.peer.alias,
+  for (final card in tester.widgetList<LgDeviceCard>(
+    find.byType(LgDeviceCard),
+  ))
+    card.name,
 ];
 
 void main() {
@@ -115,7 +135,7 @@ void main() {
     'cards in the simple mode, the list in the detail mode (01 §2.3)',
     (tester) async {
       await pumpPeers(tester);
-      expect(find.byType(PeerCard), findsNWidgets(2));
+      expect(find.byType(LgDeviceCard), findsNWidgets(2));
       expect(find.byType(LgDeviceRow), findsNothing);
 
       await tapText(tester, '视图');
@@ -127,7 +147,7 @@ void main() {
       await tapText(tester, '视图');
       await tapText(tester, '卡片');
       expect(bind.flutter['peer-card-ui-type'], '0');
-      expect(find.byType(PeerCard), findsNWidgets(2));
+      expect(find.byType(LgDeviceCard), findsNWidgets(2));
       await unmount(tester);
     },
     variant: _windows,
@@ -157,7 +177,7 @@ void main() {
     ) async {
       bind.hasPassword = true;
       await pumpPeers(tester, recent: [_shufang]);
-      await openMenu(tester);
+      await openMenuWithMore(tester);
       for (final item in [
         '远程桌面',
         '经中继连接',

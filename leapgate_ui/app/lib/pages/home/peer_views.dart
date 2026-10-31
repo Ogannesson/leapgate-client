@@ -8,25 +8,17 @@ import 'package:flutter_hbb/leapgate/peer_tabs.dart';
 import 'package:flutter_hbb/leapgate/recent_peers.dart';
 import 'package:flutter_hbb/models/peer_model.dart';
 
-import '../../icons/lg_icon.dart';
 import '../../l10n/app_localizations.dart';
 import '../../shell/navigation.dart';
 import '../../shell/tab_overlays.dart';
-import '../../theme/lg_tokens.dart';
-import '../../widgets/lg_button.dart';
 import '../../widgets/lg_device.dart';
+import '../../widgets/lg_device_card.dart';
 import '../../widgets/lg_menu.dart';
-import '../../widgets/lg_selection.dart';
+import '../../widgets/lg_menu_items.dart';
 import '../peer_platform.dart';
 import 'home_dialogs.dart';
 
 // The device cards, the list view rows and the "⋯" menu of the devices page (01 P1 block F).
-// The card, the row's extra controls and the menu's group style are placeholders until the
-// designer's `LgDeviceCard`, `LgDeviceTable` and menu groups replace them (LEAPGATE.md §10.9);
-// what they show and do is final.
-
-/// Each card column is at least this wide (01 P1 block F: 3 columns at 1280, 2 at 960).
-const kMinCardWidth = 300.0;
 
 /// What one device shows in a card or a row.
 class PeerItem {
@@ -76,132 +68,45 @@ class PeerItemActions {
   final bool current;
 }
 
-/// Placeholder for `LgDeviceCard`.
-class PeerCard extends StatefulWidget {
+/// A device as a card.
+class PeerCard extends StatelessWidget {
   const PeerCard({super.key, required this.item, required this.actions});
 
   final PeerItem item;
   final PeerItemActions actions;
 
   @override
-  State<PeerCard> createState() => _PeerCardState();
-}
-
-class _PeerCardState extends State<PeerCard> {
-  bool _hover = false;
-
-  @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final t = LgTokens.of(context);
-    final c = t.colors;
-    final item = widget.item;
-    final a = widget.actions;
+    final a = actions;
     final peer = item.peer;
     final userHost = peerUserHost(peer);
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hover = true),
-      onExit: (_) => setState(() => _hover = false),
-      child: Semantics(
-        container: true,
-        selected: a.selected || a.current,
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: a.onTap,
-          onDoubleTap: a.selecting ? null : a.onConnect,
-          child: Container(
-            padding: const EdgeInsets.all(LgSpace.s4),
-            decoration: BoxDecoration(
-              color: a.selected || a.current ? c.active : c.surface,
-              borderRadius: BorderRadius.circular(LgRadius.r16),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Row(
-                  children: [
-                    if (a.selecting)
-                      Semantics(
-                        checked: a.selected,
-                        child: LgIcon(
-                          a.selected ? LgIcons.checkCircle : LgIcons.square,
-                          size: 20,
-                          color: c.accent,
-                        ),
-                      ),
-                    LgDeviceAvatar(
-                      id: peer.id,
-                      platform: lgPlatformOf(peer.platform),
-                    ),
-                    const SizedBox(width: LgSpace.s3),
-                    Expanded(
-                      child: Text(
-                        peerDisplayName(peer),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: t.text.copyWith(
-                          color: c.text,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                    if (item.favorite)
-                      Semantics(
-                        label: l10n.peersFavorite,
-                        child: LgIcon(LgIcons.star, size: 16, color: c.text2),
-                      ),
-                    if (!a.selecting) PeerMoreButton(item: item, actions: a),
-                  ],
-                ),
-                Text(
-                  formatPeerId(peer.id),
-                  style: t.textS.copyWith(color: c.text2),
-                ),
-                if (userHost.isNotEmpty)
-                  Text(
-                    userHost,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: t.textS.copyWith(color: c.text2),
-                  ),
-                Row(
-                  children: [
-                    Text(
-                      item.statusLabel,
-                      style: t.textS.copyWith(
-                        color: item.status == LgDeviceStatus.online
-                            ? c.online
-                            : c.text2,
-                      ),
-                    ),
-                    if (item.source != null) ...[
-                      const SizedBox(width: LgSpace.s2),
-                      Text(
-                        item.source!,
-                        style: t.textS.copyWith(color: c.text2),
-                      ),
-                    ],
-                    const Spacer(),
-                    if (_hover && !a.selecting)
-                      LgButton(
-                        label: l10n.connectBoxConnect,
-                        kind: LgButtonKind.secondary,
-                        onPressed: a.onConnect,
-                      ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
+    return LgDeviceCard(
+      name: peerDisplayName(peer),
+      id: formatPeerId(peer.id),
+      platform: lgPlatformOf(peer.platform),
+      status: item.status,
+      statusLabel: item.statusLabel,
+      userHost: userHost.isEmpty ? null : userHost,
+      source: item.source,
+      favorite: item.favorite,
+      favoriteLabel: l10n.peersFavorite,
+      selected: a.current,
+      picked: a.selecting ? a.selected : null,
+      onTap: a.onTap,
+      onDoubleTap: a.selecting ? null : a.onConnect,
+      onConnect: a.selecting ? null : a.onConnect,
+      connectLabel: l10n.connectBoxConnect,
+      // "⋯" sits at the card's top right corner; the menu opens there.
+      onMore: () => _openAtCorner(context, item, a, (size) => size.topRight(Offset.zero)),
+      moreLabel: l10n.peerMenu,
+      onContextMenu: (at) => openPeerMenu(context, item, a.overlays, at),
     );
   }
 }
 
-/// A list view row: M2a's `LgDeviceRow` with the pick box, the star and "⋯" beside it
-/// (placeholder for `LgDeviceTable`'s row).
+/// A list view row. In a category list the tags column is there (empty until the address book,
+/// M4); in the search results the source column takes its place.
 class PeerTableRow extends StatelessWidget {
   const PeerTableRow({
     super.key,
@@ -217,97 +122,77 @@ class PeerTableRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final c = LgTokens.of(context).colors;
     final a = actions;
     final peer = item.peer;
     final userHost = peerUserHost(peer);
-    return Row(
-      children: [
-        if (a.selecting)
-          Semantics(
-            checked: a.selected,
-            child: LgIcon(
-              a.selected ? LgIcons.checkCircle : LgIcons.square,
-              size: 20,
-              color: c.accent,
-            ),
-          ),
-        Expanded(
-          child: LgDeviceRow(
-            name: peerDisplayName(peer),
-            id: formatPeerId(peer.id),
-            platform: lgPlatformOf(peer.platform),
-            status: item.status,
-            statusLabel: item.statusLabel,
-            userHost: userHost.isEmpty ? null : userHost,
-            source: item.source,
-            selected: a.selected || (a.current && item.source == null),
-            highlighted: a.current && item.source != null,
-            topDivider: topDivider,
-            connectLabel: l10n.connectBoxConnect,
-            onTap: a.onTap,
-            onDoubleTap: a.selecting ? null : a.onConnect,
-            onConnect: a.selecting ? null : a.onConnect,
-          ),
-        ),
-        if (item.favorite)
-          Semantics(
-            label: l10n.peersFavorite,
-            child: LgIcon(LgIcons.star, size: 16, color: c.text2),
-          ),
-        if (!a.selecting) PeerMoreButton(item: item, actions: a),
-      ],
+    return LgDeviceRow(
+      name: peerDisplayName(peer),
+      id: formatPeerId(peer.id),
+      platform: lgPlatformOf(peer.platform),
+      status: item.status,
+      statusLabel: item.statusLabel,
+      userHost: userHost.isEmpty ? null : userHost,
+      source: item.source,
+      tags: item.source == null ? const [] : null,
+      favorite: item.favorite,
+      favoriteLabel: l10n.peersFavorite,
+      selected: a.selected || (a.current && item.source == null),
+      highlighted: a.current && item.source != null,
+      picked: a.selecting ? a.selected : null,
+      topDivider: topDivider,
+      connectLabel: l10n.connectBoxConnect,
+      onTap: a.onTap,
+      onDoubleTap: a.selecting ? null : a.onConnect,
+      onConnect: a.selecting ? null : a.onConnect,
+      // "⋯" is at the row's right end; the menu opens under it.
+      onMore: () =>
+          _openAtCorner(context, item, a, (size) => size.bottomRight(Offset.zero)),
+      moreLabel: l10n.peerMenu,
+      onContextMenu: (at) => openPeerMenu(context, item, a.overlays, at),
     );
   }
 }
 
-/// "⋯" and the device menu (01 P1 block F): asks Rust whether a password is saved before it
-/// opens, as upstream builds its menu (`peer_card.dart` `_buildMenuItems`).
-class PeerMoreButton extends StatefulWidget {
-  const PeerMoreButton({super.key, required this.item, required this.actions});
-
-  final PeerItem item;
-  final PeerItemActions actions;
-
-  @override
-  State<PeerMoreButton> createState() => _PeerMoreButtonState();
+void _openAtCorner(
+  BuildContext context,
+  PeerItem item,
+  PeerItemActions actions,
+  Offset Function(Size size) corner,
+) {
+  final box = context.findRenderObject()! as RenderBox;
+  openPeerMenu(
+    context,
+    item,
+    actions.overlays,
+    box.localToGlobal(corner(box.size)),
+  );
 }
 
-class _PeerMoreButtonState extends State<PeerMoreButton> {
-  final _menu = MenuController();
-  bool _hasPassword = false;
-
-  Future<void> _open() async {
-    final has = await peerHasPassword(widget.item.peer.id);
-    if (!mounted) return;
-    setState(() => _hasPassword = has);
-    _menu.open();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context)!;
-    return LgMenuAnchor(
-      controller: _menu,
-      items: peerMenuItems(
-        context,
-        l10n,
-        widget.item,
-        overlays: widget.actions.overlays,
-        hasPassword: _hasPassword,
-      ),
-      builder: (context, controller) => LgIconButton(
-        icon: LgIcons.more,
-        label: l10n.peerMenu,
-        onPressed: () => controller.isOpen ? controller.close() : _open(),
-      ),
-    );
-  }
+/// The device menu at [globalPosition]. Rust is asked first whether a password is saved, as
+/// upstream builds its menu (`peer_card.dart` `_buildMenuItems`).
+Future<void> openPeerMenu(
+  BuildContext context,
+  PeerItem item,
+  TabOverlays overlays,
+  Offset globalPosition,
+) async {
+  final hasPassword = await peerHasPassword(item.peer.id);
+  if (!context.mounted) return;
+  final l10n = AppLocalizations.of(context)!;
+  showLgMenuAt(
+    context,
+    globalPosition: globalPosition,
+    items: peerMenuItems(
+      l10n,
+      item,
+      overlays: overlays,
+      hasPassword: hasPassword,
+    ),
+  );
 }
 
 /// The groups of [peerMenu] as menu items.
 List<Widget> peerMenuItems(
-  BuildContext context,
   AppLocalizations l10n,
   PeerItem item, {
   required TabOverlays overlays,
@@ -346,10 +231,16 @@ List<Widget> peerMenuItems(
       description: l10n.connectBoxViaRelayNote,
       onPressed: () => mainNavigation.connect(id, forceRelay: true),
     ),
-    PeerAction.alwaysRelay => LgMenuItem(
-      label: l10n.peerMenuAlwaysRelay,
-      checked: alwaysRelay(id),
-      onPressed: () => setAlwaysRelay(id, !alwaysRelay(id)),
+    // The menu stays open, so the box follows the value it set.
+    PeerAction.alwaysRelay => StatefulBuilder(
+      builder: (context, setState) => LgMenuCheckItem(
+        label: l10n.peerMenuAlwaysRelay,
+        value: alwaysRelay(id),
+        onChanged: (v) async {
+          await setAlwaysRelay(id, v);
+          setState(() {});
+        },
+      ),
     ),
     PeerAction.wakeOnLan => LgMenuItem(
       label: l10n.peerMenuWakeOnLan,
@@ -422,24 +313,26 @@ List<Widget> peerMenuItems(
 /// Shift held while clicking, for picking a run of devices.
 bool get shiftPressed => HardwareKeyboard.instance.isShiftPressed;
 
-/// The "Adjust the categories shown and their order" list (placeholder for the designer's
-/// menu list with drag handles): a box per category and a handle to drag it.
+/// The rows under "Adjust the categories shown and their order" (`p1-menu-view`): a check per
+/// category, and the grip to drag it to another place. The component draws the grip; the
+/// dragging is this list's.
 class CategoryOrderList extends StatelessWidget {
   const CategoryOrderList({
     super.key,
     required this.tabs,
     required this.names,
-    required this.enabled,
+    required this.fixedNote,
   });
 
   final PeerTabs tabs;
   final String Function(PeerCategory) names;
-  final bool enabled;
+
+  /// Greys the rows when the categories are fixed by built-in settings, saying why.
+  final String? fixedNote;
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final c = LgTokens.of(context).colors;
     return ListenableBuilder(
       listenable: tabs,
       builder: (context, _) {
@@ -450,27 +343,25 @@ class CategoryOrderList extends StatelessWidget {
           onReorderItem: (from, to) => tabs.move(ordered[from], to),
           children: [
             for (final (i, cat) in ordered.indexed)
-              Row(
+              KeyedSubtree(
                 key: ValueKey(cat),
-                children: [
-                  Expanded(
-                    child: LgCheckbox(
-                      value: tabs.isVisible(cat),
-                      label: names(cat),
-                      onChanged: enabled
-                          ? (v) => tabs.setVisible(cat, v)
-                          : null,
-                    ),
-                  ),
-                  ReorderableDragStartListener(
+                child: LgMenuItem(
+                  label: names(cat),
+                  checked: tabs.isVisible(cat),
+                  keepOpen: true,
+                  disabledNote: fixedNote,
+                  onPressed: fixedNote != null
+                      ? null
+                      : () => tabs.setVisible(cat, !tabs.isVisible(cat)),
+                  trailing: ReorderableDragStartListener(
                     index: i,
-                    enabled: enabled,
+                    enabled: fixedNote == null,
                     child: Semantics(
                       label: l10n.peersMoveCategory(names(cat)),
-                      child: LgIcon(LgIcons.grip, size: 20, color: c.text2),
+                      child: const LgMenuGrip(),
                     ),
                   ),
-                ],
+                ),
               ),
           ],
         );

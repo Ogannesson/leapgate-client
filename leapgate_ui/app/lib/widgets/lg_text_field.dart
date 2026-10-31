@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
+import 'package:flutter/services.dart';
 
 import '../icons/lg_icon.dart';
 import '../theme/lg_tokens.dart';
@@ -24,6 +25,7 @@ class LgTextField extends StatefulWidget {
     this.onSubmitted,
     this.semanticLabel,
     this.dense = false,
+    this.maxLength,
   });
 
   final TextEditingController? controller;
@@ -46,6 +48,9 @@ class LgTextField extends StatefulWidget {
   /// A button high instead of an input high, with the medium text: the field
   /// of a chat box or of a bar (`.chatp .cf .field`).
   final bool dense;
+
+  /// At most this many characters can be typed or pasted; no counter is shown.
+  final int? maxLength;
 
   @override
   State<LgTextField> createState() => _LgTextFieldState();
@@ -137,6 +142,10 @@ class _LgTextFieldState extends State<LgTextField> {
               cursorColor: c.accent,
               cursorWidth: 2,
               maxLines: 1,
+              inputFormatters: [
+                if (widget.maxLength != null)
+                  LengthLimitingTextInputFormatter(widget.maxLength),
+              ],
               decoration: InputDecoration.collapsed(
                 hintText: widget.placeholder,
                 hintStyle: base.copyWith(

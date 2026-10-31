@@ -50,11 +50,10 @@ void main() {
     expect(met(PasswordRule.length8, '12345678'), isTrue);
   });
 
-  test('strength: none while empty, then weak to strong', () {
-    expect(passwordStrength(''), isNull);
-    expect(passwordStrength('abc'), PasswordStrength.weak);
-    expect(
-        passwordStrength('Tr0ub4dour&3-xkcd-Horse'), PasswordStrength.strong);
+  test('strength: no bar while empty, then one to four', () {
+    expect(passwordStrengthBars(''), 0);
+    expect(passwordStrengthBars('abc'), 1);
+    expect(passwordStrengthBars('Tr0ub4dour&3-xkcd-Horse'), 4);
   });
 
   group('saving (desktop_home_page.dart:921-958)', () {

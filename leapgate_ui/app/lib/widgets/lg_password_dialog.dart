@@ -84,6 +84,7 @@ class LgPasswordDialog extends StatelessWidget {
     this.passwordFocus,
     this.confirmFocus,
     this.width = 440,
+    this.maxLength,
   });
 
   final LgPasswordDialogLabels labels;
@@ -115,6 +116,9 @@ class LgPasswordDialog extends StatelessWidget {
   final FocusNode? passwordFocus;
   final FocusNode? confirmFocus;
   final double width;
+
+  /// Longest password the two fields take (Rust's limit for an encrypted value).
+  final int? maxLength;
 
   @override
   Widget build(BuildContext context) {
@@ -200,6 +204,7 @@ class LgPasswordDialog extends StatelessWidget {
                     hideLabel: labels.hidePassword,
                     autofocus: true,
                     onChanged: onChanged,
+                    maxLength: maxLength,
                   ),
                   _Strength(
                     on: strength.clamp(0, 4),
@@ -216,6 +221,7 @@ class LgPasswordDialog extends StatelessWidget {
                     hideLabel: labels.hidePassword,
                     errorText: confirmError,
                     onChanged: onChanged,
+                    maxLength: maxLength,
                   ),
                   const SizedBox(height: LgSpace.s6),
                   Row(

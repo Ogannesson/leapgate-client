@@ -1,13 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/leapgate/permanent_password.dart';
+import 'package:flutter_hbb/models/platform_model.dart';
 
-import '../../icons/lg_icon.dart';
 import '../../l10n/app_localizations.dart';
 import '../../shell/tab_overlays.dart';
-import '../../theme/lg_tokens.dart';
-import '../../widgets/lg_banner.dart';
 import '../../widgets/lg_button.dart';
 import '../../widgets/lg_feedback.dart';
+import '../../widgets/lg_password_dialog.dart';
 import '../../widgets/lg_text_field.dart';
 
 // The home page's dialogs (01 P1 block K, §4.4): over the home tab only (its scope in
@@ -119,6 +118,8 @@ Future<void> showPermanentPasswordDialog(
   AppLocalizations l10n,
 ) async {
   final state = await readPermanentPasswordState();
+  // Upstream's limit on both fields (`desktop_home_page.dart:909`).
+  final maxLength = bind.mainMaxEncryptLen();
   await overlays.show<void>(
     null,
     (context, close) => LgDialogScrim(
@@ -126,6 +127,7 @@ Future<void> showPermanentPasswordDialog(
       child: PermanentPasswordDialog(
         l10n: l10n,
         state: state,
+        maxLength: maxLength,
         close: () => close(null),
       ),
     ),
@@ -137,11 +139,13 @@ class PermanentPasswordDialog extends StatefulWidget {
     super.key,
     required this.l10n,
     required this.state,
+    required this.maxLength,
     required this.close,
   });
 
   final AppLocalizations l10n;
   final PermanentPasswordState state;
+  final int maxLength;
   final VoidCallback close;
 
   @override
@@ -165,6 +169,8 @@ class _PermanentPasswordDialogState extends State<PermanentPasswordDialog> {
     super.dispose();
   }
 
+  /// "OK" is available once either field has text (01 P1 block K); the rules are checked when it
+  /// is pressed, as upstream.
   bool get _canSubmit =>
       !_busy &&
       (_first.text.trim().isNotEmpty || _confirmation.text.trim().isNotEmpty);
@@ -192,127 +198,63 @@ class _PermanentPasswordDialogState extends State<PermanentPasswordDialog> {
   @override
   Widget build(BuildContext context) {
     final l10n = widget.l10n;
-    final t = LgTokens.of(context);
-    final c = t.colors;
     final pass = _first.text.trim();
-    final strength = passwordStrength(pass);
-    return LgConfirmDialog(
-      title: l10n.pwdTitle,
-      subtitle: widget.state.isSet ? l10n.pwdNotShown : null,
-      body: widget.state.clearsTrustedDevices
-          ? l10n.pwdClearsTrustedDevices
-          : null,
-      width: 488,
-      actions: [
-        if (widget.state.isSet)
-          LgDialogAction(
-            label: l10n.pwdRemove,
-            kind: LgButtonKind.danger,
-            onPressed: _busy ? null : () => _run(removePermanentPassword),
-          ),
-        LgDialogAction(label: l10n.homeCancel, onPressed: widget.close),
-        LgDialogAction(
-          label: l10n.homeOk,
-          kind: LgButtonKind.primary,
-          onPressed: _canSubmit ? _submit : null,
-        ),
-      ],
-      children: [
-        if (_error == PasswordSaveError.failed)
-          LgBanner(tone: LgTone.error, text: l10n.pwdSaveFailed),
-        Text(l10n.pwdPassword, style: t.textS.copyWith(color: c.text2)),
-        LgTextField(
-          controller: _first,
-          obscureText: true,
-          autofocus: true,
-          enabled: !_busy,
-          semanticLabel: l10n.pwdPassword,
-          placeholder: widget.state.isSet ? l10n.pwdEnterNew : l10n.pwdEnter,
-          errorText: _error == PasswordSaveError.rules
-              ? l10n.pwdRulesNotMet
-              : null,
-          onChanged: _changed,
-          onSubmitted: (_) => _submit(),
-        ),
-        // Placeholder for the designer's strength bar: three segments, the level in words for
-        // screen readers.
-        Semantics(
-          label: switch (strength) {
-            null => null,
-            PasswordStrength.weak => l10n.pwdStrengthWeak,
-            PasswordStrength.medium => l10n.pwdStrengthMedium,
-            PasswordStrength.strong => l10n.pwdStrengthStrong,
-          },
-          child: Row(
-            children: [
-              for (var i = 0; i < 3; i++) ...[
-                if (i > 0) const SizedBox(width: LgSpace.s1),
-                Expanded(
-                  child: Container(
-                    height: 4,
-                    color: strength != null && strength.index >= i
-                        ? c.accent
-                        : c.track,
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
-        Wrap(
-          spacing: LgSpace.s3,
-          runSpacing: LgSpace.s1,
-          children: [
-            for (final (rule, label) in [
-              (PasswordRule.digit, l10n.pwdRuleDigit),
-              (PasswordRule.uppercase, l10n.pwdRuleUppercase),
-              (PasswordRule.lowercase, l10n.pwdRuleLowercase),
-              (PasswordRule.length8, l10n.pwdRuleLength),
-            ])
-              _Rule(label: label, met: passwordRuleMet(rule, pass)),
-          ],
-        ),
-        Text(l10n.pwdConfirm, style: t.textS.copyWith(color: c.text2)),
-        LgTextField(
-          controller: _confirmation,
-          obscureText: true,
-          enabled: !_busy,
-          semanticLabel: l10n.pwdConfirm,
-          placeholder: l10n.pwdEnterAgain,
-          errorText: _error == PasswordSaveError.mismatch
-              ? l10n.pwdMismatch
-              : null,
-          onChanged: _changed,
-          onSubmitted: (_) => _submit(),
-        ),
-      ],
-    );
-  }
-}
-
-/// Placeholder for the designer's rule chip: passed or not, told to screen readers as checked.
-class _Rule extends StatelessWidget {
-  const _Rule({required this.label, required this.met});
-
-  final String label;
-  final bool met;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = LgTokens.of(context);
-    final color = met ? t.colors.online : t.colors.text2;
-    return Semantics(
-      checked: met,
-      label: label,
-      excludeSemantics: true,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          LgIcon(met ? LgIcons.check : LgIcons.minus, size: 16, color: color),
-          const SizedBox(width: LgSpace.s1),
-          Text(label, style: t.textS.copyWith(color: color)),
-        ],
+    // The component has one line under the title; the two notes share it.
+    final notes = [
+      if (widget.state.isSet) l10n.pwdNotShown,
+      if (widget.state.clearsTrustedDevices) l10n.pwdClearsTrustedDevices,
+    ];
+    return LgPasswordDialog(
+      labels: LgPasswordDialogLabels(
+        title: l10n.pwdTitle,
+        passwordLabel: l10n.pwdPassword,
+        passwordPlaceholder: widget.state.isSet
+            ? l10n.pwdEnterNew
+            : l10n.pwdEnter,
+        confirmLabel: l10n.pwdConfirm,
+        confirmPlaceholder: l10n.pwdEnterAgain,
+        showPassword: l10n.connShowPassword,
+        hidePassword: l10n.connHidePassword,
+        strength: l10n.pwdStrength,
+        ruleMet: l10n.pwdRuleMet,
+        ruleUnmet: l10n.pwdRuleUnmet,
+        cancel: l10n.homeCancel,
+        confirm: l10n.homeOk,
+        remove: l10n.pwdRemove,
       ),
+      passwordController: _first,
+      confirmController: _confirmation,
+      maxLength: widget.maxLength,
+      rules: [
+        for (final (rule, label) in [
+          (PasswordRule.digit, l10n.pwdRuleDigit),
+          (PasswordRule.uppercase, l10n.pwdRuleUppercase),
+          (PasswordRule.lowercase, l10n.pwdRuleLowercase),
+          (PasswordRule.length8, l10n.pwdRuleLength),
+        ])
+          LgPasswordRule(label, passwordRuleMet(rule, pass)),
+      ],
+      strength: passwordStrengthBars(pass),
+      note: notes.isEmpty ? null : notes.join('\n'),
+      // The banner under the title: saving failed, or the rules are not met (the component has
+      // no line under the first field).
+      error: switch (_error) {
+        PasswordSaveError.failed => l10n.pwdSaveFailed,
+        PasswordSaveError.rules => l10n.pwdRulesNotMet,
+        _ => null,
+      },
+      confirmError: _error == PasswordSaveError.mismatch
+          ? l10n.pwdMismatch
+          : null,
+      onChanged: _changed,
+      onCancel: widget.close,
+      onConfirm: _canSubmit ? _submit : null,
+      // Given whenever a password is set: null would take the button away while saving.
+      onRemove: widget.state.isSet
+          ? () {
+              if (!_busy) _run(removePermanentPassword);
+            }
+          : null,
     );
   }
 }

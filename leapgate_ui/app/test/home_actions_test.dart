@@ -93,13 +93,13 @@ void main() {
       await tester.enterText(field(0), 'abc12');
       await tester.pump();
       expect(okEnabled(tester), isTrue);
+      // Each rule says whether it is met.
+      expect(find.bySemanticsLabel('包含数字, 已满足'), findsOneWidget);
+      expect(find.bySemanticsLabel('包含大写字母, 未满足'), findsOneWidget);
+      // One of the four strength bars.
       expect(
-        tester.getSemantics(find.bySemanticsLabel('包含数字')),
-        isSemantics(isChecked: true),
-      );
-      expect(
-        tester.getSemantics(find.bySemanticsLabel('包含大写字母')),
-        isSemantics(isChecked: false),
+        tester.getSemantics(find.bySemanticsLabel('密码强度')),
+        isSemantics(value: '1 / 4'),
       );
       await unmount(tester);
     });

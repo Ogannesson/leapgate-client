@@ -94,6 +94,8 @@ class FakeBind implements RustdeskImpl {
                 : '');
       case #mainHasValid2FaSync:
         return false;
+      case #mainMaxEncryptLen:
+        return 128;
       case #mainSetPermanentPasswordWithResult:
         return Future.value(passwordSaves);
       case #mainGetOption:

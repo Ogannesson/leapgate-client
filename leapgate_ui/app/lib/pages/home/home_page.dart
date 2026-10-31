@@ -10,6 +10,7 @@ import '../../shell/tab_overlays.dart';
 import '../../theme/lg_tokens.dart';
 import '../../widgets/lg_banner.dart';
 import '../../widgets/lg_button.dart';
+import '../../widgets/lg_list_chrome.dart';
 import '../../widgets/lg_pressable.dart';
 import '../../widgets/lg_status.dart';
 import 'devices_page.dart';
@@ -160,42 +161,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       onExit: (_) => _block.leave(),
       child: ListenableBuilder(
         listenable: _block,
-        builder: (context, child) => Stack(
-          children: [
-            ExcludeFocus(
-              excluding: _block.blocked,
-              child: AbsorbPointer(absorbing: _block.blocked, child: child),
-            ),
-            if (_block.blocked)
-              Positioned.fill(child: _LockedCover(text: l10n.homeLocked)),
-          ],
+        builder: (context, child) => LgBlockedOverlay(
+          blocked: _block.blocked,
+          message: l10n.homeLocked,
+          child: child!,
         ),
         child: page,
-      ),
-    );
-  }
-}
-
-/// Placeholder for the designer's cover (`p1-locked`): the dim ground and one sentence.
-class _LockedCover extends StatelessWidget {
-  const _LockedCover({required this.text});
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = LgTokens.of(context);
-    return ColoredBox(
-      color: t.colors.scrim,
-      child: Center(
-        child: Container(
-          padding: const EdgeInsets.all(LgSpace.s4),
-          decoration: BoxDecoration(
-            color: t.colors.float,
-            borderRadius: BorderRadius.circular(LgRadius.r16),
-          ),
-          child: Text(text, style: t.text.copyWith(color: t.colors.text)),
-        ),
       ),
     );
   }
@@ -314,16 +285,14 @@ class _SideColumn extends StatelessWidget {
                     // "View" (bring the connection manager forward) comes with M3.
                     if (status.remoteSessions > 0) ...[
                       const SizedBox(height: LgSpace.s2),
-                      Text(
-                        l10n.homeRemoteControlled(status.remoteSessions),
-                        style: t.textM.copyWith(color: c.text),
+                      LgControlledNote(
+                        text: l10n.homeRemoteControlled(status.remoteSessions),
                       ),
                     ],
-                    // The hint card (01 P1 block B): only the system error in M2b. Placeholder
-                    // for the designer's card.
+                    // The hint card (01 P1 block B): only the system error in M2b.
                     if (status.systemError.isNotEmpty) ...[
                       SizedBox(height: short ? LgSpace.s2 : LgSpace.s3),
-                      LgBanner(tone: LgTone.error, text: status.systemError),
+                      LgLocalNotice(tone: LgTone.error, text: status.systemError),
                     ],
                   ],
                 ),

@@ -21,17 +21,12 @@ bool passwordRuleMet(PasswordRule rule, String password) => switch (rule) {
       PasswordRule.length8 => password.length >= 8,
     };
 
-enum PasswordStrength { weak, medium, strong }
-
-/// The strength bar, upstream's thresholds (`PasswordStrengthIndicator`); null while empty.
-PasswordStrength? passwordStrength(String password) {
-  if (password.isEmpty) return null;
+/// How many of the strength bar's four bars are on: none while empty, then upstream's estimate
+/// (`estimatePasswordStrength`, 0 to 1, as `PasswordStrengthIndicator` uses it) in quarters.
+int passwordStrengthBars(String password) {
+  if (password.isEmpty) return 0;
   final s = estimatePasswordStrength(password);
-  return s < 0.33
-      ? PasswordStrength.weak
-      : s < 0.67
-          ? PasswordStrength.medium
-          : PasswordStrength.strong;
+  return (s * 4).floor().clamp(0, 3) + 1;
 }
 
 /// Why "OK" or "Remove" did not save.
