@@ -37,6 +37,8 @@ const String kAppTypeMain = "main";
 
 const String kAppTypeDesktopRemote = "remote";
 
+const String kOptionAllowAutoRecordOutgoing = "allow-auto-record-outgoing";
+const String kOptionHideRecordingButton = "hide-recording-button";
 const String kOptionVerificationMethod = "verification-method";
 const String kOptionApproveMode = "approve-mode";
 const String kOptionCollapseToolbar = "collapse_toolbar";
@@ -115,6 +117,8 @@ const String kValuePrinterIncomingJobDefault = '';
 const String kValuePrinterIncomingJobSelected = 'selected';
 
 const String kKeyPrinterSelected = 'printer-selected-name';
+
+const String kKeyPrinterAllowAutoPrint = 'allow-printer-auto-print';
 
 // Upstream (:342-346) leaves a resize border only on Linux without the compatible UI mode; the
 // new UI is Windows-only for now, where it is zero.

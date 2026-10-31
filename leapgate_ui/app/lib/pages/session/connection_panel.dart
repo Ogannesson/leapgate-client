@@ -4,9 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_hbb/leapgate/connection.dart';
 import 'package:flutter_hbb/leapgate/recent_peers.dart';
 import 'package:flutter_hbb/leapgate/session.dart';
+import 'package:flutter_hbb/leapgate/session_route.dart';
 
 import '../../l10n/app_localizations.dart';
 import '../../shell/navigation.dart';
+import '../../theme/lg_tokens.dart';
 import '../../widgets/lg_connection_panel.dart';
 import '../../widgets/lg_panel_inputs.dart';
 import '../../widgets/lg_selection.dart';
@@ -81,15 +83,22 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
     super.dispose();
   }
 
-  /// A new question starts with empty fields and the saved "remember password"; the timer runs
-  /// only where a duration shows.
+  /// A new question starts with empty fields and the saved "remember password"; a wrong password
+  /// is asked again with what was typed and chosen (`c-pwd-wrong`). The timer runs only where a
+  /// duration shows.
   void _onChange() {
     final shown = (_conn.stage, _conn.input);
     if (shown == _shown) return;
     _shown = shown;
-    _password.clear();
+    // "正在验证…" in between keeps them for the answer.
+    final retyping = _conn.stage == ConnStage.verifying &&
+        (_conn.input == ConnInput.none ||
+            _conn.reason?.code == 'wrong_password');
+    if (!retyping) {
+      _password.clear();
+      _remember = _conn.rememberPassword;
+    }
     _code.clear();
-    _remember = _conn.rememberPassword;
     _trust = false;
     _windowsSession = _conn.windowsSessions.firstOrNull?.sid;
     _elapsed = 0;
@@ -166,7 +175,10 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
         steps = twoSteps(LgStepState.done, LgStepState.current);
         switch (conn.input) {
           case ConnInput.password:
+            // A stand-in for the field's label of the designer's panel (`c-pwd-wrong`).
             inputs
+              ..add(Text(l10n.connEnterPassword,
+                  style: LgTokens.of(context).textS))
               ..add(LgPasswordField(
                 controller: _password,
                 focusNode: _inputFocus,
@@ -221,6 +233,11 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
             message = l10n.connWaitingAccept;
             busy = true;
             secondary = l10n.connWaited(_duration(l10n, _elapsed));
+            // The name Rust logs in with (block 2, `待调.md` item 23).
+            final name = readLocalDisplayName();
+            if (name.isNotEmpty) {
+              secondary = '$secondary\n${l10n.connDisplayName(name)}';
+            }
             actions.add(cancel);
           case ConnInput.windowsSession:
             message = l10n.connChooseWindowsSession;
@@ -266,6 +283,10 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
       case ConnStage.failed:
         final view = reasonView(l10n, conn.reason!, ffi.id);
         message = view.text;
+        // A refusal of the server's own is told apart from the system's errors (01 §4.3); Q3's
+        // export has it for the attempt that just failed.
+        final refused = sessionRoute(ffi).refused;
+        if (refused != null) message = l10n.connServerRefused(refused);
         final left = conn.retryCountdown;
         if (left != null) {
           tone = LgPanelTone.warning;

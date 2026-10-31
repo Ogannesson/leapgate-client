@@ -1,0 +1,410 @@
+import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_hbb/leapgate/app_core.dart';
+import 'package:flutter_hbb/leapgate/notices.dart';
+import 'package:flutter_hbb/leapgate/session.dart';
+import 'package:flutter_hbb/leapgate/session_route.dart';
+import 'package:flutter_hbb/models/platform_model.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:leapgate_ui/pages/session/session_notices.dart';
+import 'package:leapgate_ui/shell/navigation.dart';
+import 'package:leapgate_ui/shell/tab_menu.dart';
+import 'package:leapgate_ui/widgets/lg_selection.dart';
+
+import 'session_fakes.dart';
+
+// The rest of the session tab (LEAPGATE.md §10.9, coder B): connection details, the server's
+// refusal, notices with buttons, chat, recording, the tab menu and the connection panel's
+// additions. Device IDs and server names here are made up.
+
+const _id = '100200300';
+
+/// [AppFakeBind] with session toggles and peer options kept, and what chat, recording and
+/// screenshots call.
+class _Bind extends AppFakeBind {
+  final toggles = <String>{};
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) {
+    final args = invocation.namedArguments;
+    switch (invocation.memberName) {
+      case #sessionToggleOption:
+        calls.add(invocation);
+        final v = args[#value] as String;
+        if (!toggles.remove(v)) toggles.add(v);
+        return Future<void>.value();
+      case #sessionGetToggleOptionSync:
+        return toggles.contains(args[#arg]);
+      case #sessionGetToggleOption:
+        return Future<bool?>.value(toggles.contains(args[#arg]));
+      case #sessionPeerOption:
+        calls.add(invocation);
+        if (args[#value] == 'Y') {
+          toggles.add(args[#name]);
+        } else {
+          toggles.remove(args[#name]);
+        }
+        return Future<void>.value();
+      case #sessionSendChat:
+      case #sessionRecordScreen:
+      case #sessionTakeScreenshot:
+      case #sessionRequestVoiceCall:
+        calls.add(invocation);
+        return Future<void>.value();
+      case #sessionHandleScreenshot:
+        calls.add(invocation);
+        return Future.value('');
+    }
+    return super.noSuchMethod(invocation);
+  }
+}
+
+void main() {
+  late AppFakes fakes;
+  late _Bind bind;
+
+  setUp(() {
+    fakes = installAppFakes();
+    bind = _Bind();
+    platformFFI.setBindingForTesting(bind);
+    fakes = (bind: bind, lg: fakes.lg, window: fakes.window);
+  });
+  tearDown(() {
+    readSessionConnection = (_) => '{}';
+    readLocalDisplayName = () => '';
+  });
+
+  Future<FFI> open(WidgetTester tester, {String id = _id}) async {
+    mainNavigation.connect(id);
+    await tester.pump();
+    await tester.pump();
+    return appCore.sessions.sessionsOf(id).single;
+  }
+
+  Future<FFI> connected(WidgetTester tester, {String id = _id}) async {
+    final s = await open(tester, id: id);
+    await emit(tester, fakes, s, connectionReady());
+    await emit(tester, fakes, s, peerInfo());
+    return s;
+  }
+
+  group('connection details', () {
+    Future<void> openDetails(WidgetTester tester) async {
+      await tester.tap(find.bySemanticsLabel(RegExp('连接方式详情')));
+      await tester.pumpAndSettle();
+    }
+
+    testMainWindow(
+      'without an answer from Q3: no path and no relay server rows',
+      (tester) async {
+        await pumpMainWindow(tester);
+        final s = await connected(tester);
+        await emit(tester, fakes, s, {
+          'name': 'fingerprint',
+          'fingerprint': '3F2A9C417B0ED5A86C1E04D7B93AF582',
+        });
+        await emit(tester, fakes, s, {
+          'name': 'update_quality_status',
+          'delay': '45',
+          'codec_format': 'H264',
+        });
+        await openDetails(tester);
+
+        expect(find.text('路径'), findsNothing);
+        expect(find.text('中继服务器'), findsNothing);
+        expect(find.text('TCP'), findsOneWidget);
+        expect(find.text('已加密'), findsOneWidget);
+        expect(
+          find.text('3F2A 9C41 7B0E D5A8\n6C1E 04D7 B93A F582'),
+          findsOneWidget,
+        );
+        expect(find.text('H264'), findsOneWidget);
+        expect(find.text('端到端'), findsOneWidget);
+        expect(find.text('45 ms'), findsOneWidget);
+      },
+    );
+
+    testMainWindow('with Q3: the path and the relay server', (tester) async {
+      readSessionConnection = (_) =>
+          '{"path":"relay","transport":"tcp","relay":"relay-1.example.com"}';
+      await pumpMainWindow(tester);
+      await connected(tester);
+      await openDetails(tester);
+
+      expect(find.text('路径'), findsOneWidget);
+      expect(find.text('经中继'), findsWidgets);
+      expect(find.text('relay-1.example.com'), findsOneWidget);
+    });
+
+    testMainWindow(
+      'the switch shows the quality data and is kept for the device',
+      (tester) async {
+        await pumpMainWindow(tester);
+        final s = await connected(tester);
+        await emit(tester, fakes, s, {
+          'name': 'update_quality_status',
+          'speed': '1.20kB/s',
+          'fps': '{"0":30}',
+        });
+        expect(find.text('1.20kB/s'), findsNothing);
+
+        await openDetails(tester);
+        await tester.tap(find.byType(LgSwitch));
+        await tester.pumpAndSettle();
+
+        expect(
+          bind.toggles,
+          containsAll(['show-quality-monitor', kOptionQualityMonitorChosen]),
+        );
+        expect(find.text('1.20kB/s'), findsWidgets);
+      },
+    );
+  });
+
+  group('connection panel', () {
+    testMainWindow('a refusal of the server is said to be the server\'s', (
+      tester,
+    ) async {
+      readSessionConnection = (_) => '{"refused":"Banned by policy"}';
+      await pumpMainWindow(tester);
+      final s = await open(tester);
+      await emit(
+        tester,
+        fakes,
+        s,
+        msgbox('error', 'Connection Error', 'Banned by policy'),
+      );
+
+      expect(find.text('服务器拒绝了此连接：Banned by policy'), findsOneWidget);
+    });
+
+    testMainWindow('waiting for the remote user shows the name it sees', (
+      tester,
+    ) async {
+      readLocalDisplayName = () => '张三';
+      await pumpMainWindow(tester);
+      final s = await open(tester);
+      await emit(tester, fakes, s, connectionReady());
+      await emit(
+        tester,
+        fakes,
+        s,
+        msgbox('wait-remote-accept-nook', 'Prompt', ''),
+      );
+
+      expect(find.textContaining('显示给对方的名称：张三'), findsOneWidget);
+    });
+
+    testMainWindow('a wrong password keeps what was typed (待调 30)', (
+      tester,
+    ) async {
+      fakes.lg.reasons['Wrong Password'] = 'wrong_password';
+      await pumpMainWindow(tester);
+      final s = await open(tester);
+      await emit(tester, fakes, s, connectionReady());
+      await emit(
+        tester,
+        fakes,
+        s,
+        msgbox('input-password', 'Password Required', ''),
+      );
+      expect(find.text('输入密码'), findsOneWidget);
+      await tester.enterText(find.byType(EditableText), 'pw-1');
+      await tester.tap(find.text('连接'));
+      await tester.pump();
+      await emit(
+        tester,
+        fakes,
+        s,
+        msgbox('re-input-password', 'Login Error', 'Wrong Password'),
+      );
+
+      expect(find.text('密码错误'), findsOneWidget);
+      expect(
+        tester.widget<EditableText>(find.byType(EditableText)).controller.text,
+        'pw-1',
+      );
+    });
+  });
+
+  group('notices', () {
+    testMainWindow('a screenshot stays until answered; copying answers it', (
+      tester,
+    ) async {
+      await pumpMainWindow(tester);
+      final s = await connected(tester);
+      await emit(tester, fakes, s, {'name': 'screenshot', 'msg': ''});
+      await tester.pump(const Duration(seconds: 6));
+
+      expect(find.text('截图已完成'), findsOneWidget);
+      await tester.tap(find.text('复制到剪贴板'));
+      await tester.pumpAndSettle();
+
+      expect(callsTo(fakes, #sessionHandleScreenshot).single[#action], '1');
+      expect(find.text('截图已完成'), findsNothing);
+    });
+
+    testMainWindow('a notice that only informs goes by itself', (tester) async {
+      await pumpMainWindow(tester);
+      final s = await connected(tester);
+      s.notices.add(SessionNotice('display_is_plugged_out_msg'));
+      await tester.pump();
+      expect(find.text('远程设备的一台显示器已断开，已切换到主显示器'), findsOneWidget);
+
+      await tester.pump(kNoticeDuration);
+      await tester.pump();
+      expect(find.text('远程设备的一台显示器已断开，已切换到主显示器'), findsNothing);
+    });
+
+    testMainWindow('a print job offers the three answers and remembering', (
+      tester,
+    ) async {
+      await pumpMainWindow(tester);
+      final s = await connected(tester);
+      await emit(tester, fakes, s, {
+        'name': 'printer_request',
+        'id': 3,
+        'path': 'job',
+      });
+
+      expect(find.text('收到来自远程设备的打印任务'), findsOneWidget);
+      for (final label in ['使用默认打印机', '选择打印机', '不打印']) {
+        expect(find.text(label), findsOneWidget);
+      }
+      expect(find.bySemanticsLabel('记住此选择'), findsOneWidget);
+    });
+
+    testMainWindow('UAC on the remote device: wait or request elevation', (
+      tester,
+    ) async {
+      await pumpMainWindow(tester);
+      final s = await connected(tester);
+      await emit(
+        tester,
+        fakes,
+        s,
+        msgbox('on-uac', 'Prompt', 'Please wait for confirmation of UAC...'),
+      );
+
+      expect(find.text('远程设备上正在显示用户账户控制（UAC）窗口'), findsOneWidget);
+      expect(find.text('请求提升权限'), findsOneWidget);
+      await tester.tap(find.text('等待'));
+      await tester.pump();
+      expect(find.text('远程设备上正在显示用户账户控制（UAC）窗口'), findsNothing);
+    });
+
+    testMainWindow('a permission taken away is told', (tester) async {
+      await pumpMainWindow(tester);
+      final s = await connected(tester);
+      await emit(tester, fakes, s, {'name': 'permission', 'clipboard': 'true'});
+      await emit(tester, fakes, s, {
+        'name': 'permission',
+        'clipboard': 'false',
+      });
+
+      expect(find.text('对方已关闭剪贴板同步'), findsOneWidget);
+    });
+  });
+
+  group('chat', () {
+    testMainWindow(
+      'a message opens the panel; sending shows it on the right side',
+      (tester) async {
+        await pumpMainWindow(tester);
+        final s = await connected(tester);
+        await emit(tester, fakes, s, {
+          'name': 'chat_client_mode',
+          'text': '你好',
+        });
+
+        expect(find.text('你好'), findsOneWidget);
+        await tester.enterText(find.byType(EditableText), ' 好的 ');
+        await tester.tap(find.text('发送'));
+        await tester.pump();
+
+        expect(callsTo(fakes, #sessionSendChat).single[#text], '好的');
+        expect(find.text('好的'), findsOneWidget);
+      },
+    );
+
+    testMainWindow('messages to a tab out of sight are unread until it shows', (
+      tester,
+    ) async {
+      await pumpMainWindow(tester);
+      final s = await connected(tester);
+      mainNavigation.showHome();
+      await tester.pump();
+      await emit(tester, fakes, s, {'name': 'chat_client_mode', 'text': 'a'});
+      await emit(tester, fakes, s, {'name': 'chat_client_mode', 'text': 'b'});
+      expect(tabUnread(s), 2);
+
+      await tester.tap(find.text('host')); // its tab, named after the peer info
+      await tester.pump();
+      await tester.pump();
+      expect(tabUnread(s), 0);
+    });
+
+    testMainWindow('waiting for the answer: "等待接听…" with "取消"', (tester) async {
+      await pumpMainWindow(tester);
+      final s = await connected(tester);
+      await tester.tap(find.text('聊天'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('语音通话'));
+      await tester.pumpAndSettle();
+      expect(callsTo(fakes, #sessionRequestVoiceCall), hasLength(1));
+
+      await emit(tester, fakes, s, {'name': 'on_voice_call_waiting'});
+      expect(find.text('等待接听…'), findsOneWidget);
+    });
+  });
+
+  testMainWindow('recording: the button starts it', (tester) async {
+    await pumpMainWindow(tester);
+    await connected(tester);
+    await tester.tap(find.bySemanticsLabel('录制'));
+    await tester.pump();
+
+    expect(callsTo(fakes, #sessionRecordScreen).single[#start], true);
+  });
+
+  group('tab menu', () {
+    Future<void> rightClickTab(WidgetTester tester, String label) async {
+      await tester.tap(find.text(label).first, buttons: kSecondaryButton);
+      await tester.pump();
+    }
+
+    testMainWindow('"关闭其他标签" leaves this one', (tester) async {
+      await pumpMainWindow(tester);
+      await open(tester);
+      await open(tester, id: '400500600');
+      await rightClickTab(tester, '400 500 600');
+
+      await tester.tap(find.text('关闭其他标签'));
+      await tester.pump();
+      expect(appCore.sessions.devices, ['400500600']);
+    });
+
+    testMainWindow('"复制设备 ID" copies the ID', (tester) async {
+      String? copied;
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async {
+          if (call.method == 'Clipboard.setData') {
+            copied = (call.arguments as Map)['text'] as String;
+          }
+          return null;
+        },
+      );
+      await pumpMainWindow(tester);
+      await open(tester);
+      await rightClickTab(tester, '100 200 300');
+
+      await tester.tap(find.text('复制设备 ID'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(copied, _id);
+      expect(find.text('已复制'), findsOneWidget);
+    });
+  });
+}
