@@ -170,7 +170,18 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   Win32Window::Point origin(0, 0);
   Win32Window::Size size(0, 0);
-  if (is_cm_page || is_install_page) {
+  if (is_cm_page) {
+    // leapgate: the connection manager's first size and place are those Dart gives it, 300×490
+    // at the top right of the primary display's work area (kConnectionManagerWindowSizeClosedChat,
+    // app/lib/cm/cm_window.dart), so it does not first appear elsewhere.
+    RECT work;
+    double scale;
+    Win32Desktop::GetMonitorWorkArea(MonitorFromPoint({0, 0}, MONITOR_DEFAULTTOPRIMARY), work,
+                                     scale);
+    size = Win32Window::Size(300u, 490u);
+    origin = Win32Window::Point(static_cast<unsigned int>(work.right - size.width * scale),
+                                static_cast<unsigned int>(work.top));
+  } else if (is_install_page) {
     // Get primary monitor's work area.
     Win32Window::Point workarea_origin(0, 0);
     Win32Window::Size workarea_size(0, 0);
