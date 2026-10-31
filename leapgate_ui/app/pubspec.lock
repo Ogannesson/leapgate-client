@@ -199,7 +199,7 @@ packages:
     source: hosted
     version: "2.4.4"
   get:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: get
       sha256: c79eeb4339f1f3deffd9ec912f8a923834bec55f7b49c9e882b8fef2c139d425
@@ -686,7 +686,7 @@ packages:
     source: hosted
     version: "2.4.5"
   win32:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: win32
       sha256: d7cb55e04cd34096cd3a79b3330245f54cb96a370a1c27adb3c84b917de8b08e

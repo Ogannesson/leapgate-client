@@ -567,6 +567,76 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 
 留给后面的块的，都写在 10.6：截图、打印、`switch_back`、聊天和语音事件随 M2b；`cm_file_model` 和 CM 的全局事件随 M3；`shortcut_model` 改写时补回暂删的几行；V1 接入时要处理 1.5 秒唤醒；01 §4.1 的"查找设备""建立连接"合成一步。
 
+#### M2a 最小控制端（2026-10-31，`0810e2b43`）
+
+黑盒验收，两台便携端点无人值守跑：新界面（`0810e2b43`，3.44.9 自编引擎）当控制端，旧界面（`8fcdabb1e`，Rust 和 `0810e2b43` 相同）当被控端；被控端是 4K、DXGI 每约 5 秒失效一次的机器。面板上的输入和点击用 `scripts/e2e/leapgate-post-input.ps1` 向窗口投递消息，按 PrintWindow 截图的坐标操作（UI Automation 用不了，见问题 3）。要点按键的一项用了真实按键注入。依据 04 §6，冒烟清单第一版在总仓库 `docs/新界面/冒烟清单.md`。
+
+**04 §6.3 真实连接**
+
+| 项 | 结果 |
+|---|---|
+| 直连 | 通过。上游 IPv6 直连胜出，标签和工具栏"直连"，轻提示"已建立直连" |
+| 经中继 | 通过。`--relay`，没有 ICE 行，标签"经中继"。`--relay` 照上游写进对端的 `force-always-relay`，测完复原 |
+| 自研 ICE 胜出 | 通过。`leapgate ice: selected host/v6/ethernet <-> host/v6 in 2266 ms`，服务端 `ice_result` 同一行逐项一致，随后登录 |
+| 存过密码直接进 | 通过。面板勾"记住密码"登录一次后，不带密码再连直接登录 |
+| 输密码 | 通过。两步进度"建立连接 ✓ → 验证身份"，密码框自动获得焦点，空时"连接"不可点；回车提交，短暂显示"已连接，正在等待画面…"后出画面 |
+| 密码错误 | 通过。红字"密码错误"（输入被清空，见待调） |
+| 2FA | 未验证：被控端开二次验证要在旧界面设置里扫码绑定，旧界面的语义树也用不了，没有无界面的开法 |
+| 等对方接受 | 通过。面板"正在等待对方接受…"、"已等待 ‹n› 秒"、"取消"；被控端 CM 点"接受"后连上。被控端 3 分钟没处理时它关掉连接，控制端自动重连、回到等待。缺"显示给对方的名称"（已在待调） |
+| 不安全连接确认 | 未验证：控制端清空 Key 后服务端回 Key mismatch，面板"本机与服务器的密钥（Key）不一致，无法连接服务器。"、只有"关闭标签"；没有不配 Key 的会合服务 |
+| 断线后自动重试 | 部分通过。经中继的会话里停掉被控端：面板"连接已被远程设备断开。"、"1 秒后重试（第 1 次）"、"重试"，随后重连。第二次失败是"Failed to connect via rendezvous server: Please try later"，按表归成"无法连接服务器。请检查网络连接。"、不自动重试，所以翻倍没看到（问题 4）。经 KCP（上游 IPv6 打洞）的会话里被控端消失时是上游的 `Peer stopped answering, reconnecting`，面板直接回到"正在连接" |
+| 对方重启后静默重连 | 未验证：要被控端真的重启，两台端点都不能重启，同网测试虚拟机这次没开机（它重启后也不会自动起便携版） |
+| 1.5 秒唤醒锁屏 | 未验证：两台被控端连上后都在 1.5 秒内出画面，没有锁屏又能安全解锁的被控端 |
+| "改用中继" | 未验证：造不出直连被重置的错误 |
+| 对方断开 | 通过。被控端 CM 点"断开连接"：面板"对方已断开连接。"、"关闭标签""重新连接"，标签"已断开"；"重新连接"能连上 |
+| 出错文案（附带） | ID 不存在："未找到 ID 为 ‹ID› 的设备。…"、"关闭标签""修改 ID"，标签"连接失败" |
+
+**04 §4 会话标签和输入**
+
+| 项 | 结果 |
+|---|---|
+| 只有当前标签收键盘、切走时远程设备收到抬起 | 不通过，见问题 1：新界面的会话没有把键盘发给远程设备 |
+| 标签"×" | 通过。断开（`Exit io_loop`）并关掉标签 |
+| "+"回主页 | 通过。切到主页，光标在连接框里，直接打字出现"搜索结果"、"连接到 ‹输入›"、"未找到匹配的设备" |
+| 系统窗口标题跟着标签 | 通过。主页"Leapgate"，会话"‹设备名› - Leapgate"，还没拿到名称时"‹格式化 ID› - Leapgate" |
+| 关窗流程 | 部分通过。`CloseSessions` 路径（两个选项预设）通过：会话断开、窗口隐藏、进程留着。没有会话时问"关闭窗口？"（退出 / 在后台运行、记住此选择）；有会话且 `enable-confirm-closing-tabs = 'Y'` 时是"断开全部 1 个会话并关闭窗口？"加"不再提示"，选"在后台运行"后会话断开、窗口隐藏。没写这个选项时（新配置）有会话也只问"关闭窗口？"，见问题 2 |
+| `--connect` 交给运行中的主窗口后到前台 | 通过。窗口隐藏、最小化、被别的窗口挡住三种情况下都显示出来并到前台，开新标签 |
+
+**04 §6.4 引擎**
+
+- 4K、频繁重建采集的被控端：通过。新界面在这台被控端上开过十几个会话（单个最长约 7 分钟），画面持续更新，Windows 应用程序日志里没有 `leapgate.exe` 的崩溃事件。解码器两个界面一样，都是 `hevc … D3D11VA ram decoder`。
+- 开着 UI Automation 客户端（每秒遍历一次整棵树，持续 7 分钟）开、关会话标签和两种关窗确认：通过，不崩溃。讲述人没开（控制端那台机器有人在用，讲述人会出声）。但树始终只有窗口和 `FLUTTERVIEW` 两个元素，见问题 3。
+
+**V1 占用对比**（只有一台被控端有画面，用一个会话；被控端开一个不停刷新的控制台窗口让画面一直在变；会话标签切到后台的办法是再开一个 ID 不存在的标签，效果和停在主页相同；控制端进程的 CPU 按单核百分比、GPU 是各引擎利用率，各 30 秒平均）
+
+| 提交 | 会话标签在前 | 会话标签在后台 |
+|---|---|---|
+| `0e3db691d`（接 V1 之前，Flutter 部分单独编，Rust 产物和最终构建同一份） | CPU 25.1%、3D 2.4%、视频解码 2.5% | CPU 18.9%、3D 0.9%、视频解码 2.5% |
+| `0810e2b43` | CPU 25.7%、3D 2.4%、视频解码 2.5% | CPU 16.8%、3D 0.9%、视频解码 2.5% |
+
+后台时照常收流、解码（视频解码不变，符合设计）；V1 比接入前在后台再少约 2 个百分点的单核 CPU，3D 两者一样（接入前后台标签本来就不重绘）。
+
+**04 §6.6 和样稿对照**：浅色对照了 P1 本机区、最近列表、连接框搜索，P2 会话标签、面板（要密码、密码错误、等对方接受、等画面、出错和倒计时、对方断开、Key 不一致）、工具栏默认态和收起态、轻提示、两种关窗确认。必修项见问题 2；版面层级、令牌没看到用错的；小差异 3 条记进总仓库 `docs/新界面/待调.md`（ID 的"复制"是实心按钮、密码错误后输入被清空且没有"输入密码"标签、还没拿到对端信息时标题和副标题都是 ID）。深色未验证：M2a 没有切换主题的入口，本地选项 `theme = 'dark'` 不起作用；画廊的深色导出看过几张，没有发现问题。
+
+**04 §6.8 旧界面五项**：通过。两端都用 `8fcdabb1e` 旧界面：连接（ICE 胜出，登录成功）、`--relay`、文件传输两个方向（两边 SHA-256 一致）、TCP 端口转发（HTTP 200）、出口（socks5h 和 HTTP CONNECT 都 200，`tunnel up (direct)`）。ID 加盐：空配置目录起一次，`Generated id` 是 9 位、≥ 268435456，测完放回原配置。
+
+最新 stable 检查（03 §8.8）：Flutter 3.47.9（2026-10-29，验收时仍是最新 stable），官方 SDK、官方引擎、Impeller 默认开。
+1. 按 `-Ui leapgate` 编一次：通过。`pub get` 改了两个锁文件，检查完已还原，不提交。
+2. 组件画廊：通过。两版各导出 824 张，584 张逐像素相同，其余每张差异像素不到 0.02%（抗锯齿级别）。
+3. 4K 上屏：通过。只用 `--connect --password`，没开任何 UI Automation 客户端；被控端每约 5 秒重建一次采集，会话约 7 分钟，画面正常，没有崩溃；stderr 只有 "Using the Impeller rendering backend (OpenGLESSDF)"。
+4. `flutter analyze`：app 没有问题；core 97 条，和 M1 相同（92 条 info 全在复制件，5 条 warning 在复制件 `models/file_model.dart`），新写和改写的文件没有提示，也没有废弃提示。core 117 个、app 197 个测试（跳过 2 个）在 3.47.9 下都通过。
+
+发现的问题：
+1. **会话里的键盘没有发到远程设备**（必须在交付试用前查清）。新界面会话标签在前、真实光标在画面上并真实点过画面后，用 `keybd_event` 注入左 Shift、F12，被控端 `GetAsyncKeyState` 一次按下都没看到；同一台机器、同样做法换旧界面当控制端，被控端看到了按下和抬起。投递 `WM_KEYDOWN` 也没有发过去。鼠标是通的（投递的点击在远程设备上生效）。还没用真实键盘确认，注入的按键带 `LLKHF_INJECTED`，如果新界面有意过滤注入事件，就要换真实键盘再测一次。
+2. **没写过 `enable-confirm-closing-tabs` 时，有会话关窗不确认断开**（必须改）。上游这个选项缺省是开（`enable-` 开头的选项空值算开），新配置里没有这个键；新界面在缺省时只问"关闭窗口？"，不提断开会话、也没有"不再提示"，写成 `'Y'` 才出现 01 §2.1 要的确认。
+3. **语义树始终为空**（不挡试用，要单独查）。自编引擎上，UI Automation 只看到窗口和 `FLUTTERVIEW`，从第一次查询起就是这样；stderr 每次语义更新都是 "Accessibility bridge rebuilt after failed update: 0 will not be in the tree and is not the new root"（也有 45、64、74 号节点）。根节点 0 被判成不在树里，补丁 0001 随后重建，树一直是空的：讲述人读不到任何控件，04 §6.3 原定的 UI Automation 脚本也用不了。官方引擎上是否也这样没测（不能在官方引擎上开 UI Automation 客户端）。
+4. 对方掉线后重连失败的文案不对（可以记待调）：会话里被控端退出约 20 秒后，Rust 报 "Failed to connect via rendezvous server: Please try later"，按 01 §4.3 的表显示"无法连接服务器。请检查网络连接。"，实际服务器是通的、是对方不在线；这一条不自动重试，所以对方很快回来也不会自己连上。
+
+复验（2026-10-31，`3ca7230f8`，同样的两台端点和做法）：
+- 问题 1（键盘）：通过。会话页创建时补调 `bind.mainInitInputSource()` 后，真实注入的左 Shift、F12 在被控端都收到了按下和抬起；在会话标签按住 Shift 再点另一个标签，被控端在切走的那一刻收到抬起，比真正松开早约 2 秒。另一个标签是 ID 不存在的标签（只有一台被控端有画面），"新标签那台没收到按下"这一半没法用真设备验。
+- 问题 2（关窗确认）：复现不出，判通过。程序停着时 `Leapgate_local.toml` 里没有 `enable-confirm-closing-tabs`，也没有 `leapgate-close-action`；有一个会话时发 WM_CLOSE，出现"断开全部 1 个会话并关闭窗口？"和"不再提示"。照上一轮的顺序（先在没有会话时关窗、取消，再连上、再关窗）也一样。上一轮那次为什么只问"关闭窗口？"没查清：那次两个键是用 `Configure` 写空串删掉的，删掉后才启动程序。
+- 小改：本机区 ID 下面的"复制"是文字按钮，和 ID 左对齐；连接"最近"里有记录的设备时，连接中和要密码时面板标题、会话标签、窗口标题都先显示设备名，副标题是 ID。
+
 ### 10.6 core 的结构（M1）
 
 03 §3.3 第 1、2、4、5、6、8 条在 `core/lib/leapgate/` 落成下面几个文件，复制进来的 models 和改写的 `FfiModel` 接在这上面。
@@ -667,3 +737,71 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
   2. 选项键用常量，不在页面里写字面值：上游有的照上游名字和值补进 core 的 `consts.dart`（以后复制进来的 models 直接能用），Leapgate 新加的键放在用它的 core 文件里。
   3. 普通读写直接用 `config` / `local` / `peer(id)` / `SessionOptions`；有特殊读写规则的（例如上游 `main_set_option` 对 `stop-service` 会去装卸服务、`leapgate-allow-exit` 只认 "Y"）在 core 里包一个具名方法，页面调方法。
   4. 选项以外的 `bind.*`（例如画质 `sessionGetImageQuality`、Flutter 选项 `sessionGetFlutterOption`）按领域收进对应的 model，不往 `OptionsModel` 里堆；作用域本身不够用时（例如 LocalConfig 的 `ui_flutter`）再加一个 `OptionScope` 子类。
+
+### 10.8 M2a 的分工约定
+
+依据：总仓库 `docs/新界面/04-M2a拆法.md`（下称"04"；维护者 2026-10-31 定了 D1~D5：V1、全屏、"重启远程设备"提前进 M2a，连接进度合成两步）。界面行为以 01 为准（P1 区块 A、E、F，P2 区块 A~E、G，§2.1、§4.1、§4.3、§4.4、§4.5、§7.6），样稿 `A-P1.html`、`A-P2.html`，令牌和图标以 `A-基础.html` 为准。04 §7 列的不做。
+
+**分支和文件边界**（都从 `ui/m2a` 切，做完合回 `ui/m2a`）
+
+| 分支 | 谁 | 只改这些 |
+|---|---|---|
+| `ui/m2a-ds` | designer | `app/lib/widgets/`（新组件；M0 组件缺什么补什么）、`app/lib/gallery_main.dart`、`app/test/` 里组件的测试 |
+| `ui/m2a-session` | coder A | `app/lib/shell/`、`app/lib/pages/session/`、`app/lib/main.dart`、core 的 `leapgate/session.dart`、`leapgate/session_registry.dart`、`models/state_model.dart` 和它们的测试；`app/windows/` 只在链接和窗口前台确实需要时改 |
+| `ui/m2a-home` | coder B | `app/lib/pages/home/`、core 的新文件（"输入像不像地址"的判断等）、`leapgate/local_status.dart`、`leapgate/app_core.dart`（只加最近列表的 model）和它们的测试 |
+
+- 两个 coder 都要往 `app/lib/l10n/app_zh.arb`、`app_en.arb` 加键：会话块的键以 `session`、`conn`、`toolbar`、`closing` 开头，主页块以 `home`、`connectBox`、`recent` 开头，各自加在文件末尾，冲突在整合时解决。两种语言同时加，文案照 01 §7.6 和术语表；01 里写好的句子逐字照抄，没写的按 §7.6 写，并在提交说明里列出新写的句子。
+- 两个 coder 先用 M0 的组件和简单的占位控件把逻辑写通，整合时换成 designer 的组件。占位控件不求好看，但行为测试要能按文字和语义标签找到它们。
+- 外壳和主页的两条约定（2026-10-31 审查主页块时补）：外壳把非当前标签（包括被会话标签盖住的主页）包在 `TickerMode(enabled: false)` 里，主页靠它停掉在线状态查询（`IndexedStack`、`Offstage`、`Visibility.maintain` 都不关 ticker）；主页切走时不销毁。全局轻提示的 key 是上游翻译 key（例如 `Copied`），文案在 ARB 里，由外壳显示。
+- 本机区 ID 旁的"复制"和双击 ID 复制（01 区块 A）M0 没做，归主页块。
+- 共用接口 `app/lib/shell/navigation.dart`（`ui/m2a` 上已有）：`mainNavigation.connect(id, …)` 开会话或切到已有标签；`mainNavigation.showHome(focusConnectBox:, connectBoxText:)` 回主页；主页监听 `connectBoxFocusRequests`。会话块实现，主页块只调用，测试里换成假的。
+
+**组件约定（designer）**
+
+- 组件只管画：输入是普通的值和回调，不引用 core 的 model、会话对象和 `bind`（身份色这类纯函数可以用）；文字全部由调用方传进来（照 M0 `LgTitleBarLabels` 的做法），组件里不写死文案、不读 `AppLocalizations`。
+- 每个可操作的地方带语义标签：`Semantics` 的 label 用它显示的文字，只有图标的用它的名字。讲述人和端到端的 UI Automation 脚本都靠它找控件（04 §6.3）。
+- 浅色、深色和简洁、详细两套尺寸都对；尺寸、颜色、间距、圆角只用令牌。
+- 每个组件的每种状态在画廊（`buildSpecimens`）里有一项，能用 `LG_GALLERY_EXPORT` 导出和样稿对照；`app/test/` 里写行为测试（回调被调、禁用时不响应、焦点能到），不比像素。
+- 要做的组件（名字是建议，可以按 M0 的命名习惯改，接口的意思不变）：
+
+| 组件 | 数据和回调 | 样稿 |
+|---|---|---|
+| `LgDeviceAvatar` | 设备 ID（取身份色）、平台（Windows、macOS、Linux、Android、未知）、尺寸 | 设备卡片和列表视图的平台图标 |
+| `LgDeviceRow` | 名称、格式化的 ID、`用户名@主机名`、平台、在线状态（在线、离线、正在查询，带文字）、可选的来源分类文字；选中、高亮（连接框里键盘移到的那一行）；`onTap`、`onDoubleTap`、`onConnect`（悬停时出现的"连接"）、`focusNode`；"连接"按钮的文字 | `p1-list-simple`、`p1-card-*`、`p1-cb-*` |
+| `LgConnectToRow` | 整行文字（"连接到 ‹输入›"，调用方拼好）、高亮、`onTap`；行尾的"⋯"（连接方式菜单）随 M2b，先不放 | `p1-cb-conn`、`p1-cb-none` |
+| 连接框 | 输入框用 M0 的 `LgTextField`；问号按钮和说明弹层（文字由调用方传）；"连接"带下拉的按钮（菜单项由调用方传，用 M0 的 `LgMenuItem`；禁用态） | `p1-cb-empty`、`p1-cb-help`、`p1-cb-menu` |
+| 空、加载中、搜索无结果 | 文字；加载中的骨架行 | `p1-cb-none`、`p1-st-empty-recent`、`p1-st-loading` |
+| `LgPasswordRow` | 标签、内容、可选的小字说明、内容是否灰显（"已设置""不可用"这类）、`onCopy`（null 时不显示"复制"）；留一个可选的操作区给 M2b 的"刷新""修改" | `p1-ben-*` |
+| `LgConnectionPanel` | 标题（设备名）、副标题（ID）；可选的进度（两步，每步待做、进行中、完成）；语气（普通、警告、错误）；主文字、次要文字（已等待时间、等画面的说明、"‹n› 秒后重试（第 ‹k› 次）"等，调用方拼好）；是否转圈；输入区（调用方传控件列表）；按钮（文字、主次、`onPressed`；回车的默认动作由调用方用 `isDefault` 显式标记，没标就没有，只在焦点位于输入框里时执行，没有输入框时默认按钮自带焦点。M2a 只标五处：不安全连接的"断开"、密码面板的"连接"、验证码的"验证"、Windows 用户会话的"连接"、确认框的主按钮；出错面板不标，免得断线时一个回车就"改用中继"）。面板和确认框把 Tab 焦点限制在卡片内。"对方重启中"时面板盖在变暗的最后一帧上，变暗由调用方给开关 | `c-*`、`e-*`、`c-reboot` |
+| 面板用的输入件 | 密码框带"显示明文"切换（可以在 `LgTextField` 尾部加按钮）；验证码框（输满 6 位回调一次 `onCompleted`）；下拉选择（Windows 用户会话，选项是文字）；勾选用 M0 的 `LgCheckbox` | `c-pwd`、`c-2fa*`、`c-winuser` |
+| `LgSessionToolbar` | 按钮列表（调用方传）；是否固定、`onTogglePin`；是否收起、`onExpand`；收起后的拖动条：连接方式小点（直连、经中继，未加密加警告）、"展开"、"全屏 / 退出全屏"；全屏时最左的设备名（带身份色上沿）和拖动条上的"最小化"。拖动换位置和停靠不做 | `s-default`、`s-collapsed*`、`x-full` |
+| 工具栏按钮、菜单按钮 | 图标、文字（简洁模式菜单按钮只写文字，详细模式图标加文字，01 §2.3）、`onPressed` 或菜单项列表、展开时的选中态、禁用态和悬停说明；分隔 | `s-menu-view`、`m-display`、`m-action` |
+| `LgNoticeStack` | 通知列表（文字、语气、按钮、能否关闭）、`onDismiss`；最多显示 3 条，后来的排在下面，再多的排队；自动消失的计时归调用方 | `u-toasts` |
+| `LgToast` | 文字；窗口一级的位置和进出 | `A-P6-设置.html` 里的轻提示 |
+| `LgConfirmDialog`、页内确认条 | 标题（问句）、正文、附加控件（"不再提示""记住此选择"勾选，Q6 的两个单选和单选下面的说明）、按钮（文字、主次、危险）；遮罩颜色和卡片。遮罩只盖调用方给的那一块，挂在哪由会话块的作用域浮层决定 | `p1-close-sessions`、`p1-close-exit`、`g-close` |
+| 会话标签的状态 | M0 `LgSessionTab.status` 放得下的不新做；按 `tabs-s` 补齐连接中（转圈加"正在连接…"）、已中断、连接失败、已断开变灰，和悬停提示的内容块 | `tabs-s`、`tabs-tip` |
+
+**会话块（coder A）**
+
+- 输入和焦点照 04 §4 的七条。上游依据：`flutter/lib/desktop/pages/remote_page.dart` 的 `_windowsCanFocusRemoteInput`、`enterView`、`leaveView`、`onWindowBlur`、`onWindowFocus`、`RawKeyFocusScope` 的 `onFocusChange`、`dispose`；`hostStopSystemKeyPropagate` 在画面的 `MouseRegion` 进出时切换。macOS、Linux 专用的分支不搬（第一阶段只做 Windows）。
+- 从上游复制、按改写档登记（04 §2.5）：`ImagePaint`、`CursorPaint`、`_ViewStyleUpdater`（`flutter/lib/desktop/pages/remote_page.dart`）放 `app/lib/pages/session/image_paint.dart`；`RawKeyFocusScope`、`RawPointerMouseRegion`（`flutter/lib/common/widgets/remote_input.dart`）放 `app/lib/pages/session/remote_input.dart`。来源行写 `// 上游：<路径>@bd9262397（改写：只留 <类名>；…）`，写明删了什么、改了什么（按设备 ID 的共享状态改成会话字段、`Get.find` 改成参数等）。合并上游时这两个上游文件按改写档人工核对（03 §3.8 第 2 条）。
+- core：`FFI.start`、`SessionRegistry.open` 加 `password`、`isSharedPassword`、`switchUuid` 参数（04 §2.4），注册表测试跟着补；`StateGlobal.tabBarHeight` 改成新顶栏的高度、全屏时 0；会话页开始时调 `canvasModel.initializeEdgeScrollFallback(this)`、会话开始后读"显示远程光标"的初值（10.6 末尾几条）。
+- 外壳：标签列表跟 `appCore.sessions`；每个标签的内容区一个 `Overlay`，会话里的确认框和面板只挡这个标签（03 §4.5）；`appCore.prompter` 在这里实现（带会话的只遮那个标签，不带的只遮主页），M2a 还没有提问的来源，结构先做好；窗口标题"Leapgate"或"‹设备名› - Leapgate"；"+" 调 `showHome(focusConnectBox: true)`；`MainNavigation` 的实现：`connect` 照上游 `flutter/lib/common.dart:2572` 的 `connect`（去空格，`bind.mainHandleRelayId` 去掉 `/r` 并转成强制中继），标签按处理后的 ID 记。
+- 连接状态面板：`ConnectionModel` 的 `stage`、`input`、`reason`、`retryCountdown`、`retryAttempt`、`dimLastFrame` 映射到面板（01 P2 区块 D 的表；进度两步"建立连接 → 验证身份"，connecting 时第 1 步进行中，verifying 起第 1 步完成）；按钮调 `login`、`submit2fa`、`selectWindowsSession`、`continueInsecure`、`rejectInsecure`、`retry`、`useRelay`、`cancel`。原因码到文案和下一步按钮的表照 01 §4.3（10.4 C3 表的"对应"一列），`other` 显示 `reason.text`；"修改 ID"调 `showHome(connectBoxText: id)`；"打开网络设置"在 M2a 不显示；"已等待时间"、等画面几秒后加的说明由页面计时。
+- 工具栏：04 §1.1 那一行，加 D3 全屏（`appCore.window.setFullscreen`，全屏时顶栏隐藏）和 D4"重启远程设备"（确认框文案在 01 §4.4，确认后调 `bind.sessionRestartRemoteDevice`，照上游 `common/widgets/dialog.dart:1403-1431` 的出现条件）；不固定时鼠标进入画面 5 秒后收起（上游 `remote_toolbar.dart:648-676`）；画质三档、显示器切换照上游的导出；位置固定在顶部居中。
+- V1（D2）：标签切走时 `lgBind.leapgateSessionSetVisible(..., false)`，切回时设回 `true` 再 `bind.sessionRefresh`；第一帧到之前就被切走时取消 1.5 秒唤醒计时，切回时仍在等第一帧再起一次（10.4 V1、10.6"接 V1 时要处理"）。先在不接 V1 的提交上把会话页做完（验收要在它上面量一次占用基线），V1 单独一个提交。
+- 会话通知横条接 `ffi.notices`，轻提示接 `appCore.toasts`。通知的 key 是上游的英文原文或翻译 key：01 P2 区块 E 有文案的照它，没有的显示原文，每个 key 只写一次日志。第一次连上时轻提示"已建立直连"或"已建立中继连接"。
+- 关闭：标签"×"、工具栏"断开"关这个标签（M2a 一个标签只有一个视图）。关窗：有会话时确认"断开全部 ‹N› 个会话并关闭窗口？"带"不再提示"（选项 `enable-confirm-closing-tabs`，上游 `flutter/lib/consts.dart:170`）；便携版（`appCore.options.isInstalled` 为假）把 Q6 的"退出 Leapgate / 在后台运行"和"记住此选择"合进同一个确认，没有会话时只问 Q6，记住的选择是新的 LocalConfig 键（`leapgate-` 开头，放在用它的文件里，10.7 接入办法第 2 条）；安装版隐藏到托盘。"在后台运行"隐藏窗口，进程照常当被控端，再次启动程序把窗口找回来（W1）。
+- 链接：`uni_links` 收到的 `--connect` 和 `leapgate://` 链接（M0 只写日志）解析出 ID、密码、是否中继，调 `mainNavigation.connect` 并把窗口提到前面；进程自己启动时命令行里带的链接同样处理（10.5 M0"发现的问题"第二条）。解析照上游 `flutter/lib/common.dart:2207-2256` 的 `handleUriLink`，只做新建远程桌面连接这一种，其余动作写一行日志。
+
+**主页块（coder B）**
+
+- 本机区密码行：01 P1 区块 A 表的五种。数据（一次性密码、审批方式 `approve-mode`、密码方式 `verification-method`、服务是否停止）加在 `LocalStatusModel` 上，照上游 `flutter/lib/models/server_model.dart` 的读法；"复制"后轻提示"已复制"。"刷新""修改"随 M2b。
+- 连接框：01 P1 区块 E、Q2。"输入像不像地址"写成 core 里的纯函数加单测（纯数字 ID、IPv4、IPv6、`域名:端口`、带 `@服务器`、带 `/r`）；回车规则、上下键、Esc；匹配 ID、别名、主机名、用户名、备注，M2a 的结果只来自"最近"；输入为空时"连接"禁用；下拉只有"远程桌面""经中继连接"（后者下面那行说明照 01）；问号说明照上游 `id_input_tip` 按 §7.6 重写。
+- 最近列表：`Peers(name: 'recent', loadEvent: 'load_recent_peers', …)`（复制件 `models/peer_model.dart`）由 `AppCore` 持有一份，`bind.mainLoadRecentPeers` 触发加载；在线状态照上游 `flutter/lib/common/widgets/peers_view.dart:313-346`：只查看得见的行、每 6 秒一次、窗口失焦就停；名称取别名、主机名、格式化的 ID 中第一个有的；单击选中，双击或回车连接，悬停出现"连接"；空状态和加载中。连接一律调 `mainNavigation.connect`。
+
+**测试和合入**
+
+- core 的新代码有单测；app 每个页面状态一个行为测试（03 §8.3）：面板的每一种（用假的连接状态）、最近列表空和加载中、连接框几种默认高亮、关窗确认的几种组合（有无会话 × 便携或安装 × 是否勾过不再提示）。
+- 合入前：`git diff main -- flutter/` 为空；core 的 `flutter analyze --no-fatal-infos` 不超出 92 条基线，app 0 条；复制件不跑格式化（10.1）。
+- 审查重点：会话块看焦点和按键释放、钩子开关的先后、关闭流程、注册表参数、复制件和上游原件的差异；主页块看回车规则和匹配；组件看样稿对照的必修项（03 §8.4）。

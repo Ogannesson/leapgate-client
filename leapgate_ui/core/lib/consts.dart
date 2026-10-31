@@ -37,7 +37,14 @@ const String kAppTypeMain = "main";
 
 const String kAppTypeDesktopRemote = "remote";
 
+const String kOptionVerificationMethod = "verification-method";
+const String kOptionApproveMode = "approve-mode";
+const String kOptionCollapseToolbar = "collapse_toolbar";
+const String kOptionZoomCursor = "zoom-cursor";
 const String kOptionTouchMode = "touch-mode";
+const String kOptionRemoteMenubarState = "remoteMenubarState";
+const String kOptionEnableConfirmClosingTabs = "enable-confirm-closing-tabs";
+const String kOptionStopService = "stop-service";
 
 const String kOptionToggleViewOnly = "view-only";
 
@@ -141,6 +148,15 @@ const kRemoteScrollStyleBar = 'scrollbar';
 
 /// [kRemoteScrollStyleEdge] Scroll image auto at edges.
 const kRemoteScrollStyleEdge = 'scrolledge';
+
+/// [kRemoteImageQualityBest] Best image quality.
+const kRemoteImageQualityBest = 'best';
+
+/// [kRemoteImageQualityBalanced] Balanced image quality, mid performance.
+const kRemoteImageQualityBalanced = 'balanced';
+
+/// [kRemoteImageQualityLow] Low image quality, better performance.
+const kRemoteImageQualityLow = 'low';
 
 const kIgnoreDpi = true;
 

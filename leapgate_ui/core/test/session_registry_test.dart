@@ -24,6 +24,31 @@ void main() {
         s.sessionId);
   });
 
+  test('the password, a shared password and switch sides reach Rust (--connect --password)',
+      () {
+    final fakes = installFakes();
+    final registry = appCore.sessions;
+
+    registry.open('100200300', ConnType.defaultConn,
+        password: 'pw-1', isSharedPassword: true, switchUuid: 'uuid-1');
+
+    final add = fakes.bind.callsTo(#sessionAddSync).single.namedArguments;
+    expect(add[#password], 'pw-1');
+    expect(add[#isSharedPassword], true);
+    expect(add[#switchUuid], 'uuid-1');
+  });
+
+  test('without them, they go as empty as upstream sends them', () {
+    final fakes = installFakes();
+
+    appCore.sessions.open('100200300', ConnType.defaultConn);
+
+    final add = fakes.bind.callsTo(#sessionAddSync).single.namedArguments;
+    expect(add[#password], '');
+    expect(add[#isSharedPassword], false);
+    expect(add[#switchUuid], '');
+  });
+
   test('another view of an open device joins its tab with its connection token '
       '(upstream toolbar.dart:580-610)', () {
     final fakes = installFakes();

@@ -3,6 +3,7 @@ import 'app_window.dart';
 import 'notices.dart';
 import 'options.dart';
 import 'prompts.dart';
+import 'recent_peers.dart';
 import 'session_events.dart';
 import 'session_registry.dart';
 
@@ -22,6 +23,9 @@ class AppCore {
   final SessionRegistry sessions;
   final toasts = Toasts();
   final options = OptionsModel();
+
+  /// "Recent" on the home page (M2a); favorites, LAN and the address book join with M4.
+  final recentPeers = RecentPeers();
 
   /// The global event stream's table. The connection manager (M3) and the address book (M4)
   /// register their events here, not on a session's.

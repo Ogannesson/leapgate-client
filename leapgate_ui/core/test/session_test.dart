@@ -6,6 +6,7 @@ import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/notices.dart';
 import 'package:flutter_hbb/leapgate/prompts.dart';
 import 'package:flutter_hbb/leapgate/session.dart';
+import 'package:flutter_hbb/models/state_model.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fakes.dart';
@@ -126,5 +127,53 @@ void main() {
 
     expect(answer, (choice: OverwriteChoice.skip, forAll: true));
     expect(prompter.asked.single.$2, same(files));
+  });
+
+  group('toolbar actions show on upstream\'s terms (toolbar.dart:638-661)', () {
+    Future<FFI> peer(String platform, {bool sas = false}) async {
+      final fakes = installFakes();
+      final s = appCore.sessions.open('100200300', ConnType.defaultConn);
+      fakes.bind.streams[s.sessionId]!.add(EventToUI.event(jsonEncode({
+        'name': 'peer_info',
+        'version': '1.4.6',
+        'username': 'user',
+        'hostname': 'host',
+        'platform': platform,
+        'sas_enabled': sas ? 'true' : 'false',
+        'current_display': '0',
+        'displays': jsonEncode([
+          {'x': 0, 'y': 0, 'width': 1920, 'height': 1080, 'cursor_embedded': 0},
+        ]),
+        'features': jsonEncode({'privacy_mode': false}),
+        'resolutions': jsonEncode([]),
+        'platform_additions': '',
+      })));
+      await settle();
+      return s;
+    }
+
+    test('Ctrl+Alt+Del needs SAS on Windows, not on Linux', () async {
+      expect((await peer('Windows')).canSendCtrlAltDel, false);
+      expect((await peer('Windows', sas: true)).canSendCtrlAltDel, true);
+      expect((await peer('Linux')).canSendCtrlAltDel, true);
+    });
+
+    test('restart: desktop platforms, unless the restart permission is off',
+        () async {
+      expect((await peer('Android')).canRestartRemoteDevice, false);
+      final s = await peer('Windows');
+      expect(s.canRestartRemoteDevice, true);
+
+      s.ffiModel.updatePermission({'restart': 'false'}, s.id);
+      expect(s.canRestartRemoteDevice, false);
+    });
+  });
+
+  test('the canvas starts below the title bar, at the top in full screen', () {
+    stateGlobal.fullscreen.value = false;
+    expect(stateGlobal.tabBarHeight, kLeapgateTitleBarHeight);
+    stateGlobal.fullscreen.value = true;
+    expect(stateGlobal.tabBarHeight, 0);
+    stateGlobal.fullscreen.value = false;
   });
 }

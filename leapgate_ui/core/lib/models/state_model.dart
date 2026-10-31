@@ -1,4 +1,4 @@
-// 上游：flutter/lib/models/state_model.dart@bd9262397（改写：只留复制进来的 models 和 FfiModel 用到的成员；全屏经 appCore.window。上游改了这些成员时人工移植）
+// 上游：flutter/lib/models/state_model.dart@bd9262397（改写：只留复制进来的 models 和 FfiModel 用到的成员；全屏经 appCore.window；tabBarHeight 取新界面顶栏的高度。上游改了这些成员时人工移植）
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:get/get.dart';
 
@@ -18,7 +18,8 @@ class StateGlobal {
   final RxMap<String, bool> relativeMouseModeState = <String, bool>{}.obs;
 
   RxBool get fullscreen => _fullscreen;
-  double get tabBarHeight => fullscreen.isTrue ? 0 : kDesktopRemoteTabBarHeight;
+  // The canvas sits right below the app's title bar, which full screen hides.
+  double get tabBarHeight => fullscreen.isTrue ? 0 : kLeapgateTitleBarHeight;
   RxDouble get windowBorderWidth => _windowBorderWidth;
 
   setFullscreen(bool v) {
@@ -40,6 +41,10 @@ class StateGlobal {
 
   static final StateGlobal instance = StateGlobal._();
 }
+
+/// Height of the app's title bar with the tabs (01 §2.1); the app's `kLgTitleBarHeight` must
+/// equal it (a test in the app checks).
+const double kLeapgateTitleBarHeight = 40;
 
 // This final variable is initialized when the first time it is accessed.
 final stateGlobal = StateGlobal.instance;

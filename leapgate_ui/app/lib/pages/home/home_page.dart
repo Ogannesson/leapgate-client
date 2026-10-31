@@ -3,9 +3,13 @@ import 'package:flutter_hbb/leapgate/local_status.dart';
 
 import '../../icons/lg_icon.dart';
 import '../../l10n/app_localizations.dart';
+import '../../shell/navigation.dart';
 import '../../theme/lg_tokens.dart';
+import '../../widgets/lg_button.dart';
 import '../../widgets/lg_pressable.dart';
 import '../../widgets/lg_status.dart';
+import 'devices_page.dart';
+import 'password_row.dart';
 
 /// Pages of the home tab's navigation (01 §3.1 block C).
 enum HomeSection { devices, exitNodes, settings }
@@ -17,9 +21,13 @@ const double _shortWindow = 700;
 
 const double _sideWidth = 240;
 
+/// Side padding of a text button (`.btn.txt`), passed explicitly so the ID's "Copy" can be
+/// moved back by exactly that much.
+const double _textButtonPadding = 10;
+
 /// Home tab: left column (this device, navigation) and the selected page.
-/// M0 shell: the pages show only their title; the password row, the account
-/// area and the page contents come with M2a and later blocks.
+/// M2a fills the password row and the devices page; the account area and the
+/// other pages come with later blocks.
 class HomePage extends StatefulWidget {
   const HomePage({super.key, required this.status});
 
@@ -31,6 +39,38 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   HomeSection _section = HomeSection.devices;
+  final _connectBox = TextEditingController();
+  final _connectBoxFocus = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    connectBoxFocusRequests.addListener(_onFocusRequest);
+  }
+
+  @override
+  void dispose() {
+    connectBoxFocusRequests.removeListener(_onFocusRequest);
+    _connectBox.dispose();
+    _connectBoxFocus.dispose();
+    super.dispose();
+  }
+
+  /// "+" on the title bar and "修改 ID" on a connection panel ([MainNavigation.showHome]).
+  void _onFocusRequest() {
+    final text = connectBoxFocusRequests.text;
+    if (text != null) {
+      _connectBox.value = TextEditingValue(
+        text: text,
+        selection: TextSelection(baseOffset: 0, extentOffset: text.length),
+      );
+    }
+    // The box exists only on the devices page; focus it once that is built.
+    setState(() => _section = HomeSection.devices);
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _connectBoxFocus.requestFocus(),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -59,19 +99,31 @@ class _HomePageState extends State<HomePage> {
               LgSpace.s6,
               0,
             ),
-            child: Align(
-              alignment: Alignment.topLeft,
-              child: Semantics(
-                header: true,
-                child: Text(
-                  title,
-                  style: LgTokens.style(
-                    20,
-                    28,
-                    FontWeight.w700,
-                  ).copyWith(color: LgTokens.of(context).colors.text),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Semantics(
+                  header: true,
+                  child: Text(
+                    title,
+                    style: LgTokens.style(
+                      20,
+                      28,
+                      FontWeight.w700,
+                    ).copyWith(color: LgTokens.of(context).colors.text),
+                  ),
                 ),
-              ),
+                if (_section == HomeSection.devices) ...[
+                  const SizedBox(height: LgSpace.s3),
+                  Expanded(
+                    child: DevicesPage(
+                      controller: _connectBox,
+                      focusNode: _connectBoxFocus,
+                      status: widget.status,
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
         ),
@@ -125,8 +177,34 @@ class _SideColumn extends StatelessWidget {
                   children: [
                     status.id.isEmpty
                         ? _IdGenerating(text: l10n.idGenerating)
-                        : _IdGroups(status.id),
-                    // The password row (M2a) goes here.
+                        // Double-click the ID or "Copy" under it (01 P1 block A): a text
+                        // button with the icon, as in `p1-ben-both` (`.cpid`). It sits
+                        // under the ID because the 240 column has no room beside it.
+                        : Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              GestureDetector(
+                                onDoubleTap: () => copyWithToast(status.id),
+                                child: _IdGroups(status.id),
+                              ),
+                              if (!short) const SizedBox(height: LgSpace.s2),
+                              // Its text lines up with the ID: back by the text button's
+                              // own side padding.
+                              Transform.translate(
+                                offset: const Offset(-_textButtonPadding, 0),
+                                child: LgButton(
+                                  label: l10n.homeCopy,
+                                  semanticLabel: l10n.homeCopyId,
+                                  icon: LgIcons.copy,
+                                  kind: LgButtonKind.text,
+                                  horizontalPadding: _textButtonPadding,
+                                  onPressed: () => copyWithToast(status.id),
+                                ),
+                              ),
+                            ],
+                          ),
+                    SizedBox(height: short ? LgSpace.s2 : LgSpace.s3),
+                    PasswordRowView(status: status),
                     SizedBox(height: short ? LgSpace.s2 : LgSpace.s5),
                     DefaultTextStyle(
                       style: t.textM,
