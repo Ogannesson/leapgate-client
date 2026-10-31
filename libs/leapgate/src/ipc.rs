@@ -42,9 +42,12 @@ pub enum Kind {
 /// port forward, so exits are told apart by their connection ID.
 static EXIT_CONNS: Mutex<BTreeSet<i32>> = Mutex::new(BTreeSet::new());
 
-/// Called when a connection logs in as an exit.
-pub fn note_exit_conn(id: i32) {
-    EXIT_CONNS.lock().unwrap().insert(id);
+/// Called when a connection logs in as an exit. IDs whose connection is no longer `alive` are
+/// dropped first, so the table stays bounded even when nobody asks for the counts.
+pub fn note_exit_conn(id: i32, alive: &[i32]) {
+    let mut exits = EXIT_CONNS.lock().unwrap();
+    exits.retain(|id| alive.contains(id));
+    exits.insert(id);
 }
 
 /// Counts `authed` (upstream's authorized connections). Upstream has no hook where a connection
@@ -115,8 +118,8 @@ mod tests {
         use Kind::*;
         assert_eq!(incoming_counts([], &[]), Counts::default());
 
-        note_exit_conn(3);
-        note_exit_conn(5);
+        note_exit_conn(3, &[3]);
+        note_exit_conn(5, &[3, 5]);
         let authed = [
             (1, Remote),
             (2, Remote),
@@ -142,6 +145,17 @@ mod tests {
         // Exit 5 has ended: its ID is dropped, so the table does not grow with every exit.
         assert_eq!(incoming_counts([(3, PortForward)], &[3]).exit, 1);
         let after = incoming_counts([(3, PortForward), (5, PortForward)], &[3, 5]);
+        assert_eq!((after.exit, after.port_forward), (1, 1));
+
+        // An exit is noted just before it is authorized: a query in between must not drop it.
+        note_exit_conn(9, &[3, 9]);
+        assert_eq!(incoming_counts([(3, PortForward)], &[3, 9]).exit, 1);
+        let after = incoming_counts([(3, PortForward), (9, PortForward)], &[3, 9]);
+        assert_eq!((after.exit, after.port_forward), (2, 0));
+
+        // Noting an exit drops the ended ones too, with no query in between.
+        note_exit_conn(10, &[10]);
+        let after = incoming_counts([(3, PortForward), (10, PortForward)], &[3, 10]);
         assert_eq!((after.exit, after.port_forward), (1, 1));
     }
 }

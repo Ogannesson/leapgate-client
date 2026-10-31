@@ -7,7 +7,9 @@ use crate::{
 };
 #[cfg(feature = "flutter")]
 use flutter_rust_bridge::StreamSink;
-use hbb_common::{allow_err, log, tokio};
+#[cfg(any(target_os = "android", target_os = "ios", feature = "flutter"))]
+use hbb_common::tokio;
+use hbb_common::{allow_err, log};
 use leapgate::ipc::{Counts, Kind, Msg};
 
 #[cfg(feature = "flutter")]
@@ -40,7 +42,13 @@ fn incoming_counts() -> Counts {
     leapgate::ipc::incoming_counts(authed, &crate::Connection::alive_conns())
 }
 
+/// From the exit hook in `connect_port_forward_if_needed`.
+pub(crate) fn note_exit_conn(id: i32) {
+    leapgate::ipc::note_exit_conn(id, &crate::Connection::alive_conns());
+}
+
 /// Main window end of C1: asks the service once. `None` when it does not answer.
+#[cfg(any(target_os = "android", target_os = "ios", feature = "flutter"))]
 #[tokio::main(flavor = "current_thread")]
 pub(crate) async fn query_incoming_counts() -> Option<Counts> {
     let mut c = ipc::connect(1000, "").await.ok()?;

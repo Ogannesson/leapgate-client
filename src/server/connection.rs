@@ -1819,7 +1819,7 @@ impl Connection {
                 super::port_forward_mux::PortForwardMux::new(tx, self.port_forward_address.clone())
             });
             // leapgate: latch exit mode and the controller ID on the existing mux, count the connection as an exit
-            if leapgate::exit::is_exit_target(&pf.host, pf.port) { leapgate::ipc::note_exit_conn(self.inner.id()); if let Some(mux) = self.port_forward_mux.as_mut() { mux.leapgate_exit = Some(self.lr.my_id.clone()); } }
+            if leapgate::exit::is_exit_target(&pf.host, pf.port) { crate::leapgate_hooks::ipc::note_exit_conn(self.inner.id()); if let Some(mux) = self.port_forward_mux.as_mut() { mux.leapgate_exit = Some(self.lr.my_id.clone()); } }
             return self.port_forward_mux.is_some();
         }
         let mut pf = pf.clone();
