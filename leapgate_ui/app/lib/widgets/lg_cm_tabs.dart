@@ -4,6 +4,7 @@
 //
 // Components only draw: names, ID text and hints come from the caller.
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../icons/lg_icon.dart';
@@ -61,9 +62,9 @@ const double _maxTabName = 120;
 
 /// The tabs of the visitors, bottom aligned in the 36 px strip below the title
 /// row. The selected tab has the ground of the header it sits on, so the two
-/// read as one. Tabs that do not fit scroll sideways; selecting one brings it
-/// into view. The empty part of the strip passes the pointer on (dragging the
-/// window).
+/// read as one. Tabs that do not fit scroll sideways (by drag, by trackpad, and
+/// by the vertical turn of a mouse wheel); selecting one brings it into view.
+/// The empty part of the strip passes the pointer on (dragging the window).
 class LgCmTabStrip extends StatefulWidget {
   const LgCmTabStrip({
     super.key,
@@ -82,11 +83,38 @@ class LgCmTabStrip extends StatefulWidget {
 
 class _LgCmTabStripState extends State<LgCmTabStrip> {
   final _selectedKey = GlobalKey();
+  final _scroll = ScrollController();
 
   @override
   void initState() {
     super.initState();
     _reveal();
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  /// A plain mouse wheel turns vertically; over the strip it scrolls the tabs
+  /// sideways (a horizontal wheel or a trackpad already does).
+  void _onPointerSignal(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent ||
+        event.scrollDelta.dy == 0 ||
+        event.scrollDelta.dx != 0 ||
+        !_scroll.hasClients) {
+      return;
+    }
+    GestureBinding.instance.pointerSignalResolver.register(event, (event) {
+      final position = _scroll.position;
+      _scroll.jumpTo(
+        (position.pixels + (event as PointerScrollEvent).scrollDelta.dy).clamp(
+          position.minScrollExtent,
+          position.maxScrollExtent,
+        ),
+      );
+    });
   }
 
   @override
@@ -102,6 +130,12 @@ class _LgCmTabStripState extends State<LgCmTabStrip> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final ctx = _selectedKey.currentContext;
       if (ctx == null || !ctx.mounted) return;
+      // The first tab goes back to the start, with the left space before it;
+      // bringing it into view would push that space out of the strip.
+      if (widget.selected == 0 && _scroll.hasClients) {
+        _scroll.jumpTo(0);
+        return;
+      }
       Scrollable.ensureVisible(ctx);
     });
   }
@@ -110,22 +144,26 @@ class _LgCmTabStripState extends State<LgCmTabStrip> {
   Widget build(BuildContext context) {
     return Align(
       alignment: Alignment.bottomLeft,
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.only(left: kLgCmTabInset),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (final (i, tab) in widget.tabs.indexed) ...[
-              if (i > 0) const SizedBox(width: 2),
-              _CmTab(
-                key: i == widget.selected ? _selectedKey : null,
-                tab: tab,
-                selected: i == widget.selected,
-                onSelect: () => widget.onSelect(i),
-              ),
+      child: Listener(
+        onPointerSignal: _onPointerSignal,
+        child: SingleChildScrollView(
+          controller: _scroll,
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.only(left: kLgCmTabInset),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final (i, tab) in widget.tabs.indexed) ...[
+                if (i > 0) const SizedBox(width: 2),
+                _CmTab(
+                  key: i == widget.selected ? _selectedKey : null,
+                  tab: tab,
+                  selected: i == widget.selected,
+                  onSelect: () => widget.onSelect(i),
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );

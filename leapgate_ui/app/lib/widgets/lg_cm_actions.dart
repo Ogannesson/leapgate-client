@@ -43,7 +43,13 @@ class LgCmAction {
   final String? semanticLabel;
 }
 
-/// The rows of the action area, 12 px apart, as wide as the panel.
+/// The gap between the rows of the action area: 12 px, 8 px in the detail mode
+/// (`.frame.lg-detail .cm-actions{gap:var(--lg-sp-2)}`).
+double _rowGap(BuildContext context) =>
+    LgTokens.of(context).detail ? LgSpace.s2 : LgSpace.s3;
+
+/// The rows of the action area, as wide as the panel, 12 px apart (8 px in the
+/// detail mode).
 class LgCmActions extends StatelessWidget {
   const LgCmActions({super.key, required this.children});
 
@@ -51,12 +57,13 @@ class LgCmActions extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final gap = _rowGap(context);
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         for (final (i, child) in children.indexed) ...[
-          if (i > 0) const SizedBox(height: LgSpace.s3),
+          if (i > 0) SizedBox(height: gap),
           child,
         ],
       ],
@@ -67,6 +74,15 @@ class LgCmActions extends StatelessWidget {
 /// One or more large buttons on a row. One button is as wide as the panel;
 /// several share the width equally, or by [flex] ("接受并提升权限" takes twice
 /// the room of "拒绝").
+///
+/// When the label of one button does not fit in its share (a longer language:
+/// "Accept and elevate permissions" at 2:1), the buttons are stacked, one under
+/// the other and each as wide as the panel, in the order given. The label is
+/// never cut: elevating permissions is the main action of a request, and
+/// "Accept and e…" says nothing.
+///
+/// With [flex] the constructor cannot be called with `const` (the length check
+/// in its assert is not a constant expression): write `LgCmActionRow(flex: …)`.
 class LgCmActionRow extends StatelessWidget {
   const LgCmActionRow({super.key, required this.actions, this.flex})
     : assert(flex == null || flex.length == actions.length);
@@ -74,32 +90,77 @@ class LgCmActionRow extends StatelessWidget {
   final List<LgCmAction> actions;
   final List<int>? flex;
 
+  /// The width a button needs for its label: the side padding of a large
+  /// button (14 each), the icon and its gap, and the text in bold.
+  static double _needed(BuildContext context, LgCmAction a) {
+    final t = LgTokens.of(context);
+    final painter = TextPainter(
+      text: TextSpan(
+        text: a.label,
+        style: t.text.copyWith(fontWeight: FontWeight.w700),
+      ),
+      textDirection: TextDirection.ltr,
+      textScaler: MediaQuery.textScalerOf(context),
+      maxLines: 1,
+    )..layout();
+    final width = painter.width;
+    painter.dispose();
+    return 2 * 14 + (a.icon == null ? 0 : 20 + LgSpace.s2) + width;
+  }
+
+  Widget _button(LgCmAction a) => LgCmTipAnchor(
+    tip: a.tip,
+    child: LgButton(
+      label: a.label,
+      semanticLabel: a.semanticLabel,
+      icon: a.icon,
+      large: true,
+      kind: switch (a.kind) {
+        LgCmActionKind.primary => LgButtonKind.primary,
+        LgCmActionKind.secondary => LgButtonKind.secondary,
+        LgCmActionKind.danger => LgButtonKind.danger,
+      },
+      onPressed: a.onPressed,
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        for (final (i, a) in actions.indexed) ...[
-          if (i > 0) const SizedBox(width: LgSpace.s3),
-          Expanded(
-            flex: flex?[i] ?? 1,
-            child: LgCmTipAnchor(
-              tip: a.tip,
-              child: LgButton(
-                label: a.label,
-                semanticLabel: a.semanticLabel,
-                icon: a.icon,
-                large: true,
-                kind: switch (a.kind) {
-                  LgCmActionKind.primary => LgButtonKind.primary,
-                  LgCmActionKind.secondary => LgButtonKind.secondary,
-                  LgCmActionKind.danger => LgButtonKind.danger,
-                },
-                onPressed: a.onPressed,
-              ),
-            ),
-          ),
-        ],
-      ],
+    if (actions.length == 1) return _button(actions.single);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final total = (flex ?? [for (final _ in actions) 1]).fold(
+          0,
+          (a, b) => a + b,
+        );
+        final room = constraints.maxWidth - LgSpace.s3 * (actions.length - 1);
+        var fits = true;
+        for (final (i, a) in actions.indexed) {
+          final share = room * (flex?[i] ?? 1) / total;
+          if (_needed(context, a) > share) fits = false;
+        }
+        if (!fits) {
+          final gap = _rowGap(context);
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (final (i, a) in actions.indexed) ...[
+                if (i > 0) SizedBox(height: gap),
+                _button(a),
+              ],
+            ],
+          );
+        }
+        return Row(
+          children: [
+            for (final (i, a) in actions.indexed) ...[
+              if (i > 0) const SizedBox(width: LgSpace.s3),
+              Expanded(flex: flex?[i] ?? 1, child: _button(a)),
+            ],
+          ],
+        );
+      },
     );
   }
 }
@@ -323,9 +384,9 @@ class _HangUpButton extends StatelessWidget {
 /// the bubble's left end (over the icon of a field).
 enum LgCmTipAlign { center, start }
 
-/// Puts a dark bubble with an arrow 8 px above [child] while [tip] is set.
-/// The bubble takes no pointer and is announced to a screen reader when it
-/// appears.
+/// Puts a dark bubble with an arrow 8 px above [child] while [tip] is set (not
+/// null and not empty). The bubble takes no pointer and is announced to a
+/// screen reader when it appears.
 class LgCmTipAnchor extends StatelessWidget {
   const LgCmTipAnchor({
     super.key,
@@ -340,7 +401,8 @@ class LgCmTipAnchor extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (tip == null) return child;
+    final tip = this.tip;
+    if (tip == null || tip.isEmpty) return child;
     return Stack(
       clipBehavior: Clip.none,
       fit: StackFit.passthrough,
@@ -360,7 +422,7 @@ class LgCmTipAnchor extends StatelessWidget {
                       ? Alignment.topCenter
                       : Alignment.topLeft,
                   child: LgCmTip(
-                    tip!,
+                    tip,
                     arrowFromStart: align == LgCmTipAlign.start ? 36 : null,
                   ),
                 ),

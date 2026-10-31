@@ -2,6 +2,7 @@
 // inert controls stay inert, the keyboard reaches what the mouse reaches, and
 // every control has a name for a screen reader. No pixels are compared.
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -165,6 +166,38 @@ void main() {
         tester.getTopRight(find.text('来访者 7')).dx,
         lessThanOrEqualTo(tester.getRect(find.byType(LgCmTabStrip)).right),
       );
+    });
+
+    testWidgets('the vertical turn of a mouse wheel scrolls the tabs '
+        'sideways, and stops at both ends', (tester) async {
+      await pumpLg(
+        tester,
+        SizedBox(
+          width: kLgCmWidth,
+          height: 36,
+          child: LgCmTabStrip(
+            tabs: [
+              for (var i = 0; i < 8; i++)
+                LgCmTab(kind: LgCmKind.remote, name: '来访者 $i', identity: i),
+            ],
+            selected: 0,
+            onSelect: (_) {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      double first() => tester.getTopLeft(find.text('来访者 0')).dx;
+      final start = first();
+      final pointer = TestPointer(1, PointerDeviceKind.mouse);
+      await tester.sendEventToBinding(
+        pointer.hover(tester.getCenter(find.byType(LgCmTabStrip))),
+      );
+      await tester.sendEventToBinding(pointer.scroll(const Offset(0, 100)));
+      await tester.pump();
+      expect(first(), start - 100);
+      await tester.sendEventToBinding(pointer.scroll(const Offset(0, -500)));
+      await tester.pump();
+      expect(first(), start);
     });
   });
 
@@ -489,6 +522,13 @@ void main() {
         Padding(padding: const EdgeInsets.only(top: 80), child: row(null)),
       );
       final plain = tester.getRect(find.widgetWithText(LgButton, '断开'));
+      // No bubble without a tip, and an empty tip is none either.
+      expect(find.byType(LgCmTip), findsNothing);
+      await pumpLg(
+        tester,
+        Padding(padding: const EdgeInsets.only(top: 80), child: row('')),
+      );
+      expect(find.byType(LgCmTip), findsNothing);
       await pumpLg(
         tester,
         Padding(
@@ -496,6 +536,7 @@ void main() {
           child: row('无法远程执行此操作'),
         ),
       );
+      expect(find.byType(LgCmTip), findsOneWidget);
       expect(tester.getRect(find.widgetWithText(LgButton, '断开')), plain);
       final bubble = tester.getRect(find.text('无法远程执行此操作'));
       expect(bubble.bottom, lessThan(plain.top));
@@ -503,6 +544,65 @@ void main() {
       expect(disconnected, 0);
       await tester.tap(find.widgetWithText(LgButton, '断开'));
       expect(disconnected, 1);
+    });
+
+    testWidgets('the rows are 12 px apart, 8 px in the detail mode', (
+      tester,
+    ) async {
+      Widget area() => SizedBox(
+        width: 272,
+        child: LgCmActions(
+          children: [
+            LgCmActionRow(
+              actions: [LgCmAction(label: '接受', onPressed: () {})],
+            ),
+            LgCmActionRow(
+              actions: [LgCmAction(label: '拒绝', onPressed: () {})],
+            ),
+          ],
+        ),
+      );
+      double gap() =>
+          tester.getTopLeft(find.widgetWithText(LgButton, '拒绝')).dy -
+          tester.getBottomLeft(find.widgetWithText(LgButton, '接受')).dy;
+      await pumpLg(tester, area());
+      expect(gap(), 12);
+      await pumpLg(tester, area(), mode: LgMode.detail);
+      expect(gap(), 8);
+    });
+
+    testWidgets('buttons whose labels do not fit side by side are stacked, '
+        'in the order given, each as wide as the panel', (tester) async {
+      final log = <String>[];
+      await pumpLg(
+        tester,
+        SizedBox(
+          width: 272,
+          child: LgCmActionRow(
+            flex: const [2, 1],
+            actions: [
+              LgCmAction(
+                label: 'Accept and elevate permissions',
+                icon: LgIcons.shield,
+                onPressed: () => log.add('elevate'),
+              ),
+              LgCmAction(label: 'Refuse', onPressed: () => log.add('refuse')),
+            ],
+          ),
+        ),
+      );
+      final first = tester.getRect(
+        find.widgetWithText(LgButton, 'Accept and elevate permissions'),
+      );
+      final second = tester.getRect(find.widgetWithText(LgButton, 'Refuse'));
+      expect((first.width, second.width), (272, 272));
+      expect(second.top, greaterThan(first.bottom));
+      await tester.tap(find.widgetWithText(LgButton, 'Refuse'));
+      await tester.tap(
+        find.widgetWithText(LgButton, 'Accept and elevate permissions'),
+      );
+      expect(log, ['refuse', 'elevate']);
+      expect(tester.takeException(), isNull);
     });
 
     testWidgets('the waiting note is announced as one line', (tester) async {
@@ -673,6 +773,23 @@ void main() {
       await pumpLg(tester, single(blocked: '无法远程执行此操作'));
       expect(find.text('无法远程执行此操作'), findsOneWidget);
       expect(find.text('00:12:34'), findsNothing);
+    });
+
+    testWidgets('the button reads the title and the time, the refusal too '
+        'while it shows, and the refusal is a live region', (tester) async {
+      final handle = tester.ensureSemantics();
+      await pumpLg(tester, single());
+      expect(find.bySemanticsLabel('李四 正在远程控制本机, 00:12:34'), findsOneWidget);
+      await pumpLg(tester, single(blocked: '无法远程执行此操作'));
+      expect(
+        find.bySemanticsLabel('李四 正在远程控制本机, 00:12:34, 无法远程执行此操作'),
+        findsOneWidget,
+      );
+      expect(
+        tester.getSemantics(find.bySemanticsLabel('无法远程执行此操作')),
+        isSemantics(isLiveRegion: true),
+      );
+      handle.dispose();
     });
 
     testWidgets('a group shows its avatars, says how many, and expands', (
@@ -870,24 +987,26 @@ void main() {
       expect(behind, 0);
     });
 
-    testWidgets('inside the frame it covers the whole window', (tester) async {
-      final log = <String>[];
+    testWidgets('inside the frame it covers the whole window, title row '
+        'included', (tester) async {
+      var closed = 0;
       await pumpLg(
         tester,
         _window(
+          onClose: () => closed++,
           overlay: LgCmCloseConfirm(
             title: '断开全部会话？',
-            actions: [
-              LgDialogAction(label: '取消', onPressed: () => log.add('c')),
-            ],
+            actions: [LgDialogAction(label: '取消', onPressed: () {})],
           ),
         ),
       );
-      await tester.tap(_icon(LgIcons.x), warnIfMissed: false);
       expect(
         tester.getRect(find.byType(LgCmCloseConfirm)),
         tester.getRect(find.byType(LgCmFrame)),
       );
+      // The window's own close button is under the dim ground and gets nothing.
+      await tester.tap(_icon(LgIcons.x), warnIfMissed: false);
+      expect(closed, 0);
     });
   });
 

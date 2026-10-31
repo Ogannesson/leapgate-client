@@ -96,18 +96,20 @@ class LgCmPill extends StatelessWidget {
             Expanded(
               child: LgPressable(
                 onPressed: onRestore,
-                semanticLabel: title,
+                // The button reads the whole strip: what they do, for how
+                // long, and the refusal while it is shown.
+                semanticLabel: [title, ?time, ?blockedHint].join(', '),
                 builder: (context, states) => LgFocusRing(
                   show: states.contains(WidgetState.focused),
                   radius: BorderRadius.circular(LgRadius.r6),
                   child: Align(
                     alignment: Alignment.centerLeft,
-                    child: ExcludeSemantics(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        ExcludeSemantics(
+                          child: Text(
                             title,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
@@ -116,32 +118,47 @@ class LgCmPill extends StatelessWidget {
                               fontWeight: FontWeight.w700,
                             ),
                           ),
-                          if (blockedHint != null)
-                            Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                LgIcon(LgIcons.info, size: 12, color: c.accent),
-                                const SizedBox(width: 6),
-                                Flexible(
-                                  child: Text(
-                                    blockedHint!,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: t.textS.copyWith(
-                                      color: c.accent,
-                                      fontWeight: FontWeight.w700,
+                        ),
+                        if (blockedHint != null)
+                          // Announced when it appears, like the bubble of the
+                          // full window (`LgCmTip`).
+                          Semantics(
+                            liveRegion: true,
+                            container: true,
+                            label: blockedHint,
+                            child: ExcludeSemantics(
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  LgIcon(
+                                    LgIcons.info,
+                                    size: 12,
+                                    color: c.accent,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Flexible(
+                                    child: Text(
+                                      blockedHint!,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: t.textS.copyWith(
+                                        color: c.accent,
+                                        fontWeight: FontWeight.w700,
+                                      ),
                                     ),
                                   ),
-                                ),
-                              ],
-                            )
-                          else if (time != null)
-                            Text(
+                                ],
+                              ),
+                            ),
+                          )
+                        else if (time != null)
+                          ExcludeSemantics(
+                            child: Text(
                               time!,
                               style: t.textS.copyWith(color: c.text2),
                             ),
-                        ],
-                      ),
+                          ),
+                      ],
                     ),
                   ),
                 ),
