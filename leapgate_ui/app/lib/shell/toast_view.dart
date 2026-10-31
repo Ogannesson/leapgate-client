@@ -13,5 +13,13 @@ String? toastText(AppLocalizations l10n, String? key) => switch (key) {
       'Copied' => l10n.sessionToastCopied,
       kToastDirectEstablished => l10n.sessionDirectEstablished,
       kToastRelayEstablished => l10n.sessionRelayEstablished,
+      // The device actions of the home page; the keys are the ARB keys.
+      'peersToastAddedFavorites' => l10n.peersToastAddedFavorites,
+      'peersToastRemovedFavorites' => l10n.peersToastRemovedFavorites,
+      'peersToastDeleted' => l10n.peersToastDeleted,
+      'peersToastRemoved' => l10n.peersToastRemoved,
+      'peerMenuToastRenamed' => l10n.peerMenuToastRenamed,
+      'peerMenuToastPasswordCleared' => l10n.peerMenuToastPasswordCleared,
+      'peerMenuToastShortcutCreated' => l10n.peerMenuToastShortcutCreated,
       _ => translate(key),
     };

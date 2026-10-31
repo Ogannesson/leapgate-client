@@ -13,13 +13,38 @@ Peer peer(String id, {String alias = '', String hostname = ''}) =>
     Peer.fromJson({'id': id, 'alias': alias, 'hostname': hostname});
 
 void main() {
-  group('RecentPeers', () {
+  group('CategoryPeers', () {
     late FakeBind bind;
-    late RecentPeers recent;
+    late CategoryPeers recent;
     setUp(() {
       bind = installFakes().bind;
       recent = appCore.recentPeers;
       addTearDown(recent.dispose);
+      addTearDown(appCore.favPeers.dispose);
+      addTearDown(appCore.lanPeers.dispose);
+    });
+
+    test('each category loads from its own event', () async {
+      await platformFFI.tryHandle({
+        'name': 'load_fav_peers',
+        'peers': jsonEncode([
+          {'id': '123456789'},
+        ]),
+      });
+      await platformFFI.tryHandle({'name': 'load_lan_peers', 'peers': '[]'});
+      expect(appCore.favPeers.loaded, isTrue);
+      expect(appCore.favPeers.peers.map((p) => p.id), ['123456789']);
+      expect(appCore.lanPeers.loaded, isTrue);
+      expect(recent.loaded, isFalse);
+
+      // Every category takes the online answers.
+      await platformFFI.tryHandle({
+        'name': 'callback_query_onlines',
+        'onlines': '123456789',
+        'offlines': '',
+      });
+      expect(appCore.favPeers.hasOnlineState('123456789'), isTrue);
+      expect(appCore.favPeers.peers.single.online, isTrue);
     });
 
     test('loading until Rust pushes the list, even an empty one', () async {

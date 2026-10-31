@@ -49,6 +49,12 @@ const String kAppTypeMain = "main";
 
 const String kAppTypeDesktopRemote = "remote";
 
+const String kOptionForceAlwaysRelay = "force-always-relay";
+const String kOptionAccessMode = "access-mode";
+const String kOptionAllowRemoteConfigModification =
+    "allow-remote-config-modification";
+const String kOptionAllowAutoRecordOutgoing = "allow-auto-record-outgoing";
+const String kOptionHideRecordingButton = "hide-recording-button";
 const String kOptionVerificationMethod = "verification-method";
 const String kOptionApproveMode = "approve-mode";
 const String kOptionCollapseToolbar = "collapse_toolbar";
@@ -63,6 +69,11 @@ const String kOptionRemoteMenubarFraction = "remote-menubar-frac";
 const String kOptionAllowMultiEdgeToolbarDock =
     "allow-multi-edge-toolbar-dock";
 const String kOptionRemoteMenubarState = "remoteMenubarState";
+const String kOptionPeerSorting = "peer-sorting";
+const String kOptionPeerTabIndex = "peer-tab-index";
+const String kOptionPeerTabOrder = "peer-tab-order";
+const String kOptionPeerTabVisible = "peer-tab-visible";
+const String kOptionPeerCardUiType = "peer-card-ui-type";
 const String kOptionEnableConfirmClosingTabs = "enable-confirm-closing-tabs";
 const String kOptionStopService = "stop-service";
 const String kOptionAllowMonitorSwitchMainToolbar = "allow-monitor-switch-main-toolbar";
@@ -151,6 +162,8 @@ const String kValuePrinterIncomingJobDefault = '';
 const String kValuePrinterIncomingJobSelected = 'selected';
 
 const String kKeyPrinterSelected = 'printer-selected-name';
+
+const String kKeyPrinterAllowAutoPrint = 'allow-printer-auto-print';
 
 // Upstream (:342-346) leaves a resize border only on Linux without the compatible UI mode; the
 // new UI is Windows-only for now, where it is zero.

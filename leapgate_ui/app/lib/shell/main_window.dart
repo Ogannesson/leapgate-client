@@ -12,6 +12,7 @@ import 'package:window_manager/window_manager.dart';
 
 import '../l10n/app_localizations.dart';
 import '../pages/home/home_page.dart';
+import '../pages/session/connection_panel.dart';
 import '../pages/session/reasons.dart';
 import '../pages/session/session_names.dart';
 import '../pages/session/session_page.dart';
@@ -200,7 +201,7 @@ class _MainWindowState extends State<MainWindow>
     final tipViews = <(String, Widget)>[];
     if (conn.stage == ConnStage.failed) {
       final reason = conn.reason!;
-      lines.add(reasonView(l10n, reason, s.id).text);
+      lines.add(failureText(l10n, s));
       final countdown = conn.retryCountdown;
       if (countdown != null) {
         status = LgStatusText(LgStatus.warning, l10n.sessionInterrupted);
@@ -276,7 +277,7 @@ class _MainWindowState extends State<MainWindow>
 
     final titleBar = ListenableBuilder(
       listenable: Listenable.merge([
-        for (final s in views) ...[s.connection, s.ffiModel],
+        for (final s in views) ...[s.connection, s.ffiModel, s.chatModel],
       ]),
       builder: (context, _) {
         _syncTitle(_selected == null
@@ -338,7 +339,7 @@ class _MainWindowState extends State<MainWindow>
                   sizing: StackFit.expand,
                   children: [
                     _scope(null, _selected == null,
-                        HomePage(status: widget.status)),
+                        HomePage(status: widget.status, overlays: _overlays)),
                     for (final s in views)
                       KeyedSubtree(
                         key: ObjectKey(s),
