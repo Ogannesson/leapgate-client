@@ -851,7 +851,7 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 
 - 初始化：`--cm` 分支照上游 `flutter/lib/main.dart:285-302`：先建 `AppCore`，再按 CM 初始化平台接口（`kAppTypeConnectionManager`，它会调 Rust 的 `cm_init`，`core/lib/models/native_model.dart` 里已有这一处），登记 CM 的全局事件 `add_connection`、`on_client_remove`、`show_elevation`、`update_voice_call_state`、`theme`、`language`（登记在 `appCore.events`，10.6），第二段再加 `chat_server_mode`、`cm_file_transfer_log`。不读 `hide_cm`（03 §5.2 M3）。
 - 复制件：`flutter/lib/models/server_model.dart` 复制进 core，CM 用到的部分按"只删界面调用"保留（客户端列表、`addConnection`、`onClientRemove`、接受和拒绝、断开、提权、撤销交换、语音状态、关闭全部、500 ms 的轮询和约 6 秒退出），主窗口和 Android 的部分（密码、ID、起停服务）整段删掉，来源行写明删了什么。标签不用上游的 `DesktopTabController`，用自己的列表。一条连接的两次 `add_connection`、`on_client_remove` 的关闭标记、同一个人重连时删旧的那条，照上游的规则（06 §4.2）。
-- 窗口：紧凑态约 300×490、贴主显示器工作区右上角、置顶、不能改大小；展开侧栏时向左展开到约 700 宽；隐藏照上游用透明加隐藏、不销毁；runner 里 CM 的初值（现在 800×600）改成和 Dart 一致。
+- 窗口：紧凑态 320×500、贴主显示器工作区右上角、置顶、不能改大小；展开侧栏时向左展开到 700×500（2026-10-31 组件审查后定：样稿是 320×500，01 §3.3 写"约 300~320 宽"，300 宽时两列权限放不下"阻止本地输入"；尺寸用组件里的 `kLgCmWidth`、`kLgCmHeight`、`kLgCmExpandedWidth`，不另写一套）；隐藏照上游用透明加隐藏、不销毁；runner 里 CM 的初值（现在 800×600）改成和 Dart 一致。
 - 贴边小条：同一个窗口缩成一条，贴主显示器上边、靠右，沿上边左右拖动、位置记住（新的 LocalConfig 键，`leapgate-` 开头，放在用它的文件里，10.7 接入办法第 2 条）；授权后自动收起的时机和取消条件照上游 `server_model.dart:571-590`、`server_page.dart:180-186`（01 §3.3 改成"收成小条"而不是最小化）；新来访时恢复成完整小窗并置顶。
 - 远程点击保护：照上游 `server_page.dart:1237-1253`，被拦下时在按钮旁提示"无法远程执行此操作"；`allow-remote-cm-modification` 开着时放行。小条上的"断开"同样受保护。
 - 关窗：多于一个连接时始终确认"断开全部会话？"，不读 `enable-confirm-closing-tabs`（R2-Q16）；关闭照上游 `closeAll`。
