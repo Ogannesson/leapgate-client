@@ -1008,6 +1008,8 @@ impl Client {
                     Some(rendezvous_message::Union::PunchHoleResponse(ph)) => {
                         if ph.socket_addr.is_empty() {
                             if !ph.other_failure.is_empty() {
+                                // leapgate: the new UI tells a server's refusal from other errors
+                                leapgate::session::note_refusal(&ph.other_failure);
                                 bail!(ph.other_failure);
                             }
                             match ph.failure.enum_value() {
@@ -1855,6 +1857,8 @@ impl Client {
             {
                 if let Some(rendezvous_message::Union::RelayResponse(rs)) = msg_in.union {
                     if !rs.refuse_reason.is_empty() {
+                        // leapgate: the new UI tells a server's refusal from other errors
+                        leapgate::session::note_refusal(&rs.refuse_reason);
                         bail!(rs.refuse_reason);
                     }
                     succeed = true;
@@ -1877,6 +1881,8 @@ impl Client {
         conn_type: ConnType,
         ipv4: bool,
     ) -> ResultType<Stream> {
+        // leapgate: every relay connection passes here; the new UI shows which relay it uses
+        leapgate::session::note_relay(&relay_server);
         // The proxy's address family does not constrain the relay target.
         let relay_server = check_port(relay_server, RELAY_PORT);
         let use_ws_proxy = Config::is_proxy() && is_ws_endpoint(&check_ws(&relay_server));
