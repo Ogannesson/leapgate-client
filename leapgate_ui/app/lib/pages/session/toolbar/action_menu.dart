@@ -95,6 +95,14 @@ Future<List<TbEntry>> actionMenuEntries(ToolbarEnv env) async {
       ),
     );
   }
+  // A-P2's three groups: what acts on the remote device, what sends input, the rest.
+  void divide() {
+    if (entries.isNotEmpty && entries.last is! TbDivider) {
+      entries.add(const TbDivider());
+    }
+  }
+
+  divide();
   if (isDefault && pi.platform == kPeerPlatformWindows) {
     final reason =
         noKeyboard ??
@@ -165,6 +173,7 @@ Future<List<TbEntry>> actionMenuEntries(ToolbarEnv env) async {
       TbItem(label: l10n.menuResetWayland, onPressed: () => _resetWayland(env)),
     );
   }
+  divide();
   if (pi.version.isNotEmpty) {
     entries.add(
       TbItem(
@@ -220,6 +229,7 @@ Future<List<TbEntry>> actionMenuEntries(ToolbarEnv env) async {
       ),
     );
   }
+  if (entries.isNotEmpty && entries.last is TbDivider) entries.removeLast();
   return entries;
 }
 

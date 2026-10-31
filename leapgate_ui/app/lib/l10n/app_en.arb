@@ -204,7 +204,7 @@
   "toolbarAllMonitors": "All monitors",
   "toolbarRelativeMouseHint": "Press Ctrl+Alt to release the mouse",
   "toolbarAndroidNav": "Android navigation bar",
-  "toolbarHideNav": "Hide navigation bar",
+  "toolbarMoveNav": "Move navigation bar",
   "menuCustom": "Custom",
   "menuScaleRange": "5%–1000%",
   "menuCustomScale": "Custom scale",
@@ -556,5 +556,13 @@
   "tabMenuClose": "Close",
   "menuToastWaylandReset": "Keyboard permission reset",
   "menuToastWaylandResetFailed": "Couldn't reset keyboard permission",
-  "menuFollowingCursor": "Shown while following the remote cursor"
+  "menuFollowingCursor": "Shown while following the remote cursor",
+  "routeQualityData": "Quality data",
+  "routeChart60s": "60 s ago",
+  "routeChart30s": "30 s ago",
+  "routeChartNow": "Now",
+  "routeLatencyChartCurrent": "End-to-end latency over the last 60 seconds, now {ms} ms",
+  "@routeLatencyChartCurrent": {"placeholders": {"ms": {"type": "int"}}},
+  "chatMine": "Me",
+  "chatTheirs": "Remote user"
 }

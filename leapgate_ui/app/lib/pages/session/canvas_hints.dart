@@ -4,10 +4,9 @@ import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/session.dart';
 import 'package:get/get.dart';
 
-import '../../icons/lg_icon.dart';
 import '../../l10n/app_localizations.dart';
 import '../../theme/lg_tokens.dart';
-import '../../widgets/lg_session_toolbar.dart';
+import '../../widgets/lg_canvas_parts.dart';
 import 'toolbar/input_menu.dart';
 
 /// What the input settings put over the image (01 P2 block C): the relative mouse hint at
@@ -43,39 +42,26 @@ class CanvasHints extends StatelessWidget {
   }
 }
 
-/// Placeholder for the designer's hint (`x-rel`).
+/// `x-rel`: at the top centre, where the toolbar was.
 class _RelativeMouseHint extends StatelessWidget {
   const _RelativeMouseHint();
 
   @override
-  Widget build(BuildContext context) {
-    final t = LgTokens.of(context);
-    return Align(
-      alignment: Alignment.topCenter,
-      child: IgnorePointer(
-        child: Container(
-          margin: const EdgeInsets.only(top: LgSpace.s3),
-          padding: const EdgeInsets.symmetric(
-            horizontal: LgSpace.s4,
-            vertical: LgSpace.s2,
-          ),
-          decoration: BoxDecoration(
-            color: t.colors.float,
-            borderRadius: BorderRadius.circular(LgRadius.r12),
-            boxShadow: t.colors.shadow,
-          ),
-          child: Text(
-            AppLocalizations.of(context)!.toolbarRelativeMouseHint,
-            style: t.text.copyWith(color: t.colors.text),
-          ),
+  Widget build(BuildContext context) => Align(
+    alignment: Alignment.topCenter,
+    child: IgnorePointer(
+      child: Padding(
+        padding: const EdgeInsets.only(top: LgSpace.s3),
+        child: LgCanvasHint(
+          text: AppLocalizations.of(context)!.toolbarRelativeMouseHint,
         ),
       ),
-    );
-  }
+    ),
+  );
 }
 
-/// Back, home, recent apps and hide, at the bottom centre, dragged anywhere over the image.
-/// Placeholder for the designer's bar.
+/// Back, home and recent apps, at the bottom centre, dragged anywhere over the image by its
+/// grip. Hidden with "显示导航浮条" in the "输入" menu.
 class _AndroidNavBar extends StatefulWidget {
   const _AndroidNavBar({required this.ffi});
 
@@ -92,51 +78,25 @@ class _AndroidNavBarState extends State<_AndroidNavBar> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final t = LgTokens.of(context);
     final input = widget.ffi.inputModel;
     return Align(
       alignment: Alignment.bottomCenter,
       child: Transform.translate(
         offset: _moved,
-        child: GestureDetector(
-          onPanUpdate: (d) => setState(() => _moved += d.delta),
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 80),
           child: Semantics(
             container: true,
             label: l10n.toolbarAndroidNav,
-            child: Container(
-              margin: const EdgeInsets.only(bottom: 80),
-              padding: const EdgeInsets.all(LgSpace.s1),
-              decoration: BoxDecoration(
-                color: t.colors.float,
-                borderRadius: BorderRadius.circular(LgRadius.r16),
-                boxShadow: t.colors.shadow,
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  LgToolbarButton(
-                    icon: LgIcons.navBack,
-                    label: l10n.menuNavBack,
-                    onPressed: input.onMobileBack,
-                  ),
-                  LgToolbarButton(
-                    icon: LgIcons.navHome,
-                    label: l10n.menuNavHome,
-                    onPressed: input.onMobileHome,
-                  ),
-                  LgToolbarButton(
-                    icon: LgIcons.navRecents,
-                    label: l10n.menuNavRecents,
-                    onPressed: input.onMobileApps,
-                  ),
-                  LgToolbarButton(
-                    icon: LgIcons.chevD,
-                    label: l10n.toolbarHideNav,
-                    dim: true,
-                    onPressed: () => setAndroidNavBarShown(false),
-                  ),
-                ],
-              ),
+            child: LgAndroidNavBar(
+              backLabel: l10n.menuNavBack,
+              homeLabel: l10n.menuNavHome,
+              recentsLabel: l10n.menuNavRecents,
+              dragLabel: l10n.toolbarMoveNav,
+              onBack: input.onMobileBack,
+              onHome: input.onMobileHome,
+              onRecents: input.onMobileApps,
+              onDrag: (delta) => setState(() => _moved += delta),
             ),
           ),
         ),

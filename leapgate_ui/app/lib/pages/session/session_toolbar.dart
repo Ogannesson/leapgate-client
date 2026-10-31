@@ -11,7 +11,6 @@ import 'package:window_manager/window_manager.dart';
 
 import '../../icons/lg_icon.dart';
 import '../../l10n/app_localizations.dart';
-import '../../shell/tab_menu.dart';
 import '../../shell/tab_overlays.dart';
 import '../../shell/tab_shortcuts.dart';
 import '../../theme/lg_tokens.dart';
@@ -37,12 +36,6 @@ import 'toolbar/toolbar_env.dart';
 /// `desktop/widgets/remote_toolbar.dart:648-676`).
 const kToolbarAutoCollapse = Duration(seconds: 5);
 
-/// Narrower than this, "录制", "聊天" and "会话" go into "更多" (01 P2 block B, measured on the
-/// mockups: simple / detail mode, without / with the monitor button). The designer's toolbar
-/// measures its items instead (`LEAPGATE.md` §10.9).
-double _foldWidth({required bool detail, required bool monitors}) =>
-    monitors ? (detail ? 1022 : 1009) : (detail ? 919 : 918);
-
 /// "Pin", one for every device, saved as upstream's toolbar saves it
 /// (`desktop/widgets/remote_toolbar.dart:253-324`: `{"pin": …}` in the Flutter options).
 bool get _pinned {
@@ -59,10 +52,11 @@ bool get _pinned {
 void _setPinned(bool pin) => appCore.options.flutter
     .set(kOptionRemoteMenubarState, jsonEncode({'pin': pin}));
 
-/// The session's floating toolbar (01 P2 block B), drawn by [LgSessionToolbar]: the menus of
-/// `toolbar/`, the monitors, the chat, recording and connection mark of the other session
-/// files, and "断开". It fills the image area and places itself on the edge it is docked to;
-/// with the relative mouse mode on it is hidden (`remote_page.dart:782-792`).
+/// The session's floating toolbar (01 P2 block B), drawn by [LgSessionToolbar] in an
+/// [LgToolbarPlacer]: the menus of `toolbar/`, the monitors, the chat, recording and connection
+/// mark of the other session files, and "断开". It fills the image area; where the bar sits and
+/// where a drag drops it are `toolbar/dock.dart`'s rules. With the relative mouse mode on it is
+/// hidden (`remote_page.dart:782-792`).
 class SessionToolbar extends StatefulWidget {
   const SessionToolbar(
       {super.key,
@@ -89,9 +83,15 @@ class _SessionToolbarState extends State<SessionToolbar> {
   /// Null until the device's place is read; the toolbar shows from then on.
   ToolbarDock? _dock;
 
-  /// While dragging: where it would land, and where the pointer holds it.
+  /// While dragging: where it would land.
   ToolbarDock? _preview;
+
+  /// The place a drag started from, and where on the bar the pointer took hold of it.
+  LgToolbarPlacement? _dragFrom;
   double _grab = 0;
+
+  /// Where the last press on the bar went down (global).
+  Offset _downAt = Offset.zero;
   Size _dragSize = Size.zero;
   final _barKey = GlobalKey();
 
@@ -153,47 +153,72 @@ class _SessionToolbarState extends State<SessionToolbar> {
     if (mounted) setState(() => _collapsed = collapsed);
   }
 
-  RenderBox? get _area => context.findRenderObject() as RenderBox?;
-
-  void _dragStart(DragStartDetails d) {
-    final area = _area;
-    final bar = _barKey.currentContext?.findRenderObject() as RenderBox?;
-    final dock = _dock;
-    if (area == null || bar == null || dock == null) return;
-    _dragSize = bar.size;
-    final cursor = area.globalToLocal(d.globalPosition);
-    final at = toolbarOffset(dock, area.size, toolbarSizeOn(dock.edge, _dragSize));
-    _grab = isHorizontalEdge(dock.edge) ? cursor.dx - at.dx : cursor.dy - at.dy;
-    setState(() => _preview = dock);
-  }
-
-  void _dragUpdate(DragUpdateDetails d) {
-    final area = _area;
-    final dock = _dock;
-    final preview = _preview;
-    if (area == null || dock == null || preview == null) return;
-    final cursor = area.globalToLocal(d.globalPosition);
-    final edge = nearestToolbarEdge(cursor, area.size,
-        multiEdge: multiEdgeDocking(),
-        current: dock.edge,
-        previewed: preview.edge);
+  /// The placer's rule for a pointer at [local] in [area]: the edge by upstream's hysteresis
+  /// (only the top one unless docking on any edge is on), the place along it so the bar keeps
+  /// where it was taken hold of, within the bounds. The placer keeps [kToolbarEdgeMargin] at
+  /// both ends of the edge, so the way the bar can travel is that much shorter.
+  LgToolbarPlacement _resolve(
+    Offset local,
+    Size area,
+    LgToolbarPlacement start,
+  ) {
+    if (!identical(start, _dragFrom)) {
+      // The first call comes once the pointer has moved past the slop, so the hold is taken
+      // from where it went down.
+      _dragFrom = start;
+      final box = context.findRenderObject() as RenderBox?;
+      final bar = _barKey.currentContext?.findRenderObject() as RenderBox?;
+      if (box != null && bar != null) {
+        _dragSize = bar.size;
+        final at = box.globalToLocal(bar.localToGlobal(Offset.zero));
+        final down = box.globalToLocal(_downAt);
+        _grab = start.dock.vertical ? down.dy - at.dy : down.dx - at.dx;
+      }
+    }
+    final from = dockOf(start).edge;
+    final edge = nearestToolbarEdge(
+      local,
+      area,
+      multiEdge: multiEdgeDocking(),
+      current: from,
+      previewed: _preview?.edge ?? from,
+    );
     final size = toolbarSizeOn(edge, _dragSize);
-    final extent = isHorizontalEdge(edge) ? size.width : size.height;
-    setState(() => _preview = (
-          edge: edge,
-          fraction: dragFraction(
-              edge, cursor, _grab.clamp(0, extent), area.size, size),
-        ));
+    final horizontal = isHorizontalEdge(edge);
+    final extent = horizontal ? size.width : size.height;
+    const m = kToolbarEdgeMargin;
+    final fraction = dragFraction(
+      edge,
+      local - (horizontal ? const Offset(m, 0) : const Offset(0, m)),
+      _grab.clamp(0, extent),
+      horizontal
+          ? Size(area.width - 2 * m, area.height)
+          : Size(area.width, area.height - 2 * m),
+      size,
+    );
+    return placementOf((edge: edge, fraction: fraction));
   }
 
-  void _dragEnd(DragEndDetails d) {
-    final preview = _preview;
-    if (preview == null) return;
+  void _onMove(LgToolbarPlacement p) => setState(() => _preview = dockOf(p));
+
+  void _onMoveEnd(LgToolbarPlacement p) {
+    final dock = dockOf(p);
+    _dragFrom = null;
     setState(() {
-      _dock = preview;
+      _dock = dock;
       _preview = null;
     });
-    saveToolbarDock(_ffi, preview);
+    saveToolbarDock(_ffi, dock);
+  }
+
+  /// The ghost: the bar as measured when the drag began, turned to the edge it would land on.
+  Size _previewSize(LgToolbarDock dock) {
+    final edge = ToolbarEdge.values.byName(dock.name);
+    final size = toolbarSizeOn(edge, _dragSize);
+    // Without the 12 px the bar keeps from its edge.
+    return isHorizontalEdge(edge)
+        ? Size(size.width, size.height - LgSpace.s3)
+        : Size(size.width - LgSpace.s3, size.height);
   }
 
   @override
@@ -203,6 +228,9 @@ class _SessionToolbarState extends State<SessionToolbar> {
         _ffi.connection,
         _ffi.ffiModel,
         _ffi.canvasModel,
+        // The chat's unread count on "更多" is read when the bar builds.
+        _ffi.chatModel,
+        _ffi.notices,
         _env!.changed,
         appCore.options.flutter.listenable(kOptionRemoteMenubarState),
       ]),
@@ -213,74 +241,54 @@ class _SessionToolbarState extends State<SessionToolbar> {
         if (_ffi.inputModel.relativeMouseMode.value) {
           return const SizedBox.shrink();
         }
-        return LayoutBuilder(builder: _build);
+        final dock = _dock;
+        if (dock == null) return const SizedBox.shrink();
+        final preview = _preview;
+        return LgToolbarPlacer(
+          placement: placementOf(dock),
+          preview: preview == null ? null : placementOf(preview),
+          anyEdge: multiEdgeDocking(),
+          resolve: _resolve,
+          onMove: _onMove,
+          onMoveEnd: _onMoveEnd,
+          previewSize: _previewSize,
+          edgeMargin: kToolbarEdgeMargin,
+          child: Listener(
+            onPointerDown: (e) => _downAt = e.position,
+            child: KeyedSubtree(key: _barKey, child: _bar(context, dock)),
+          ),
+        );
       }),
     );
   }
 
-  Widget _build(BuildContext context, BoxConstraints constraints) {
-    final dock = _dock;
-    if (dock == null) return const SizedBox.shrink();
-    final preview = _preview;
-    final bar = KeyedSubtree(key: _barKey, child: _bar(context, constraints));
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        if (preview != null) _dropPreview(preview, constraints.biggest),
-        Align(alignment: alignmentForEdge(dock.edge, dock.fraction), child: bar),
-      ],
-    );
-  }
-
-  /// Where the toolbar lands if dropped now. Placeholder for the designer's preview.
-  Widget _dropPreview(ToolbarDock preview, Size area) {
-    final c = LgTokens.of(context).colors;
-    final size = toolbarSizeOn(preview.edge, _dragSize);
-    final at = toolbarOffset(preview, area, size);
-    return Positioned(
-      left: at.dx,
-      top: at.dy,
-      width: size.width,
-      height: size.height,
-      child: IgnorePointer(
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: c.accent.withValues(alpha: .1),
-            border: Border.all(color: c.accent, width: 1.5),
-            borderRadius: BorderRadius.circular(LgRadius.r16),
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// A menu of the bar. [disabledReason] greys the whole button and is said on hover;
-  /// [refresh] also rebuilds the open menu besides the env's own changes.
+  /// A menu of the bar. [disabledReason] greys the button and is said on hover; the menu still
+  /// opens, its rows greyed (A-P2 `x-no-perm`). [refresh] also rebuilds the open menu besides
+  /// the env's own changes.
   Widget _menu(String label, LgIcons icon,
-      Future<List<TbEntry>> Function(ToolbarEnv) entries,
-      {String? disabledReason, Listenable? refresh}) {
-    final button = LgToolbarMenuButton(
-      label: label,
-      icon: icon,
-      enabled: disabledReason == null,
-      items: [
-        TbMenuContent(
-          build: () => entries(_env!),
-          refresh: refresh == null
-              ? _env!.changed
-              : Listenable.merge([_env!.changed, refresh]),
-        ),
-      ],
-    );
-    return disabledReason == null
-        ? button
-        : LgTooltip(message: disabledReason, child: button);
-  }
+          Future<List<TbEntry>> Function(ToolbarEnv) entries,
+          {String? disabledReason, Listenable? refresh, double? width}) =>
+      LgToolbarMenuButton(
+        label: label,
+        icon: icon,
+        width: width ?? kLgMenuWidth,
+        enabled: disabledReason == null,
+        disabledNote: disabledReason,
+        items: [_content(entries, refresh: refresh)],
+      );
 
-  Widget _bar(BuildContext context, BoxConstraints constraints) {
+  Widget _content(Future<List<TbEntry>> Function(ToolbarEnv) entries,
+          {Listenable? refresh}) =>
+      TbMenuContent(
+        build: () => entries(_env!),
+        refresh: refresh == null
+            ? _env!.changed
+            : Listenable.merge([_env!.changed, refresh]),
+      );
+
+  Widget _bar(BuildContext context, ToolbarDock dock) {
     final env = _env!;
     final l10n = env.l10n;
-    final t = LgTokens.of(context);
     final fullscreen = stateGlobal.fullscreen.isTrue;
     final conn = _ffi.connection;
     // Shown from "waiting for the image" on (01 P2 block A); before that the folded bar has no dot.
@@ -292,30 +300,25 @@ class _SessionToolbarState extends State<SessionToolbar> {
     final routeMark = sessionRouteMark(context, _ffi, widget.overlays);
     final record = recordButton(context, _ffi);
     final chat = chatToolbarButtons(context, _ffi, widget.overlays);
-    final monitors = monitorToolbarItems(env);
-    final pinned = _pinned;
+    final collapsedSwitch = collapsedMonitorSwitch(env);
 
-    final sessionMenu =
-        _menu(l10n.toolbarSession, LgIcons.toggles, sessionMenuEntries);
-    final fold = isHorizontalEdge(_dock!.edge) &&
-        constraints.maxWidth <
-            _foldWidth(detail: t.detail, monitors: monitors.isNotEmpty);
-    final unread = tabUnread(_ffi);
-    // "更多" holds what does not fit, in the order 录制、聊天、会话 (01 P2 block B).
-    final more = LgToolbarMenuButton(
-      label: unread > 0 ? '${l10n.toolbarMore} $unread' : l10n.toolbarMore,
-      icon: LgIcons.more,
-      items: [
-        LgSubmenu(label: l10n.toolbarSession, items: [
-          TbMenuContent(
-              build: () => sessionMenuEntries(env), refresh: env.changed),
-        ]),
-        ...chat,
-        ?record,
-      ],
+    // What does not fit goes into "更多" from the end: 录制, then 聊天, then 会话
+    // (01 P2 block B); the bar measures, these say what each becomes in the menu.
+    final session = LgToolbarFoldable(
+      inline: _menu(l10n.toolbarSession, LgIcons.toggles, sessionMenuEntries,
+          width: 340),
+      menuItem: LgSubmenu(
+        label: l10n.toolbarSession,
+        icon: LgIcons.toggles,
+        width: 340,
+        items: [_content(sessionMenuEntries)],
+      ),
     );
+    // Chat and recording come foldable, with their rows for "更多"; the chat's count is read
+    // when the bar builds, which it does on every chat change (see [build]).
+    final talk = <Widget>[...chat, ?record];
 
-    final toolbar = LgSessionToolbar(
+    return LgSessionToolbar(
       labels: LgToolbarLabels(
         toolbar: l10n.toolbarName,
         pin: l10n.toolbarPin,
@@ -324,9 +327,12 @@ class _SessionToolbarState extends State<SessionToolbar> {
         minimize: l10n.minimize,
         collapse: l10n.toolbarCollapse,
         expand: l10n.toolbarExpand,
+        drag: l10n.toolbarMove,
+        more: l10n.toolbarMore,
       ),
-      pinned: pinned,
-      onTogglePin: () => _setPinned(!pinned),
+      dock: placementOf(dock).dock,
+      pinned: _pinned,
+      onTogglePin: () => _setPinned(!_pinned),
       collapsed: _collapsed,
       onToggleCollapsed: () => _setCollapsed(!_collapsed),
       fullscreen: fullscreen,
@@ -339,6 +345,9 @@ class _SessionToolbarState extends State<SessionToolbar> {
       routeLabel: shown ? routeLabel : null,
       encrypted: encrypted,
       unencryptedLabel: l10n.sessionUnencrypted,
+      collapsedActions: [?collapsedSwitch],
+      // The notices sit at the top right of the image: notes open on the left (`x-revoked`).
+      noteSide: _ffi.notices.items.isEmpty ? null : LgNoteSide.left,
       groups: [
         [
           LgToolbarMenuButton(
@@ -351,7 +360,7 @@ class _SessionToolbarState extends State<SessionToolbar> {
                   onPressed: () {}),
             ],
           ),
-          ...monitors,
+          ...monitorToolbarItems(env),
         ],
         [
           _menu(l10n.toolbarDisplay, LgIcons.image, displayMenuEntries),
@@ -361,10 +370,10 @@ class _SessionToolbarState extends State<SessionToolbar> {
             _menu(l10n.toolbarInput, LgIcons.keyboard, inputMenuEntries,
                 disabledReason: env.keyboardReason),
           _menu(l10n.toolbarActions, LgIcons.bolt, actionMenuEntries,
-              refresh: _ffi.requests.screenshotPending),
-          if (fold) more else sessionMenu,
+              refresh: _ffi.requests.screenshotPending, width: 380),
+          session,
         ],
-        if (!fold && (chat.isNotEmpty || record != null)) [...chat, ?record],
+        if (talk.isNotEmpty) talk,
         if (routeMark != null) [routeMark],
         [
           LgToolbarButton(
@@ -373,32 +382,8 @@ class _SessionToolbarState extends State<SessionToolbar> {
             danger: true,
             onPressed: () => appCore.sessions.close(_ffi),
           ),
-          // Only the handle drags the bar, as upstream's drag button
-          // (`remote_toolbar.dart` `_DraggableShowHide`): a press on a button that slips a few
-          // pixels still opens its menu.
-          Semantics(
-            label: l10n.toolbarMove,
-            child: ExcludeSemantics(
-              child: GestureDetector(
-                onPanStart: _dragStart,
-                onPanUpdate: _dragUpdate,
-                onPanEnd: _dragEnd,
-                child: MouseRegion(
-                  cursor: SystemMouseCursors.move,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: LgIcon(LgIcons.grip,
-                        size: t.sizes.icon, color: t.colors.text2),
-                  ),
-                ),
-              ),
-            ),
-          ),
         ],
       ],
     );
-    final collapsedSwitch = _collapsed ? collapsedMonitorSwitch(env) : null;
-    if (collapsedSwitch == null) return toolbar;
-    return Row(mainAxisSize: MainAxisSize.min, children: [toolbar, collapsedSwitch]);
   }
 }

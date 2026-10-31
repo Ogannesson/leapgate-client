@@ -190,6 +190,7 @@ Future<List<TbEntry>> inputMenuEntries(ToolbarEnv env) async {
     entries.add(
       TbItem(
         label: l10n.menuRelativeMouse,
+        switchRow: true,
         checked: ffi.inputModel.relativeMouseMode.value,
         actionId: kShortcutActionToggleRelativeMouseMode,
         disabledReason: inputReason,
@@ -216,6 +217,7 @@ Future<List<TbEntry>> inputMenuEntries(ToolbarEnv env) async {
   entries.add(
     TbItem(
       label: l10n.menuReverseWheel,
+      switchRow: true,
       checked: reverse == 'Y',
       actionId: kShortcutActionToggleReverseMouseWheel,
       disabledReason: inputReason,
@@ -285,6 +287,7 @@ Future<List<TbEntry>> inputMenuEntries(ToolbarEnv env) async {
     entries.add(
       TbItem(
         label: l10n.menuShowNavBar,
+        switchRow: true,
         checked: shown,
         onPressed: () {
           setAndroidNavBarShown(!shown);
@@ -307,6 +310,7 @@ List<TbEntry> viewOnlyEntries(ToolbarEnv env, String? noKeyboard) {
   return [
     TbItem(
       label: l10n.menuViewOnly,
+      switchRow: true,
       checked: model.viewOnly,
       actionId: kShortcutActionToggleViewOnly,
       disabledReason: noKeyboard,
@@ -319,6 +323,7 @@ List<TbEntry> viewOnlyEntries(ToolbarEnv env, String? noKeyboard) {
     ].contains(pi.platform))
       TbItem(
         label: l10n.menuShowMyCursor,
+        switchRow: true,
         checked: model.showMyCursor,
         indent: true,
         actionId: kShortcutActionToggleShowMyCursor,
@@ -367,6 +372,7 @@ TbItem _toggle(
   final ffi = env.ffi;
   return TbItem(
     label: label,
+    switchRow: true,
     checked: ffi.options.getToggle(option),
     actionId: actionId,
     disabledReason: reason,

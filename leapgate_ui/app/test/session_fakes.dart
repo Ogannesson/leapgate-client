@@ -124,6 +124,7 @@ class AppFakeBind extends FakeBind {
       case #sessionChangePreferCodec:
       case #sessionSetCustomImageQuality:
       case #sessionSetCustomFps:
+      case #sessionSendMouse:
         calls.add(invocation);
         return Future<void>.value();
     }

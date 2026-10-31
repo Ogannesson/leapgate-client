@@ -8,7 +8,6 @@ import 'package:flutter_hbb/leapgate/session_route.dart';
 
 import '../../l10n/app_localizations.dart';
 import '../../shell/navigation.dart';
-import '../../theme/lg_tokens.dart';
 import '../../widgets/lg_connection_panel.dart';
 import '../../widgets/lg_panel_inputs.dart';
 import '../../widgets/lg_selection.dart';
@@ -184,10 +183,9 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
         steps = twoSteps(LgStepState.done, LgStepState.current);
         switch (conn.input) {
           case ConnInput.password:
-            // A stand-in for the field's label of the designer's panel (`c-pwd-wrong`).
+            // The panel's sentence names the field, as its password specimens (`c-pwd-wrong`).
+            message = l10n.connEnterPassword;
             inputs
-              ..add(Text(l10n.connEnterPassword,
-                  style: LgTokens.of(context).textS))
               ..add(LgPasswordField(
                 controller: _password,
                 focusNode: _inputFocus,
