@@ -44,6 +44,11 @@ class LgFoldSlot {
 /// The row. [more] is laid out at the place of the first folded slot and not at
 /// all while nothing is folded. [onFolded] is told how many slots are folded
 /// (after the frame, so that it may rebuild what shows them).
+///
+/// [folded] is the count the owner holds now. The row tells [onFolded] whenever
+/// what it lays out differs from it, so an owner that resets its count (the
+/// bar moved to another edge) is told again even if the row would fold the same
+/// number as before.
 class LgFoldRow extends MultiChildRenderObjectWidget {
   LgFoldRow({
     super.key,
@@ -51,6 +56,7 @@ class LgFoldRow extends MultiChildRenderObjectWidget {
     required this.maxExtent,
     required this.slots,
     required Widget more,
+    required this.folded,
     required this.onFolded,
   }) : super(children: [for (final s in slots) s.child, more]);
 
@@ -59,6 +65,7 @@ class LgFoldRow extends MultiChildRenderObjectWidget {
   /// How long the row may be along its axis.
   final double maxExtent;
   final List<LgFoldSlot> slots;
+  final int folded;
   final ValueChanged<int> onFolded;
 
   @override
@@ -67,6 +74,7 @@ class LgFoldRow extends MultiChildRenderObjectWidget {
     maxExtent: maxExtent,
     gaps: [for (final s in slots) s.gap],
     foldable: [for (final s in slots) s.foldable],
+    known: folded,
     onFolded: onFolded,
   );
 
@@ -77,6 +85,7 @@ class LgFoldRow extends MultiChildRenderObjectWidget {
       ..maxExtent = maxExtent
       ..gaps = [for (final s in slots) s.gap]
       ..foldable = [for (final s in slots) s.foldable]
+      ..known = folded
       ..onFolded = onFolded;
   }
 }
@@ -94,11 +103,13 @@ class _RenderFoldRow extends RenderBox
     required double maxExtent,
     required List<double> gaps,
     required List<bool> foldable,
+    required int known,
     required this.onFolded,
   }) : _axis = axis,
        _maxExtent = maxExtent,
        _gaps = gaps,
-       _foldable = foldable;
+       _foldable = foldable,
+       _known = known;
 
   Axis _axis;
   Axis get axis => _axis;
@@ -131,7 +142,17 @@ class _RenderFoldRow extends RenderBox
   }
 
   ValueChanged<int> onFolded;
-  int _reported = 0;
+
+  // What the owner holds, and the count already on its way to it.
+  int _known;
+  int _pending = -1;
+  int _latest = 0;
+  set known(int v) {
+    if (v == _known) return;
+    _known = v;
+    _pending = -1;
+    markNeedsLayout();
+  }
 
   @override
   void setupParentData(RenderBox child) {
@@ -155,7 +176,11 @@ class _RenderFoldRow extends RenderBox
 
   @override
   Size computeDryLayout(BoxConstraints constraints) {
-    assert(debugCannotComputeDryLayout(reason: 'LgFoldRow lays out its children for real'));
+    assert(
+      debugCannotComputeDryLayout(
+        reason: 'LgFoldRow lays out its children for real',
+      ),
+    );
     return Size.zero;
   }
 
@@ -234,10 +259,15 @@ class _RenderFoldRow extends RenderBox
           ? Offset(data.offset.dx, shift)
           : Offset(shift, data.offset.dy);
     }
-    if (k != _reported) {
-      _reported = k;
+    _latest = k;
+    if (k == _known) {
+      _pending = -1;
+    } else if (k != _pending) {
+      _pending = k;
       SchedulerBinding.instance.addPostFrameCallback((_) {
-        if (attached) onFolded(k);
+        // The last layout counts: the row may have been laid out again, back
+        // to what the owner holds, before the frame ended.
+        if (attached && _latest != _known) onFolded(_latest);
       });
     }
   }

@@ -146,43 +146,49 @@ class LgToolbarGrip extends StatelessWidget {
       child: _GripKeys(
         scope: scope,
         vertical: dock.vertical,
-        child: LgPressable(
-          // A click does nothing: the grip is for dragging.
-          onPressed: () {},
-          semanticLabel: label,
-          builder: (context, states) {
-            final radius = BorderRadius.circular(LgRadius.r12);
-            return MouseRegion(
-              cursor: SystemMouseCursors.move,
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onPanStart: (d) => scope.onStart(d.globalPosition),
-                onPanUpdate: (d) => scope.onUpdate(d.globalPosition),
-                onPanEnd: (_) => scope.onEnd(),
-                onPanCancel: scope.onEnd,
-                child: LgFocusRing(
-                  show: states.contains(WidgetState.focused),
-                  radius: radius,
-                  child: Container(
-                    height: t.sizes.tool,
-                    constraints: BoxConstraints(minWidth: t.sizes.tool),
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: lgStateOverlay(c, states),
-                      borderRadius: radius,
-                    ),
-                    child: ExcludeSemantics(
-                      child: LgIcon(
-                        LgIcons.grip,
-                        size: t.sizes.icon,
-                        color: c.text2,
+        // A screen reader cannot drag: "increase" and "decrease" move the bar a
+        // step along its edge, like the arrow keys.
+        child: Semantics(
+          onIncrease: () => scope.onNudge(1),
+          onDecrease: () => scope.onNudge(-1),
+          child: LgPressable(
+            // A click does nothing: the grip is for dragging.
+            onPressed: () {},
+            semanticLabel: label,
+            builder: (context, states) {
+              final radius = BorderRadius.circular(LgRadius.r12);
+              return MouseRegion(
+                cursor: SystemMouseCursors.move,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onPanStart: (d) => scope.onStart(d.globalPosition),
+                  onPanUpdate: (d) => scope.onUpdate(d.globalPosition),
+                  onPanEnd: (_) => scope.onEnd(),
+                  onPanCancel: scope.onEnd,
+                  child: LgFocusRing(
+                    show: states.contains(WidgetState.focused),
+                    radius: radius,
+                    child: Container(
+                      height: t.sizes.tool,
+                      constraints: BoxConstraints(minWidth: t.sizes.tool),
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: lgStateOverlay(c, states),
+                        borderRadius: radius,
+                      ),
+                      child: ExcludeSemantics(
+                        child: LgIcon(
+                          LgIcons.grip,
+                          size: t.sizes.icon,
+                          color: c.text2,
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
-            );
-          },
+              );
+            },
+          ),
         ),
       ),
     );
@@ -203,7 +209,9 @@ class _GripKeys extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final back = vertical ? LogicalKeyboardKey.arrowUp : LogicalKeyboardKey.arrowLeft;
+    final back = vertical
+        ? LogicalKeyboardKey.arrowUp
+        : LogicalKeyboardKey.arrowLeft;
     final forward = vertical
         ? LogicalKeyboardKey.arrowDown
         : LogicalKeyboardKey.arrowRight;
@@ -223,11 +231,15 @@ class _GripKeys extends StatelessWidget {
 /// shows where a drag would drop it.
 ///
 /// While the grip is dragged [onMove] gets the candidate place for the pointer
-/// (the nearest edge when [anyEdge]); the caller may move the bar there at once
-/// (pass it back as [placement]) or only show the ghost (as [preview]).
-/// [onMoveEnd] gets the last candidate when the pointer lets go, or after a key
-/// press. Pass [resolve] to turn a pointer position into a place by other
-/// rules than "nearest".
+/// (the nearest edge when [anyEdge]). Across edges show it only as the ghost
+/// ([preview]) and change [placement] when [onMoveEnd] comes: a bar that
+/// changes edge under the pointer is built again as a row or a column (its
+/// buttons change places, separators come and go), and its grip, which holds
+/// the drag, may be rebuilt with it. Along its own edge the bar may follow the
+/// pointer at once (pass the candidate back as [placement]). [onMoveEnd] gets
+/// the last candidate when the pointer lets go, or after a key press. Pass
+/// [resolve] to turn a pointer position into a place by other rules than
+/// "nearest".
 class LgToolbarPlacer extends StatefulWidget {
   const LgToolbarPlacer({
     super.key,

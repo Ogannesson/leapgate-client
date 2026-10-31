@@ -108,10 +108,14 @@ class LgPasswordDialog extends StatelessWidget {
   final ValueChanged<String>? onChanged;
   final VoidCallback onCancel;
 
-  /// Null greys "确定": the rules are not met or the two texts differ.
+  /// Null greys "确定". The mockup greys it only while both fields are empty;
+  /// once there is text it can be pressed, and a password that does not meet
+  /// the rules or does not match the second field is answered with [error] or
+  /// [confirmError]. Enter does the same as the button.
   final VoidCallback? onConfirm;
 
-  /// Shows "移除" at the left end of the buttons.
+  /// Shows "移除" at the left end of the buttons; [LgPasswordDialogLabels.remove]
+  /// must then be given.
   final VoidCallback? onRemove;
   final FocusNode? passwordFocus;
   final FocusNode? confirmFocus;
@@ -122,6 +126,10 @@ class LgPasswordDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    assert(
+      onRemove == null || labels.remove != null,
+      'LgPasswordDialog: onRemove needs labels.remove ("移除").',
+    );
     final t = LgTokens.of(context);
     final c = t.colors;
     Widget label(String text) => Padding(

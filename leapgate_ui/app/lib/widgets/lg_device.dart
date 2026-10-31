@@ -453,10 +453,19 @@ class _LgDeviceRowState extends State<LgDeviceRow> {
   static const _doubleClick = Duration(milliseconds: 300);
   Duration? _lastDown;
 
+  // Set by the buttons at the end of the row, which hear the press before the
+  // row does: a press on them is not a click on the row.
+  bool _onButtons = false;
+
   // A click selects at once; a second click inside the window is a double
   // click. GestureDetector.onDoubleTap would delay the selection.
   void _onPointerDown(PointerDownEvent e) {
     if (e.buttons != kPrimaryButton) return;
+    if (_onButtons) {
+      _onButtons = false;
+      _lastDown = null;
+      return;
+    }
     final last = _lastDown;
     if (last != null && e.timeStamp - last <= _doubleClick) {
       _lastDown = null;
@@ -613,24 +622,31 @@ class _LgDeviceRowState extends State<LgDeviceRow> {
                               ? _actionWidth
                               : _actionWidthMore,
                           child: showConnect || showMore
-                              ? Row(
-                                  mainAxisAlignment: MainAxisAlignment.end,
-                                  children: [
-                                    if (showConnect)
-                                      _ConnectButton(
-                                        label: w.connectLabel!,
-                                        name: w.name,
-                                        onPressed: w.onConnect!,
-                                      ),
-                                    if (showConnect && showMore)
-                                      const SizedBox(width: 4),
-                                    if (showMore)
-                                      _MoreButton(
-                                        label: w.moreLabel!,
-                                        name: w.name,
-                                        onPressed: w.onMore!,
-                                      ),
-                                  ],
+                              ? Listener(
+                                  onPointerDown: (e) {
+                                    if (e.buttons == kPrimaryButton) {
+                                      _onButtons = true;
+                                    }
+                                  },
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.end,
+                                    children: [
+                                      if (showConnect)
+                                        _ConnectButton(
+                                          label: w.connectLabel!,
+                                          name: w.name,
+                                          onPressed: w.onConnect!,
+                                        ),
+                                      if (showConnect && showMore)
+                                        const SizedBox(width: 4),
+                                      if (showMore)
+                                        _MoreButton(
+                                          label: w.moreLabel!,
+                                          name: w.name,
+                                          onPressed: w.onMore!,
+                                        ),
+                                    ],
+                                  ),
                                 )
                               : null,
                         ),

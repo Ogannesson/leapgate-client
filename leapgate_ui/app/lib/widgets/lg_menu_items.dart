@@ -231,7 +231,7 @@ class LgMenuSwitchItem extends StatelessWidget {
       ),
     );
     if (enabled || disabledNote == null) return row;
-    return LgTooltip(
+    return LgNoteTip(
       message: disabledNote!,
       child: Semantics(hint: disabledNote, child: row),
     );
@@ -289,7 +289,7 @@ class LgMenuCheckItem extends StatelessWidget {
       ),
     );
     if (enabled || disabledNote == null) return row;
-    return LgTooltip(
+    return LgNoteTip(
       message: disabledNote!,
       child: Semantics(hint: disabledNote, child: row),
     );
@@ -312,9 +312,12 @@ class LgMenuSliderItem extends StatelessWidget {
     this.step,
     this.startLabel,
     this.onChangeEnd,
+    this.disabledNote,
   });
 
   final double value;
+
+  /// Null greys the row and the slider does not move.
   final ValueChanged<double>? onChanged;
   final ValueChanged<double>? onChangeEnd;
   final double min;
@@ -329,11 +332,27 @@ class LgMenuSliderItem extends StatelessWidget {
   final String semanticLabel;
   final String? startLabel;
 
+  /// Why a greyed row is greyed, on hover (beside the menu) and to a screen
+  /// reader.
+  final String? disabledNote;
+
   @override
   Widget build(BuildContext context) {
     final t = LgTokens.of(context);
     final c = t.colors;
+    final enabled = onChanged != null;
     final small = t.textS.copyWith(color: c.text2);
+    final row = _sliderRow(t, c, small, enabled);
+    if (enabled || disabledNote == null) return row;
+    return LgNoteTip(
+      message: disabledNote!,
+      child: Semantics(hint: disabledNote, child: row),
+    );
+  }
+
+  Widget _sliderRow(LgTokens t, LgColors c, TextStyle small, bool enabled) {
+    // The slider dims itself; the words around it follow it (`.mr.off`).
+    Widget dim(Widget w) => enabled ? w : Opacity(opacity: .6, child: w);
     return Container(
       height: t.sizes.menuSlider,
       padding: const EdgeInsets.only(left: 48, right: LgSpace.s5),
@@ -342,7 +361,7 @@ class LgMenuSliderItem extends StatelessWidget {
           if (startLabel != null) ...[
             SizedBox(
               width: 32,
-              child: Text(startLabel!, style: small, maxLines: 1),
+              child: dim(Text(startLabel!, style: small, maxLines: 1)),
             ),
             const SizedBox(width: 14),
           ],
@@ -363,13 +382,15 @@ class LgMenuSliderItem extends StatelessWidget {
           SizedBox(
             width: 40,
             child: ExcludeSemantics(
-              child: Text(
-                format(value),
-                textAlign: TextAlign.right,
-                maxLines: 1,
-                style: small.copyWith(
-                  color: c.text,
-                  fontWeight: FontWeight.w600,
+              child: dim(
+                Text(
+                  format(value),
+                  textAlign: TextAlign.right,
+                  maxLines: 1,
+                  style: small.copyWith(
+                    color: c.text,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
             ),

@@ -196,6 +196,38 @@ void main() {
       handle.dispose();
     });
 
+    testWidgets('"移除" without its label is caught while building', (
+      tester,
+    ) async {
+      await pumpLg(
+        tester,
+        LgPasswordDialog(
+          labels: const LgPasswordDialogLabels(
+            title: '设置固定密码',
+            passwordLabel: '新密码',
+            passwordPlaceholder: '输入新密码',
+            confirmLabel: '确认密码',
+            confirmPlaceholder: '再输入一次',
+            showPassword: '显示密码',
+            hidePassword: '隐藏密码',
+            strength: '密码强度',
+            ruleMet: '已满足',
+            ruleUnmet: '未满足',
+            cancel: '取消',
+            confirm: '确定',
+          ),
+          passwordController: TextEditingController(),
+          confirmController: TextEditingController(),
+          rules: const [],
+          strength: 0,
+          onCancel: () {},
+          onConfirm: () {},
+          onRemove: () {},
+        ),
+      );
+      expect(tester.takeException(), isA<AssertionError>());
+    });
+
     testWidgets('a narrow window does not overflow', (tester) async {
       tester.view.physicalSize = const Size(420, 800);
       tester.view.devicePixelRatio = 1;
@@ -509,6 +541,48 @@ void main() {
       expect(find.bySemanticsLabel('对方, 10:24: 在吗'), findsOneWidget);
       expect(find.bySemanticsLabel('我, 10:25: 在'), findsOneWidget);
       handle.dispose();
+    });
+
+    List<LgChatMessage> numbered(int from, int to) => [
+      for (var i = from; i < to; i++)
+        LgChatMessage(text: '消息 $i', time: '10:${10 + i % 40}', mine: i.isEven),
+    ];
+
+    bool atBottom(WidgetTester tester, String text) {
+      final list = tester.getRect(find.byType(ListView));
+      final last = tester.getRect(find.text(text));
+      return last.bottom <= list.bottom && last.top >= list.top;
+    }
+
+    testWidgets('it opens on the newest message, not the oldest', (
+      tester,
+    ) async {
+      await pumpLg(
+        tester,
+        panel(TextEditingController(), [], messages: numbered(0, 40)),
+      );
+      await tester.pump();
+      await tester.pump();
+      expect(atBottom(tester, '消息 39'), isTrue);
+      expect(find.text('消息 0'), findsNothing);
+    });
+
+    testWidgets('a list that keeps only the last N still follows the end', (
+      tester,
+    ) async {
+      final controller = TextEditingController();
+      await pumpLg(tester, panel(controller, [], messages: numbered(0, 40)));
+      await tester.pump();
+      await tester.pump();
+      // The user reads upwards.
+      await tester.drag(find.byType(ListView), const Offset(0, 600));
+      await tester.pump();
+      expect(find.text('消息 39'), findsNothing);
+      // The model drops the oldest and appends one: the count is the same.
+      await pumpLg(tester, panel(controller, [], messages: numbered(1, 41)));
+      await tester.pump();
+      await tester.pump();
+      expect(atBottom(tester, '消息 40'), isTrue);
     });
 
     testWidgets('a new message scrolls the list to the end', (tester) async {

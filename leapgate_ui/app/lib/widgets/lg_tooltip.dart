@@ -66,6 +66,90 @@ class LgTooltip extends StatelessWidget {
   }
 }
 
+/// Which side of a menu the note of a greyed row opens on.
+enum LgNoteSide { right, left }
+
+/// Tells the greyed rows of the menus below it which side their note opens on
+/// when the pointer is on them: the right (the default) or the left, for a menu
+/// whose right side is taken (a notice in the corner, a bar on the right edge).
+/// A note that does not fit on its side goes to the other one.
+class LgNoteSideScope extends InheritedWidget {
+  const LgNoteSideScope({super.key, required this.side, required super.child});
+
+  final LgNoteSide side;
+
+  static LgNoteSide of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<LgNoteSideScope>()?.side ??
+      LgNoteSide.right;
+
+  @override
+  bool updateShouldNotify(LgNoteSideScope old) => old.side != side;
+}
+
+/// The note of a greyed menu row (`x-view-only`, `x-revoked` in A-P2.html): a
+/// tooltip beside the menu, level with the row, so that it does not cover the
+/// row under it. [child] is the row, which spans the width of the menu; the
+/// note opens on the side [LgNoteSideScope] gives, or on the other one when it
+/// would leave the window.
+class LgNoteTip extends StatelessWidget {
+  const LgNoteTip({super.key, required this.message, required this.child});
+
+  final String message;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final side = LgNoteSideScope.of(context);
+    return RawTooltip(
+      semanticsTooltip: message,
+      hoverDelay: _hoverDelay,
+      triggerMode: TooltipTriggerMode.longPress,
+      positionDelegate: (p) => _beside(p, side),
+      tooltipBuilder: (context, animation) => FadeTransition(
+        opacity: animation,
+        child: LgTooltipBox(child: Text(message)),
+      ),
+      child: child,
+    );
+  }
+
+  static Offset _beside(TooltipPositionContext p, LgNoteSide side) {
+    final left = p.target.dx - p.targetSize.width / 2;
+    final top = p.target.dy - p.targetSize.height / 2;
+    return Offset(
+      leftFor(
+        side: side,
+        rowLeft: left,
+        rowRight: left + p.targetSize.width,
+        width: p.tooltipSize.width,
+        overlayWidth: p.overlaySize.width,
+      ),
+      math.max(
+        0.0,
+        math.min(top, p.overlaySize.height - p.tooltipSize.height),
+      ),
+    );
+  }
+
+  /// The left edge of the note of a row that spans [rowLeft] to [rowRight]:
+  /// 8 px beside the row on [side], or on the other side when it would leave
+  /// the overlay.
+  @visibleForTesting
+  static double leftFor({
+    required LgNoteSide side,
+    required double rowLeft,
+    required double rowRight,
+    required double width,
+    required double overlayWidth,
+  }) {
+    final fitsRight = rowRight + _gap + width <= overlayWidth;
+    final fitsLeft = rowLeft - _gap - width >= 0;
+    final toLeft = side == LgNoteSide.left ? fitsLeft || !fitsRight : !fitsRight;
+    final x = toLeft ? rowLeft - _gap - width : rowRight + _gap;
+    return math.max(0.0, math.min(x, overlayWidth - width));
+  }
+}
+
 /// The floating box of a tooltip. Public so the gallery can show it in place.
 class LgTooltipBox extends StatelessWidget {
   const LgTooltipBox({super.key, required this.child});
