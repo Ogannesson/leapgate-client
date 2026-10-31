@@ -661,6 +661,8 @@ impl<T: InvokeUiCM> IpcTaskRunner<T> {
                                     LocalConfig::set_option("lang".to_owned(), lang);
                                     self.cm.change_language();
                                 }
+                                // leapgate: the main window's messages to the CM (C2, S7)
+                                Data::Leapgate(msg) => crate::leapgate_hooks::ipc::on_cm(msg),
                                 Data::DataPortableService(ipc::DataPortableService::CmShowElevation(show)) => {
                                     self.cm.show_elevation(show);
                                 }

@@ -586,6 +586,8 @@ pub enum Data {
         #[serde(default = "legacy_hot_measured")]
         hot_measured: bool,
     },
+    // leapgate: all of Leapgate's messages ride this one variant (LEAPGATE.md §10.10)
+    Leapgate(leapgate::ipc::Msg),
 }
 
 /// The default for a `hot_measured` that is not on the wire at all; see the field's docs.
@@ -1281,6 +1283,8 @@ async fn handle(data: Data, stream: &mut Connection) {
                     .await
             );
         }
+        // leapgate: Leapgate's messages to the service (C1)
+        Data::Leapgate(msg) => crate::leapgate_hooks::ipc::handle(msg, stream).await,
         _ => {}
     };
 }
