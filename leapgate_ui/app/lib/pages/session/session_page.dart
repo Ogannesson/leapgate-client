@@ -67,6 +67,11 @@ class _SessionPageState extends State<SessionPage>
   @override
   void initState() {
     super.initState();
+    // Starts Rust's keyboard grab, without which no key reaches the remote device; upstream does
+    // it for every remote window (`desktop/screen/desktop_remote_screen.dart:13-14`), and again
+    // is harmless.
+    bind.mainInitInputSource();
+    stateGlobal.getInputSource(force: true);
     _ffi.canvasModel.initializeEdgeScrollFallback(this);
     // Upstream reads them once the session started (`remote_page.dart:200-206`); the registry
     // started it before the page.

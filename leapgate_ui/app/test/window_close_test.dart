@@ -56,8 +56,12 @@ void main() {
         (askSessions: false, askAction: false, action: CloseAction.background));
   });
 
-  testMainWindow('portable with a session: one dialog asks both, Quit closes',
+  testMainWindow(
+      'portable with a session, confirmation never set: one dialog asks both, Quit closes',
       (tester) async {
+    // A new configuration has no "enable-confirm-closing-tabs": the confirmation is on.
+    expect(fakes.bind.localOptions.containsKey(kOptionEnableConfirmClosingTabs),
+        false);
     await pumpMainWindow(tester);
     await _withSession(tester);
 

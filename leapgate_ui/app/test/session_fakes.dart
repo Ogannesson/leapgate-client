@@ -40,6 +40,7 @@ class AppFakeBind extends FakeBind {
         calls.add(invocation);
         return Future<void>.value();
       case #sessionEnterOrLeave:
+      case #mainInitInputSource:
         calls.add(invocation);
         return null;
       case #mainSetLocalOption:

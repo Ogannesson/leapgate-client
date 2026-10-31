@@ -13,13 +13,16 @@ bool showsRoute(ConnectionModel c) =>
     (c.stage == ConnStage.waitingForImage || c.stage == ConnStage.connected);
 
 /// The device's name on its tab, the window title and the connection panel: the alias, the
-/// host name once the peer info arrived, or the ID, whichever comes first (as the device list
-/// names a device, 01 P1 block F).
+/// host name once the peer info arrived, before that the name "Recent" shows for it, or the ID,
+/// whichever comes first (as the device list names a device, 01 P1 block F).
 String deviceName(FFI ffi) {
   final alias = appCore.options.peer(ffi.id).get('alias');
   if (alias.isNotEmpty) return alias;
   final host = ffi.ffiModel.pi.hostname;
   if (host.isNotEmpty) return host;
+  final recent =
+      appCore.recentPeers.peers.where((p) => p.id == ffi.id).firstOrNull;
+  if (recent != null) return peerDisplayName(recent);
   return formatPeerId(ffi.id);
 }
 
