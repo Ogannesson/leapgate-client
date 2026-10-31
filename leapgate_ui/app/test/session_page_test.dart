@@ -66,6 +66,23 @@ void main() {
       expect(appCore.sessions.devices, isEmpty);
     });
 
+    testMainWindow('before the peer info, a device in "Recent" goes by its name there',
+        (tester) async {
+      await pumpMainWindow(tester);
+      await platformFFI.tryHandle({
+        'name': 'load_recent_peers',
+        'peers': jsonEncode([
+          {'id': _id, 'alias': '', 'hostname': 'den-pc', 'username': 'u',
+            'platform': 'Windows'}
+        ]),
+      });
+      await _open(tester);
+
+      // The tab and the panel's title; the subtitle stays the ID.
+      expect(find.text('den-pc'), findsNWidgets(2));
+      expect(find.text('100 200 300'), findsOneWidget);
+    });
+
     testMainWindow('password: Connect is off while empty, then logs in', (tester) async {
       await pumpMainWindow(tester);
       final s = await _open(tester);
@@ -311,6 +328,13 @@ void main() {
   });
 
   group('keyboard', () {
+    testMainWindow('a session starts Rust\'s keyboard grab', (tester) async {
+      await pumpMainWindow(tester);
+      expect(callsTo(fakes, #mainInitInputSource), isEmpty);
+      await _open(tester);
+      expect(callsTo(fakes, #mainInitInputSource), isNotEmpty);
+    });
+
     testMainWindow('switching tabs lets go before the other tab can take it', (tester) async {
       await pumpMainWindow(tester);
       final a = await _open(tester);
