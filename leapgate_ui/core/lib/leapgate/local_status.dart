@@ -49,6 +49,14 @@ class LocalStatusModel extends ChangeNotifier {
 
   /// `verification-method`: one of the kUse...Password values, or empty.
   String verificationMethod = '';
+
+  /// What Rust reports as wrong with this device (`main_get_error`), shown as it is on the
+  /// hint card (01 P1 block B); empty when nothing is.
+  String systemError = '';
+
+  /// Remote desktop sessions into this device (`video_conn_count`, upstream
+  /// `connection_page.dart:187`): "正在被远程控制（N 个会话）" while above 0 (01 P1 block A).
+  int remoteSessions = 0;
   Timer? _timer;
 
   /// Upstream `ServerModel.updatePasswordModel` (`models/server_model.dart:249-258`) shows "-"
@@ -75,6 +83,14 @@ class LocalStatusModel extends ChangeNotifier {
     super.dispose();
   }
 
+  /// "Refresh" on the one-time password; the next poll shows the new one.
+  Future<void> refreshOneTimePassword() => bind.mainUpdateTemporaryPassword();
+
+  /// "Start service" (upstream `common.dart` `start_service(true)`; the superuser check there
+  /// is macOS only). Rust starts the service when `stop-service` is cleared.
+  Future<void> startService() =>
+      bind.mainSetOption(key: kOptionStopService, value: 'N');
+
   Future<void> _poll() async {
     final id = await bind.mainGetMyId();
     final connect =
@@ -84,6 +100,8 @@ class LocalStatusModel extends ChangeNotifier {
     final approveMode = await bind.mainGetOption(key: kOptionApproveMode);
     final verificationMethod =
         await bind.mainGetOption(key: kOptionVerificationMethod);
+    final systemError = await bind.mainGetError();
+    final remoteSessions = connect['video_conn_count'] as int? ?? 0;
     final status = stopped
         ? ServiceStatus.stopped
         : switch (connect['status_num']) {
@@ -98,12 +116,16 @@ class LocalStatusModel extends ChangeNotifier {
         status != this.status ||
         oneTimePassword != this.oneTimePassword ||
         approveMode != this.approveMode ||
-        verificationMethod != this.verificationMethod) {
+        verificationMethod != this.verificationMethod ||
+        systemError != this.systemError ||
+        remoteSessions != this.remoteSessions) {
       this.id = id;
       this.status = status;
       this.oneTimePassword = oneTimePassword;
       this.approveMode = approveMode;
       this.verificationMethod = verificationMethod;
+      this.systemError = systemError;
+      this.remoteSessions = remoteSessions;
       notifyListeners();
     }
   }

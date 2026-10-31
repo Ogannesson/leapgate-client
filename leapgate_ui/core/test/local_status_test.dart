@@ -10,13 +10,17 @@ import 'fakes.dart';
 /// What Rust answers for this device: the ID, the server connection and the options.
 class _StatusBind implements RustdeskImpl {
   final options = <String, String>{};
+  String connectStatus = '{"status_num":1}';
+  String error = '';
 
   @override
   Future<String> mainGetMyId({dynamic hint}) async => '135792468';
 
   @override
-  Future<String> mainGetConnectStatus({dynamic hint}) async =>
-      '{"status_num":1}';
+  Future<String> mainGetConnectStatus({dynamic hint}) async => connectStatus;
+
+  @override
+  Future<String> mainGetError({dynamic hint}) async => error;
 
   @override
   Future<String> mainGetTemporaryPassword({dynamic hint}) async => 'a1b2c3';
@@ -68,6 +72,20 @@ void main() {
       expect(model.approveMode, 'click');
       expect(model.verificationMethod, kUsePermanentPassword);
       expect(model.passwordRow, PasswordRow.unavailable);
+    });
+
+    test('the system error and the remote desktop sessions into this device',
+        () async {
+      var model = await poll();
+      expect(model.systemError, isEmpty);
+      expect(model.remoteSessions, 0);
+
+      bind
+        ..error = 'Failed to write the config file'
+        ..connectStatus = '{"status_num":1,"video_conn_count":2}';
+      model = await poll();
+      expect(model.systemError, 'Failed to write the config file');
+      expect(model.remoteSessions, 2);
     });
   });
 

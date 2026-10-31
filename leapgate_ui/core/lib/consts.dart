@@ -37,12 +37,21 @@ const String kAppTypeMain = "main";
 
 const String kAppTypeDesktopRemote = "remote";
 
+const String kOptionForceAlwaysRelay = "force-always-relay";
+const String kOptionAccessMode = "access-mode";
+const String kOptionAllowRemoteConfigModification =
+    "allow-remote-config-modification";
 const String kOptionVerificationMethod = "verification-method";
 const String kOptionApproveMode = "approve-mode";
 const String kOptionCollapseToolbar = "collapse_toolbar";
 const String kOptionZoomCursor = "zoom-cursor";
 const String kOptionTouchMode = "touch-mode";
 const String kOptionRemoteMenubarState = "remoteMenubarState";
+const String kOptionPeerSorting = "peer-sorting";
+const String kOptionPeerTabIndex = "peer-tab-index";
+const String kOptionPeerTabOrder = "peer-tab-order";
+const String kOptionPeerTabVisible = "peer-tab-visible";
+const String kOptionPeerCardUiType = "peer-card-ui-type";
 const String kOptionEnableConfirmClosingTabs = "enable-confirm-closing-tabs";
 const String kOptionStopService = "stop-service";
 
