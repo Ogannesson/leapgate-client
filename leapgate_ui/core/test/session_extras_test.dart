@@ -51,6 +51,29 @@ class _Bind extends FakeBind {
   return (bind: bind, s: s);
 }
 
+const _connectionReady = {
+  'name': 'connection_ready',
+  'secure': 'true',
+  'direct': 'true',
+  'stream_type': 'TCP',
+};
+
+final _peerInfo = {
+  'name': 'peer_info',
+  'version': '1.4.6',
+  'username': 'user',
+  'hostname': 'host',
+  'platform': 'Windows',
+  'sas_enabled': 'true',
+  'current_display': '0',
+  'displays': jsonEncode([
+    {'x': 0, 'y': 0, 'width': 1920, 'height': 1080, 'cursor_embedded': 0},
+  ]),
+  'features': jsonEncode({'privacy_mode': false}),
+  'resolutions': jsonEncode([]),
+  'platform_additions': '',
+};
+
 Future<void> _emit(_Bind bind, FFI s, Map<String, dynamic> evt) async {
   bind.streams[s.sessionId]!.add(EventToUI.event(jsonEncode(evt)));
   await settle();
@@ -91,14 +114,27 @@ void main() {
       });
     });
 
-    test('a session counts the delays of its quality status', () async {
-      final (:bind, :s) = _session();
-      await _emit(bind, s, {'name': 'update_quality_status', 'delay': '45'});
-      await _emit(bind, s, {'name': 'update_quality_status', 'delay': '41'});
+    Future<void> delay(_Bind bind, FFI s, int ms) =>
+        _emit(bind, s, {'name': 'update_quality_status', 'delay': '$ms'});
 
-      expect(s.latency.current, 41);
-      expect(s.latency.min, 41);
-      expect(s.latency.max, 45);
+    test(
+        'a session counts its delays, not the remote side\'s first 0 of each connection',
+        () async {
+      final (:bind, :s) = _session();
+      await _emit(bind, s, _connectionReady);
+      for (final ms in [0, 45, 41]) {
+        await delay(bind, s, ms);
+      }
+      expect((s.latency.min, s.latency.max), (41, 45));
+
+      // A reconnect: the channel is up again and starts with 0 once more; a real 0 counts.
+      s.connection.retry();
+      await _emit(bind, s, _connectionReady);
+      for (final ms in [0, 30, 0]) {
+        await delay(bind, s, ms);
+      }
+      expect((s.latency.current, s.latency.min, s.latency.max), (0, 0, 45));
+      expect(s.latency.average, (45 + 41 + 30 + 0) / 4);
     });
   });
 
@@ -204,16 +240,29 @@ void main() {
       expect(bind.local[kKeyPrinterIncomingJobAction], 'dismiss');
     });
 
-    test('a permission taken away during the session gets a notice', () async {
+    // Rust's order: the channel, the withheld permissions as false (`connection.rs:675-697`),
+    // then the login and its peer info; given ones are never sent.
+    test('a given clipboard taken away during the session gets a notice',
+        () async {
       final (:bind, :s) = _session();
-      await _emit(bind, s,
-          {'name': 'permission', 'keyboard': 'true', 'clipboard': 'true'});
+      await _emit(bind, s, _connectionReady);
+      await _emit(bind, s, _peerInfo);
       expect(s.notices.items, isEmpty);
 
       await _emit(bind, s, {'name': 'permission', 'clipboard': 'false'});
       expect(s.notices.items.single.args['permission'], 'clipboard');
 
       await _emit(bind, s, {'name': 'permission', 'clipboard': 'true'});
+      expect(s.notices.items, isEmpty);
+    });
+
+    test('audio withheld before the login is no revocation', () async {
+      final (:bind, :s) = _session();
+      await _emit(bind, s, _connectionReady);
+      await _emit(bind, s, {'name': 'permission', 'audio': 'false'});
+      await _emit(bind, s, _peerInfo);
+      await _emit(bind, s, {'name': 'permission', 'keyboard': 'true'});
+
       expect(s.notices.items, isEmpty);
     });
 

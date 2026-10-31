@@ -265,8 +265,6 @@
   "chatClose": "关闭聊天",
   "chatPlaceholder": "输入消息",
   "chatSend": "发送",
-  "chatUnread": "{count} 条未读消息",
-  "@chatUnread": {"placeholders": {"count": {"type": "int"}}},
   "recordStart": "录制",
   "recordStop": "停止录制",
   "recordNoPermission": "未获得录制权限",

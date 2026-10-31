@@ -15,6 +15,15 @@ import '../../widgets/lg_selection.dart';
 import 'reasons.dart';
 import 'session_names.dart';
 
+/// Why the connection failed, for the panel and the tab's hover (01 §4.3): a refusal of the
+/// server's own is told apart from the system's errors; Q3's export has it for the attempt that
+/// just failed.
+String failureText(AppLocalizations l10n, FFI ffi) {
+  final refused = sessionRoute(ffi).refused;
+  if (refused != null) return l10n.connServerRefused(refused);
+  return reasonView(l10n, ffi.connection.reason!, ffi.id).text;
+}
+
 /// After this long on "已连接，正在等待画面…" the panel adds why the image may not come
 /// (01 P2 block D "超过几秒").
 const kWaitingImageHintAfter = 5;
@@ -282,11 +291,7 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
             LgPanelAction(label: l10n.connCloseTab, onPressed: conn.cancel));
       case ConnStage.failed:
         final view = reasonView(l10n, conn.reason!, ffi.id);
-        message = view.text;
-        // A refusal of the server's own is told apart from the system's errors (01 §4.3); Q3's
-        // export has it for the attempt that just failed.
-        final refused = sessionRoute(ffi).refused;
-        if (refused != null) message = l10n.connServerRefused(refused);
+        message = failureText(l10n, ffi);
         final left = conn.retryCountdown;
         if (left != null) {
           tone = LgPanelTone.warning;

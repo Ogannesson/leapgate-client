@@ -31,10 +31,24 @@ class LatencyStats extends ChangeNotifier {
     return _points.where((p) => !p.at.isBefore(from)).toList();
   }
 
+  /// How old [p] is now, for drawing the line against the same clock.
+  Duration ageOf(LatencyPoint p) => clock.now().difference(p.at);
+
+  var _skipNext = false;
+
+  /// A connection (or a reconnect) is up: its first delay is the remote side's initial 0, not a
+  /// measurement (`src/server/connection.rs` sends `last_delay` before it has one).
+  void onConnected() => _skipNext = true;
+
   /// Upstream's `update_quality_status` event; only the ones that carry a delay count.
   void onQualityStatus(Map<String, dynamic> evt) {
     final ms = int.tryParse('${evt['delay'] ?? ''}');
-    if (ms != null) add(ms);
+    if (ms == null) return;
+    if (_skipNext) {
+      _skipNext = false;
+      return;
+    }
+    add(ms);
   }
 
   void add(int ms) {

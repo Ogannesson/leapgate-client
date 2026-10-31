@@ -6,6 +6,7 @@ import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 
 import 'app_core.dart';
+import 'connection.dart';
 import 'notices.dart';
 import 'session.dart';
 
@@ -205,15 +206,21 @@ class SessionRequests {
   var _permissions = <String, bool>{};
 
   /// A permission that was given and is now taken away gets a notice (01 P2 block B); one given
-  /// again takes its notice away.
+  /// again takes its notice away. The remote side sends only the permissions it withholds, as
+  /// false, and does so before the login (`src/server/connection.rs:675-697`), so one without a
+  /// value is given; changes count only once logged in (peer info in, the image coming), and
+  /// what a new connection withholds from the start is no revocation.
   void _onPermissions() {
     final now = Map.of(_ffi.ffiModel.permissions);
-    for (final p in kRevocablePermissions) {
-      if (_permissions[p] == true && now[p] == false) {
-        _notices.add(SessionNotice(kNoticePermissionRevoked,
-            args: {'permission': p}, tag: '$kNoticeTagPermissionPrefix$p'));
-      } else if (_permissions[p] == false && now[p] == true) {
-        _notices.dismissTag('$kNoticeTagPermissionPrefix$p');
+    final stage = _ffi.connection.stage;
+    if (stage == ConnStage.waitingForImage || stage == ConnStage.connected) {
+      for (final p in kRevocablePermissions) {
+        if (_permissions[p] != false && now[p] == false) {
+          _notices.add(SessionNotice(kNoticePermissionRevoked,
+              args: {'permission': p}, tag: '$kNoticeTagPermissionPrefix$p'));
+        } else if (_permissions[p] == false && now[p] != false) {
+          _notices.dismissTag('$kNoticeTagPermissionPrefix$p');
+        }
       }
     }
     _permissions = now;

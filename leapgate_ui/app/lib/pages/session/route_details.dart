@@ -260,17 +260,20 @@ class LatencyLine extends StatelessWidget {
       image: true,
       child: CustomPaint(
         size: Size.infinite,
-        painter: _LinePainter(stats.points, DateTime.now(), c.text, c.border),
+        // Aged on the statistics' clock.
+        painter: _LinePainter(
+            [for (final p in stats.points) (age: stats.ageOf(p), ms: p.ms)],
+            c.text,
+            c.border),
       ),
     );
   }
 }
 
 class _LinePainter extends CustomPainter {
-  _LinePainter(this.points, this.now, this.color, this.axis);
+  _LinePainter(this.points, this.color, this.axis);
 
-  final List<LatencyPoint> points;
-  final DateTime now;
+  final List<({Duration age, int ms})> points;
   final Color color;
   final Color axis;
 
@@ -281,8 +284,8 @@ class _LinePainter extends CustomPainter {
     if (points.isEmpty) return;
     final top = points.map((p) => p.ms).reduce((a, b) => a > b ? a : b);
     final span = LatencyStats.window.inMilliseconds;
-    Offset at(LatencyPoint p) => Offset(
-          size.width * (1 - now.difference(p.at).inMilliseconds / span),
+    Offset at(({Duration age, int ms}) p) => Offset(
+          size.width * (1 - p.age.inMilliseconds / span),
           size.height * (1 - p.ms / (top == 0 ? 1 : top * 1.2)),
         );
     final path = Path()..moveTo(at(points.first).dx, at(points.first).dy);

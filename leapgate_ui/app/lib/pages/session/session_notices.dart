@@ -84,9 +84,9 @@ String noticeText(AppLocalizations l10n, SessionNotice notice) {
 }
 
 /// The session's notices at the top right of its tab, below the toolbar ([LgNoticeStack]); the
-/// ones without buttons go after [kNoticeDuration]. The ones that ask (01 P2 block E: screenshot,
-/// print job, elevation, a recording started by itself, privacy mode on another monitor) get
-/// their buttons here by tag and type, and stay until answered or closed.
+/// ones without buttons go after [kNoticeDuration]. The ones with buttons (01 P2 block E:
+/// screenshot, print job, elevation, a recording started by itself, privacy mode on another
+/// monitor) get them here by tag and type; those that ask stay until answered or closed.
 class SessionNoticesView extends StatefulWidget {
   const SessionNoticesView({super.key, required this.ffi, this.overlays});
 
@@ -161,14 +161,11 @@ class _SessionNoticesViewState extends State<SessionNoticesView> {
     if (tag.startsWith(kNoticeTagPrinterPrefix)) {
       final remember = _rememberPrint[n] ?? false;
       return [
-        LgNoticeAction(
-            l10n.noticeUseDefaultPrinter,
-            () => _requests.answerPrintJob(n, remember: remember)),
+        LgNoticeAction(l10n.noticeUseDefaultPrinter,
+            () => _answerPrint(n, remember: remember)),
         LgNoticeAction(l10n.noticeChoosePrinter, () => _choosePrinter(n)),
-        LgNoticeAction(
-            l10n.noticeDontPrint,
-            () => _requests.answerPrintJob(n,
-                print: false, remember: remember)),
+        LgNoticeAction(l10n.noticeDontPrint,
+            () => _answerPrint(n, print: false, remember: remember)),
         // A stand-in for the designer's check box on the notice.
         LgNoticeAction(
             '${remember ? '☑' : '☐'} ${l10n.noticeRememberChoice}',
@@ -200,8 +197,17 @@ class _SessionNoticesViewState extends State<SessionNoticesView> {
     ];
   }
 
-  /// Upstream's file dialog for "Save as…" (`models/model.dart:502-508`).
+  Future<void> _answerPrint(SessionNotice n,
+      {bool print = true, String printer = '', bool remember = false}) {
+    _rememberPrint.remove(n);
+    return _requests.answerPrintJob(n,
+        print: print, printer: printer, remember: remember);
+  }
+
+  /// Upstream's file dialog for "Save as…" (`models/model.dart:502-508`). The notice goes first,
+  /// as upstream closed its dialog first, so a second click cannot open a second file dialog.
   Future<void> _saveScreenshot() async {
+    _notices.dismissTag(kNoticeTagScreenshot);
     final l10n = AppLocalizations.of(context)!;
     final ts = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final path = await FilePicker.platform.saveFile(
@@ -257,7 +263,7 @@ class _SessionNoticesViewState extends State<SessionNoticesView> {
       ),
     );
     if (ok == true && chosen != null) {
-      await _requests.answerPrintJob(n, printer: chosen!, remember: remember);
+      await _answerPrint(n, printer: chosen!, remember: remember);
     }
   }
 
@@ -297,13 +303,13 @@ class _SessionNoticesViewState extends State<SessionNoticesView> {
   }
 }
 
-/// The notices that ask something stay until answered or closed (01 P2 block E).
+/// The notices that ask something stay until answered or closed (01 P2 block E). The automatic
+/// recording one goes by itself: the toolbar's record button stops it too.
 bool _asks(SessionNotice n) {
   final tag = n.tag ?? '';
   final type = n.args['type'];
   return tag == kNoticeTagScreenshot ||
       tag.startsWith(kNoticeTagPrinterPrefix) ||
-      tag == kNoticeTagAutoRecord ||
       tag == kNoticeTagPrivacySwitchDisplay ||
       type == 'on-uac' ||
       type == 'on-foreground-elevated' ||

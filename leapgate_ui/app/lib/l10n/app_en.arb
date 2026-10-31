@@ -281,8 +281,6 @@
   "chatClose": "Close chat",
   "chatPlaceholder": "Type a message",
   "chatSend": "Send",
-  "chatUnread": "{count} unread",
-  "@chatUnread": {"placeholders": {"count": {"type": "int"}}},
   "recordStart": "Record",
   "recordStop": "Stop recording",
   "recordNoPermission": "No permission to record",

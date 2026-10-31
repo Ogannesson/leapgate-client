@@ -11,6 +11,7 @@ import 'package:leapgate_ui/pages/session/session_notices.dart';
 import 'package:leapgate_ui/shell/navigation.dart';
 import 'package:leapgate_ui/shell/tab_menu.dart';
 import 'package:leapgate_ui/widgets/lg_selection.dart';
+import 'package:leapgate_ui/widgets/lg_status.dart';
 
 import 'session_fakes.dart';
 
@@ -55,6 +56,12 @@ class _Bind extends AppFakeBind {
       case #sessionHandleScreenshot:
         calls.add(invocation);
         return Future.value('');
+      case #mainGetSoundInputs:
+        return Future.value(['Headset microphone']);
+      case #getVoiceCallInputDevice:
+        return Future.value('');
+      case #mainAudioSupportLoopback:
+        return true;
     }
     return super.noSuchMethod(invocation);
   }
@@ -103,6 +110,11 @@ void main() {
         await emit(tester, fakes, s, {
           'name': 'fingerprint',
           'fingerprint': '3F2A9C417B0ED5A86C1E04D7B93AF582',
+        });
+        // The remote side's first delay of a connection is its initial 0, not counted.
+        await emit(tester, fakes, s, {
+          'name': 'update_quality_status',
+          'delay': '0',
         });
         await emit(tester, fakes, s, {
           'name': 'update_quality_status',
@@ -296,8 +308,8 @@ void main() {
 
     testMainWindow('a permission taken away is told', (tester) async {
       await pumpMainWindow(tester);
+      // Given permissions are never sent; the remote user turns one off after the login.
       final s = await connected(tester);
-      await emit(tester, fakes, s, {'name': 'permission', 'clipboard': 'true'});
       await emit(tester, fakes, s, {
         'name': 'permission',
         'clipboard': 'false',
@@ -337,12 +349,26 @@ void main() {
       await tester.pump();
       await emit(tester, fakes, s, {'name': 'chat_client_mode', 'text': 'a'});
       await emit(tester, fakes, s, {'name': 'chat_client_mode', 'text': 'b'});
-      expect(tabUnread(s), 2);
+      Finder badge(String n) =>
+          find.descendant(of: find.byType(LgBadge), matching: find.text(n));
+      expect(badge('2'), findsOneWidget);
 
       await tester.tap(find.text('host')); // its tab, named after the peer info
       await tester.pump();
       await tester.pump();
+      expect(badge('2'), findsNothing);
       expect(tabUnread(s), 0);
+    });
+
+    testMainWindow('the chat stays at hand during a call', (tester) async {
+      await pumpMainWindow(tester);
+      final s = await connected(tester);
+      await emit(tester, fakes, s, {'name': 'on_voice_call_started'});
+      await tester.tap(find.text('通话中'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('文字聊天'), findsOneWidget);
+      expect(find.text('挂断'), findsOneWidget);
     });
 
     testMainWindow('waiting for the answer: "等待接听…" with "取消"', (tester) async {

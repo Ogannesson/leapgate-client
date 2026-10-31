@@ -71,6 +71,15 @@ class FFI {
     events.on('screenshot', requests.onScreenshot);
     events.on('printer_request', requests.onPrinterRequest);
     events.on('switch_back', requests.onSwitchBack);
+    // Every connection, reconnects included, goes into verifying once the channel is up.
+    var stage = connection.stage;
+    connection.addListener(() {
+      if (connection.stage == ConnStage.verifying &&
+          stage != ConnStage.verifying) {
+        latency.onConnected();
+      }
+      stage = connection.stage;
+    });
   }
 
   /// The events of the copied models (upstream `FfiModel.startEventListener`,

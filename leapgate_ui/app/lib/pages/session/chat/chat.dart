@@ -36,20 +36,31 @@ class _ChatButton extends StatelessWidget {
       listenable: chat,
       builder: (context, _) {
         final l10n = AppLocalizations.of(context)!;
+        // The number is a stand-in for the designer's badge.
+        final unread = chat.unread;
+        String withUnread(String label) =>
+            unread > 0 ? '$label $unread' : label;
+        final textChat = LgMenuItem(
+          label: l10n.chatText,
+          checked: chat.open,
+          onPressed: () => chat.setOpen(!chat.open),
+        );
         switch (chat.voiceCallStatus) {
           case VoiceCallStatus.waitingForResponse:
             return LgToolbarMenuButton(
-              label: l10n.chatWaitingAnswer,
+              label: withUnread(l10n.chatWaitingAnswer),
               icon: LgIcons.call,
               items: [
                 LgMenuItem(label: l10n.connCancel, onPressed: chat.closeVoiceCall),
               ],
             );
           case VoiceCallStatus.connected:
+            // Text chat stays at hand during a call, as upstream's separate chat menu.
             return LgToolbarMenuButton(
-              label: l10n.chatInCall,
+              label: withUnread(l10n.chatInCall),
               icon: LgIcons.call,
               items: [
+                textChat,
                 LgMenuGroup(l10n.chatMicrophone),
                 _Microphones(chat: chat),
                 LgMenuItem(
@@ -62,17 +73,11 @@ class _ChatButton extends StatelessWidget {
             );
           case VoiceCallStatus.notStarted:
           case VoiceCallStatus.incoming:
-            // The number is a stand-in for the designer's badge.
-            final unread = chat.unread;
             return LgToolbarMenuButton(
-              label: unread > 0 ? '${l10n.chatMenu} $unread' : l10n.chatMenu,
+              label: withUnread(l10n.chatMenu),
               icon: LgIcons.chat,
               items: [
-                LgMenuItem(
-                  label: l10n.chatText,
-                  checked: chat.open,
-                  onPressed: () => chat.setOpen(!chat.open),
-                ),
+                textChat,
                 LgMenuItem(
                     label: l10n.chatVoiceCall,
                     onPressed: chat.requestVoiceCall),
