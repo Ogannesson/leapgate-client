@@ -805,3 +805,54 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 - core 的新代码有单测；app 每个页面状态一个行为测试（03 §8.3）：面板的每一种（用假的连接状态）、最近列表空和加载中、连接框几种默认高亮、关窗确认的几种组合（有无会话 × 便携或安装 × 是否勾过不再提示）。
 - 合入前：`git diff main -- flutter/` 为空；core 的 `flutter analyze --no-fatal-infos` 不超出 92 条基线，app 0 条；复制件不跑格式化（10.1）。
 - 审查重点：会话块看焦点和按键释放、钩子开关的先后、关闭流程、注册表参数、复制件和上游原件的差异；主页块看回车规则和匹配；组件看样稿对照的必修项（03 §8.4）。
+
+### 10.10 M3 的分工约定
+
+依据：总仓库 `docs/新界面/06-M3拆法.md`（下称"06"；维护者 2026-10-31 按推荐定）。界面行为以 01 §3.3（P3 全部）为准，02 §0.4 第 2、11 条、R2-Q16 有更正；样稿 `A-P3.html`，画框名见 06 §2.2；令牌和图标以 `A-基础.html` 为准。M3 和 M2b 并行，M2b 的约定在 10.9（在 `ui/m2b` 上，合入后两节并存）。
+
+**两段**：第一段现在做（窗口、来访标签、信息头、权限区、操作区、贴边小条、远程点击保护、关窗确认、主题和语言跟随，加 Rust 三项）；第二段等 M2b 合入 main、main 合进 `ui/m3` 以后做（聊天侧栏、文件记录侧栏、主窗口本机区的连入数和"查看"、界面模式跟随）。
+
+**分支和文件边界**（都从 `ui/m3` 切，做完合回 `ui/m3`）
+
+| 分支 | 谁 | 只改这些 |
+|---|---|---|
+| `ui/rust-m3` | Rust coder | `src/ipc.rs`（`Data` 末尾一个变体，主进程一侧 `handle` 一处分发）、`src/ui_cm_interface.rs`（CM 一侧消息循环一处分发）、`src/server/connection.rs`（只在出口连接的编号从现有挂钩拿不到时加一行）、`src/leapgate_ffi.rs`（末尾追加 M3 一段）、`src/leapgate_hooks` 下的新文件、`libs/leapgate/src/ipc.rs`（新）；测试 |
+| `ui/m3-ds` | designer | `app/lib/widgets/` 下 `lg_cm` 开头的新文件、`app/lib/gallery_main.dart` 的追加、这些组件的测试 |
+| `ui/m3-cm` | CM coder | `app/lib/cm/`（新）、`app/lib/main.dart` 的 `--cm` 分支、`app/windows/runner/main.cpp` 里 CM 窗口的初值；core 的 `models/server_model.dart`（新复制）、`leapgate/` 下 `cm_` 开头的新文件、`consts.dart`（只追加）；它们的测试 |
+
+- 和 M2b 重叠的只有 `app/lib/main.dart`（M2b 主页块改界面模式接主题那几行）、core `consts.dart`（M2b 两个 coder 也追加选项键）、`gallery_main.dart`，都只追加，整合时合并相邻行。
+- ARB 键用 `cm` 前缀，加在两个 ARB 文件末尾，中英文同时加，文案照 01 §3.3 和 §7.6，新写的句子列进提交说明。
+- CM coder 先用 M0、M2a 的组件和简单占位把逻辑写通，整合时换成 designer 的组件；占位要能被行为测试按文字和语义标签找到。
+
+**进程间消息和块 2 导出**（Rust coder 做；Rust 合进 `ui/m3` 之前，CM coder 用测试里能换掉的取值函数）
+
+`ipc::Data` 末尾加 `Leapgate(leapgate::ipc::Msg)`，`Msg` 定义在 `libs/leapgate/src/ipc.rs`，以后 Leapgate 的进程间消息都加在 `Msg` 里（03 §6.1 C1），只追加、不改已有变体的顺序和含义。上游 `Data` 两头的消息循环都有兜底的 `_ => {}`，两头各加一处分发，漏了新消息会被静默吞掉。
+
+| 导出（块 2） | 谁调 | 做什么 |
+|---|---|---|
+| `leapgate_incoming_counts()`，异步，返回 JSON 字符串 | 主窗口本机区（第二段） | 连服务进程的进程间通道问一次，返回 `{"remote":n,"file_transfer":n,"port_forward":n,"exit":n,"camera":n,"terminal":n}`；服务进程不在时 `{}`。端口转发里属于出口的只算进 `exit`。不改上游 `ui_interface.rs` 的状态轮询（C1） |
+| `leapgate_show_cm()` | 主窗口"查看"（第二段） | 经上游 `send_to_cm`（`src/ui_interface.rs`）同一条路发 `Msg::ShowCm`；CM 进程不在时什么也不做（C2） |
+| `leapgate_ui_mode_changed(mode)` | 主窗口改了界面模式以后（第二段） | 发 `Msg::UiMode(mode)` 给 CM（S7） |
+| `leapgate_cm_events(sink)`，`StreamSink<String>` | CM 启动时订阅 | CM 一侧收到 `Msg::ShowCm` 推 `{"name":"show_cm"}`，收到 `Msg::UiMode` 推 `{"name":"ui_mode","mode":"…"}`。不往上游的 `InvokeUiCM` 加方法（10.1） |
+
+- C1 的出口：出口连接的编号在已有的 Leapgate 出口挂钩里记进 `libs/leapgate`（出口在登录时判定，`port_forward_mux.leapgate_exit`）；数的时候按上游连接表（`AUTHED_CONNS`）分类，端口转发里编号在出口表中的算出口，出口表里已经不在连接表的编号顺手删掉（V1 的做法）。上游的连接表和 `AuthedConn` 不加字段。
+- 已知限制：新旧版本的进程短暂同时在跑时，旧进程收不懂新变体，解码失败（上游 `Data::DrmCursor` 的注释写过同类问题）。新界面便携版和旧界面不同时运行（03 §7.1），日常碰不到。
+- C1 在 M6 也要用（关出口前的确认）。
+
+**组件（designer）**：规则同 10.8"组件约定"。要做的见 06 §2.2：CM 外框（可拖动的标题区、"收起""关闭"，紧凑和展开两种宽度）、来访标签条、信息头（头像规则同 01 §3.1 区块 D）、几种会话类型的信息区、权限区（带文字的开关两列、只读态）、操作区的各种组合、贴边小条（一个连接按类型的文案、几个连接）、远程点击被拦下的提示、文件记录侧栏的列表行和空状态、关窗确认。聊天侧栏用 M2b 正在做的聊天面板，只补只读态（第二段，聊天面板合入以后）。CM 的颜色跟主题，信息头用固定的浅青功能底（01 §2.4），不用来访者的身份色。
+
+**CM 页面（CM coder，第一段）**
+
+- 初始化：`--cm` 分支照上游 `flutter/lib/main.dart:285-302`：先建 `AppCore`，再按 CM 初始化平台接口（`kAppTypeConnectionManager`，它会调 Rust 的 `cm_init`，`core/lib/models/native_model.dart` 里已有这一处），登记 CM 的全局事件 `add_connection`、`on_client_remove`、`show_elevation`、`update_voice_call_state`、`theme`、`language`（登记在 `appCore.events`，10.6），第二段再加 `chat_server_mode`、`cm_file_transfer_log`。不读 `hide_cm`（03 §5.2 M3）。
+- 复制件：`flutter/lib/models/server_model.dart` 复制进 core，CM 用到的部分按"只删界面调用"保留（客户端列表、`addConnection`、`onClientRemove`、接受和拒绝、断开、提权、撤销交换、语音状态、关闭全部、500 ms 的轮询和约 6 秒退出），主窗口和 Android 的部分（密码、ID、起停服务）整段删掉，来源行写明删了什么。标签不用上游的 `DesktopTabController`，用自己的列表。一条连接的两次 `add_connection`、`on_client_remove` 的关闭标记、同一个人重连时删旧的那条，照上游的规则（06 §4.2）。
+- 窗口：紧凑态约 300×490、贴主显示器工作区右上角、置顶、不能改大小；展开侧栏时向左展开到约 700 宽；隐藏照上游用透明加隐藏、不销毁；runner 里 CM 的初值（现在 800×600）改成和 Dart 一致。
+- 贴边小条：同一个窗口缩成一条，贴主显示器上边、靠右，沿上边左右拖动、位置记住（新的 LocalConfig 键，`leapgate-` 开头，放在用它的文件里，10.7 接入办法第 2 条）；授权后自动收起的时机和取消条件照上游 `server_model.dart:571-590`、`server_page.dart:180-186`（01 §3.3 改成"收成小条"而不是最小化）；新来访时恢复成完整小窗并置顶。
+- 远程点击保护：照上游 `server_page.dart:1237-1253`，被拦下时在按钮旁提示"无法远程执行此操作"；`allow-remote-cm-modification` 开着时放行。小条上的"断开"同样受保护。
+- 关窗：多于一个连接时始终确认"断开全部会话？"，不读 `enable-confirm-closing-tabs`（R2-Q16）；关闭照上游 `closeAll`。
+- 主题、语言：启动时读当前设置，运行中收 `theme`、`language` 事件切换（新界面的主题和 ARB，不用上游的 `MyTheme`）；语言只有简体中文和英文，跟随系统而系统是其他语言时用英文（IQ10）。
+
+**测试和合入**
+
+- core：客户端列表的增删和两次事件、已断开的保留和清理、自动收起的取消条件、没有来访时退出的计时（用假时钟），各有单测；Rust：C1 的分类（含出口表清理）、`Msg` 的编解码。app：06 §5.1 列的每种状态一个行为测试。
+- 合入前：`git diff main -- flutter/` 为空；core 的 `flutter analyze --no-fatal-infos` 在 3.44.9 下不超出 92 条 info 的基线，新复制的 `server_model` 带来的上游提示单列；app 0 条；复制件不跑格式化；改已有文件时不对整个文件跑 `dart format`。
+- 审查重点：Rust 看两头分发都在、出口计数和清理、旧界面的 CM 不受影响；CM 看事件处理和上游规则一致、窗口和小条的状态切换、远程点击保护；组件看样稿必修项。
