@@ -82,21 +82,25 @@ class LgTagChips extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = LgTokens.of(context);
     final gap = spacing ?? (t.detail ? LgSpace.s1 : LgSpace.s2);
-    return ClipRect(
-      child: Align(
-        alignment: alignEnd ? Alignment.centerRight : Alignment.centerLeft,
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          physics: const NeverScrollableScrollPhysics(),
-          reverse: alignEnd,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              for (final (i, tag) in tags.indexed) ...[
-                if (i > 0) SizedBox(width: gap),
-                LgTagChip(tag),
+    // As high as a chip: a horizontal scroll view would take all the height.
+    return SizedBox(
+      height: t.sizes.lhS + (t.detail ? 0 : 2),
+      child: ClipRect(
+        child: Align(
+          alignment: alignEnd ? Alignment.centerRight : Alignment.centerLeft,
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            physics: const NeverScrollableScrollPhysics(),
+            reverse: alignEnd,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final (i, tag) in tags.indexed) ...[
+                  if (i > 0) SizedBox(width: gap),
+                  LgTagChip(tag),
+                ],
               ],
-            ],
+            ),
           ),
         ),
       ),

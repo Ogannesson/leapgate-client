@@ -201,7 +201,16 @@ class LgMenuSwitchItem extends StatelessWidget {
           child: ExcludeSemantics(
             child: Row(
               children: [
-                Expanded(child: LgEllipsisText(label)),
+                Expanded(
+                  child: !enabled && disabledNote != null
+                      ? Text(
+                          label,
+                          maxLines: 1,
+                          softWrap: false,
+                          overflow: TextOverflow.ellipsis,
+                        )
+                      : LgEllipsisText(label),
+                ),
                 if (shortcut != null) ...[
                   const SizedBox(width: LgSpace.s3),
                   Flexible(
@@ -261,7 +270,16 @@ class LgMenuCheckItem extends StatelessWidget {
           child: ExcludeSemantics(
             child: Row(
               children: [
-                Expanded(child: LgEllipsisText(label)),
+                Expanded(
+                  child: !enabled && disabledNote != null
+                      ? Text(
+                          label,
+                          maxLines: 1,
+                          softWrap: false,
+                          overflow: TextOverflow.ellipsis,
+                        )
+                      : LgEllipsisText(label),
+                ),
                 const SizedBox(width: LgSpace.s3),
                 LgCheckGlyph(value: value, enabled: enabled),
               ],

@@ -219,9 +219,14 @@ class _ItemRow extends StatelessWidget {
     this.lead,
     this.trailing,
     required this.disabled,
+    this.ownTip = true,
   });
 
   final String label;
+
+  /// False when the row has a tooltip of its own (the note of a greyed row):
+  /// two tooltips on one spot would put the empty one over the other.
+  final bool ownTip;
   final String? description;
   final Widget? lead;
   final Widget? trailing;
@@ -249,7 +254,14 @@ class _ItemRow extends StatelessWidget {
         ],
         Expanded(
           child: description == null
-              ? LgEllipsisText(label)
+              ? (ownTip
+                    ? LgEllipsisText(label)
+                    : Text(
+                        label,
+                        maxLines: 1,
+                        softWrap: false,
+                        overflow: TextOverflow.ellipsis,
+                      ))
               : Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
@@ -382,6 +394,7 @@ class LgMenuItem extends StatelessWidget {
         label: label,
         description: description,
         disabled: onPressed == null,
+        ownTip: !(onPressed == null && disabledNote != null),
         lead: _lead(c, icon: icon, checked: checked),
         trailing: _tail(
           t,
@@ -434,6 +447,7 @@ class LgSubmenu extends StatelessWidget {
       child: _ItemRow(
         label: label,
         disabled: items.isEmpty,
+        ownTip: !(items.isEmpty && disabledNote != null),
         lead: _lead(c, icon: icon),
         trailing: _tail(
           t,
