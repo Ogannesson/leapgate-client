@@ -7,6 +7,18 @@ import 'package:flutter/material.dart';
 import '../theme/lg_tokens.dart';
 import 'lg_pressable.dart';
 
+// The words are 13 px in both modes and sit 6 px from their switch (the mockup
+// has 14 px in the simple mode and 8 px). The window is 320 wide but its
+// client area is 304 to 311 once Windows takes its invisible resize border
+// (309 at 150 %), which leaves a column 122 to 125 wide: a switch (36), the
+// gap and six Chinese characters ("文件复制粘贴", "阻止本地输入") need 36 + 8 + 84
+// = 128 at 14 px, so they broke into two lines. At 13 px with a 6 px gap they
+// need 36 + 6 + 78 = 120. The 12 px between the columns stays: it has to be
+// wider than the gap inside a cell, or a word reads as belonging to the next
+// switch.
+const double _labelSize = 13;
+const double _labelGap = 6;
+
 /// One permission: the words, whether it is granted, and what flips it. A null
 /// [onChanged] makes this one item inert.
 class LgCmPermission {
@@ -143,14 +155,19 @@ class _PermissionCell extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(width: LgSpace.s2),
+              const SizedBox(width: _labelGap),
               Expanded(
                 child: ExcludeSemantics(
+                  // Words that do not fit one line (other languages) go to a
+                  // second one; the row grows with them.
                   child: Text(
                     item.label,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: t.textM.copyWith(color: c.text),
+                    style: LgTokens.style(
+                      _labelSize,
+                      t.sizes.lhM,
+                    ).copyWith(color: c.text),
                   ),
                 ),
               ),

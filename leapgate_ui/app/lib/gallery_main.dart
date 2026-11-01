@@ -2941,6 +2941,26 @@ Widget _cmCrop(Widget panel) => Builder(
   },
 );
 
+/// The permissions with the buttons under them, in a panel of a window at the
+/// narrowest client area ([kLgCmNarrowestClient] wide), without the header.
+Widget _cmNarrowPanel(Widget body) => Builder(
+  builder: (context) => SizedBox(
+    width: kLgCmNarrowestClient,
+    height: 290,
+    child: ColoredBox(
+      color: LgTokens.of(context).colors.bg,
+      child: Padding(
+        padding: const EdgeInsets.all(LgSpace.s2),
+        child: _cmPanel(
+          header: const SizedBox(height: 12),
+          body: body,
+          actions: [_cmDisconnectRow()],
+        ),
+      ),
+    ),
+  ),
+);
+
 List<LgCmFileEntry> _cmFileEntries() => const [
   LgCmFileEntry(
     action: LgCmFileAction.toHere,
@@ -3202,6 +3222,35 @@ List<Specimen> _m3Specimens() {
           header: _cmHeader(_cmLi, sideButton: _cmChat()),
           body: _cmPerms(readOnly: true),
           actions: [_cmDisconnectRow()],
+        ),
+      ),
+    ),
+    // The longest words at the narrowest client area of the window: one line
+    // each. In English they do not fit one line in a column and take two.
+    cm(
+      'permissions-longest',
+      const Size(kLgCmNarrowestClient, 290),
+      (_) => _cmNarrowPanel(_cmPerms()),
+    ),
+    cm(
+      'permissions-longest-english',
+      const Size(kLgCmNarrowestClient, 290),
+      (_) => _cmNarrowPanel(
+        LgCmPermissions(
+          title: 'Allow the remote user',
+          items: [
+            for (final (i, label) in [
+              'Keyboard and mouse',
+              'Clipboard',
+              'Audio',
+              'File copy and paste',
+              'Remote restart',
+              'Record',
+              'Block user input',
+              'Privacy mode',
+            ].indexed)
+              LgCmPermission(label: label, value: i.isEven, onChanged: (_) {}),
+          ],
         ),
       ),
     ),
