@@ -1,0 +1,10 @@
+# build_runner here only serves flutter_rust_bridge's codegen: freezed for the bridge's classes.
+# freezed 2.x pins analyzer below 8, and analyzer 7.7.1 cannot link a library whose parameter
+# default is a dot shorthand (Flutter 3.47's platform_views.dart has one), so resolving any
+# annotated file that reaches package:flutter/services.dart breaks the build on a newer SDK.
+targets:
+  $default:
+    builders:
+      freezed:
+        generate_for:
+          - lib/generated_bridge.dart
