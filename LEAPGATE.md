@@ -459,6 +459,8 @@ Leapgate 自己的文件里和挂钩配套的：`report/heartbeat.rs` 在开关�
 | S12 | `src/leapgate_ffi.rs` 的 `leapgate_version()` | `libs/leapgate` 的版本（`libs/leapgate/src/ui.rs` 的 `VERSION`），界面当产品版本显示；构建时由 `--build-name` 写进 Windows 版本资源 |
 | C3 | `src/leapgate_ffi.rs` 的 `leapgate_msgbox_reason(msgtype, title, text)`，同步 | 会话的 `msgbox` 事件按（类型、标题、正文）归成原因码，返回 JSON 字符串：`{"code": "..."}`，带参数的原因多一个键（`feature` 或 `port`，见下表）。归类在 `libs/leapgate/src/reason.rs`（纯函数）。能否重试取 msgbox 事件的 `hasRetry`（即 `Session::msgbox` 当时调上游 `check_if_retry` 算出的结果，`src/flutter.rs` 的 `msgbox`），C3 只给原因码。没认出的归 `other`，界面显示原文；同一段正文只在日志里写一次（最多记 64 段，有的正文来自对端）。上游 Dart 的"连上过的会话报不在线时 30 秒内照样重试"（`model.dart` 的 `shouldAutoRetryOnOffline`）不在 Rust 里，归 `core` 的连接状态。返回 JSON 而不是块 2 的结构体：参数随原因变，`SyncReturn<String>` 是 F0 实测过的形态 |
 | V1 | `src/leapgate_ffi.rs` 的 `leapgate_session_set_visible(session_id, visible)`，同步；`src/flutter.rs` 的 `on_rgba`（桌面那一份）、`on_texture` 开头各一处挂钩 | 不可见的会话标签不往界面推帧：照常收流、解码、计帧率，只是不交给 Flutter（03 §3.3 第 1 条）。界面用法：标签切走时设 `false`；切回时设 `true`，再调上游的 `session_refresh(session_id, display)` 要一帧（软件上屏、纹理上屏都一样）。状态在 `libs/leapgate/src/session.rs`，默认可见，只记被隐藏的会话；挂钩在这个对端会话的所有界面会话（`session_handlers`）都被隐藏时才跳过，同一台设备在另一个窗口里还显示着就照推。会话关闭不加挂钩：设回可见时删掉条目，每次调 `leapgate_session_set_visible` 时顺手删掉已经不在的会话（隐藏着被关掉的标签），查会话时不拿着这把锁（挂钩是拿着 `session_handlers` 读锁再拿它，反过来会有锁序问题）。不会卡住：软件上屏的"界面还没取走上一帧就不推下一帧"（`display_rgbas` 的 `valid`）只在已经发出的 `Rgba` 事件被界面处理后复位，隐藏前发出的那一条照常会被 `core` 处理（取帧、`session_next_rgba` 不依赖页面是否显示）；纹理上屏的"第一帧通知"（`notify_render_type`）隐藏期间不动，切回后的第一帧照常通知。界面要注意：上游 Dart 连上后 1.5 秒还没画面会给对方发空的系统登录密码（`model.dart` 的 `waitForImageTimer`），标签在第一帧到之前被隐藏时这个判断会误触发，`core` 要在隐藏期间不按"没画面"处理 |
+| Q3 | `src/leapgate_ffi.rs` 的 `leapgate_session_connection(session_id)`，同步；`src/client.rs` 三处挂钩（`create_relay`、`_start_inner` 和 `request_relay` 里服务器拒绝的 `bail!` 前），已有的 H-1（`race_ice`）调用不改 | 这个会话当前连接是怎么连上的（01 §4.2 第二级的"路径""中继服务器""传输"），返回 JSON 字符串：`{"path":"relay","transport":"tcp","relay":"relay-1.example.com"}`、`{"path":"lan","transport":"tcp"}`；服务器拒绝了这次连接时 `{"refused":"<原文>"}`；还没连上、正在重连、会话已不在、判不出时 `{}`。界面在每次连接就绪事件后重新取。路径码、判法、中继名和拒绝原因的取法见下面"Q3 连接路径和中继名" |
+| 本机名 | `src/leapgate_ffi.rs` 的 `leapgate_local_display_name()`，同步 | 登录时显示给对方的本机名称（"等对方接受"面板的"显示给对方的名称"），返回字符串。算法照上游 `src/client.rs` 登录时的 `display_name` 抄了一份在 `libs/leapgate/src/ui.rs` 的 `display_name`（不改上游那段去抽函数）：先读内置选项 `display-name`，再读 LocalConfig `user_info` 的 `display_name`（trim 后非空）或 `name`，再退到系统用户名，最后按空白分词、每词首字母大写、用一个空格连接。读的是调用时的值，和上一次登录时实际发出去的可能不同（中间改过登录状态时） |
 
 - 新界面 runner 的窗口类：主窗口 `LEAPGATE_UI_MAIN`，CM（`--cm`）`LEAPGATE_UI_CM`，安装页（`--install`）`LEAPGATE_UI_INSTALL`。三者分开，按主窗口类名找时不会找到另外两个。主窗口的类名（`leapgate_ui/app/windows/runner/main.cpp` 的 `kMainWindowClass`）和 `libs/leapgate/src/ui.rs` 的 `MAIN_WINDOW_CLASS` 要一致；另外两个 Rust 不找，只在 runner 里。
 - 合并上游时核对：`core_main_invoke_new_connection` 的 Windows 分支仍按 `send_message_to_hnwd` 加 `WM_USER + 2` 把链接交给已有窗口（`uni_links_desktop` 认这个消息号）；上游有没有新增按 `FLUTTER_RUNNER_WIN32_WINDOW_CLASS` 或窗口标题找窗口的地方（`git grep -n "FLUTTER_RUNNER_WIN32_WINDOW\|FindWindow"`）。
@@ -507,12 +509,86 @@ Leapgate 自己的文件里和挂钩配套的：`report/heartbeat.rs` 在开关�
 
 - `feature` 取 `file_transfer`、`camera`、`terminal`、`port_forward`；`port` 是数字。
 - 01 §4.3 里写"不会出现"的两行（Incoming only mode、MSG_NEED_MUX）不给码，真出现时归 `other`。
-- 已知限制：服务器自定义的拒绝原因（`PunchHoleResponse.other_failure`、`RelayResponse.refuse_reason`）在 msgbox 里只是任意正文，和系统错误原文分不开，归 `other`、显示原文。01 §4.3 要的"服务器拒绝了此连接："前缀，得在 `src/client.rs` 加两处挂钩（`_start_inner` 的 `bail!(ph.other_failure)`、`request_relay` 的 `bail!(rs.refuse_reason)`），等 Q3 的挂钩位置交维护者确认时一起问。
+- 已知限制：服务器自定义的拒绝原因（`PunchHoleResponse.other_failure`、`RelayResponse.refuse_reason`）在 msgbox 里只是任意正文，和系统错误原文分不开，C3 归 `other`、显示原文。01 §4.3 要的"服务器拒绝了此连接："前缀由 Q3 的导出给：界面收到连接阶段的 msgbox 后调 `leapgate_session_connection`，有 `refused` 就显示"服务器拒绝了此连接：<原文>"（见下面 Q3 第 4 节）。
 - 不在 01 §4.3 里的错误不给码，归 `other`：摄像头、终端的（`No cameras`、`view_camera_unsupported_tip`、`Remote terminal is not supported by the remote side`）第三轮随说明一起补；`No active console user logged on…` 01 没有文案。
 - Linux 对端的另几种登录错误（`x11 expected`、`ubuntu-21-04-required`、portal 不可用）归 `other`、显示原文；01 §4.3 只给了 Wayland 登录界面那一条。
 - `Failed to listen on` 一律归 `local_port_in_use`。Windows 上端口落在系统保留段时报的是 10013（访问被拒），文案"被占用"不准，但"改用其他端口"的建议仍然对。
 - 没认出的正文入表和写日志前截到 200 个字符（按字符边界），因为有的正文来自对端。
 - 合并上游时：`git diff <旧> <新> -- src | grep msgbox` 看 msgbox 文本有没有变，变了就改 `reason.rs` 的表和单测（03 §3.8 第 3 条）；`check_if_retry` 的签名或语义变了，核对 `leapgate_msgbox_reason`。
+
+#### Q3 连接路径和中继名
+
+2026-10-30 读码定的方案（基线 `7bc0abd92`，下文行号以它为准），2026-10-31 维护者把末尾三条全部按推荐定了（见"维护者的决定"），同日实现。按 03 §6.1 Q3、§12 IQ14。界面要什么见 01 §4.2（第二级的"路径""中继服务器""传输"三项）。
+
+**思路**：`race_ice`（§7.1 的 H-1，`src/client.rs:393`）包着整个 `Client::_start`，上游的结果、上游的错误、ICE 的结果都从它这里出去，所以路径在它里面判、在它里面写表。`_start` 里面有四样东西 `race_ice` 看不到：服务端回没回 `is_local`、局域网多候选赢没赢、连的是哪台中继、服务器有没有拒绝。这几处的挂钩拿不到会话，用 tokio 的 task-local 记录器传：`race_ice` 用 `leapgate::session::record` 把整场竞速包在记录器的 `scope` 里（ICE 那条腿不写记录器）；已有的 `lan_connect`、`lan_fallback` 在函数里调 `note_lan`，`src/client.rs` 新加的三处调 `note_relay`、`note_refusal`，不在 scope 里（单测、别的调用方）时什么也不做。已有挂钩的调用行和参数都没改。能这样做是因为 `_start` 的整棵调用树（两轮 `_start_inner` 的 `select_ok`、`connect`、`request_relay`、中继和 IPv6、WebRTC 的竞速）都在同一个 future 里被 poll；被 `tokio::spawn` 的只有 UDP NAT 测试和 WebRTC 的候选桥，Q3 用不到它们。
+
+##### 1. 六种路径怎么判
+
+纯函数 `leapgate::session::classify`，`race_ice` 拿到成功结果后调用，按下表顺序取第一条命中：
+
+| 顺序 | 01 §4.2 的叫法 | 路径码 | 条件 | 数据从哪来 |
+|---|---|---|---|---|
+| 1 | 直接 IP 访问 | `direct_ip` | `is_direct_ip_access(peer)`（`src/common.rs:3039`） | `race_ice` 的 `peer` 参数。上游 `_start` 对 IP 和 `域名:端口` 直接 `connect_tcp_local`，返回 `"TCP"`（`src/client.rs:440`、`:455`） |
+| 2 | ICE 胜出时 | `lan` / `punch_v4` / `punch_v6` | `race_legs` 返回 `Either::Left`。选中对的对端地址是私网 IPv4（10/8、172.16/12、192.168/16）或 ULA（fc00::/7）时 `lan`；否则按地址族 `punch_v4` / `punch_v6` | `IceWin` 里多存的 `remote`（`sel.remote` 的 IP），在 `leapgate_hooks.rs` 里，不碰上游 |
+| 3 | 经中继 / 经中继（WebSocket） | `relay` / `relay_ws` | 结果的 `direct` 为假（`"Relay"`、`"WebSocket"`，以及走 TURN 的 `"WebRTC"`）。流是 `Stream::WebSocket` 时 `relay_ws`，否则 `relay` | 结果元组。按流的变体判、不按标签：`connect()` 的中继回退在 WebSocket 下也写 `"Relay"`（`src/client.rs:1588`、`:1627`） |
+| 4 | 局域网直连 | `lan` | `"TCP"`、直连，并且这次尝试里服务端回过 `is_local`（局域网多候选胜出，或上游按 `is_local` 连了本地地址） | 记录器：`lan_connect` 成功时、`lan_fallback` 收到 `is_local = true` 时各记一笔（已有挂钩 `src/leapgate_hooks.rs` 的 `lan_connect`、`lan_fallback` 里各加一行 `note_lan`） |
+| 5 | 打洞直连（IPv4）/（IPv6） | `punch_v4` / `punch_v6` | `"TCP"` 直连但不是局域网（TCP 打洞）：按流本地地址的地址族（IPv4 映射地址算 IPv4）；`"UDP"` 是 `punch_v4`；`"IPv6"` 是 `punch_v6`；直连的 `"WebRTC"` 按 `webrtc_remote_ipv6()`（拿不到时算 IPv4，和 `io_loop` 给连接类型标签的做法一致） | 结果元组、`Stream::local_addr` |
+| 6 | 都不是 | 不给（`{}`） | 读码看不会出现；界面只显示第一级 | |
+
+- 传输（01 §4.2"传输：TCP / UDP"）顺带给：ICE 和标签是 `"UDP"`、`"IPv6"`（这两种带 KCP）、`"WebRTC"` 时 `udp`，其余 `tcp`。
+- 01 §4.2 要求不区分 ICE 和上游打洞，这里只按"实际走的是不是局域网地址"分 `lan` 和打洞（维护者 2026-10-31 定）。全局 IPv6 即使两端在同一 /64 也算打洞直连（IPv6），和上游 IPv6 打洞一致。srflx 的对端地址都是公网地址，归打洞。
+- 上游 UDP 打洞不会出现在 `is_local` 那一轮：服务端的局域网响应不带 `is_udp`（leapgate-server `rendezvous_server.rs` 的 `handle_local_addr`），`_start_inner` 不会把 NAT socket 连上去。`is_local` 那一轮 IPv6 打洞赢了算打洞直连（IPv6）。
+- WebRTC：自建服务器时默认关（`get_local_option` 给 "N"），用户打开时按上表第 3、5 行处理，走 TURN 时不给中继名。
+
+##### 2. 中继名
+
+- 01 §4.2 和 §7 的示例显示的是服务器下发的中继地址（`relay-1.example.com`），没有另起的名字。取服务端下发的原串，去掉默认端口 `:21117`（`RELAY_PORT`），非默认端口保留。
+- 挂钩放在 `create_relay` 里，不放 03 写的 `request_relay`。中继连接有三个来源：`_start_inner` 收到被控端要求中继的 `RelayResponse` 时直接 `create_relay(rr.relay_server)`（`src/client.rs:1135`）；`connect()` 直连失败后、两处 WebRTC 握手失败后经 `request_relay` 再 `create_relay`（`:1868`）。放在 `request_relay` 只看得到后两种，第一种会漏（被控端是对称 NAT、任一端强制中继时都走它）；三条路最后都经过 `create_relay`。
+- `create_relay` 在 `RelayResponse` 分支里和 IPv6、WebRTC 同时起跑，没赢也会被记下，所以只在第 1 节判成中继时才给名字；`"WebRTC"`（TURN）不给；一次尝试里记到两台不同的中继时不给（两轮 `_start_inner` 同时问服务端，读码看服务端给的是同一台，实际碰不到）。
+- 不按连接对上：`create_relay` 把 `relay_server` 按值交给 `ipv4_to_ipv6` 再去连，连好以后原串已经没了；要对上得在连接前后各加一处挂钩，不值。
+
+##### 3. 挂钩清单
+
+| 编号 | 文件 | 位置 | 加几行 | 调用 | 为什么不能少 |
+|---|---|---|---|---|---|
+| Q3-1 | `src/client.rs` | `create_relay`（`:1872`）开头，上游注释 `The proxy's address family…` 和 `let relay_server = check_port(relay_server, RELAY_PORT);`（`:1881`）之前 | 2（注释 + 调用） | `leapgate::session::note_relay(&relay_server);` | 中继地址只在 `_start_inner` 和 `create_relay` 的局部变量里，`race_ice` 拿到的结果里没有 |
+| C3-1 | `src/client.rs` | `_start_inner`，`bail!(ph.other_failure);`（`:1011`）之前 | 2 | `leapgate::session::note_refusal(&ph.other_failure);` | 服务器自定义的拒绝原因是任意正文，到界面时和系统错误分不开（C3 的已知限制） |
+| C3-2 | `src/client.rs` | `request_relay`，`bail!(rs.refuse_reason);`（`:1858`）之前 | 2 | `leapgate::session::note_refusal(&rs.refuse_reason);` | 同上；这条在 `connect()` 里还会被包成 `Failed to connect via relay server: <原因>`，按正文认不出来 |
+| 已有 H-1 | `src/client.rs:393` | `race_ice` | 0 | 调用不改 | 建记录器、判路径、写表都在函数里 |
+| 已有 | `src/client.rs:1379`、`:1385` | `lan_connect`、`lan_fallback` | 0 | 调用不改 | 在函数里记局域网胜出和 `is_local` |
+
+- `src/client.rs` 新增 3 处（Q3-1、C3-1、C3-2），其他上游文件 0 处，在 03 §6.1 定的"不超过 3 处"以内。合并不了：两处拒绝都在各自的 `bail!` 前面，和 `create_relay` 不在同一个函数里；把 Q3 挂到 `request_relay` 里能和 C3-2 挨着，但会漏掉上面说的 `RelayResponse` 那条中继。
+- 三处直接调 `libs/leapgate`（和上游文件里已有的 `leapgate::route::self_id()`、`leapgate::lan::peer_candidates` 一样），不经 `leapgate_hooks.rs` 转一手：它们不用上游的私有项。
+- `src/client/io_loop.rs`、`src/flutter.rs` 不加：`race_ice` 返回在 `io_loop` 调 `set_connection_type`（发连接就绪事件，`src/client/io_loop.rs:218`）之前，界面收到事件时表已经写好；导出用上游已有的 `sessions::get_session_by_session_id` 找会话。
+
+##### 4. 交给界面
+
+- 状态放 `libs/leapgate/src/session.rs`，键是（对端 ID、连接类型），值是这次连接的路径、传输、中继名，或者服务器的拒绝原因。不按界面 session_id 存：`race_ice` 拿到的是对端会话（上游的 `Session`），一个对端会话可以挂多个界面会话；上游 `flutter::sessions` 的 `SESSIONS` 就是按（`lc.id`、`conn_type`）存对端会话、每个键只有一个（`insert_session` 用 `entry().or_insert`），`race_ice` 里的 `interface.get_id()` 和 `get_lch()` 的 `conn_type` 正是这个键。
+- 导出 `leapgate_session_connection(session_id)`，同步，返回 JSON 字符串（和 C3 一样，F0 实测过的形态）：先用 `sessions::get_session_by_session_id` 找到对端会话、取出键，再查表。例：`{"path":"relay","transport":"tcp","relay":"relay-1.example.com"}`、`{"path":"lan","transport":"tcp"}`；没有记录（还没连上、正在重连、会话已不在）时 `{}`，界面只显示第一级。路径码 `lan`、`direct_ip`、`punch_v4`、`punch_v6`、`relay`、`relay_ws` 和 C3 的原因码一样算接口。不另给地址族：打洞的两种已经带着，其余几种界面用不到。
+- 写入：`race_ice` 一进来先删掉这个键的旧记录，成功时写新记录，失败时只在有服务器拒绝原因时写。重连（`Session::reconnect`、自动重试）每次都重新走 `Client::start`，所以重连期间查到 `{}`，连上以后换成新路径，界面在这一轮的连接就绪事件后重新取。`Session::reconnect` 在"正在连接"时直接返回，同一个对端会话不会有两轮 `Client::start` 同时跑。
+- 清理：不加挂钩，照 V1 的做法：每次调 `leapgate_session_connection` 时顺手删掉已经没有对端会话的键（用上游 `sessions::get_session_by_peer_id` 判断，查的时候不拿着表的锁）。放在导出里而不是写入时，`race_ice` 就不用引用只有 Flutter 构建才有的 `flutter::sessions`；不带界面的构建没人查，表里每个连过的（对端、连接类型）留一条，不会无限长。
+- 端口转发、出口隧道也经 `Client::start`，同样会写（连接类型不同，键互不影响）；界面不查它们，出口的状态由 E2 给。
+- 服务器拒绝：`race_ice` 返回错误、记录器里有服务器拒绝原因时，把原因写进同一张表，导出返回 `{"refused":"<原文>"}`；界面收到连接阶段的 msgbox 后调这个导出，有 `refused` 就显示"服务器拒绝了此连接：<原文>"。错误原文不动，旧界面和以前一样。ICE 在上游被拒以后照样可能连上，那时按成功写路径，不给 `refused`。两轮 `_start_inner` 一轮被拒、另一轮因别的原因失败时，返回的错误可能是另一轮的，`refused` 照样给（服务器确实拒绝了）。
+
+##### 5. 拼不全、有风险的地方
+
+- 记录器只在 `race_ice` 的 future 里被 poll 时有效。上游哪天把 `_start_inner`、`connect` 或中继竞速改成 `tokio::spawn`，就拿不到局域网标记和中继名：局域网的 TCP 直连会被判成打洞直连，中继没有名字，不报错。单测覆盖不到，合并上游时核对 `_start`、`_start_inner`、`connect`、`request_relay` 里有没有新增 spawn，以及 `create_relay` 是否仍是所有中继连接的必经之处。
+- 一次尝试里记到两台不同的中继时不给名字（见第 2 节）。
+- 上游的局域网判断靠服务端的 `is_local`：服务端误判同网（两端公网出口相同、其实不在一个局域网，§3.4 的已知限制）时，上游的 TCP 直连被判成局域网直连；服务端判成不同网、其实在一个局域网、走了 TCP 打洞时，判成打洞直连。ICE 按地址判，不受这条影响。
+- 上游 `is_local` 那一轮 IPv6 打洞赢了算打洞直连（IPv6），哪怕两台在同一局域网。
+
+##### 6. 合并上游时核对
+
+- `_start`、`_start_inner`、`connect`、`request_relay` 里有没有新增 `tokio::spawn`（把建连接的那段搬进 spawn 出去的任务，记录器就拿不到，见第 5 节）。
+- `create_relay` 是否仍是所有中继连接的必经之处，入参是否仍是服务端下发的原串；`bail!(ph.other_failure)`、`bail!(rs.refuse_reason)` 还在不在、有没有新的服务器拒绝出口。
+- 返回元组的连接类型标签（`"TCP"`、`"UDP"`、`"IPv6"`、`"Relay"`、`"WebSocket"`、`"WebRTC"`）有没有增减或改名，`direct` 的含义变没变：`classify` 按它们判。
+- 上游登录时的 `display_name` 算法（`src/client.rs` 里 `LoginConfigHandler` 组 `LoginRequest` 那段）变没变，变了就改 `libs/leapgate/src/ui.rs` 的 `display_name` 和单测。
+
+##### 维护者的决定（2026-10-31，全部按推荐）
+
+1. Q3 的挂钩放 `create_relay`，不放 03 写的 `request_relay`（理由见第 2 节）。
+2. C3 的"服务器拒绝了此连接："前缀要做（`src/client.rs` 再加 2 处，共 3 处）：拒绝原因写进本表、由 `leapgate_session_connection` 返回，错误原文不动、旧界面不受影响。没选的备选：在 `race_ice` 里把错误正文改写成 `Server refused the connection: <原因>`，代价是旧界面也显示这句英文。
+3. ICE 选中的对端地址是私网 IPv4 或 ULA 时判成 `lan`（显示"局域网直连"，显示的是实际走的网络）。没选的备选：ICE 一律按地址族显示打洞直连，和旧界面的标签一致。
 
 ### 10.5 验收记录
 
@@ -637,6 +713,63 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 - 问题 2（关窗确认）：复现不出，判通过。程序停着时 `Leapgate_local.toml` 里没有 `enable-confirm-closing-tabs`，也没有 `leapgate-close-action`；有一个会话时发 WM_CLOSE，出现"断开全部 1 个会话并关闭窗口？"和"不再提示"。照上一轮的顺序（先在没有会话时关窗、取消，再连上、再关窗）也一样。上一轮那次为什么只问"关闭窗口？"没查清：那次两个键是用 `Configure` 写空串删掉的，删掉后才启动程序。
 - 小改：本机区 ID 下面的"复制"是文字按钮，和 ID 左对齐；连接"最近"里有记录的设备时，连接中和要密码时面板标题、会话标签、窗口标题都先显示设备名，副标题是 ID。
 
+#### M2b 控制端完整会话页和主页（2026-11-01，`9799bb9ec`）
+
+黑盒验收，无人值守。控制端 A（新界面，3.44.9 自编引擎，补丁 0003）连被控端 B（4K，旧界面 `8fcdabb1e`；Q3 的挂钩只在控制端，所以 B 没有重编）。依据 05 §6。面板操作用 `scripts/e2e/leapgate-uia.ps1`（原生 COM 的 IUIAutomation，按语义名），工具栏菜单项没有 Invoke 模式、用它的 `Click`（真实鼠标）；点击窗口里没有名字的位置用 `leapgate-post-input.ps1`。含被控端画面的截图读完即删，不留证据。
+
+**05 §6.1 自动测试**：通过。core `flutter analyze` 92 条 info（基线不变，全在复制件里），测试 170 个通过；app analyze 0 条，测试 405 个通过、2 个跳过。Rust：`leapgate` crate 139 个通过，其中有 `session::tests::connection_paths`（Q3 分类，逐种路径）和 `ui::tests::display_name_as_upstream_computes_it`（本机名对上游算法）；根 crate `cargo test --lib leapgate` 11 个通过（`leapgate_hooks`）。
+
+**05 §6.3 真实连接**
+
+| 项 | 结果 |
+|---|---|
+| 连接方式详情，自研 ICE 胜出 | 通过。日志 `leapgate ice: selected host/v6/ethernet <-> host/v6`；详情"路径 打洞直连（IPv6）、传输 UDP、加密 已加密"，指纹带复制按钮；画面数据（编码 H265、帧率、目标码率、色度 4:2:0、速度）；延迟只有"端到端"一行，带当前、最低、平均、最高和近 60 秒折线；"在画面上显示质量数据"开关 |
+| 经中继 | 通过。`--relay`；详情"路径 经中继、中继服务器 ‹地址›、传输 TCP"，地址和日志 `relay_server` 一致；标签语义名里带"经中继" |
+| 上游直连、局域网直连 | 未验证：两端都在 ICE 抢先，造不出上游直连；局域网直连要同局域网的第二台端点（测试虚拟机宿主内存紧，没开机） |
+| 工具栏菜单 | 通过。远程桌面、画面、输入、操作、会话、聊天六个菜单各打开一次，条目和 01 的分组一致；"添加备注"灰显并有"登录后可添加备注"说明 |
+| 画质、缩放 | 通过。选"速度优先"后对端配置 `image_quality = 'low'`；选"适应窗口"后 `view_style = 'adaptive'` |
+| 截图并另存 | 通过。操作 › 截图后出"截图已完成"和"另存为""复制到剪贴板"；另存为弹出系统对话框，保存的 PNG 有效（约 500 KB，已删） |
+| 隐私模式 | 未验证：便携构建没带 `WindowInjection.dll`，被控端开不起来。点开关后出一条只有"失败"二字的通知，没有原因（见问题 1） |
+| 阻止、取消阻止本地输入 | 未验证：被控端非提权，`BlockInput` 超时，通知"无法阻止远程设备的本地输入（Error: … os error 1460）"，文案和提示框都正常出现 |
+| 锁定远程设备 | 未做：被控端是别人的笔记本，锁屏后没有办法解锁 |
+| 切显示器、"全部显示器" | 未验证：被控端只有一块屏 |
+| 聊天 | 部分通过。控制端发一条，被控端 CM 的聊天里出现；被控端回复、未读数、"更多"里的未读数未验证（往被控端 CM 输入框里没法发进按键），列入试用清单 |
+| 主页：收藏 | 通过。多选 › 加入收藏，轻提示"已加入收藏"，卡片带"已收藏"，"收藏"分类里有它，配置里 `fav` 写入 |
+| 主页：分类、视图、详细模式 | 通过。最近 / 收藏 / 局域网切换；卡片和列表两种视图（列表有状态、名称、ID、用户@主机、标签列）；视图菜单里"简洁 / 详细"切换立即生效；排序菜单（名称、ID、用户名、在线状态）能打开，条目太少，排序结果没验 |
+| 主页：多选删除、重命名 | 通过。用测试时造的记录：多选 › 删除弹"删除 1 台设备？"（取消 / 删除），确认后对应的对端配置文件被删；设备菜单 › 重命名，输入框正常（中文输入法组字可用），确定后卡片名改变。设备菜单分组"连接方式 / 设备 / 管理 / 危险操作"，条目和 05 §1.1 一致 |
+| 局域网分类 | 未验证：没有同一局域网里的 Leapgate 端点。空状态"未在局域网中发现设备"正常 |
+| 断线重连、错误文案 | 部分通过。经中继的会话里停掉被控端：面板"连接已被远程设备断开。"、"1 秒后重试（第 1 次）"，随后"正在连接 ‹设备名›…"；第二次失败是"无法连接服务器。请检查网络连接。"加"重试"，不再自动重试，所以"2 秒后重试（第 2 次）"造不出来（`待调.md` 第 31 条，Rust 的规则，M2b 不动）。另验：ID 不存在（"未找到 ID 为 ‹ID› 的设备。…"）、密码错误（红字"密码错误"，输入被清空，见待调） |
+| 打印、语音通话、提权、Android / Wayland 对端、虚拟显示器驱动 | 未验证：没有对应环境，列入试用清单 |
+
+**05 §4.5 V1 占用复测**。同一个被控端、同一个不停刷屏的控制台（比 M2a 时刷得快，所以绝对值不能直接和 M2a 的数字比），先后用 `3ca7230f8`（M2a）和 `9799bb9ec` 各量一遍，会话标签在前 30 秒、退到后台 30 秒（再开一个 ID 不存在的标签），控制端进程 CPU 按单核算：
+
+| 提交 | 会话标签在前 | 会话标签在后台 |
+|---|---|---|
+| `3ca7230f8`（M2a） | CPU 32.7%、3D 7.1%、视频解码 6.8% | CPU 24.0%、3D 4.2%、视频解码 8.9% |
+| `9799bb9ec`（M2b） | CPU 30.0%、3D 7.6%、视频解码 6.8% | CPU 22.4%、3D 3.4%、视频解码 7.9% |
+
+工具栏、通知、聊天多了以后后台标签没有回退（后台比前台约低 8 个百分点，和 M2a 一致）。M2a 当时的数字（前台 25.7%、后台 16.8%）见上一节。
+
+**05 §6.4 和样稿对照**：抽样，没有逐区块对。浅色真机对了 P1 设备页（本机区、导航、卡片、设备菜单分组）、P2 的连接面板（要密码、密码错误、连接失败）、工具栏和六个菜单、连接方式详情、聊天面板、通知；深色看了画廊导出的设备页、连接方式详情、聊天面板、通知（新界面主题跟随系统，没动控制端的系统主题）。没有发现必修项（版面层级、缺状态、文案、令牌用错）。没有对的：P2 的拖动和停靠、八种标签状态逐个、详细模式下工具栏、P1 的最小窗口和各主页对话框，留给试用。记进 `待调.md` 的小差异见该文件（来源"对照样稿"和"验收"）。
+
+**05 §6.5 最新 stable 检查**：Flutter 官方 releases 页面（`storage.googleapis.com/flutter_infra_release/releases/releases_windows.json`，2026-11-01 查）最新 stable 仍是 3.47.9（2026-10-29 发布）。
+1. 按 `-Ui leapgate` 编：通过。`pub get` 改了两个锁文件，检查完已还原。
+2. 组件画廊：通过。两版各导出 1424 张，1022 张逐像素相同，其余每张差异像素不超过 0.02%（抗锯齿级别）。
+3. 4K 上屏：通过。只用 `--connect`，没开 UI Automation 客户端；会话约 3 分钟（M2a 是 7 分钟），画面持续更新，没有崩溃事件，stderr 只有 "Using the Impeller rendering backend (OpenGLESSDF)"。
+4. analyze 和测试：app 没有问题；core 97 条（92 条 info 加复制件 `file_model.dart` 的 5 条 warning，和 M2a 相同）；core 170 个、app 405 个测试通过（画廊导出那个多跑一次）。
+构建 worktree 已用 3.44.9 和自编引擎编回（`app.so` 和之前逐字节相同，`libleapgate.dll` 因为重新链接哈希变了）。
+
+**旧界面五项冒烟（`9799bb9ec` 的 Rust，旧界面）**：连接（ICE 胜出，登录成功）、`--relay`（有 `relay_server` 日志，没有 ICE 行）、TCP 端口转发（HTTP 200）、出口（socks5h 和 HTTP CONNECT 都 200，`tunnel up (direct)`）通过；文件传输未验证（没做旧界面文件传输窗口的坐标点击；这条路径 M2b 没碰，Q3 挂钩只记录连接路径）。ID 加盐：空配置目录起一次，`Generated id` 是 9 位、≥ 268435456，测完放回原配置。
+
+**发现的问题**（都不挡试用）：
+1. 隐私模式点开后的失败通知只有"失败"两个字，没有原因（01 P2 区块 E 要求写原因）。被控端有 `WindowInjection.dll` 时是否仍这样没查。已修（`0ab9b3ef0`）：缺这个 dll 时被控端回 `PrvOnFailed` 不带原因，Rust 的通知正文是 "Failed"；现在显示"无法开启隐私模式"，"Failed to turn off" 显示"无法退出隐私模式"，被控端给了原因时显示"无法切换隐私模式（原因）"（原因里看不出是开还是关）。
+2. 工具栏菜单打开后，按 Esc 不关闭（投递的 Esc 和真实的 `SendKeys` 都试过；真实按键可能被会话抓去发给远程设备，没分清）；点菜单外面能关。试用时用真实键盘确认。已修（`b84f68d36`、`873d088aa`）：菜单打开时键盘焦点还在画面上，Rust 的键盘钩子照样把按键截走发给远程设备，投递的 Esc 也被画面的按键处理吃掉；现在工具栏菜单按钮打开菜单时拿走焦点（同上游 SubmenuButton），画面随之 `enterOrLeave(false)` 关掉钩子，Esc 由菜单处理；菜单开着时鼠标经过画面、窗口切出再切回都不再把焦点拿回去，点画面才拿；菜单关闭时（Esc、选了一项）鼠标如果在画面上，画面当场拿回焦点（这时不会再有"鼠标进入画面"）。
+3. 语义树：菜单行只是 `Text`，没有 Invoke 模式，辅助技术不能激活；会话处在连接失败、要密码等整页面板时，顶部的标签栏不在语义树里（这时 stderr 有 "dropped semantics nodes unreachable from root 0"）。0003 的收尾项，不挡试用。
+4. 删除最近记录时没有同时清掉收藏里的这个 ID（配置里 `fav` 留着已不存在的 ID）。上游行为，不改：上游单台删除（`peer_card.dart` `_removeAction`）和多选删除（`peer_tab_page.dart` `deleteSelection`）在"最近"里都只调 `mainRemovePeer`（删对端配置文件），不动收藏；"收藏"分类按对端配置列出，所以这台设备从"收藏"里也看不到了，以后再连接它、配置重建后又会出现在"收藏"里。
+5. 验收过程中窗口在两次操作之间多次被最小化或换位置（同时控制端前台是别的程序），没查清是不是应用自己做的，试用时留意。
+
+**试用清单**：拖工具栏、停靠四边、窗口窄时的"更多"和未读数；聊天的收发、未读数和语音通话（要真实麦克风）；快捷键（切标签、截图、全屏、切显示器）；被控时的遮罩（在别的机器上连进来、鼠标进主页）；多显示器和"全部显示器"；隐私模式、阻止输入（被控端提权）、锁定远程设备；局域网分类和局域网直连；打印、提权、虚拟显示器驱动；Esc 关菜单；`待调.md` 第 25、29、30、33 条是否满意。
+
 ### 10.6 core 的结构（M1）
 
 03 §3.3 第 1、2、4、5、6、8 条在 `core/lib/leapgate/` 落成下面几个文件，复制进来的 models 和改写的 `FfiModel` 接在这上面。
@@ -710,11 +843,11 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 - 会话流上没登记、等各自的块或要主会话定的：`screenshot`（:468，:484-550，"另存为"要选文件的对话框）、`printer_request`（:466，:552-722，要选打印机的提问）、`switch_back`（:407-410）；聊天和语音的 6 个（`chat_client_mode`、`chat_server_mode`、`on_voice_call_*`，:362-367、:416-428）随 M2b（`chat_model` 改写）；`terminal_response`（第三轮）；`selected_files`、`send_emptry_dirs` 只在 Web 上有。
 - 全局流上没登记的：CM 的 `add_connection`、`on_client_remove`、`show_elevation`、`update_voice_call_state`、`cm_file_transfer_log`（`src/flutter.rs:1534-1596`）在 M3，`sync_peer_hash_password_to_personal_ab`（`src/client.rs:3742`）在 M4，都登记在 `appCore.events` 上，不登记在会话的表上；`on_url_scheme_received`（`src/server.rs:776`，只来自 macOS 和 Linux）。
 - M2a 的会话页要做的：`canvasModel.initializeEdgeScrollFallback(this)`（`desktop/pages/remote_page.dart:179`，要页面的 TickerProvider）。会话 model 的其余初始化已在 `FFI.start` 里：首帧时 `activateLocalCursor`（只远程桌面）和录制状态（`remote_page.dart:160-165`、`view_camera_page.dart:105-110`），`checkShowQualityMonitor`（`remote_page.dart:198`）。
-- **暂删、`shortcut_model` 改写时（随 M2a/M2b）照上游原样补回**：`models/input_model.dart:426` 本地快捷键分发器里的 `ffi.shortcutModel.onTriggered(action)`（回调留空体）；同文件 `_matchFlutterShortcut` 的匹配部分（:1212-1236，现在只剩 `return null`，因为它读 `ShortcutModel.config`；`shortcut_utils.dart` 因此没复制）；`model.dart:473-477` 的 `kShortcutEventName` 事件不登记。
+- **M1 暂删、M2b 已照上游原样补回**（`shortcut_model` 复制进 core 时，见 10.9 会话·工具栏）：`models/input_model.dart:426` 本地快捷键分发器里的 `ffi.shortcutModel.onTriggered(action)`；同文件 `_matchFlutterShortcut` 的匹配部分（:1212-1236，读 `ShortcutModel.config`；`shortcut_utils.dart` 一并复制）；`model.dart:473-477` 的 `kShortcutEventName` 事件在 `leapgate/session.dart` 登记；会话关闭时照上游 `model.dart:4397` 调 `shortcutModel.clear()`。
 - `cm_file_model.dart` 推迟到 M3，和 `server_model` 一起复制（它读 `serverModel.clients`、`tabController` 和 `chatModel`）。`ElevationModel` 留在 `model.dart` 里（peer info 和便携服务事件要用）。`QualityMonitorModel.webrtcTransport` 只在 Web 上有值、读 `CachedPeerData`，删了。
 - 复制件里的提示：`msgBox` 改成会话通知，key 用 msgbox 的正文（`file_model` 的单向传输错误是翻译 key `one-way-file-transfer-tip`，删除时的出错是原始错误文本）；`JobState.display`、`JobProgress.display` 这类返回界面文字的仍调 core 的 `translate`（经 Rust 翻译），没改。
 - `FFI.close` 除了上游 `FFI.close` 的清理，还做了上游页面在关会话前做的 model 清理：文件视图的 `FileModel.close`（`file_manager_page.dart:125`），远程桌面的纹理、图像、光标图（`remote_page.dart:676`、`:684-685`）。纹理在 `start` 里建，跟会话走，不跟页面走。页面自己的（`enterOrLeave`、`hostStopSystemKeyPropagate`、键盘焦点）归 M2a 的会话页。
-- `StateGlobal`（`models/state_model.dart`，改写档）只留复制件和 `FfiModel` 用到的：`fullscreen`；`setFullscreen`（经 `appCore.window.setFullscreen`）M1 里没有调用方，留着给 M2a 的全屏；`windowBorderWidth`、`tabBarHeight`、`relativeMouseModeState`、`getInputSource`。工具栏分辨率菜单记的上次选择（`_lastResolutionGroupValues` 和它的三个方法，`FfiModel.handlePeerInfo` 在 :1487 清它）随 M2b 的工具栏一起补。`relativeMouseModeState` 照上游按设备 ID 记：一台设备只有一个远程桌面视图，不会互相覆盖。`tabBarHeight` 照上游是 28（全屏时 0），`CanvasModel` 拿它算画面可用的高度；M2a 的会话页上方占的高度不同时改这里。`consts.dart` 的 `kDragToResizeAreaPadding` 恒为 0（上游只在 Linux 上留改大小的边）。
+- `StateGlobal`（`models/state_model.dart`，改写档）只留复制件和 `FfiModel` 用到的：`fullscreen`；`setFullscreen`（经 `appCore.window.setFullscreen`）M1 里没有调用方，留着给 M2a 的全屏；`windowBorderWidth`、`tabBarHeight`、`relativeMouseModeState`、`getInputSource`。工具栏分辨率菜单记的上次选择（`_lastResolutionGroupValues` 和它的三个方法）M2b 已随工具栏补回，`leapgate/ffi_model.dart` 的 `handlePeerInfo` 照上游 :1487 在每次 peer info 后清它。`relativeMouseModeState` 照上游按设备 ID 记：一台设备只有一个远程桌面视图，不会互相覆盖。`tabBarHeight` 照上游是 28（全屏时 0），`CanvasModel` 拿它算画面可用的高度；M2a 的会话页上方占的高度不同时改这里。`consts.dart` 的 `kDragToResizeAreaPadding` 恒为 0（上游只在 Linux 上留改大小的边）。
 - core 的 `flutter analyze` 用 `--no-fatal-infos` 跑。M1 B 块后的基线是 92 条 info，全是复制件从上游原件带来的（同一份原件在同样规则下也报，主要是 `RawKeyEvent` 和 `window` 的废弃提示），只看新增的。
 
 ### 10.7 选项 model（M1）
@@ -805,3 +938,83 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 - core 的新代码有单测；app 每个页面状态一个行为测试（03 §8.3）：面板的每一种（用假的连接状态）、最近列表空和加载中、连接框几种默认高亮、关窗确认的几种组合（有无会话 × 便携或安装 × 是否勾过不再提示）。
 - 合入前：`git diff main -- flutter/` 为空；core 的 `flutter analyze --no-fatal-infos` 不超出 92 条基线，app 0 条；复制件不跑格式化（10.1）。
 - 审查重点：会话块看焦点和按键释放、钩子开关的先后、关闭流程、注册表参数、复制件和上游原件的差异；主页块看回车规则和匹配；组件看样稿对照的必修项（03 §8.4）。
+
+### 10.9 M2b 的分工约定
+
+依据：总仓库 `docs/新界面/05-M2b拆法.md`（下称"05"；维护者 2026-10-31 四条全部按推荐定）。界面行为以 01 为准（P1 区块 A~C、E、F、J、K，P2 区块 A~C、E、F，§2.1、§2.3、§4.2、§4.4），界面模式和工具栏、显示器的几项设置看 02；样稿 `A-P1.html`、`A-P2.html`，令牌和图标以 `A-基础.html` 为准，画框名见 05 §2.2。05 §1.3 列的项等对应的块做完再加，§7 列的不做。
+
+**分支和文件边界**（都从 `ui/m2b` 切，做完合回 `ui/m2b`；`ui/m2b` 上已有下面"挂载点"的骨架）
+
+| 分支 | 谁 | 只改这些 |
+|---|---|---|
+| `ui/rust-q3` | coder R | Q3、本机显示名两个块 2 导出和 `src/client.rs` 的挂钩（10.4） |
+| `ui/m2b-ds` | designer | `app/lib/widgets/`、`app/lib/gallery_main.dart`、`app/test/` 里组件的测试 |
+| `ui/m2b-toolbar` | coder A（会话·工具栏） | `app/lib/pages/session/session_toolbar.dart`、新目录 `app/lib/pages/session/toolbar/`、`canvas_hints.dart`、`app/lib/shell/tab_shortcuts.dart`；core 新复制的 `models/shortcut_model.dart`、`models/input_model.dart` 里 10.6 暂删的几处、`models/state_model.dart`；它们的测试 |
+| `ui/m2b-session` | coder B（会话·其余） | `app/lib/pages/session/` 下的 `route_details.dart`、`quality_overlay.dart`、`recording.dart`、`chat/`、`session_notices.dart`、`connection_panel.dart`，`app/lib/shell/tab_menu.dart`；core 改写的 `models/chat_model.dart` 和新文件（延迟统计等）；`app/pubspec.yaml` 和锁文件（只加 `file_picker`）；它们的测试 |
+| `ui/m2b-home` | coder C（主页） | `app/lib/pages/home/`；`app/lib/main.dart` 里界面模式接到主题的那几行；`app/lib/theme/` 里按选项切 `LgMode` 要的（不改令牌值）；core 的 `leapgate/local_status.dart`、`leapgate/app_core.dart`（只加分类的 `Peers`）、`leapgate/recent_peers.dart` 和新文件；它们的测试 |
+
+- A、B 都可能要改 core 的 `leapgate/session.dart`：A 加 `shortcutModel` 和 `kShortcutEventName` 的登记，B 加聊天 model 和 6 个聊天语音事件、`screenshot`、`printer_request`、`switch_back` 的登记。只在字段表和构造函数里追加，整合时合并相邻行。其余文件不越界；确实要改别人的文件时写进汇报，由主会话协调。
+- ARB 的键按前缀分：A 用 `toolbar`、`menu`、`shortcut`；B 用 `route`、`notice`、`chat`、`record`、`tabMenu`、`conn`；C 用 `home`、`peers`、`peerMenu`、`pwd`、`uiMode`。加在文件末尾，中英文同时加，文案照 01 §7.6：01 里写好的句子逐字照抄，没写的按 §7.6 写，并在提交说明里列出新写的句子。已有的键能用就用。
+- 三个 coder 先用 M0、M2a 的组件和简单的占位控件把逻辑写通，整合时换成 designer 的组件。占位控件不求好看，但行为测试要能按文字和语义标签找到它们。
+
+**挂载点**（`ui/m2b` 上的骨架提交，行为和 M2a 相同）
+
+| 文件 | 现在的内容 | 谁填 |
+|---|---|---|
+| `pages/session/route_details.dart` | `sessionRouteMark(context, ffi, overlays)`：工具栏上的连接方式标记，连接就绪前是 null；现在是 M2a 的标记加悬停说明，要改成能点开详情（01 §4.2） | B |
+| `pages/session/chat/chat.dart` | `chatToolbarButtons(context, ffi, overlays)`（现在是空表）、`ChatLayer`（会话页里通知之上的一层，现在不画东西） | B |
+| `pages/session/recording.dart` | `recordButton(context, ffi)`，现在是 null | B |
+| `pages/session/quality_overlay.dart` | `QualityOverlay`，画面之上第一层 | B |
+| `pages/session/canvas_hints.dart` | `CanvasHints`：相对鼠标模式的提示、Android 导航浮条，在质量数据浮层之上 | A |
+| `shell/tab_menu.dart` | `tabUnread(view)`、`showSessionTabMenu(context, device, position)`；主窗口已经接到标签的未读数和右键 | B |
+| `shell/tab_shortcuts.dart` | `TabShortcuts(onNext:, onPrevious:, child:)` 包着整个主窗口；切到下一个 / 上一个标签的逻辑（主页算第一个，首尾循环）在主窗口的 `_selectBy` 里已经写好 | A |
+
+- 工具栏里的顺序已经放好：A 现有和要加的菜单（视图、显示器、画面、输入、操作、会话）之后，是 `chatToolbarButtons` 和 `recordButton` 一组，然后 `sessionRouteMark`，最后"断开"。"更多"按"录制、聊天、会话"的顺序收（01 P2 区块 B），A 按这一组的位置判断，B 的函数不用另外返回什么。
+- 会话页的层（从下往上）：画面 → `QualityOverlay` → `CanvasHints` → 工具栏 → 通知 → `ChatLayer` → 连接状态面板。每层都是 `Positioned.fill`，自己定位；没画东西的地方要让鼠标事件落到画面上，所以层里不铺满底色、不加整块的手势监听。菜单和详情弹层用现有的菜单浮层或这个标签的 `TabOverlays`。
+
+**组件（designer）**：规则同 10.8"组件约定"（只管画、文字由调用方传、带语义标签、两套主题和两套尺寸、画廊里每种状态一项、有行为测试）。要做的组件和样稿画框见 05 §2.2。接口补充：
+
+- 设备卡片 `LgDeviceCard` 和列表视图 `LgDeviceTable`：数据同 `LgDeviceRow`，另有星标、来源分类、选中、多选时的勾选、`onMore`（"⋯"）；表格的列、可排序的列和当前排序由调用方给。卡片网格每列至少 300 宽（01 区块 F）。
+- 菜单：在 `LgMenuItem`、`LgMenuGroup` 上补滑块项（标签、值、范围、步长、显示值的格式化、`onChanged`）、步进器项、右侧的快捷键文字、灰显项的悬停说明、危险项、组标题旁的说明（例如"此地址簿为只读"）。
+- 工具栏：`LgSessionToolbar` 加沿边拖动（回调给出新位置，0~1 的相对值）、停靠的边（上下左右）、左右两边竖排只显示图标、拖动时的落点预览、"更多"（调用方给出可以收进去的项和顺序，组件按宽度决定收几个）、显示器平铺按钮、收起后拖动条上的切屏按钮。位置记忆和吸附规则由 A 算，组件只画。
+- 连接方式详情 `LgRouteDetails`：分组的键值行、可复制的值（指纹）、延迟表（每行名字、当前值、最低、平均、最高）、折线 `LgSparkline`（多条线，颜色加线型，图例文字由调用方传）、开关行。
+- 聊天面板 `LgChatPanel`：消息列表（自己 / 对方、时间、文字）、输入框、发送、关闭、拖动。语音通话的几种状态不在面板里，画在工具栏的聊天按钮和它的菜单上（2026-11-01 按实现回写）。
+- 通知：`LgNoticeStack` 加按钮组、勾选（"记住此选择"）、一直保留直到处理。
+- 对话框：设置固定密码 `LgPasswordDialog`（两个输入框、强度条、规则逐条通过、错误、按钮）；其他小对话框用 `LgConfirmDialog` 加输入件拼，不另做。
+- 本机提示卡、被控时的遮罩、多选条、分类分段、列表工具条。
+- 详细模式：组件已经支持两套尺寸；`LgRouteMark` 详细模式下的路径标记画法、工具栏菜单按钮的"图标加文字"按 `LgTokens.of(context).mode` 切换，不另加参数（01 §2.3）。
+
+**会话·工具栏（coder A）**
+
+- 菜单：05 §1.1 会话页表的"显示器""画面""输入""操作""会话"五行和"灰显和快捷键"一行。每项的出现条件和动作照上游 `flutter/lib/common/widgets/toolbar.dart`、`flutter/lib/desktop/widgets/remote_toolbar.dart`（01 P2 区块 B 有行号），分组照 01 的表，不搬上游的菜单结构；权限不够、仅查看模式时灰显并给说明（01 的文案），隐私模式和录制两处例外照上游。菜单文件放 `pages/session/toolbar/`，文件头注明对应的上游出处。
+- 菜单打开的小对话框（自定义分辨率、键盘布局 ANSI / ISO、系统登录密码、请求提升权限的方式、交换控制方向确认、Wayland 授权确认、添加备注）也放 `pages/session/toolbar/`，挂在这个标签的 `TabOverlays` 上。"请求提升权限的方式"做成能从外面调的函数，B 的提权通知按钮也调它。
+- 工具栏拖动和停靠、"更多"；显示器的三种形态（读 `show_monitors_toolbar` 等现有选项，01 P2 区块 B）和"全部显示器"（`kAllDisplayValue`，同一个标签里合并显示）。
+- 快捷键：把 `flutter/lib/models/shortcut_model.dart` 复制进 core（只删界面调用），补回 10.6"暂删、`shortcut_model` 改写时补回"的几处；菜单项右侧显示绑定的组合键（默认绑定见 01 P2 区块 B）；`TabShortcuts` 实现切标签，按键照上游 `shortcut_model` 的切标签动作。
+- `StateGlobal` 补回分辨率菜单记的上次选择（10.6 末尾）。
+- `CanvasHints`：相对鼠标模式的提示（这时工具栏隐藏，上游 `remote_page.dart:782-792`）、Android 导航浮条。
+- `待调.md` 第 29 条（自动收起后点"展开"会把收起设置存成开）对照上游行为判断，改不改写进汇报。
+
+**会话·其余（coder B）**
+
+- 连接方式详情（01 §4.2 第二级）：路径、中继名用 Q3 的导出 `leapgate_session_connection(session_id)`（10.4；coder R 在 `ui/rust-q3` 上做，合进 `ui/m2b` 之前用一个测试里能换掉的取值函数，返回值照 10.4 的 JSON），每次连接就绪后重新取，返回 `{}` 时不显示"路径""中继服务器"两行。指纹、画面数据来自 core 已有的 `FfiModel`、`QualityMonitorModel`。延迟只有"端到端"一行（Q13 之前，01 §4.2）：core 里每个会话记近 60 秒每 2 秒一个点和本次会话的最低、平均、最高，重连后接着记。"在画面上显示质量数据"照上游的会话选项；界面模式是详细时默认开（02 R2-Q11）。
+- "服务器拒绝了此连接："：连接阶段出错、原因码是 `other` 时调同一个导出，有 `refused` 就照 01 §4.3 显示前缀加原文。
+- 通知：登记 `screenshot`、`printer_request`、`switch_back`（10.6），做 01 P2 区块 E 里带按钮的几种。截图"另存为"要选位置，加 `file_picker`（版本先用上游 `flutter/pubspec.lock` 锁的，解析不了时选能和 frb 1.80.1 的 `uuid ^3.0.6`、`js ^0.6.4` 共存的版本）；提权通知的"请求提升权限"调 A 的选方式对话框；录屏通知的"停止"。权限中途被收回时加一条通知。
+- 聊天和语音：`chat_model` 改写进 core（只留消息存储、未读数、语音状态；消息类型用 core 自己的，不带 `dash_chat_2`），登记 6 个事件；`ChatLayer` 里的面板、`chatToolbarButtons` 的聊天菜单（文字聊天、语音通话、等待接听、通话中的麦克风选择和挂断）、`tabUnread`。
+- 录制：`recordButton` 和录制态，权限例外照上游。
+- 标签右键菜单：`showSessionTabMenu`，"复制设备 ID""关闭其他标签""关闭"。
+- 连接状态面板：等对方接受时加"显示给对方的名称：‹本机名›"（块 2 导出 `leapgate_local_display_name()`，coder R 做，取值方式同上）；`待调.md` 第 30 条（密码错误后保留输入、带"输入密码"标签）、第 33 条（关掉确认框后密码框拿回焦点）照样稿改。
+
+**主页（coder C）**
+
+- 分类：最近、收藏、局域网三类。`AppCore` 加收藏、局域网两份 `Peers`（照 M2a 的 `recentPeers`），加载用 `bind.mainLoadFavPeers`、`bind.mainLoadLanPeers`，事件 `load_fav_peers`、`load_lan_peers`。哪些分类显示、顺序照上游的选项（`peer_tab_page.dart` 的读法），在"视图"菜单里改。
+- 卡片和列表视图、排序（修掉上游按在线状态排序那个不合法的比较函数，`peers_view.dart:389-391`）、多选、设备菜单（四组，出现条件照上游 `peer_card.dart:958-1348`，地址簿相关的项不出现）、各分类的空状态、1000 台上限；在线状态查询照 M2a。网络唤醒、创建桌面快捷方式、始终经中继、重命名（别名）、收藏、清除保存的密码、删除（最近）、移除（局域网）各照上游的调用。
+- 连接框：搜索扩到三类（同一个 ID 只出现一次，标出来源，顺序最近、收藏、局域网）；"连接到"行尾的"⋯"（远程桌面、经中继连接）；结果按当前视图显示（`待调.md` 第 25 条）。"输入看起来像地址"的判断和回车规则不变。
+- 本机区：密码行"刷新"（一次性密码）、"修改"（只在便携版显示，打开设置固定密码对话框，校验和保存照上游 `desktop_home_page.dart:890-1126`）；服务已停止时的"启动服务"；"正在被远程控制（N 个会话）"，N 用现有的远程桌面连接数，"查看"不显示（M3）；提示卡只显示系统错误那张。
+- 被控时的遮罩：照上游 `canBeBlocked`、`shouldBeBlocked`（`flutter/lib/common.dart:3138-3205`），只盖主页。
+- 界面模式：02 §4.1 的新选项，键 `leapgate-ui-mode`（值 `detail` 是详细，其余是简洁），Leapgate 自己的 LocalConfig 键放在用它的文件里（10.7 接入办法第 2 条）；"视图"菜单里切换；`main.dart` 把它接到 `buildLgTheme` 的 `mode`，切换立即生效；设备页默认视图跟着它，用户手动选过视图后按用户选的。
+
+**测试和合入**
+
+- core 的新代码有单测（延迟统计、分类合并搜索、排序、遮罩判断、聊天消息存储）；app 每个页面状态一个行为测试（05 §6.1）。
+- 合入前：`git diff main -- flutter/` 为空；core 的 `flutter analyze --no-fatal-infos` 在 3.44.9 下不超出 92 条 info 的基线，新复制的 `shortcut_model` 带来的上游提示单列；app 0 条；复制件不跑格式化。改已有文件时不对整个文件跑 `dart format`：M2a 的文件不是按当前格式化器的样式排的，整文件格式化会把差异放大到几百行；只格式化新文件。
+- 审查重点见 05 §3 第 2 步。

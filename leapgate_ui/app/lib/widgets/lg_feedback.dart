@@ -14,23 +14,49 @@ import '../theme/lg_tokens.dart';
 import 'lg_banner.dart';
 import 'lg_button.dart';
 import 'lg_default_enter.dart';
+import 'lg_pressable.dart';
+import 'lg_selection.dart';
 
 Duration _enter(BuildContext context) => MediaQuery.disableAnimationsOf(context)
     ? Duration.zero
     : const Duration(milliseconds: 160);
 
-/// A button inside a notice ("另存为").
+/// A button inside a notice ("另存为"). The first, usual answer is in the accent
+/// colour; a [secondary] one ("不打印") is in the text colour, so that the two
+/// are told apart without a frame around either.
 class LgNoticeAction {
-  const LgNoticeAction(this.label, this.onPressed, {this.semanticLabel});
+  const LgNoticeAction(
+    this.label,
+    this.onPressed, {
+    this.semanticLabel,
+    this.secondary = false,
+  });
 
   final String label;
   final VoidCallback onPressed;
+  final bool secondary;
 
   /// The accessible name when it must differ from [label].
   final String? semanticLabel;
 }
 
-/// One session notice: what happened, and what can be done about it.
+/// A check box under the buttons of a notice ("记住此选择").
+class LgNoticeCheck {
+  const LgNoticeCheck({
+    required this.label,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final String label;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+}
+
+/// One session notice: what happened, and what can be done about it. A notice
+/// that asks something (a print job, a permission) has buttons and may have a
+/// [check]; how long it stays is the caller's: one that asks stays until it is
+/// answered or closed.
 class LgNotice {
   const LgNotice({
     required this.id,
@@ -39,6 +65,7 @@ class LgNotice {
     this.tone = LgTone.info,
     this.icon,
     this.actions = const [],
+    this.check,
     this.dismissible = true,
   });
 
@@ -53,6 +80,7 @@ class LgNotice {
   /// Overrides the icon of the tone (a printer for a print job).
   final LgIcons? icon;
   final List<LgNoticeAction> actions;
+  final LgNoticeCheck? check;
 
   /// Shows the close button; notices that ask for a decision keep it too, so
   /// that nothing stays on the picture for good.
@@ -191,15 +219,27 @@ class _NoticeCard extends StatelessWidget {
                           runSpacing: LgSpace.s1,
                           children: [
                             for (final a in notice.actions)
-                              LgButton(
-                                label: a.label,
-                                semanticLabel: a.semanticLabel,
-                                kind: LgButtonKind.text,
-                                horizontalPadding: LgSpace.s3,
-                                onPressed: a.onPressed,
-                              ),
+                              if (a.secondary)
+                                _SecondaryAction(action: a)
+                              else
+                                LgButton(
+                                  label: a.label,
+                                  semanticLabel: a.semanticLabel,
+                                  kind: LgButtonKind.text,
+                                  horizontalPadding: LgSpace.s3,
+                                  onPressed: a.onPressed,
+                                ),
                           ],
                         ),
+                      ),
+                    ),
+                  if (notice.check != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: LgSpace.s1),
+                      child: LgCheckbox(
+                        value: notice.check!.value,
+                        onChanged: notice.check!.onChanged,
+                        label: notice.check!.label,
                       ),
                     ),
                 ],
@@ -229,6 +269,53 @@ class _NoticeCard extends StatelessWidget {
         ),
       ),
       child: card,
+    );
+  }
+}
+
+/// A text button in the text colour: the quieter answer of a notice.
+class _SecondaryAction extends StatelessWidget {
+  const _SecondaryAction({required this.action});
+
+  final LgNoticeAction action;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = LgTokens.of(context);
+    final c = t.colors;
+    final radius = BorderRadius.circular(LgRadius.r10);
+    return LgPressable(
+      onPressed: action.onPressed,
+      semanticLabel: action.semanticLabel ?? action.label,
+      builder: (context, states) => LgFocusRing(
+        show: states.contains(WidgetState.focused),
+        radius: radius,
+        child: Container(
+          height: t.sizes.button,
+          padding: const EdgeInsets.symmetric(horizontal: LgSpace.s3),
+          decoration: BoxDecoration(
+            color: lgStateOverlay(c, states),
+            borderRadius: radius,
+          ),
+          // Centred but no wider than its text: in a Wrap a Container that
+          // aligns its child would take the whole line.
+          child: Align(
+            alignment: Alignment.center,
+            widthFactor: 1,
+            child: ExcludeSemantics(
+              child: Text(
+                action.label,
+                maxLines: 1,
+                softWrap: false,
+                style: t.text.copyWith(
+                  color: c.text2,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

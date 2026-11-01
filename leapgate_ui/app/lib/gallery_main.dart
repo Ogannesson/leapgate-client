@@ -19,21 +19,32 @@ import 'theme/lg_theme.dart';
 import 'theme/lg_tokens.dart';
 import 'widgets/lg_banner.dart';
 import 'widgets/lg_button.dart';
+import 'widgets/lg_canvas_parts.dart';
+import 'widgets/lg_chat.dart';
 import 'widgets/lg_connect_box.dart';
 import 'widgets/lg_connection_panel.dart';
 import 'widgets/lg_device.dart';
+import 'widgets/lg_device_card.dart';
+import 'widgets/lg_device_parts.dart';
 import 'widgets/lg_feedback.dart';
+import 'widgets/lg_list_chrome.dart';
 import 'widgets/lg_menu.dart';
+import 'widgets/lg_menu_items.dart';
 import 'widgets/lg_panel_inputs.dart';
+import 'widgets/lg_password_dialog.dart';
 import 'widgets/lg_password_row.dart';
 import 'widgets/lg_pressable.dart';
+import 'widgets/lg_route_details.dart';
 import 'widgets/lg_selection.dart';
 import 'widgets/lg_session_toolbar.dart';
+import 'widgets/lg_slider.dart';
 import 'widgets/lg_status.dart';
 import 'widgets/lg_tab_tip.dart';
 import 'widgets/lg_text_field.dart';
 import 'widgets/lg_title_bar.dart';
 import 'widgets/lg_tooltip.dart';
+
+part 'gallery_m2b.dart';
 
 const _exportDir = String.fromEnvironment('LG_GALLERY_EXPORT');
 
@@ -686,6 +697,7 @@ List<Specimen> buildSpecimens() {
   );
 
   list.addAll(_m2aSpecimens());
+  list.addAll(_m2bSpecimens());
 
   // Interactive only: open the menus with the mouse.
   list.add(

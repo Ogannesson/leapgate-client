@@ -1,4 +1,4 @@
-// 上游：flutter/lib/models/input_model.dart@bd9262397（只删界面调用，不格式化；:426 和 _matchFlutterShortcut 的匹配暂删，shortcut_model 改写时照上游补回，LEAPGATE.md §10.6）
+// 上游：flutter/lib/models/input_model.dart@bd9262397（只删界面调用，不格式化）
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -15,7 +15,9 @@ import 'package:get/get.dart';
 
 import '../../models/model.dart';
 import '../../models/platform_model.dart';
+import '../../models/shortcut_model.dart';
 import '../../models/state_model.dart';
+import '../common/widgets/keyboard_shortcuts/shortcut_utils.dart';
 import 'input_modifier_utils.dart';
 import 'local_flutter_shortcuts.dart';
 import 'relative_mouse_model.dart';
@@ -421,6 +423,7 @@ class InputModel {
     onTriggered: (action) {
       final ffi = parent.target;
       if (ffi != null && !ffi.closed) {
+        ffi.shortcutModel.onTriggered(action);
       }
     },
   );
@@ -1206,6 +1209,31 @@ class InputModel {
       required bool shiftPressed,
       required bool commandPressed}) {
     if (isViewCamera) return null;
+    final keyName = physicalKeyName(key);
+    if (keyName == null) return null;
+    final config = ShortcutModel.config(active: true);
+    if (!config.enabled || config.passThrough) return null;
+    final mods = <String>[];
+    if (isMacOS || isIOS || isWebOnMacOs) {
+      if (commandPressed) mods.add('primary');
+      if (ctrlPressed) mods.add('ctrl');
+    } else if (ctrlPressed) {
+      mods.add('primary');
+    }
+    if (altPressed) mods.add('alt');
+    if (shiftPressed) mods.add('shift');
+    for (final binding in config.bindings) {
+      final action = binding['action'];
+      final key = binding['key'];
+      final bindingMods =
+          canonicalShortcutModsForSave(shortcutModSetFrom(binding['mods']));
+      if (action is String &&
+          key == keyName &&
+          bindingMods.isNotEmpty &&
+          listEquals(bindingMods, mods)) {
+        return action;
+      }
+    }
     return null;
   }
 

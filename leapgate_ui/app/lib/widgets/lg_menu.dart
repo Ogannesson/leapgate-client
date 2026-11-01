@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import '../icons/lg_icon.dart';
 import '../theme/lg_tokens.dart';
 import 'lg_pressable.dart';
+import 'lg_status.dart';
 import 'lg_tooltip.dart';
 
 /// Default menu width (`.menu{width:300px}`). Item labels that do not fit end
@@ -55,6 +56,8 @@ class LgMenuAnchor extends StatelessWidget {
     required this.builder,
     this.width = kLgMenuWidth,
     this.controller,
+    this.onClose,
+    this.triggerFocus = false,
   });
 
   final List<Widget> items;
@@ -63,16 +66,34 @@ class LgMenuAnchor extends StatelessWidget {
   final double width;
   final MenuController? controller;
 
+  /// Called when the menu has closed, however it was closed.
+  final VoidCallback? onClose;
+
+  /// Puts [builder]'s widget in a focus node of its own, `Focus.of(context)`
+  /// in [builder]. A trigger over the session image takes it when it opens the
+  /// menu, as upstream's SubmenuButton does (`menu_anchor.dart` `_handleOpen`):
+  /// the image lets go of the keyboard and Escape reaches the menu.
+  final bool triggerFocus;
+
   @override
   Widget build(BuildContext context) {
     final c = LgTokens.of(context).colors;
     return MenuAnchor(
       controller: controller,
+      onClose: onClose,
       style: _panelStyle(c),
       clipBehavior: Clip.none,
       alignmentOffset: const Offset(0, LgSpace.s1),
       menuChildren: [_panelBody(width, items)],
-      builder: (context, controller, _) => builder(context, controller),
+      builder: (context, controller, _) => triggerFocus
+          ? Focus(
+              skipTraversal: true,
+              includeSemantics: false,
+              child: Builder(
+                builder: (context) => builder(context, controller),
+              ),
+            )
+          : builder(context, controller),
     );
   }
 }
@@ -148,6 +169,7 @@ ButtonStyle _itemStyle(
   required bool danger,
   required bool bold,
   bool tall = false,
+  bool indent = false,
 }) {
   final c = t.colors;
   return ButtonStyle(
@@ -171,9 +193,12 @@ ButtonStyle _itemStyle(
       t.text.copyWith(fontWeight: bold ? FontWeight.w700 : FontWeight.w400),
     ),
     padding: WidgetStatePropertyAll(
-      EdgeInsets.symmetric(
-        horizontal: LgSpace.s4,
-        vertical: tall ? LgSpace.s2 : 0,
+      EdgeInsets.fromLTRB(
+        // `.mr.ind`: a row that belongs to the one above it.
+        indent ? LgSpace.s4 + LgSpace.s6 : LgSpace.s4,
+        tall ? LgSpace.s2 : 0,
+        LgSpace.s4,
+        tall ? LgSpace.s2 : 0,
       ),
     ),
     minimumSize: WidgetStatePropertyAll(Size(0, t.sizes.row)),
@@ -209,9 +234,14 @@ class _ItemRow extends StatelessWidget {
     this.lead,
     this.trailing,
     required this.disabled,
+    this.ownTip = true,
   });
 
   final String label;
+
+  /// False when the row has a tooltip of its own (the note of a greyed row):
+  /// two tooltips on one spot would put the empty one over the other.
+  final bool ownTip;
   final String? description;
   final Widget? lead;
   final Widget? trailing;
@@ -239,7 +269,14 @@ class _ItemRow extends StatelessWidget {
         ],
         Expanded(
           child: description == null
-              ? LgEllipsisText(label)
+              ? (ownTip
+                    ? LgEllipsisText(label)
+                    : Text(
+                        label,
+                        maxLines: 1,
+                        softWrap: false,
+                        overflow: TextOverflow.ellipsis,
+                      ))
               : Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
@@ -263,13 +300,61 @@ class _ItemRow extends StatelessWidget {
   }
 }
 
+/// The small texts and the badge at the end of a row, in the order of the
+/// mockups: a hint ("5%~1000%"), the shortcut, a count, then [trailing].
+Widget? _tail(
+  LgTokens t, {
+  String? hint,
+  String? shortcut,
+  int? badge,
+  String? value,
+  Widget? trailing,
+}) {
+  final c = t.colors;
+  final small = t.textS.copyWith(color: c.text2, fontWeight: FontWeight.w400);
+  final parts = <Widget>[
+    if (hint != null) Text(hint, style: small),
+    if (value != null) Text(value, style: small),
+    if (shortcut != null) Text(shortcut, style: small),
+    if (badge != null && badge > 0) LgBadge(badge),
+    ?trailing,
+  ];
+  if (parts.isEmpty) return null;
+  return Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      for (final (i, part) in parts.indexed) ...[
+        if (i > 0) const SizedBox(width: LgSpace.s3),
+        part,
+      ],
+    ],
+  );
+}
+
+/// Greyed rows explain themselves on hover and to a screen reader ("需要被控端
+/// 允许键盘和鼠标", 01 P2 block B). The note opens beside the menu, level with
+/// the row, not under the row where it would cover the next one.
+Widget _explained(String? note, bool disabled, Widget item) {
+  if (note == null || !disabled) return item;
+  return LgNoteTip(
+    message: note,
+    child: Semantics(hint: note, child: item),
+  );
+}
+
 /// A menu row.
 ///
 /// [checked] reserves the check column: true draws the check mark and makes
 /// the label bold (the current choice), false leaves the column empty so the
 /// labels line up. [icon] takes the same column. [hint] is the small text at
-/// the right end (`.mr .hint`). [danger] is the one destructive item of a menu
-/// (`.mr.dng`): error colour, bold, red hover.
+/// the right end (`.mr .hint`); [shortcut] the key combination bound to the row,
+/// in the same place and style. [badge] is a count (unread messages) and
+/// [trailing] any further control at the end (an edit button, a check box, the
+/// grip of a row that can be moved). [danger] is the one destructive item of a
+/// menu (`.mr.dng`): error colour, bold, red hover. A row with [onPressed]
+/// null is greyed; [disabledNote] says why, on hover and to a screen reader.
+/// [indent] sets the row in under the one above (`.mr.ind`); [keepOpen] leaves
+/// the menu open after the row is used.
 class LgMenuItem extends StatelessWidget {
   const LgMenuItem({
     super.key,
@@ -278,8 +363,14 @@ class LgMenuItem extends StatelessWidget {
     this.icon,
     this.checked,
     this.hint,
+    this.shortcut,
+    this.badge,
+    this.trailing,
     this.description,
+    this.disabledNote,
     this.danger = false,
+    this.indent = false,
+    this.keepOpen = false,
   });
 
   final String label;
@@ -287,17 +378,24 @@ class LgMenuItem extends StatelessWidget {
   final LgIcons? icon;
   final bool? checked;
   final String? hint;
+  final String? shortcut;
+  final int? badge;
+  final Widget? trailing;
 
   /// Small text on a second line under the label (`.mr.two`).
   final String? description;
+  final String? disabledNote;
   final bool danger;
+  final bool indent;
+  final bool keepOpen;
 
   @override
   Widget build(BuildContext context) {
     final t = LgTokens.of(context);
     final c = t.colors;
-    return MenuItemButton(
+    final item = MenuItemButton(
       onPressed: onPressed,
+      closeOnActivate: !keepOpen,
       statesController: _forced(context),
       // Inside a menu MenuAnchor already uses this; it matters for LgMenuPanel.
       overflowAxis: Axis.vertical,
@@ -306,46 +404,55 @@ class LgMenuItem extends StatelessWidget {
         danger: danger,
         bold: danger || checked == true,
         tall: description != null,
+        indent: indent,
       ),
       child: _ItemRow(
         label: label,
         description: description,
         disabled: onPressed == null,
+        ownTip: !(onPressed == null && disabledNote != null),
         lead: _lead(c, icon: icon, checked: checked),
-        trailing: hint == null
-            ? null
-            : Text(
-                hint!,
-                style: t.textS.copyWith(
-                  color: c.text2,
-                  fontWeight: FontWeight.w400,
-                ),
-              ),
+        trailing: _tail(
+          t,
+          hint: hint,
+          shortcut: shortcut,
+          badge: badge,
+          trailing: trailing,
+        ),
       ),
     );
+    return _explained(disabledNote, onPressed == null, item);
   }
 }
 
 /// A row that opens a second-level menu on hover, click or Right arrow.
+/// [value] is what is chosen inside ("1920×1080"), shown before the arrow;
+/// [badge] a count.
 class LgSubmenu extends StatelessWidget {
   const LgSubmenu({
     super.key,
     required this.label,
     required this.items,
     this.icon,
+    this.value,
+    this.badge,
+    this.disabledNote,
     this.width = kLgMenuWidth,
   });
 
   final String label;
   final List<Widget> items;
   final LgIcons? icon;
+  final String? value;
+  final int? badge;
+  final String? disabledNote;
   final double width;
 
   @override
   Widget build(BuildContext context) {
     final t = LgTokens.of(context);
     final c = t.colors;
-    return SubmenuButton(
+    final item = SubmenuButton(
       statesController: _forced(context),
       style: _itemStyle(t, danger: false, bold: false),
       menuStyle: _panelStyle(c),
@@ -356,22 +463,35 @@ class LgSubmenu extends StatelessWidget {
       child: _ItemRow(
         label: label,
         disabled: items.isEmpty,
+        ownTip: !(items.isEmpty && disabledNote != null),
         lead: _lead(c, icon: icon),
-        trailing: LgIcon(LgIcons.chevR, size: 20, color: c.text2),
+        trailing: _tail(
+          t,
+          value: value,
+          badge: badge,
+          trailing: LgIcon(LgIcons.chevR, size: 20, color: c.text2),
+        ),
       ),
     );
+    return _explained(disabledNote, items.isEmpty, item);
   }
 }
 
-/// Group title inside a menu (`.mg`).
+/// Group title inside a menu (`.mg`). [note] is a short remark at its right
+/// end, in regular weight ("此地址簿为只读", `.mg.why`).
 class LgMenuGroup extends StatelessWidget {
-  const LgMenuGroup(this.title, {super.key});
+  const LgMenuGroup(this.title, {super.key, this.note});
 
   final String title;
+  final String? note;
 
   @override
   Widget build(BuildContext context) {
     final t = LgTokens.of(context);
+    final style = t.textS.copyWith(
+      color: t.colors.text2,
+      fontWeight: FontWeight.w700,
+    );
     return Container(
       height: t.sizes.menuGroup,
       padding: EdgeInsets.fromLTRB(
@@ -382,14 +502,28 @@ class LgMenuGroup extends StatelessWidget {
       ),
       child: Semantics(
         header: true,
-        child: Text(
-          title,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: t.textS.copyWith(
-            color: t.colors.text2,
-            fontWeight: FontWeight.w700,
-          ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: style,
+              ),
+            ),
+            if (note != null) ...[
+              const SizedBox(width: LgSpace.s3),
+              Flexible(
+                child: Text(
+                  note!,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: style.copyWith(fontWeight: FontWeight.w400),
+                ),
+              ),
+            ],
+          ],
         ),
       ),
     );

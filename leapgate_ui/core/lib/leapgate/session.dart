@@ -5,21 +5,25 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/generated_bridge.dart';
+import 'package:flutter_hbb/models/chat_model.dart';
 import 'package:flutter_hbb/models/desktop_render_texture.dart';
 import 'package:flutter_hbb/models/file_model.dart';
 import 'package:flutter_hbb/models/input_model.dart';
 import 'package:flutter_hbb/models/model.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
+import 'package:flutter_hbb/models/shortcut_model.dart';
 import 'package:get/get.dart';
 import 'package:uuid/uuid.dart';
 
 import 'app_core.dart';
 import 'bridge.dart';
 import 'connection.dart';
+import 'latency.dart';
 import 'notices.dart';
 import 'options.dart';
 import 'prompts.dart';
 import 'session_events.dart';
+import 'session_requests.dart';
 
 /// `index` goes to Rust as the connection type (upstream `FfiModel`), so the order stays
 /// upstream's. A session tab shows `defaultConn` (remote desktop) and `fileTransfer`; camera and
@@ -52,7 +56,37 @@ class FFI {
     elevationModel = ElevationModel(WeakReference(this));
     textureModel = TextureModel(WeakReference(this));
     connection = ConnectionModel(WeakReference(this));
+    chatModel = ChatModel(WeakReference(this));
+    requests = SessionRequests(WeakReference(this));
     _registerEvents();
+    shortcutModel = ShortcutModel(WeakReference(this));
+    // Rust's shortcut matcher (`src/keyboard/shortcuts.rs`, upstream `model.dart:473-477`).
+    events.on(kShortcutEventName, (evt) {
+      final action = evt['action'];
+      if (action is String) shortcutModel.onTriggered(action);
+    });
+    // Chat and voice (upstream `models/model.dart:362-364`, `:416-428`); `chat_server_mode` is
+    // the connection manager's and comes on the global stream (M3).
+    events.on('chat_client_mode',
+        (evt) => chatModel.receive('${evt['text'] ?? ''}'));
+    events.on('on_voice_call_waiting', (evt) => chatModel.onVoiceCallWaiting());
+    events.on('on_voice_call_started', (evt) => chatModel.onVoiceCallStarted());
+    events.on('on_voice_call_closed',
+        (evt) => chatModel.onVoiceCallClosed('${evt['reason']}'));
+    events.on(
+        'on_voice_call_incoming', (evt) => chatModel.onVoiceCallIncoming());
+    events.on('screenshot', requests.onScreenshot);
+    events.on('printer_request', requests.onPrinterRequest);
+    events.on('switch_back', requests.onSwitchBack);
+    // Every connection, reconnects included, goes into verifying once the channel is up.
+    var stage = connection.stage;
+    connection.addListener(() {
+      if (connection.stage == ConnStage.verifying &&
+          stage != ConnStage.verifying) {
+        latency.onConnected();
+      }
+      stage = connection.stage;
+    });
   }
 
   /// The events of the copied models (upstream `FfiModel.startEventListener`,
@@ -78,8 +112,10 @@ class FFI {
         'load_last_job', (evt) => fileModel.jobController.loadLastJob(evt));
     events.on('update_folder_files',
         (evt) => fileModel.jobController.updateFolderFiles(evt));
-    events.on('update_quality_status',
-        (evt) => qualityMonitorModel.updateQualityStatus(evt));
+    events.on('update_quality_status', (evt) {
+      qualityMonitorModel.updateQualityStatus(evt);
+      latency.onQualityStatus(evt);
+    });
     events.on('record_status',
         (evt) => recordingModel.updateStatus(evt['start'] == 'true'));
   }
@@ -98,6 +134,12 @@ class FFI {
   late final ElevationModel elevationModel;
   late final TextureModel textureModel;
   late final ConnectionModel connection;
+  late final ShortcutModel shortcutModel;
+  late final ChatModel chatModel;
+  late final SessionRequests requests;
+
+  /// The round trip for the connection details (01 §4.2).
+  final latency = LatencyStats();
 
   /// The device ID.
   final String id;
@@ -280,42 +322,6 @@ class FFI {
     connection.onVisibilityChanged();
   }
 
-  // The session toolbar's actions (01 §3.2 block B), with the bridge calls and the conditions of
-  // upstream's toolbar (`common/widgets/toolbar.dart`).
-
-  /// "Original size" and "Fit to window" (`toolbar.dart:799-811`); the canvas follows.
-  Future<void> setViewStyle(String style) async {
-    await bind.sessionSetViewStyle(sessionId: sessionId, value: style);
-    await canvasModel.updateViewStyle();
-  }
-
-  /// One of `kRemoteImageQuality*`; '' before Rust has one (`toolbar.dart:833-840`).
-  Future<String> getImageQuality() async =>
-      await bind.sessionGetImageQuality(sessionId: sessionId) ?? '';
-
-  Future<void> setImageQuality(String value) =>
-      bind.sessionSetImageQuality(sessionId: sessionId, value: value);
-
-  /// Upstream shows "Insert Ctrl + Alt + Del" only on these terms (`toolbar.dart:638-648`).
-  bool get canSendCtrlAltDel =>
-      connType == ConnType.defaultConn &&
-      !ffiModel.viewOnly &&
-      ffiModel.keyboard &&
-      (ffiModel.pi.platform == kPeerPlatformLinux || ffiModel.pi.sasEnabled);
-
-  void sendCtrlAltDel() => bind.sessionCtrlAltDel(sessionId: sessionId);
-
-  /// `toolbar.dart:650-661`.
-  bool get canRestartRemoteDevice =>
-      connType == ConnType.defaultConn &&
-      ffiModel.permissions['restart'] != false &&
-      const [kPeerPlatformLinux, kPeerPlatformWindows, kPeerPlatformMacOS]
-          .contains(ffiModel.pi.platform);
-
-  /// After the user confirmed (`common/widgets/dialog.dart:1403-1431`).
-  void restartRemoteDevice() =>
-      bind.sessionRestartRemoteDevice(sessionId: sessionId);
-
   /// Upstream `FFI.close`, plus the model cleanup upstream's pages did before it, now that the
   /// pages no longer close sessions: `FileModel.close` (`desktop/pages/file_manager_page.dart:125`)
   /// and the textures and images of the remote page (`desktop/pages/remote_page.dart:676`,
@@ -345,6 +351,7 @@ class FFI {
             ffiModel.pi.currentDisplay);
       }
       imageModel.callbacksOnFirstImage.clear();
+      shortcutModel.clear();
       await imageModel.update(null);
       cursorModel.clear();
       ffiModel.clear();
