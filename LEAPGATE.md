@@ -806,7 +806,7 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 
 **06 §5.3 和样稿对照**：`A-P3.html` 抽样，浅色、深色各对了请求中（输入密码）、已连接远程控制（权限区）、出口会话、聊天侧栏、文件记录、贴边小条（一个、几个）。版面层级、状态、文案、令牌颜色都对得上，唯一的差异见下面"必修"。深色看了已连接远程控制、出口、几个连接的小条，浅色看了全部（B 上切系统主题后截小窗，没有留一次性密码）。没有逐画框对的：语音来电、通话中、没有麦克风（要真实麦克风）、终端、摄像头、互换（造不出）、多个来访标签的深色。
 
-**必修（样稿对照）**：紧凑模式（320×500）下权限开关的标签折行：B 在 150% 缩放，"文件复制粘贴"变成"文件复制粘 / 贴"、"阻止本地输入"变成"阻止本地输 / 入"，样稿里都是单行；"阻止本地输入"这一行折成两行以后，第二行的"入"贴着下面的按钮，请求中（输入密码）状态下和"对方正在输入密码…"那块几乎相碰。详细模式下不折行。出口说明那段话的断行也和样稿不同（字体宽度差异，不影响）。复现：被控端 150% 缩放，对方连入后看权限区。
+**必修（样稿对照）**：紧凑模式（320×500）下权限开关的标签折行：B 在 150% 缩放，"文件复制粘贴"变成"文件复制粘 / 贴"、"阻止本地输入"变成"阻止本地输 / 入"，样稿里都是单行；"阻止本地输入"这一行折成两行以后，第二行的"入"贴着下面的按钮，请求中（输入密码）状态下和"对方正在输入密码…"那块几乎相碰。详细模式下不折行。出口说明那段话的断行也和样稿不同（字体宽度差异，不影响）。复现：被控端 150% 缩放，对方连入后看权限区。已修（`566da0b1e`）：窗口外框 320 含 Windows 的不可见缩放边框，150% 下客户区实测约 309，样稿的 14 号字加 8 间距放不下 6 个汉字；权限标签字号固定 13、开关和文字间距改 6，按最窄客户区 304（`kLgCmNarrowestClient`）设计，画廊和测试按 304 宽核对单行，真机待试用时再看。
 
 **06 §5.3 最新 stable 检查**：Flutter 官方 releases（`storage.googleapis.com/flutter_infra_release/releases/releases_windows.json`，2026-11-01 查）最新 stable 仍是 3.47.9（2026-10-29 发布）。
 1. 按 `-Ui leapgate` 编：在 `ef182b887` 上不通过，修好后（`6ea135d92`）通过。验收时 `bridge` 步里 build_runner 的 freezed 在 core 报 `Exception: Missing implementation of visitDotShorthandPropertyAccess`，随后卡在 `freezed on lib/leapgate/local_status.dart` 不结束（证据 `80-stable-run.txt`）。
@@ -820,7 +820,7 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 构建 worktree 已用 3.44.9 和自编引擎编回 `6ea135d92`（强制生成桥接代码）：`app.so` 和验收构建逐字节相同，`flutter_windows.dll` 是带 0003 的 `8667024A…`；`leapgate.exe` 重新链接后和验收构建只差 PE 头和调试目录里的两处链接时间戳（6 个字节），所以哈希不同；`libleapgate.dll` 因为重新链接哈希变了。
 
 **发现的问题**：
-1. 上面"必修"的权限标签折行（还没修）。
+1. 上面"必修"的权限标签折行：已修（`566da0b1e`，见上）。
 2. 最新 stable 检查第 1 步不通过：已查清并修好（`6ea135d92`，见上），四步复跑通过。
 3. 被控端点"接受并提升权限"后，系统弹 UAC 确认框（secure desktop），无人在场时一直挡着被控端的真实鼠标键盘输入（`SetCursorPos` 失败），要远程结束 `consent.exe` 才恢复；UI Automation 的 `Invoke` 不受影响。不是产品问题，试用时在场的人点掉即可，写进试用说明。
 4. 01 §3.3 的"已断开 + 关闭"状态实际看不到（见上表）。
@@ -1116,7 +1116,7 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 
 - 初始化：`--cm` 分支照上游 `flutter/lib/main.dart:285-302`：先建 `AppCore`，再按 CM 初始化平台接口（`kAppTypeConnectionManager`，它会调 Rust 的 `cm_init`，`core/lib/models/native_model.dart` 里已有这一处），登记 CM 的全局事件 `add_connection`、`on_client_remove`、`show_elevation`、`update_voice_call_state`（登记在 `appCore.events`，10.6；`theme`、`language` 不登记，见下面"主题、语言"），第二段加了 `chat_server_mode`、`cm_file_transfer_log`（见下面"第二段"）。不读 `hide_cm`（03 §5.2 M3）。
 - 复制件：`flutter/lib/models/server_model.dart` 复制进 core，CM 用到的部分按"只删界面调用"保留（客户端列表、`addConnection`、`onClientRemove`、接受和拒绝、断开、提权、撤销交换、语音状态、关闭全部、500 ms 的轮询和约 6 秒退出），主窗口和 Android 的部分（密码、ID、起停服务）整段删掉，来源行写明删了什么。标签不用上游的 `DesktopTabController`，用自己的列表。一条连接的两次 `add_connection`、`on_client_remove` 的关闭标记、同一个人重连时删旧的那条，照上游的规则（06 §4.2）。
-- 窗口：紧凑态 320×500、贴主显示器工作区右上角、置顶、不能改大小；展开侧栏时向左展开到 700×500（2026-10-31 组件审查后定：样稿是 320×500，01 §3.3 写"约 300~320 宽"，300 宽时两列权限放不下"阻止本地输入"；尺寸用组件里的 `kLgCmWidth`、`kLgCmHeight`、`kLgCmExpandedWidth`，不另写一套）；隐藏照上游用透明加隐藏、不销毁；runner 里 CM 的初值（现在 800×600）改成和 Dart 一致。
+- 窗口：紧凑态 320×500、贴主显示器工作区右上角、置顶、不能改大小；展开侧栏时向左展开到 700×500（2026-10-31 组件审查后定：样稿是 320×500，01 §3.3 写"约 300~320 宽"，选 320；外框 320 含不可见缩放边框，客户区 150% 下约 309，组件按最窄客户区 304 设计，见 §10.5 M3 必修项的修法；尺寸用组件里的 `kLgCmWidth`、`kLgCmHeight`、`kLgCmExpandedWidth`，不另写一套）；隐藏照上游用透明加隐藏、不销毁；runner 里 CM 的初值（现在 800×600）改成和 Dart 一致。
 - 贴边小条：同一个窗口缩成一条，贴主显示器上边、靠右，沿上边左右拖动、位置只在本次运行内记住（记在 `LgCmWindow` 的内存里，不写 LocalConfig：CM 进程的 LocalConfig 是启动时读的快照，写任何一个键都会把整份旧配置存回文件，盖掉主窗口之后改过的本地配置；第一段原来写的 `leapgate-cm-strip-offset` 键第二段审查后去掉）；授权后自动收起的时机和取消条件照上游 `server_model.dart:571-590`、`server_page.dart:180-186`（01 §3.3 改成"收成小条"而不是最小化）；新来访时恢复成完整小窗并置顶。
 - 远程点击保护：照上游 `server_page.dart:1237-1253`，被拦下时在按钮旁提示"无法远程执行此操作"；`allow-remote-cm-modification` 开着时放行。小条上的"断开"同样受保护。
 - 关窗：多于一个连接时始终确认"断开全部会话？"，不读 `enable-confirm-closing-tabs`（R2-Q16）；关闭照上游 `closeAll`。标题栏"关闭"和确认里的"断开"也做远程点击保护，问的是任意一个还连着的来访（已断开的问不到、会读到旧值）；一个都没连着时直接执行。整个窗口（标题栏按钮、标签、面板、确认框、小条）都不接键盘焦点（`allow-remote-cm-modification` 开着时除外）：服务端只在左键抬起和回车时更新对方的输入时间，Tab 加空格能绕过点击判断。
