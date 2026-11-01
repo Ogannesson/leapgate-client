@@ -809,15 +809,19 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 **必修（样稿对照）**：紧凑模式（320×500）下权限开关的标签折行：B 在 150% 缩放，"文件复制粘贴"变成"文件复制粘 / 贴"、"阻止本地输入"变成"阻止本地输 / 入"，样稿里都是单行；"阻止本地输入"这一行折成两行以后，第二行的"入"贴着下面的按钮，请求中（输入密码）状态下和"对方正在输入密码…"那块几乎相碰。详细模式下不折行。出口说明那段话的断行也和样稿不同（字体宽度差异，不影响）。复现：被控端 150% 缩放，对方连入后看权限区。
 
 **06 §5.3 最新 stable 检查**：Flutter 官方 releases（`storage.googleapis.com/flutter_infra_release/releases/releases_windows.json`，2026-11-01 查）最新 stable 仍是 3.47.9（2026-10-29 发布）。
-1. 按 `-Ui leapgate` 编：不通过。`bridge` 步里 build_runner 的 freezed 在 core 报 `Exception: Missing implementation of visitDotShorthandPropertyAccess`（栈在 `package:analyzer` 7.7.1 写 summary 的 `bundle_writer.dart`，点名文件是 `test/connect_box_test.dart`，随后卡在 `freezed on lib/leapgate/local_status.dart`，20 分钟不结束，手动杀掉后脚本报 `Failed to run build_runner`）。M2b 同一项通过；`connect_box_test.dart` 在 M2b 之后没改，`pubspec.yaml` 也没改，所以更像依赖解析漂移（锁文件还原，换 3.47.9 后 `pub get` 重新解析），没有在 M2b 的提交上复验。证据 `80-stable-run.txt`。
-2. 组件画廊：通过。3.44.9 和 3.47.9 各导出 1580 张，1070 张逐像素相同，没有一张差异像素超过 1%（最大差异像素比例 0.02%，抗锯齿级别）。
-3. 4K 上屏：未验证。第 1 步没编出 3.47.9 的构建。
-4. analyze 和测试：app 没有问题；core 97 条（92 条 info 加复制件 `file_model.dart` 的 5 条 warning，和 M2a、M2b 相同）；core 181 个、app 503 个测试通过（用 3.44.9 编出来的生成文件）。
-构建 worktree 已用 3.44.9 和自编引擎编回（`leapgate.exe` 哈希和验收用的构建相同）。
+1. 按 `-Ui leapgate` 编：在 `ef182b887` 上不通过，修好后（`6ea135d92`）通过。验收时 `bridge` 步里 build_runner 的 freezed 在 core 报 `Exception: Missing implementation of visitDotShorthandPropertyAccess`，随后卡在 `freezed on lib/leapgate/local_status.dart` 不结束（证据 `80-stable-run.txt`）。
+   - 根因：core 的 build_runner 用的是 `analyzer` 7.7.1（`freezed` 2.5.8 要求 analyzer 低于 8，7.7.1 是 7.x 最后一版，不是解析漂移，3.44.9 下也是它）。3.47.9 的 `package:flutter/src/services/platform_views.dart` 里 `initUiKitView` 有一个参数默认值用了点号简写（`= .fallbackToPluginDefault`），analyzer 7.7.1 链接这个库、写 summary 时没实现这种节点，分析调度器抛异常后不再处理请求，后面的 build 步骤就一直等。source_gen 只解析带顶层注解的文件：M2b 里带顶层注解的只有 `leapgate/bridge.dart`（只引 `flutter/foundation.dart`，碰不到 services）；M3 给 `local_status.dart` 的 `IncomingSessions` 加了 `@immutable`，这个文件经 `models/platform_model.dart` 引到 `flutter/services.dart`，于是被解析、触发。去掉这一行在 3.47.9 下就通过（只用于验证，没提交）。
+   - M2b 那次没撞上，是因为它的 stable 检查里 `bridge` 步判断桥接代码是新的、跳过了生成，build_runner 根本没在 3.47.9 下跑；强制生成（`-ForceBridge`）时 `61225d783` 在 3.47.9 下通过。
+   - 修法：core 加 `build.yaml`，freezed 只对 `lib/generated_bridge.dart` 生成（core 里只有它用 freezed，它的依赖链不碰 `package:flutter`），以后哪个文件加了顶层注解也不会被 freezed 解析。没有改依赖版本：升 freezed 3 要改桥接生成的代码。3.44.9 下生成的 `generated_bridge.freezed.dart`、`generated_bridge.dart` 和加之前逐字节相同，3.47.9 生成的也相同；build_runner 的动作从 175 个降到 17 个。
+   - 复跑（`6ea135d92`，3.47.9 强制生成桥接代码）：编出来（`leapgate.exe` `BE58E4F4…`、`app.so` `B22208B7…`，官方引擎 `30494FB0…`）。
+2. 组件画廊：通过。在 `6ea135d92` 上 3.44.9 和 3.47.9 各导出 1580 张，1070 张逐像素相同，没有一张差异像素超过 1%（最大差异像素比例 0.02%，抗锯齿级别），和验收时那次一致。
+3. 4K 上屏：通过。被控端 B（4K）用 `ef182b887` 的旧界面构建，控制端只用 `--connect`，没开 UI Automation 客户端；会话约 5 分钟，直连，画面持续更新（每分钟截一次，内容都不同），进程一直在（句柄稳定在约 1500），没有崩溃事件，stderr 只有 "Using the Impeller rendering backend (OpenGLESSDF)"。
+4. analyze 和测试：app 没有问题；core 97 条（92 条 info 加复制件 `file_model.dart` 的 5 条 warning，和 M2a、M2b 相同）；core 181 个、app 503 个测试通过（跳过 2 个），这次用的是 3.47.9 自己生成的桥接代码。
+构建 worktree 已用 3.44.9 和自编引擎编回 `6ea135d92`（强制生成桥接代码）：`app.so` 和验收构建逐字节相同，`flutter_windows.dll` 是带 0003 的 `8667024A…`；`leapgate.exe` 重新链接后和验收构建只差 PE 头和调试目录里的两处链接时间戳（6 个字节），所以哈希不同；`libleapgate.dll` 因为重新链接哈希变了。
 
 **发现的问题**：
 1. 上面"必修"的权限标签折行（还没修）。
-2. 最新 stable 检查第 1 步不通过（未查清，见上）。
+2. 最新 stable 检查第 1 步不通过：已查清并修好（`6ea135d92`，见上），四步复跑通过。
 3. 被控端点"接受并提升权限"后，系统弹 UAC 确认框（secure desktop），无人在场时一直挡着被控端的真实鼠标键盘输入（`SetCursorPos` 失败），要远程结束 `consent.exe` 才恢复；UI Automation 的 `Invoke` 不受影响。不是产品问题，试用时在场的人点掉即可，写进试用说明。
 4. 01 §3.3 的"已断开 + 关闭"状态实际看不到（见上表）。
 5. 被控端的聊天输入框用 UI Automation 的 `Type`（`SendKeys`）能输入；控制端那边台式机的中文输入法会吃掉空格，聊天里的空格丢失，是环境问题。
