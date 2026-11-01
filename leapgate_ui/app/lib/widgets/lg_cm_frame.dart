@@ -13,12 +13,19 @@ import '../theme/lg_tokens.dart';
 import 'lg_button.dart';
 
 /// The size the mockup draws the window at: 320 × 500 with one column, 700 × 500
-/// with the side panel open. The two-column permission grid needs the 320: at
-/// 300 "阻止本地输入" no longer fits next to its switch.
+/// with the side panel open.
 const double kLgCmWidth = 320;
 const double kLgCmHeight = 500;
 const double kLgCmSideWidth = 380;
 const double kLgCmExpandedWidth = kLgCmSideWidth + kLgCmWidth;
+
+/// What the window actually draws in: its 320 includes the invisible resize
+/// border Windows keeps at both sides, so the client area is 309 wide at 150 %
+/// (measured in the M3 acceptance); 304 is the narrowest taken for the other
+/// scales, which were not measured. The two-column
+/// permission grid has to fit "文件复制粘贴" and "阻止本地输入" on one line at
+/// this width, not at the mockup's 320.
+const double kLgCmNarrowestClient = 304;
 
 const double _rowHeight = 36;
 

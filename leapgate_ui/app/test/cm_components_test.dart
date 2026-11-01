@@ -408,6 +408,47 @@ void main() {
       handle.dispose();
     });
 
+    testWidgets('the longest Chinese words take one line at the narrowest '
+        'client area of the window, in both modes', (tester) async {
+      const labels = [
+        '键盘和鼠标',
+        '剪贴板',
+        '声音',
+        '文件复制粘贴',
+        '远程重启',
+        '录制',
+        '阻止本地输入',
+        '隐私模式',
+      ];
+      // The panel's width in the narrowest client area: the frame keeps 8 px
+      // at each side of it and the panel 16 px more.
+      const width = kLgCmNarrowestClient - 2 * 8 - 2 * 16;
+      for (final mode in LgMode.values) {
+        await pumpLg(
+          tester,
+          SizedBox(
+            width: width,
+            child: LgCmPermissions(
+              title: '允许对方',
+              items: [
+                for (final l in labels)
+                  LgCmPermission(label: l, value: true, onChanged: (_) {}),
+              ],
+            ),
+          ),
+          mode: mode,
+        );
+        final oneLine = tester.getSize(find.text('声音')).height;
+        for (final l in labels) {
+          expect(
+            tester.getSize(find.text(l)).height,
+            oneLine,
+            reason: '$l in ${mode.name}',
+          );
+        }
+      }
+    });
+
     testWidgets('an odd number of items and long words lay out', (
       tester,
     ) async {
