@@ -1,4 +1,4 @@
-// 上游：flutter/lib/models/server_model.dart@bd9262397（只删界面调用，不格式化；只留连接管理小窗用到的部分，主窗口和 Android 的部分整段删掉：密码、ID、服务端连接状态、起停服务、Android 权限和亮屏、各权限开关、登录和语音对话框、showInputWarnAlert、showClientsMayNotBeChangedAlert；`tabController` 和 `jumpTo` 删掉，标签是页面自己的列表（app/lib/cm/）；`parent` 换成 `CmWindow`，`hideCmWindow`、`showCmWindow`、`windowOnTop(null)`、`windowManager.minimize`、`windowManager.close` 改调它（leapgate/cm_core.dart）；`isTest` 的两处判断删掉，计时器由 `dispose` 停；聊天的 `updateConnIdOfKey` 随第二段的聊天加回）
+// 上游：flutter/lib/models/server_model.dart@bd9262397（只删界面调用，不格式化；只留连接管理小窗用到的部分，主窗口和 Android 的部分整段删掉：密码、ID、服务端连接状态、起停服务、Android 权限和亮屏、各权限开关、登录和语音对话框、showInputWarnAlert、showClientsMayNotBeChangedAlert；`tabController` 和 `jumpTo` 删掉，标签是页面自己的列表（app/lib/cm/）；`parent` 换成 `CmWindow`，`hideCmWindow`、`showCmWindow`、`windowOnTop(null)`、`windowManager.minimize`、`windowManager.close` 改调它（leapgate/cm_core.dart）；`isTest` 的两处判断删掉，计时器由 `dispose` 停；`_addTab` 里聊天的 `updateConnIdOfKey` 删掉：CM 的聊天按对方 ID 存、按所在标签的连接发（leapgate/cm_chat.dart），没有要更新的连接编号）
 import 'dart:async';
 import 'dart:convert';
 

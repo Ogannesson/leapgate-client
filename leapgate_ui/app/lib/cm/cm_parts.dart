@@ -1,11 +1,15 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_hbb/common.dart' show readableFileSize;
 import 'package:flutter_hbb/leapgate/cm_core.dart';
 import 'package:flutter_hbb/leapgate/identity_color.dart';
+import 'package:flutter_hbb/models/cm_file_model.dart';
+import 'package:flutter_hbb/models/file_model.dart' show JobState;
 import 'package:flutter_hbb/models/server_model.dart';
 
 import '../l10n/app_localizations.dart';
+import '../widgets/lg_cm_files.dart';
 import '../widgets/lg_cm_pill.dart';
 import '../widgets/lg_cm_tabs.dart';
 
@@ -71,6 +75,63 @@ String cmLetter(Client client) {
 
 LgCmPillPerson cmPillPerson(Client client) =>
     LgCmPillPerson(letter: cmLetter(client), identity: cmIdentity(client));
+
+/// A record of the file log (01 §3.3, 02 §0.4 item 11): the direction from this device's side,
+/// the file's name without its folders, the size and how it went.
+LgCmFileEntry cmFileEntry(AppLocalizations l10n, CmFileLog log) {
+  final (action, label) = switch (log.action) {
+    // On Windows the CM reads the files a visitor downloads (`start_read_job`, `isRemote` true)
+    // and writes the ones uploaded here (`isRemote` false).
+    CmFileAction.remoteToLocal => (
+      LgCmFileAction.fromHere,
+      l10n.cmFileFromHere,
+    ),
+    CmFileAction.localToRemote || CmFileAction.none => (
+      LgCmFileAction.toHere,
+      l10n.cmFileToHere,
+    ),
+    CmFileAction.remove => (LgCmFileAction.delete, l10n.cmFileDelete),
+    CmFileAction.createDir => (LgCmFileAction.newFolder, l10n.cmFileNewFolder),
+    CmFileAction.rename => (LgCmFileAction.rename, l10n.cmFileRename),
+  };
+  final name = log.action == CmFileAction.rename
+      ? '${_baseName(log.fileName)} → ${log.newName}'
+      : _baseName(log.fileName);
+  final size = log.isTransfer() && log.totalSize > 0
+      ? readableFileSize(log.totalSize.toDouble())
+      : null;
+  if (log.isTransfer() &&
+      (log.state == JobState.none || log.state == JobState.inProgress)) {
+    final progress = log.totalSize > 0 ? log.finishedSize / log.totalSize : 0.0;
+    return LgCmFileEntry(
+      action: action,
+      actionLabel: label,
+      name: name,
+      size: size,
+      state: LgCmFileState.running,
+      progress: progress,
+      resultLabel: '${(progress * 100).toStringAsFixed(0)}%',
+    );
+  }
+  final failed = log.state == JobState.error;
+  return LgCmFileEntry(
+    action: action,
+    actionLabel: label,
+    name: name,
+    size: size,
+    state: failed ? LgCmFileState.failed : LgCmFileState.done,
+    resultLabel: failed
+        ? l10n.cmFileFailed
+        : log.err == 'skipped'
+        ? l10n.cmFileSkipped
+        : l10n.cmFileDone,
+  );
+}
+
+String _baseName(String path) {
+  final parts = path.split(RegExp(r'[\\/]')).where((p) => p.isNotEmpty);
+  return parts.isEmpty ? path : parts.last;
+}
 
 /// The visitor's picture, when the account has one (upstream `common.dart:4254-4284`,
 /// `buildAvatarWidget`).

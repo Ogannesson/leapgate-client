@@ -8,17 +8,22 @@ import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/generated_bridge.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
+import 'package:flutter_hbb/leapgate/cm_chat.dart';
 import 'package:flutter_hbb/leapgate/cm_core.dart';
+import 'package:flutter_hbb/models/cm_file_model.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/models/server_model.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:leapgate_ui/cm/cm_page.dart';
 import 'package:leapgate_ui/cm/cm_window.dart';
 import 'package:leapgate_ui/l10n/app_localizations.dart';
+import 'package:leapgate_ui/main.dart' show LeapgateApp;
 import 'package:leapgate_ui/theme/lg_theme.dart';
 import 'package:leapgate_ui/theme/lg_tokens.dart';
 import 'package:leapgate_ui/widgets/lg_button.dart';
+import 'package:leapgate_ui/widgets/lg_cm_chat.dart';
 import 'package:leapgate_ui/widgets/lg_cm_frame.dart';
+import 'package:leapgate_ui/widgets/lg_pressable.dart';
 
 // The connection manager's page, one test per state of 06 §5.1 in the first stage (A-P3.html).
 // Device IDs and names here are made up.
@@ -33,6 +38,11 @@ class CmBind implements RustdeskImpl {
   /// What `cm_get_click_time` answers: the remote user's last input. 0 lets every click through.
   double clickTime = 0;
   int clientsLength = 0;
+
+  /// This device's microphones, and whether "系统声音" can be used.
+  List<String> soundInputs = const ['USB 麦克风'];
+  bool loopback = false;
+  String voiceInput = '';
 
   List<Invocation> callsTo(Symbol name) =>
       calls.where((c) => c.memberName == name).toList();
@@ -61,6 +71,16 @@ class CmBind implements RustdeskImpl {
         return Future<double>.value(clickTime);
       case #cmGetClientsLength:
         return Future<int>.value(clientsLength);
+      case #mainGetSoundInputs:
+        return Future<List<String>>.value(soundInputs);
+      case #mainAudioSupportLoopback:
+        return loopback;
+      case #getVoiceCallInputDevice:
+        return Future<String>.value(voiceInput);
+      case #setVoiceCallInputDevice:
+        voiceInput = invocation.namedArguments[#device] as String;
+        return Future<void>.value();
+      case #cmSendChat:
       case #cmCheckClickTime:
       case #cmLoginRes:
       case #cmCloseConnection:
@@ -79,6 +99,12 @@ class CmBind implements RustdeskImpl {
 class FakeCmShell implements CmShellWindow {
   final _view = ValueNotifier(CmView.full);
   final calls = <String>[];
+
+  /// The side panel's width is asked for.
+  bool expanded = false;
+
+  @override
+  Future<void> setExpanded(bool expanded) async => this.expanded = expanded;
 
   @override
   ValueListenable<CmView> get view => _view;
@@ -130,7 +156,12 @@ class FakeCmShell implements CmShellWindow {
   Future<void> setFullscreen(bool fullscreen) async {}
 }
 
-typedef Cm = ({CmBind bind, FakeCmShell window, ServerModel model});
+typedef Cm = ({
+  CmBind bind,
+  FakeCmShell window,
+  ServerModel model,
+  CmChatModel chat,
+});
 
 Map<String, dynamic> visitor(
   int id, {
@@ -189,18 +220,31 @@ Future<Cm> pumpCm(WidgetTester tester, {void Function(CmBind)? setUp}) async {
   appCore = AppCore(window: window);
   addTearDown(appCore.recentPeers.dispose);
   final model = ServerModel(window);
-  registerCmEvents(model);
+  final chat = CmChatModel(model);
+  final files = CmFileModel(model);
+  registerCmEvents(model, chat, files);
   await tester.pumpWidget(
     MaterialApp(
       locale: const Locale('zh'),
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
       theme: buildLgTheme(brightness: Brightness.light, mode: LgMode.compact),
-      home: CmPage(model: model, window: window),
+      home: CmPage(model: model, chat: chat, files: files, window: window),
     ),
   );
-  return (bind: bind, window: window, model: model);
+  return (bind: bind, window: window, model: model, chat: chat);
 }
+
+/// The window as wide as with the side panel open; the test view does not follow
+/// `setExpanded`.
+void expandView(WidgetTester tester) =>
+    tester.view.physicalSize = const Size(kLgCmExpandedWidth, kLgCmHeight);
+
+Future<void> chatFrom(WidgetTester tester, int id, String text) =>
+    send(tester, {'name': 'chat_server_mode', 'id': '$id', 'text': text});
+
+Future<void> fileLog(WidgetTester tester, String action, Object value) =>
+    send(tester, {'name': 'cm_file_transfer_log', action: jsonEncode(value)});
 
 /// Takes the page down and stops the model's timers before the test ends. A second visitor's
 /// collapse timer replaces the first's handle, as upstream's does, so the first one is left to
@@ -731,5 +775,206 @@ void main() {
       LgButtonKind.secondary,
     );
     await finish(tester, cm);
+  });
+
+  // Second stage: the side panels, the microphones and the interface mode.
+
+  Finder chatInput() => find.descendant(
+    of: find.byType(LgCmChat),
+    matching: find.byType(EditableText),
+  );
+
+  Future<void> type(WidgetTester tester, String text) async {
+    await tester.enterText(chatInput(), text);
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump(const Duration(milliseconds: 200));
+  }
+
+  testWidgets(
+    'a chat message brings the window up with the chat; the input takes the keyboard; read-only once gone',
+    (tester) async {
+      final cm = await pumpCm(tester);
+      expandView(tester);
+      await arrive(tester, visitor(1));
+      cm.window.viewForTest = CmView.strip;
+      await tester.pump();
+
+      await chatFrom(tester, 1, '你好，我帮你看一下打印机。');
+      expect(cm.window.view.value, CmView.full);
+      expect(cm.window.expanded, true);
+      expect(find.text('你好，我帮你看一下打印机。'), findsOneWidget);
+
+      await type(tester, '好的，谢谢！');
+      final sent = cm.bind.callsTo(#cmSendChat).single.namedArguments;
+      expect((sent[#connId], sent[#msg]), (1, '好的，谢谢！'));
+      expect(find.text('好的，谢谢！'), findsOneWidget);
+
+      // The keyboard still reaches nothing else.
+      final checks = cm.bind.callsTo(#cmCheckClickTime).length;
+      for (var i = 0; i < 8; i++) {
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        await tester.sendKeyEvent(LogicalKeyboardKey.space);
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      }
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(cm.bind.callsTo(#cmCheckClickTime), hasLength(checks));
+      expect(cm.window.calls, isNot(contains('close')));
+
+      await send(tester, {'name': 'on_client_remove', 'id': '1', 'close': 'false'});
+      expect(find.text('对方已断开连接'), findsOneWidget);
+      expect(find.text('好的，谢谢！'), findsOneWidget);
+      await finish(tester, cm);
+    },
+  );
+
+  testWidgets('a remote "send" is dropped with a hint over the chat', (
+    tester,
+  ) async {
+    final cm = await pumpCm(tester, setUp: (b) => b.clickTime = 1e15);
+    expandView(tester);
+    await arrive(tester, visitor(1));
+    await chatFrom(tester, 1, '在吗');
+    await type(tester, '不该发出去');
+    expect(cm.bind.callsTo(#cmSendChat), isEmpty);
+    expect(find.text('无法远程执行此操作'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 3));
+    await finish(tester, cm);
+  });
+
+  testWidgets(
+    'writing to one visitor, a message from another counts on their tab; their tab opens it',
+    (tester) async {
+      final cm = await pumpCm(tester);
+      expandView(tester);
+      await arrive(tester, visitor(1));
+      await arrive(tester, visitor(2, name: '王五', peerId: '147258369'));
+      await chatFrom(tester, 1, '第一条');
+      expect(find.text('912'), findsOneWidget);
+      await tester.showKeyboard(chatInput());
+
+      await chatFrom(tester, 2, '第二条');
+      expect(find.text('912'), findsOneWidget);
+      expect(find.text('第二条'), findsNothing);
+      expect(find.text('1'), findsOneWidget);
+
+      await tester.tap(find.text('王五'));
+      await tester.pump();
+      expect(find.text('147'), findsOneWidget);
+      expect(find.text('第二条'), findsOneWidget);
+      expect(find.text('1'), findsNothing);
+      await finish(tester, cm);
+    },
+  );
+
+  testWidgets(
+    'file transfer: the file log opens to the left; records count as unread until it shows them',
+    (tester) async {
+      final cm = await pumpCm(tester);
+      expandView(tester);
+      await arrive(tester, visitor(1, fileTransfer: true));
+      final button = find.byWidgetPredicate(
+        (w) => w is LgPressable && w.semanticLabel == '文件记录',
+      );
+      await click(tester, button);
+      expect(cm.window.expanded, true);
+      expect(find.text('暂无文件传输记录'), findsOneWidget);
+      await click(tester, button);
+      expect(cm.window.expanded, false);
+
+      await fileLog(tester, 'transfer', [
+        {
+          'connId': 1,
+          'id': 1,
+          'dataSource': r'C:\Users\a\旅行照片.zip',
+          'isRemote': false,
+          'totalSize': 1000,
+          'finishedSize': 620,
+        },
+      ]);
+      // On the tab and on the button.
+      expect(find.text('1'), findsNWidgets(2));
+      await click(tester, button);
+      expect(find.text('旅行照片.zip'), findsOneWidget);
+      expect(find.text('上传到本机'), findsOneWidget);
+      expect(find.text('62%'), findsOneWidget);
+      expect(find.text('1'), findsNothing);
+
+      await fileLog(tester, 'create_dir', {
+        'connId': 1,
+        'id': 2,
+        'path': r'C:\Users\a\打印机驱动',
+      });
+      expect(find.text('1'), findsNothing);
+      // Newest first.
+      expect(
+        tester.getTopLeft(find.text('打印机驱动')).dy,
+        lessThan(tester.getTopLeft(find.text('旅行照片.zip')).dy),
+      );
+      await finish(tester, cm);
+    },
+  );
+
+  testWidgets(
+    'with the side panel open a new visitor keeps the width once they have one, not while waiting',
+    (tester) async {
+      final cm = await pumpCm(tester);
+      expandView(tester);
+      await arrive(tester, visitor(1));
+      await chatFrom(tester, 1, '你好');
+      expect(cm.window.expanded, true);
+
+      await arrive(
+        tester,
+        visitor(2, name: '王五', peerId: '147258369', authorized: false),
+      );
+      expect(cm.window.expanded, false);
+      await arrive(tester, visitor(2, name: '王五', peerId: '147258369'));
+      expect(cm.window.expanded, true);
+      await finish(tester, cm);
+    },
+  );
+
+  testWidgets(
+    'in a call: this device\'s microphones; with none, the field says so',
+    (tester) async {
+      var cm = await pumpCm(
+        tester,
+        setUp: (b) => b
+          ..loopback = true
+          ..voiceInput = '',
+      );
+      await arrive(tester, visitor(1, inVoiceCall: true));
+      await tester.pump();
+      // The default is "系统声音" where it can be used.
+      expect(find.text('系统声音'), findsOneWidget);
+      await finish(tester, cm);
+
+      cm = await pumpCm(tester, setUp: (b) => b.soundInputs = const []);
+      await arrive(tester, visitor(1, inVoiceCall: true));
+      await tester.pump();
+      await tester.tap(find.text('选择麦克风'));
+      await tester.pump();
+      expect(find.text('未找到音频输入设备'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 3));
+      await finish(tester, cm);
+    },
+  );
+
+  testWidgets('the interface mode follows the main window (S7)', (
+    tester,
+  ) async {
+    final detail = ValueNotifier(false);
+    await tester.pumpWidget(
+      LeapgateApp(
+        detailMode: detail,
+        home: Builder(
+          builder: (context) => Text(LgTokens.of(context).mode.name),
+        ),
+      ),
+    );
+    expect(find.text('compact'), findsOneWidget);
+    detail.value = true;
+    await tester.pump();
+    expect(find.text('detail'), findsOneWidget);
   });
 }

@@ -3,8 +3,12 @@ import 'dart:ui';
 
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter_hbb/common.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
+import 'package:flutter_hbb/leapgate/cm_chat.dart';
 import 'package:flutter_hbb/leapgate/cm_core.dart';
+import 'package:flutter_hbb/models/cm_file_model.dart';
+import 'package:flutter_hbb/models/file_model.dart' show JobState;
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/models/server_model.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -40,6 +44,7 @@ class CmFakeBind extends FakeBind {
         calls.add(invocation);
         return Future<String>.value(approveMode);
       case #cmLoginRes:
+      case #cmSendChat:
         calls.add(invocation);
         return Future<void>.value();
     }
@@ -110,10 +115,14 @@ Map<String, dynamic> removed(int id, {required bool close}) =>
 void main() {
   late CmFakeBind bind;
   late FakeCmWindow window;
+  late CmChatModel chat;
+  late CmFileModel files;
 
   ServerModel start() {
     final model = ServerModel(window);
-    registerCmEvents(model);
+    chat = CmChatModel(model);
+    files = CmFileModel(model);
+    registerCmEvents(model, chat, files);
     return model;
   }
 
@@ -260,5 +269,102 @@ void main() {
         cmSessionKind(Client.fromJson(
             client(1, portForward: 'leapgate-exit.invalid:65536'))),
         CmSessionKind.exit);
+  });
+
+  test(
+      'chat: kept by the visitor, so a reconnect finds it; sent on the connection written in',
+      () {
+    fakeAsync((async) {
+      final model = start();
+      final received = <int>[];
+      chat.onReceive = (c) => received.add(c.id);
+      send(async, added(client(1, authorized: true)));
+      send(async, {'name': 'chat_server_mode', 'id': '1', 'text': 'hello'});
+      // Not a connection of this window: dropped, as upstream.
+      send(async, {'name': 'chat_server_mode', 'id': '9', 'text': 'lost'});
+      expect(received, [1]);
+
+      // The same visitor again on connection 2.
+      send(async, removed(1, close: true));
+      send(async, added(client(2, authorized: true)));
+      final again = model.clients.single;
+      expect(chat.messagesOf(again).map((m) => (m.isOut, m.text)),
+          [(false, 'hello')]);
+      expect(chat.send(again, '  hi  '), true);
+      expect(chat.send(again, '   '), false);
+      final sent = bind.callsTo(#cmSendChat).single.namedArguments;
+      expect((sent[#connId], sent[#msg]), (2, 'hi'));
+      expect(chat.messagesOf(again).last.isOut, true);
+      model.dispose();
+    });
+  });
+
+  test(
+      'file log: transfers, folder and rename records; unread unless the panel shows them',
+      () {
+    fakeAsync((async) {
+      final model = start();
+      send(async, added(client(1, authorized: true)));
+      final visitor = model.clients.single;
+      void log(String action, Object value) => send(async, {
+            'name': 'cm_file_transfer_log',
+            action: jsonEncode(value),
+          });
+      Map<String, Object> job(int id,
+              {bool isRemote = false,
+              int finished = 0,
+              bool done = false,
+              String error = ''}) =>
+          {
+            'connId': 1,
+            'id': id,
+            'dataSource': 'C:\\Users\\a\\report.pdf',
+            'isRemote': isRemote,
+            'totalSize': 100,
+            'finishedSize': finished,
+            'done': done,
+            'error': error,
+          };
+
+      log('transfer', [job(1, finished: 40)]);
+      log('transfer', [job(1, finished: 100, done: true), job(2, isRemote: true, error: 'denied')]);
+      log('create_dir', {'connId': 1, 'id': 3, 'path': 'C:\\Users\\a\\new'});
+      log('rename', {'connId': 1, 'path': 'C:\\Users\\a\\x.txt', 'newName': 'y.txt'});
+      final records = files.logOf(1);
+      expect(records.map((r) => (r.action, r.state)), [
+        (CmFileAction.localToRemote, JobState.done),
+        (CmFileAction.remoteToLocal, JobState.error),
+        (CmFileAction.createDir, JobState.done),
+        (CmFileAction.rename, JobState.done),
+      ]);
+      expect((records.last.fileName, records.last.newName),
+          ('C:\\Users\\a\\x.txt', 'y.txt'));
+      // One per new record, not per update.
+      expect(visitor.unreadChatMessageCount.value, 4);
+
+      files.shownConnId = 1;
+      log('remove', {'connId': 1, 'id': 4, 'path': 'C:\\Users\\a\\new', 'dir': true});
+      expect(visitor.unreadChatMessageCount.value, 4);
+      expect(files.logOf(1).last.action, CmFileAction.remove);
+      model.dispose();
+    });
+  });
+
+  test('the main window\'s "View" and interface mode (C2, S7)', () {
+    fakeAsync((async) {
+      final fakes = installFakes();
+      final detail = ValueNotifier(false);
+      final sub = listenToMainWindow(window, detail);
+      fakes.lg.cmEvents.add('{"name":"ui_mode","mode":"detail"}');
+      async.flushMicrotasks();
+      expect(detail.value, true);
+      fakes.lg.cmEvents.add('{"name":"show_cm"}');
+      async.flushMicrotasks();
+      expect(window.calls, ['bringToFront']);
+      fakes.lg.cmEvents.add('{"name":"ui_mode","mode":""}');
+      async.flushMicrotasks();
+      expect(detail.value, false);
+      sub.cancel();
+    });
   });
 }

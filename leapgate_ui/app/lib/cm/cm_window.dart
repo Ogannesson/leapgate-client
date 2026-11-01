@@ -41,6 +41,10 @@ abstract class CmShellWindow implements CmWindow {
 
   /// Puts the strip where the cursor left it and remembers the place.
   Future<void> endStripDrag();
+
+  /// The full window is [kLgCmExpandedWidth] wide while the side panel shows, opening to the
+  /// left; it keeps that width when it comes back from the strip or for a new visitor.
+  Future<void> setExpanded(bool expanded);
 }
 
 class LgCmWindow implements CmShellWindow {
@@ -50,6 +54,8 @@ class LgCmWindow implements CmShellWindow {
   /// started, in physical pixels. The pointer's own deltas are in window coordinates, which move
   /// with the window.
   ({int cursorX, Future<double> left})? _drag;
+
+  bool _expanded = false;
 
   @override
   ValueListenable<CmView> get view => _view;
@@ -154,6 +160,13 @@ class LgCmWindow implements CmShellWindow {
   }
 
   @override
+  Future<void> setExpanded(bool expanded) async {
+    if (_expanded == expanded) return;
+    _expanded = expanded;
+    if (_view.value == CmView.full) await _place(CmView.full);
+  }
+
+  @override
   Future<Rect> getFrame() => _bounds();
 
   @override
@@ -175,7 +188,10 @@ class LgCmWindow implements CmShellWindow {
   /// distance from the right edge it was left at.
   Future<void> _place(CmView v) async {
     final (:work, :scale) = cmPrimaryWorkArea();
-    final size = (v == CmView.strip ? kCmStripSize : _fullSize) * scale;
+    final full = _expanded
+        ? const Size(kLgCmExpandedWidth, kLgCmHeight)
+        : _fullSize;
+    final size = (v == CmView.strip ? kCmStripSize : full) * scale;
     var right = work.right;
     if (v == CmView.strip) {
       final offset =

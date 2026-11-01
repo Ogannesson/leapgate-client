@@ -1,39 +1,58 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_hbb/leapgate/cm_chat.dart';
 import 'package:flutter_hbb/leapgate/cm_core.dart';
 import 'package:flutter_hbb/leapgate/recent_peers.dart' show formatPeerId;
+import 'package:flutter_hbb/models/chat_model.dart' show VoiceInputs;
+import 'package:flutter_hbb/models/cm_file_model.dart';
 import 'package:flutter_hbb/models/server_model.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../icons/lg_icon.dart';
 import '../l10n/app_localizations.dart';
 import '../widgets/lg_button.dart';
+import '../widgets/lg_chat.dart';
 import '../widgets/lg_cm_actions.dart';
+import '../widgets/lg_cm_chat.dart';
 import '../widgets/lg_cm_close_confirm.dart';
+import '../widgets/lg_cm_files.dart';
 import '../widgets/lg_cm_frame.dart';
 import '../widgets/lg_cm_head.dart';
 import '../widgets/lg_cm_permissions.dart';
 import '../widgets/lg_cm_tabs.dart';
 import '../widgets/lg_feedback.dart';
+import '../widgets/lg_panel_inputs.dart' show LgSelectItem;
 import 'cm_parts.dart';
 import 'cm_strip.dart';
 import 'cm_window.dart';
 
 // The connection manager's page (docs/新界面/01-内容与逻辑说明.md §3.3, A-P3.html): a tab per
-// connection, the selected visitor's header, permissions and buttons; collapsed, the strip.
-// Upstream: `flutter/lib/desktop/pages/server_page.dart`. The chat and file log side panels
-// come with the second stage; their header buttons are there and do nothing yet.
+// connection, the selected visitor's header, permissions and buttons, and the side panel with
+// the chat or the file log; collapsed, the strip. Upstream:
+// `flutter/lib/desktop/pages/server_page.dart`, the CM parts of `models/chat_model.dart`.
 
 /// Where a dropped remote click is reported (01 §3.3): over the panel for the header button,
-/// the permissions and closing; on the strip; or over the button itself (`action:` + label).
+/// the permissions and closing; on the strip; over the side panel; or over the button itself
+/// (`action:` + label). [_hintNoMic] puts "未找到音频输入设备" on the microphone field instead.
 const _hintPanel = 'panel';
 const _hintStrip = 'strip';
+const _hintSide = 'side';
+const _hintMic = 'mic';
+const _hintNoMic = 'no-mic';
 
 class CmPage extends StatefulWidget {
-  const CmPage({super.key, required this.model, required this.window});
+  const CmPage({
+    super.key,
+    required this.model,
+    required this.chat,
+    required this.files,
+    required this.window,
+  });
 
   final ServerModel model;
+  final CmChatModel chat;
+  final CmFileModel files;
   final CmShellWindow window;
 
   @override
@@ -60,10 +79,21 @@ class _CmPageState extends State<CmPage> with WindowListener {
 
   bool _confirmingClose = false;
 
+  /// The side panel was opened. It shows while the selected visitor has one (`_hasSide`); the
+  /// window is as wide as it needs (upstream keeps one `isShowCMSidePage` for all tabs too).
+  bool _sideOpen = false;
+
+  /// One draft for every visitor, as upstream's one text controller.
+  final _chatInput = TextEditingController();
+  final _chatFocus = FocusNode();
+
   @override
   void initState() {
     super.initState();
     _model.addListener(_onModel);
+    widget.chat.addListener(_onSideContent);
+    widget.files.addListener(_onSideContent);
+    widget.chat.onReceive = _onChatReceived;
     widget.window.view.addListener(_onView);
     windowManager.addListener(this);
     _model.updateClientState();
@@ -74,10 +104,15 @@ class _CmPageState extends State<CmPage> with WindowListener {
   @override
   void dispose() {
     _model.removeListener(_onModel);
+    widget.chat.removeListener(_onSideContent);
+    widget.files.removeListener(_onSideContent);
+    widget.chat.onReceive = null;
     widget.window.view.removeListener(_onView);
     windowManager.removeListener(this);
     _clock?.cancel();
     _blockedTimer?.cancel();
+    _chatInput.dispose();
+    _chatFocus.dispose();
     super.dispose();
   }
 
@@ -92,7 +127,80 @@ class _CmPageState extends State<CmPage> with WindowListener {
 
   void _onView() => setState(() {});
 
-  void _onModel() => setState(_syncTabs);
+  void _onModel() {
+    setState(_syncTabs);
+    _syncSide();
+  }
+
+  /// A message or a file record came; the unread counts they change are read in build.
+  void _onSideContent() => setState(() {});
+
+  Client? get _selectedClient =>
+      _model.clients.where((c) => c.id == _selected).firstOrNull;
+
+  /// Upstream `server_page.dart:562-581`: the chat (or, for file transfer, the file log) once
+  /// authorized; terminal, port forwarding and exit nodes have neither.
+  bool _hasSide(Client client) {
+    final kind = cmSessionKind(client);
+    return client.authorized &&
+        (kind == CmSessionKind.remoteDesktop ||
+            kind == CmSessionKind.fileTransfer ||
+            kind == CmSessionKind.camera);
+  }
+
+  /// The visitor whose chat or file log shows.
+  Client? get _sideClient {
+    final client = _selectedClient;
+    return _sideOpen && client != null && _hasSide(client) ? client : null;
+  }
+
+  /// After the selection or the side panel changed: the window's width, and what is shown is
+  /// read (upstream `toggleCMSidePage`, `_addUnread`).
+  void _syncSide() {
+    final client = _sideClient;
+    widget.window.setExpanded(client != null);
+    widget.files.shownConnId = client?.id;
+    client?.unreadChatMessageCount.value = 0;
+  }
+
+  void _select(Client client) {
+    setState(() {
+      _selected = client.id;
+      // Upstream `server_page.dart:131-145`: a tab with something unread opens it.
+      if (client.unreadChatMessageCount.value > 0 && _hasSide(client)) {
+        _sideOpen = true;
+      }
+    });
+    _syncSide();
+  }
+
+  void _toggleSide() {
+    setState(() => _sideOpen = !_sideOpen);
+    _syncSide();
+    final client = _sideClient;
+    if (client != null && cmSessionKind(client) != CmSessionKind.fileTransfer) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _chatFocus.context != null) _chatFocus.requestFocus();
+      });
+    }
+  }
+
+  /// Upstream `ChatModel.receive` in the CM: the window comes up with the sender's chat, unless
+  /// the user is writing to another visitor; the sender's tab then counts it as unread.
+  void _onChatReceived(Client client) {
+    widget.window.bringToFront();
+    final shown = _sideClient;
+    if (shown != null && shown.id != client.id && _chatFocus.hasFocus) {
+      client.unreadChatMessageCount.value += 1;
+      setState(() {});
+      return;
+    }
+    setState(() {
+      _selected = client.id;
+      _sideOpen = true;
+    });
+    _syncSide();
+  }
 
   /// A new connection's tab is selected, as upstream's tab controller does when a tab is added;
   /// when the selected one goes, the one that takes its place.
@@ -107,6 +215,9 @@ class _CmPageState extends State<CmPage> with WindowListener {
     }
     _seconds.removeWhere((id, _) => !ids.contains(id));
     _avatars.removeWhere((id, _) => !ids.contains(id));
+    // The window is hidden: the next visitor, within the 6 s before the process ends, starts
+    // with it closed.
+    if (ids.isEmpty) _sideOpen = false;
     _order = ids;
   }
 
@@ -210,6 +321,11 @@ class _CmPageState extends State<CmPage> with WindowListener {
       onCollapse: widget.window.collapse,
       onClose: _onClose,
       onStartDrag: widget.window.startDragging,
+      // Upstream `_buildKeyEventBlock`: the remote user's keyboard cannot reach the buttons
+      // through the focus. Title buttons, tabs, panel and the confirmation: the service only
+      // takes the remote side's input time on a left button release and Enter, so Tab and Space
+      // would pass the click guard. The chat input takes it; sending is guarded.
+      sideFocusOnly: !allowRemoteCmModification(),
       tabs: LgCmTabStrip(
         tabs: [
           for (final c in clients)
@@ -226,7 +342,7 @@ class _CmPageState extends State<CmPage> with WindowListener {
             ),
         ],
         selected: client == null ? 0 : clients.indexOf(client),
-        onSelect: (i) => setState(() => _selected = clients[i].id),
+        onSelect: (i) => _select(clients[i]),
       ),
       panel: client == null
           ? const SizedBox.shrink()
@@ -234,6 +350,7 @@ class _CmPageState extends State<CmPage> with WindowListener {
               tip: _blocked == _hintPanel ? l10n.cmBlockedRemotely : null,
               child: _panel(client, l10n),
             ),
+      side: _side(l10n),
       overlay: _confirmingClose
           ? LgCmCloseConfirm(
               title: l10n.cmCloseAllTitle,
@@ -256,11 +373,6 @@ class _CmPageState extends State<CmPage> with WindowListener {
             )
           : null,
     );
-    // Upstream `_buildKeyEventBlock`: the remote user's keyboard cannot reach the buttons
-    // through the focus. The whole window, title buttons, tabs and the confirmation included:
-    // the service only takes the remote side's input time on a left button release and Enter,
-    // so Tab and Space would pass the click guard.
-    frame = ExcludeFocus(excluding: !allowRemoteCmModification(), child: frame);
     if (clients.isNotEmpty) {
       // Upstream listens to down and move only, and Flutter's move is a drag; 01 §3.3 cancels
       // on any mouse movement too.
@@ -345,13 +457,6 @@ class _CmPageState extends State<CmPage> with WindowListener {
       );
     }
     final kind = cmSessionKind(client);
-    // Upstream `server_page.dart:562-581`: the chat (or, for file transfer, the file log) once
-    // authorized; terminal, port forwarding and exit nodes have neither.
-    final side =
-        client.authorized &&
-        (kind == CmSessionKind.remoteDesktop ||
-            kind == CmSessionKind.fileTransfer ||
-            kind == CmSessionKind.camera);
     return LgCmHeader(
       name: client.name,
       id: formatPeerId(client.peerId),
@@ -360,7 +465,7 @@ class _CmPageState extends State<CmPage> with WindowListener {
       status: status,
       avatarText: cmLetter(client),
       avatarImage: _avatars.putIfAbsent(client.id, () => cmAvatarImage(client)),
-      sideButton: side
+      sideButton: _hasSide(client)
           ? LgCmSideButton(
               icon: kind == CmSessionKind.fileTransfer
                   ? LgIcons.files
@@ -368,9 +473,66 @@ class _CmPageState extends State<CmPage> with WindowListener {
               label: kind == CmSessionKind.fileTransfer
                   ? l10n.cmFileLog
                   : l10n.cmChat,
-              onPressed: _guarded(client, _hintPanel, () {}),
+              selected: _sideClient == client,
+              unread: client.unreadChatMessageCount.value,
+              onPressed: _guarded(client, _hintPanel, _toggleSide),
             )
           : null,
+    );
+  }
+
+  /// The chat or the file log of [_sideClient] (01 §3.3); a dropped remote click on "发送" is
+  /// reported over it.
+  Widget? _side(AppLocalizations l10n) {
+    final client = _sideClient;
+    if (client == null) return null;
+    final Widget panel;
+    if (cmSessionKind(client) == CmSessionKind.fileTransfer) {
+      panel = LgCmSidePanel(
+        icon: LgIcons.files,
+        title: l10n.cmFileLog,
+        child: LgCmFileLog(
+          // Newest first: what is going on now is on top without scrolling.
+          entries: [
+            for (final log in widget.files.logOf(client.id).reversed)
+              cmFileEntry(l10n, log),
+          ],
+          emptyText: l10n.cmFileLogEmpty,
+        ),
+      );
+    } else {
+      String two(int v) => v.toString().padLeft(2, '0');
+      panel = LgCmSidePanel(
+        icon: LgIcons.chat,
+        title: l10n.cmChat,
+        child: LgCmChat(
+          messages: [
+            for (final m in widget.chat.messagesOf(client))
+              LgChatMessage(
+                text: m.text,
+                time: '${two(m.at.hour)}:${two(m.at.minute)}',
+                mine: m.isOut,
+                sender: m.isOut ? null : client.name,
+              ),
+          ],
+          controller: _chatInput,
+          focusNode: _chatFocus,
+          placeholder: l10n.chatPlaceholder,
+          sendLabel: l10n.chatSend,
+          mineLabel: l10n.chatMine,
+          theirsLabel: l10n.chatTheirs,
+          emptyText: l10n.cmChatEmpty,
+          readOnly: client.disconnected,
+          readOnlyText: l10n.cmChatPeerLeft,
+          onSend: (text) => _guarded(client, _hintSide, () {
+            if (widget.chat.send(client, text)) _chatInput.clear();
+          })(),
+        ),
+      );
+    }
+    return LgCmTipAnchor(
+      tip: _blocked == _hintSide ? l10n.cmBlockedRemotely : null,
+      child: panel,
     );
   }
 
@@ -440,12 +602,14 @@ class _CmPageState extends State<CmPage> with WindowListener {
           ],
         ),
       if (client.inVoiceCall)
-        row(
-          action(
-            l10n.cmHangUp,
-            () => cmCloseVoiceCall(client),
-            icon: LgIcons.callEnd,
-          ),
+        _CmMicRow(
+          tip: switch (_blocked) {
+            _hintMic => l10n.cmBlockedRemotely,
+            _hintNoMic => l10n.cmNoAudioInput,
+            _ => null,
+          },
+          onNoDevices: () => _showBlocked(_hintNoMic),
+          onHangUp: _guarded(client, _hintMic, () => cmCloseVoiceCall(client)),
         ),
       if (client.fromSwitch)
         row(action(l10n.cmSwitchBack, () => cmSwitchBack(client))),
@@ -464,5 +628,67 @@ class _CmPageState extends State<CmPage> with WindowListener {
         ),
       ),
     ];
+  }
+}
+
+/// During a voice call: the microphones of this device, "系统声音" first where it can be used
+/// (upstream `server_page.dart:893-960`, `AudioInput`), and "挂断". Without any, pressing the
+/// field says so (upstream's `no_audio_input_device_tip`). Choosing one is not guarded, as
+/// upstream's menu is not.
+class _CmMicRow extends StatefulWidget {
+  const _CmMicRow({
+    required this.tip,
+    required this.onNoDevices,
+    required this.onHangUp,
+  });
+
+  final String? tip;
+  final VoidCallback onNoDevices;
+  final VoidCallback onHangUp;
+
+  @override
+  State<_CmMicRow> createState() => _CmMicRowState();
+}
+
+class _CmMicRowState extends State<_CmMicRow> {
+  VoiceInputs? _inputs;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final inputs = await cmVoiceInputs();
+    if (mounted) setState(() => _inputs = inputs);
+  }
+
+  Future<void> _choose(String device) async {
+    await cmSetVoiceInput(device);
+    await _load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final inputs = _inputs;
+    final loopback = inputs?.loopback ?? false;
+    final current = inputs?.current ?? '';
+    return LgCmMicRow(
+      microphoneLabel: l10n.chatMicrophone,
+      placeholder: l10n.cmChooseMicrophone,
+      devices: [
+        if (loopback) LgSelectItem('', l10n.chatSystemSound),
+        for (final d in inputs?.devices ?? const <String>[]) LgSelectItem(d, d),
+      ],
+      // '' is the default: "系统声音" where there is one, otherwise nothing chosen.
+      device: current.isEmpty && !loopback ? null : current,
+      onDeviceChanged: _choose,
+      onNoDevices: widget.onNoDevices,
+      hangUpLabel: l10n.cmHangUp,
+      onHangUp: widget.onHangUp,
+      tip: widget.tip,
+    );
   }
 }

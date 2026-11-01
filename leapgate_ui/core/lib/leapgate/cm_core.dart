@@ -4,19 +4,25 @@
 // (`flutter/lib/desktop/pages/server_page.dart`) and in `flutter/lib/main.dart`.
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:ffi' hide Size;
 import 'dart:ui';
 
 import 'package:clock/clock.dart';
 import 'package:ffi/ffi.dart';
+import 'package:flutter/foundation.dart';
 import 'package:win32/win32.dart' as win32;
 
 import '../common.dart';
 import '../consts.dart';
+import '../models/chat_model.dart' show VoiceInputs;
+import '../models/cm_file_model.dart';
 import '../models/platform_model.dart';
 import '../models/server_model.dart';
 import 'app_core.dart';
 import 'app_window.dart';
+import 'bridge.dart';
+import 'cm_chat.dart';
 
 /// The CM's window as the copied [ServerModel] drives it. [bringToFront] (upstream
 /// `windowOnTop(null)`, called for a new visitor and an incoming voice call) also brings a
@@ -36,11 +42,10 @@ abstract class CmWindow implements AppWindow {
   Future<void> close();
 }
 
-/// The global events the CM handles (upstream `models/model.dart:392-430`).
-/// `chat_server_mode` and `cm_file_transfer_log` join with the chat and the file log. `theme`
+/// The global events the CM handles (upstream `models/model.dart:365-367`, `:392-445`). `theme`
 /// and `language` are not handled: like the new main window, the CM follows the system until
 /// the settings page (M6) stores a choice.
-void registerCmEvents(ServerModel model) {
+void registerCmEvents(ServerModel model, CmChatModel chat, CmFileModel files) {
   final events = appCore.events;
   events.on('add_connection', model.addConnection);
   events.on('on_client_remove', model.onClientRemove);
@@ -49,7 +54,26 @@ void registerCmEvents(ServerModel model) {
     model.setShowElevation(show);
   });
   events.on('update_voice_call_state', model.updateVoiceCallState);
+  events.on('chat_server_mode',
+      (evt) => chat.receive(int.parse(evt['id'] as String), evt['text'] ?? ''));
+  events.on('cm_file_transfer_log', files.onFileTransferLog);
 }
+
+/// What the main window tells the CM (C2, S7): "查看" brings the window to the front; a new
+/// interface mode goes to [detailMode]. Subscribed when the CM starts: Rust drops a message
+/// that comes before. The mode is not written to LocalConfig here: the CM's copy of it was read
+/// when it started, and a write would store that old copy over the main window's later changes.
+StreamSubscription<String> listenToMainWindow(
+        CmWindow window, ValueNotifier<bool> detailMode) =>
+    lgBind.leapgateCmEvents().listen((event) {
+      final evt = jsonDecode(event) as Map<String, dynamic>;
+      switch (evt['name']) {
+        case 'show_cm':
+          window.bringToFront();
+        case 'ui_mode':
+          detailMode.value = evt['mode'] == 'detail';
+      }
+    });
 
 /// The session types the CM tells apart; an exit node is a port forward to the exit sentinel.
 enum CmSessionKind {
@@ -182,6 +206,22 @@ void cmElevate(ServerModel model, Client client) {
 void cmSwitchBack(Client client) => bind.cmSwitchBack(connId: client.id);
 
 void cmCloseVoiceCall(Client client) => bind.cmCloseVoiceCall(id: client.id);
+
+/// The microphones for a voice call on this device, as a session's chat model gives them
+/// (upstream `AudioInput.getDevicesInfo(isCm: true, isVoiceCall: true)`).
+Future<VoiceInputs> cmVoiceInputs() async {
+  final devices = (await bind.mainGetSoundInputs()).toList();
+  final current = await bind.getVoiceCallInputDevice(isCm: true);
+  return (
+    devices: devices,
+    loopback: bind.mainAudioSupportLoopback(),
+    current: current,
+  );
+}
+
+/// '' chooses the default.
+Future<void> cmSetVoiceInput(String device) =>
+    bind.setVoiceCallInputDevice(isCm: true, device: device);
 
 /// Upstream `handleClose` for a disconnected visitor; true when it was the last one, and the
 /// window is to close.

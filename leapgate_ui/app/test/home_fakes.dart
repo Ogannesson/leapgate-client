@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_hbb/generated_bridge.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/app_window.dart';
+import 'package:flutter_hbb/leapgate/bridge.dart';
 import 'package:flutter_hbb/leapgate/local_status.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -13,6 +14,10 @@ import 'package:leapgate_ui/shell/navigation.dart';
 import 'package:leapgate_ui/shell/tab_overlays.dart';
 import 'package:leapgate_ui/theme/lg_theme.dart';
 import 'package:leapgate_ui/theme/lg_tokens.dart';
+
+import '../../core/test/fakes.dart' show FakeLeapgate;
+
+export '../../core/test/fakes.dart' show FakeLeapgate;
 
 /// Records the bridge calls the home page makes, and keeps the options it reads and writes the
 /// way Rust does.
@@ -136,9 +141,11 @@ class FakeNavigation implements MainNavigation {
 }
 
 /// Fresh fakes behind `bind`, `appCore` and `mainNavigation` for one test.
-({FakeBind bind, FakeNavigation nav}) installHomeFakes() {
+({FakeBind bind, FakeLeapgate lg, FakeNavigation nav}) installHomeFakes() {
   final bind = FakeBind();
   platformFFI.setBindingForTesting(bind);
+  final leapgate = FakeLeapgate();
+  setLgBindForTesting(leapgate);
   appCore = AppCore(window: FakeWindow());
   // Their event handlers are registered by name; the next test's AppCore needs the names free.
   addTearDown(appCore.recentPeers.dispose);
@@ -146,7 +153,7 @@ class FakeNavigation implements MainNavigation {
   addTearDown(appCore.lanPeers.dispose);
   final nav = FakeNavigation();
   mainNavigation = nav;
-  return (bind: bind, nav: nav);
+  return (bind: bind, lg: leapgate, nav: nav);
 }
 
 /// Rust pushing the recent list.

@@ -42,6 +42,7 @@ class LgCmFrame extends StatelessWidget {
     this.side,
     this.overlay,
     this.onStartDrag,
+    this.sideFocusOnly = false,
   });
 
   /// "Leapgate".
@@ -68,10 +69,16 @@ class LgCmFrame extends StatelessWidget {
   /// moved: start moving the window.
   final VoidCallback? onStartDrag;
 
+  /// Nothing but [side] takes the keyboard focus: the remote user's keyboard cannot reach the
+  /// buttons, while the chat input can still be typed in (01 §3.3).
+  final bool sideFocusOnly;
+
   @override
   Widget build(BuildContext context) {
     final t = LgTokens.of(context);
     final c = t.colors;
+    Widget noFocus(Widget child) =>
+        ExcludeFocus(excluding: sideFocusOnly, child: child);
     return DefaultTextStyle(
       style: t.text.copyWith(color: c.text),
       child: ColoredBox(
@@ -94,12 +101,14 @@ class LgCmFrame extends StatelessWidget {
               children: [
                 SizedBox(
                   height: _rowHeight,
-                  child: _TitleRow(
-                    title: title,
-                    collapseLabel: collapseLabel,
-                    closeLabel: closeLabel,
-                    onCollapse: onCollapse,
-                    onClose: onClose,
+                  child: noFocus(
+                    _TitleRow(
+                      title: title,
+                      collapseLabel: collapseLabel,
+                      closeLabel: closeLabel,
+                      onCollapse: onCollapse,
+                      onClose: onClose,
+                    ),
                   ),
                 ),
                 Expanded(
@@ -110,7 +119,7 @@ class LgCmFrame extends StatelessWidget {
                       Expanded(
                         child: Column(
                           children: [
-                            SizedBox(height: _rowHeight, child: tabs),
+                            SizedBox(height: _rowHeight, child: noFocus(tabs)),
                             Expanded(
                               child: Padding(
                                 padding: const EdgeInsets.fromLTRB(
@@ -119,7 +128,7 @@ class LgCmFrame extends StatelessWidget {
                                   LgSpace.s2,
                                   LgSpace.s2,
                                 ),
-                                child: panel,
+                                child: noFocus(panel),
                               ),
                             ),
                           ],
@@ -130,7 +139,7 @@ class LgCmFrame extends StatelessWidget {
                 ),
               ],
             ),
-            ?overlay,
+            if (overlay != null) noFocus(overlay!),
           ],
         ),
       ),

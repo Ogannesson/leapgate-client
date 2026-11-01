@@ -546,5 +546,20 @@
   "routeLatencyChartCurrent": "近 60 秒的端到端延迟，当前 {ms} ms",
   "@routeLatencyChartCurrent": {"placeholders": {"ms": {"type": "int"}}},
   "chatMine": "我",
-  "chatTheirs": "对方"
+  "chatTheirs": "对方",
+  "cmChatPeerLeft": "对方已断开连接",
+  "cmChatEmpty": "暂无聊天消息",
+  "cmFileLogEmpty": "暂无文件传输记录",
+  "cmFileToHere": "上传到本机",
+  "cmFileFromHere": "从本机下载",
+  "cmFileNewFolder": "新建文件夹",
+  "cmFileRename": "重命名",
+  "cmFileDelete": "删除",
+  "cmFileDone": "已完成",
+  "cmFileFailed": "失败",
+  "cmFileSkipped": "已跳过",
+  "cmChooseMicrophone": "选择麦克风",
+  "cmNoAudioInput": "未找到音频输入设备",
+  "homeIncomingSessions": "{count} 个传入会话进行中",
+  "homeShowCm": "查看"
 }

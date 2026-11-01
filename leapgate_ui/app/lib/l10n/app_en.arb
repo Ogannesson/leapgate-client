@@ -626,5 +626,21 @@
   "routeLatencyChartCurrent": "End-to-end latency over the last 60 seconds, now {ms} ms",
   "@routeLatencyChartCurrent": {"placeholders": {"ms": {"type": "int"}}},
   "chatMine": "Me",
-  "chatTheirs": "Remote user"
+  "chatTheirs": "Remote user",
+  "cmChatPeerLeft": "The remote user has disconnected",
+  "cmChatEmpty": "No chat messages",
+  "cmFileLogEmpty": "No file transfers yet",
+  "cmFileToHere": "Uploaded to this device",
+  "cmFileFromHere": "Downloaded from this device",
+  "cmFileNewFolder": "New folder",
+  "cmFileRename": "Rename",
+  "cmFileDelete": "Delete",
+  "cmFileDone": "Done",
+  "cmFileFailed": "Failed",
+  "cmFileSkipped": "Skipped",
+  "cmChooseMicrophone": "Choose a microphone",
+  "cmNoAudioInput": "No audio input device found",
+  "homeIncomingSessions": "{count, plural, =1{1 incoming session in progress} other{{count} incoming sessions in progress}}",
+  "@homeIncomingSessions": {"placeholders": {"count": {"type": "int"}}},
+  "homeShowCm": "View"
 }
