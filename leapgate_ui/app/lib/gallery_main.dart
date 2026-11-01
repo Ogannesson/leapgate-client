@@ -21,6 +21,15 @@ import 'widgets/lg_banner.dart';
 import 'widgets/lg_button.dart';
 import 'widgets/lg_canvas_parts.dart';
 import 'widgets/lg_chat.dart';
+import 'widgets/lg_cm_actions.dart';
+import 'widgets/lg_cm_chat.dart';
+import 'widgets/lg_cm_close_confirm.dart';
+import 'widgets/lg_cm_files.dart';
+import 'widgets/lg_cm_frame.dart';
+import 'widgets/lg_cm_head.dart';
+import 'widgets/lg_cm_permissions.dart';
+import 'widgets/lg_cm_pill.dart';
+import 'widgets/lg_cm_tabs.dart';
 import 'widgets/lg_connect_box.dart';
 import 'widgets/lg_connection_panel.dart';
 import 'widgets/lg_device.dart';
@@ -44,6 +53,7 @@ import 'widgets/lg_text_field.dart';
 import 'widgets/lg_title_bar.dart';
 import 'widgets/lg_tooltip.dart';
 
+part 'gallery_cm_chat.dart';
 part 'gallery_m2b.dart';
 
 const _exportDir = String.fromEnvironment('LG_GALLERY_EXPORT');
@@ -730,6 +740,8 @@ List<Specimen> buildSpecimens() {
       );
     }),
   );
+  list.addAll(_m3Specimens());
+  list.addAll(_cmChatSpecimens());
   return list;
 }
 
@@ -2736,6 +2748,784 @@ class GalleryApp extends StatelessWidget {
           : _Exporter(dir: exportDir!),
     );
   }
+}
+
+// ---- M3: connection manager (CM) components (A-P3.html) -------------------
+
+typedef _CmPerson = ({String name, String id, int identity});
+
+/// Invented visitors of 01 §7.4. [identity] is the group (0..6), k2 and k6 of
+/// the mockup.
+const _CmPerson _cmLi = (name: '李四', id: '912 345 678', identity: 1);
+const _CmPerson _cmWang = (name: '王五', id: '147 258 369', identity: 5);
+
+List<LgCmPermission> _cmRemotePerms({bool wang = false}) => [
+  LgCmPermission(label: '键盘和鼠标', value: true, onChanged: (_) {}),
+  LgCmPermission(label: '剪贴板', value: !wang, onChanged: (_) {}),
+  LgCmPermission(label: '声音', value: true, onChanged: (_) {}),
+  LgCmPermission(label: '文件复制粘贴', value: !wang, onChanged: (_) {}),
+  LgCmPermission(label: '远程重启', value: false, onChanged: (_) {}),
+  LgCmPermission(label: '录制', value: !wang, onChanged: (_) {}),
+  LgCmPermission(label: '阻止本地输入', value: false, onChanged: (_) {}),
+  LgCmPermission(label: '隐私模式', value: false, onChanged: (_) {}),
+];
+
+Widget _cmPerms({List<LgCmPermission>? items, bool readOnly = false}) =>
+    LgCmPermissions(
+      title: '允许对方',
+      items: items ?? _cmRemotePerms(),
+      readOnly: readOnly,
+    );
+
+LgCmHeader _cmHeader(
+  _CmPerson p, {
+  String type = '远程桌面',
+  LgCmStatusLine? status,
+  LgCmSideButton? sideButton,
+}) => LgCmHeader(
+  name: p.name,
+  id: p.id,
+  identity: p.identity,
+  type: type,
+  status:
+      status ??
+      const LgCmStatusLine(
+        phase: LgCmPhase.connected,
+        label: '已连接',
+        time: '00:12:34',
+      ),
+  sideButton: sideButton,
+);
+
+const _cmRequesting = LgCmStatusLine(
+  phase: LgCmPhase.requesting,
+  label: '正在请求连接本机…',
+);
+
+LgCmSideButton _cmChat({bool selected = false, int unread = 0}) =>
+    LgCmSideButton(
+      icon: LgIcons.chat,
+      label: '聊天',
+      onPressed: _noop,
+      selected: selected,
+      unread: unread,
+    );
+
+LgCmAction _cmDisconnect({String? tip}) => LgCmAction(
+  label: '断开',
+  kind: LgCmActionKind.danger,
+  onPressed: _noop,
+  tip: tip,
+);
+
+Widget _cmDisconnectRow({String? tip}) =>
+    LgCmActionRow(actions: [_cmDisconnect(tip: tip)]);
+
+LgCmAction _cmAccept() => const LgCmAction(
+  label: '接受',
+  kind: LgCmActionKind.primary,
+  onPressed: _noop,
+);
+
+LgCmAction _cmRefuse() => const LgCmAction(label: '拒绝', onPressed: _noop);
+
+LgCmPanel _cmPanel({
+  required Widget header,
+  Widget? body,
+  List<Widget>? actions,
+}) => LgCmPanel(
+  header: header,
+  body: body,
+  actions: actions == null ? null : LgCmActions(children: actions),
+);
+
+List<LgCmTab> _cmTabs(_CmPerson p, LgCmKind kind, {bool gone = false}) => [
+  LgCmTab(
+    kind: kind,
+    name: p.name,
+    identity: p.identity,
+    gone: gone,
+    tooltip: '连接编号 12',
+  ),
+];
+
+/// The window as the mockup frames it: 8 px corners and a hairline, because
+/// the ground of the specimen is the ground of the window.
+Widget _cmWindow({
+  required List<LgCmTab> tabs,
+  required Widget panel,
+  int selected = 0,
+  Widget? side,
+  Widget? overlay,
+  double width = kLgCmWidth,
+  double height = kLgCmHeight,
+}) => Builder(
+  builder: (context) => SizedBox(
+    width: width,
+    height: height,
+    child: DecoratedBox(
+      position: DecorationPosition.foreground,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: LgTokens.of(context).colors.border),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: LgCmFrame(
+          title: 'Leapgate',
+          collapseLabel: '收起',
+          closeLabel: '关闭',
+          onCollapse: _noop,
+          onClose: _noop,
+          onStartDrag: _noop,
+          tabs: LgCmTabStrip(tabs: tabs, selected: selected, onSelect: (_) {}),
+          panel: panel,
+          side: side,
+          overlay: overlay,
+        ),
+      ),
+    ),
+  ),
+);
+
+/// The lower part of the window, cut across the panel (the mockup's "区块"
+/// frames of the action area): 320 × 250.
+Widget _cmCrop(Widget panel) => Builder(
+  builder: (context) {
+    final c = LgTokens.of(context).colors;
+    return SizedBox(
+      width: kLgCmWidth,
+      height: 250,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: ColoredBox(
+          color: c.bg,
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    LgSpace.s2,
+                    0,
+                    LgSpace.s2,
+                    LgSpace.s2,
+                  ),
+                  child: OverflowBox(
+                    alignment: Alignment.bottomCenter,
+                    minHeight: 0,
+                    maxHeight: 420,
+                    child: SizedBox(height: 420, child: panel),
+                  ),
+                ),
+              ),
+              Positioned(
+                left: 0,
+                right: 0,
+                top: 0,
+                height: 28,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [c.bg, c.bg.withAlpha(0)],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  },
+);
+
+/// The permissions with the buttons under them, in a panel of a window at the
+/// narrowest client area ([kLgCmNarrowestClient] wide), without the header.
+Widget _cmNarrowPanel(Widget body) => Builder(
+  builder: (context) => SizedBox(
+    width: kLgCmNarrowestClient,
+    height: 290,
+    child: ColoredBox(
+      color: LgTokens.of(context).colors.bg,
+      child: Padding(
+        padding: const EdgeInsets.all(LgSpace.s2),
+        child: _cmPanel(
+          header: const SizedBox(height: 12),
+          body: body,
+          actions: [_cmDisconnectRow()],
+        ),
+      ),
+    ),
+  ),
+);
+
+List<LgCmFileEntry> _cmFileEntries() => const [
+  LgCmFileEntry(
+    action: LgCmFileAction.toHere,
+    actionLabel: '上传到本机',
+    name: '旅行照片.zip',
+    size: '48.6 MB',
+    state: LgCmFileState.running,
+    resultLabel: '62%',
+    progress: .62,
+  ),
+  LgCmFileEntry(
+    action: LgCmFileAction.fromHere,
+    actionLabel: '从本机下载',
+    name: '报价单.xlsx',
+    size: '1.2 MB',
+    state: LgCmFileState.done,
+    resultLabel: '已完成',
+  ),
+  LgCmFileEntry(
+    action: LgCmFileAction.fromHere,
+    actionLabel: '从本机下载',
+    name: '旧备份.zip',
+    size: '640 MB',
+    state: LgCmFileState.failed,
+    resultLabel: '失败',
+  ),
+  LgCmFileEntry(
+    action: LgCmFileAction.newFolder,
+    actionLabel: '新建文件夹',
+    name: '打印机驱动',
+    state: LgCmFileState.done,
+    resultLabel: '已完成',
+  ),
+  LgCmFileEntry(
+    action: LgCmFileAction.rename,
+    actionLabel: '重命名',
+    name: '说明.txt → 说明-新.txt',
+    state: LgCmFileState.done,
+    resultLabel: '已完成',
+  ),
+  LgCmFileEntry(
+    action: LgCmFileAction.delete,
+    actionLabel: '删除',
+    name: '草稿.docx',
+    size: '86 KB',
+    state: LgCmFileState.done,
+    resultLabel: '已完成',
+  ),
+];
+
+Widget _cmFileWindow({List<LgCmFileEntry>? entries, bool leftHalf = false}) {
+  final window = _cmWindow(
+    width: kLgCmExpandedWidth,
+    tabs: _cmTabs(_cmLi, LgCmKind.file),
+    side: LgCmSidePanel(
+      icon: LgIcons.files,
+      title: '文件记录',
+      child: LgCmFileLog(
+        entries: entries ?? _cmFileEntries(),
+        emptyText: '暂无文件传输记录',
+      ),
+    ),
+    panel: _cmPanel(
+      header: _cmHeader(
+        _cmLi,
+        type: '文件传输',
+        status: const LgCmStatusLine(
+          phase: LgCmPhase.connected,
+          label: '已连接',
+          time: '00:03:21',
+        ),
+        sideButton: const LgCmSideButton(
+          icon: LgIcons.files,
+          label: '文件记录',
+          onPressed: _noop,
+          selected: true,
+        ),
+      ),
+      actions: [_cmDisconnectRow()],
+    ),
+  );
+  if (!leftHalf) return window;
+  return SizedBox(
+    width: kLgCmSideWidth,
+    height: kLgCmHeight,
+    child: ClipRect(
+      child: OverflowBox(
+        alignment: Alignment.topLeft,
+        minWidth: 0,
+        maxWidth: kLgCmExpandedWidth,
+        child: window,
+      ),
+    ),
+  );
+}
+
+Widget _cmVoiceWindow({
+  required LgCmStatusLine status,
+  required Widget voiceRow,
+}) => _cmWindow(
+  tabs: _cmTabs(_cmLi, LgCmKind.remote),
+  panel: _cmPanel(
+    header: _cmHeader(_cmLi, status: status, sideButton: _cmChat()),
+    body: _cmPerms(),
+    actions: [voiceRow, _cmDisconnectRow()],
+  ),
+);
+
+LgCmMicRow _cmMicRow({bool noDevices = false, String? tip}) => LgCmMicRow(
+  microphoneLabel: '麦克风',
+  placeholder: '选择麦克风',
+  devices: noDevices
+      ? const []
+      : const [
+          LgSelectItem('default', '默认麦克风'),
+          LgSelectItem('usb', 'USB 麦克风'),
+        ],
+  device: noDevices ? null : 'default',
+  onDeviceChanged: (_) {},
+  onNoDevices: _noop,
+  hangUpLabel: '挂断',
+  onHangUp: _noop,
+  tip: tip,
+);
+
+List<Specimen> _m3Specimens() {
+  const window = Size(kLgCmWidth, kLgCmHeight);
+  const wide = Size(kLgCmExpandedWidth, kLgCmHeight);
+  const crop = Size(kLgCmWidth, 250);
+  const pill = Size(kLgCmWidth, kLgCmPillHeight);
+  Specimen cm(String name, Size size, WidgetBuilder build) =>
+      Specimen('cm', name, size, padding: 0, build);
+
+  LgCmPill single(String title, {String time = '00:12:34', String? blocked}) =>
+      LgCmPill.single(
+        person: LgCmPillPerson(letter: _cmLi.name[0], identity: _cmLi.identity),
+        title: '${_cmLi.name} $title',
+        time: time,
+        blockedHint: blocked,
+        actionLabel: '断开',
+        onAction: _noop,
+        onRestore: _noop,
+        onStartDrag: _noop,
+      );
+
+  return [
+    // Waiting for the person at this computer.
+    cm(
+      'req-click',
+      window,
+      (_) => _cmWindow(
+        tabs: _cmTabs(_cmLi, LgCmKind.remote),
+        panel: _cmPanel(
+          header: _cmHeader(_cmLi, status: _cmRequesting),
+          body: _cmPerms(),
+          actions: [
+            LgCmActionRow(actions: [_cmAccept()]),
+            LgCmActionRow(actions: [_cmRefuse()]),
+          ],
+        ),
+      ),
+    ),
+    cm(
+      'req-password',
+      window,
+      (_) => _cmWindow(
+        tabs: _cmTabs(_cmLi, LgCmKind.remote),
+        panel: _cmPanel(
+          header: _cmHeader(_cmLi, status: _cmRequesting),
+          body: _cmPerms(),
+          actions: [
+            const LgCmNote(text: '对方正在输入密码…'),
+            LgCmActionRow(actions: [_cmRefuse()]),
+          ],
+        ),
+      ),
+    ),
+    cm(
+      'req-elevate',
+      crop,
+      (_) => _cmCrop(
+        _cmPanel(
+          header: _cmHeader(_cmLi, status: _cmRequesting),
+          body: _cmPerms(),
+          actions: [
+            LgCmActionRow(actions: [_cmAccept()]),
+            LgCmActionRow(
+              flex: const [2, 1],
+              actions: [
+                const LgCmAction(
+                  label: '接受并提升权限',
+                  icon: LgIcons.shield,
+                  onPressed: _noop,
+                ),
+                _cmRefuse(),
+              ],
+            ),
+          ],
+        ),
+      ),
+    ),
+    // Connected.
+    cm(
+      'connected-remote',
+      window,
+      (_) => _cmWindow(
+        tabs: _cmTabs(_cmLi, LgCmKind.remote),
+        panel: _cmPanel(
+          header: _cmHeader(_cmLi, sideButton: _cmChat()),
+          body: _cmPerms(),
+          actions: [_cmDisconnectRow()],
+        ),
+      ),
+    ),
+    cm(
+      'connected-elevate',
+      crop,
+      (_) => _cmCrop(
+        _cmPanel(
+          header: _cmHeader(_cmLi, sideButton: _cmChat()),
+          body: _cmPerms(),
+          actions: [
+            const LgCmActionRow(
+              actions: [
+                LgCmAction(
+                  label: '提升权限',
+                  icon: LgIcons.shield,
+                  onPressed: _noop,
+                ),
+              ],
+            ),
+            _cmDisconnectRow(),
+          ],
+        ),
+      ),
+    ),
+    cm(
+      'connected-swapped',
+      crop,
+      (_) => _cmCrop(
+        _cmPanel(
+          header: _cmHeader(_cmLi, sideButton: _cmChat()),
+          body: _cmPerms(),
+          actions: [
+            const LgCmActionRow(
+              actions: [LgCmAction(label: '撤销交换', onPressed: _noop)],
+            ),
+            _cmDisconnectRow(),
+          ],
+        ),
+      ),
+    ),
+    cm(
+      'permissions-read-only',
+      window,
+      (_) => _cmWindow(
+        tabs: _cmTabs(_cmLi, LgCmKind.remote),
+        panel: _cmPanel(
+          header: _cmHeader(_cmLi, sideButton: _cmChat()),
+          body: _cmPerms(readOnly: true),
+          actions: [_cmDisconnectRow()],
+        ),
+      ),
+    ),
+    // The longest words at the narrowest client area of the window: one line
+    // each. In English they do not fit one line in a column and take two.
+    cm(
+      'permissions-longest',
+      const Size(kLgCmNarrowestClient, 290),
+      (_) => _cmNarrowPanel(_cmPerms()),
+    ),
+    cm(
+      'permissions-longest-english',
+      const Size(kLgCmNarrowestClient, 290),
+      (_) => _cmNarrowPanel(
+        LgCmPermissions(
+          title: 'Allow the remote user',
+          items: [
+            for (final (i, label) in [
+              'Keyboard and mouse',
+              'Clipboard',
+              'Audio',
+              'File copy and paste',
+              'Remote restart',
+              'Record',
+              'Block user input',
+              'Privacy mode',
+            ].indexed)
+              LgCmPermission(label: label, value: i.isEven, onChanged: (_) {}),
+          ],
+        ),
+      ),
+    ),
+    Specimen(
+      'cm',
+      'permissions-focus',
+      const Size(320, 220),
+      states: _focus,
+      (_) => SizedBox(width: 288, child: _cmPerms()),
+    ),
+    Specimen(
+      'cm',
+      'permissions-hover',
+      const Size(320, 220),
+      states: _hover,
+      (_) => SizedBox(width: 288, child: _cmPerms()),
+    ),
+    // Other kinds of session.
+    cm(
+      'camera',
+      window,
+      (_) => _cmWindow(
+        tabs: _cmTabs(_cmLi, LgCmKind.camera),
+        panel: _cmPanel(
+          header: _cmHeader(_cmLi, type: '查看摄像头', sideButton: _cmChat()),
+          body: LgCmPermissions(
+            title: '允许对方',
+            items: [
+              LgCmPermission(label: '声音', value: true, onChanged: (_) {}),
+              LgCmPermission(label: '录制', value: true, onChanged: (_) {}),
+            ],
+          ),
+          actions: [_cmDisconnectRow()],
+        ),
+      ),
+    ),
+    cm('file-transfer', wide, (_) => _cmFileWindow()),
+    cm(
+      'file-transfer-empty',
+      const Size(kLgCmSideWidth, kLgCmHeight),
+      (_) => _cmFileWindow(entries: const [], leftHalf: true),
+    ),
+    cm(
+      'port',
+      window,
+      (_) => _cmWindow(
+        tabs: _cmTabs(_cmLi, LgCmKind.port),
+        panel: _cmPanel(
+          header: _cmHeader(
+            _cmLi,
+            type: '端口转发：10.0.0.5:8080',
+            status: const LgCmStatusLine(
+              phase: LgCmPhase.connected,
+              label: '已连接',
+              time: '00:20:08',
+            ),
+          ),
+          actions: [_cmDisconnectRow()],
+        ),
+      ),
+    ),
+    cm(
+      'terminal',
+      window,
+      (_) => _cmWindow(
+        tabs: _cmTabs(_cmLi, LgCmKind.terminal),
+        panel: _cmPanel(
+          header: _cmHeader(_cmLi, type: '终端'),
+          actions: [_cmDisconnectRow()],
+        ),
+      ),
+    ),
+    cm(
+      'exit',
+      window,
+      (_) => _cmWindow(
+        tabs: _cmTabs(_cmLi, LgCmKind.exit),
+        panel: _cmPanel(
+          header: _cmHeader(
+            _cmLi,
+            type: '作为出口',
+            status: const LgCmStatusLine(
+              phase: LgCmPhase.connected,
+              label: '已连接',
+              time: '02:41:09',
+            ),
+          ),
+          body: const LgCmNoteBlock(text: '对方正在通过本机访问网络（仅 TCP），无法查看本机屏幕。'),
+          actions: [_cmDisconnectRow()],
+        ),
+      ),
+    ),
+    // Voice.
+    cm(
+      'voice-incoming',
+      window,
+      (_) => _cmVoiceWindow(
+        status: const LgCmStatusLine(
+          phase: LgCmPhase.voiceRequesting,
+          label: '正在请求语音通话…',
+          time: '00:12:34',
+        ),
+        voiceRow: const LgCmActionRow(
+          actions: [
+            LgCmAction(
+              label: '接听',
+              kind: LgCmActionKind.primary,
+              icon: LgIcons.call,
+              onPressed: _noop,
+            ),
+            LgCmAction(label: '拒绝', onPressed: _noop),
+          ],
+        ),
+      ),
+    ),
+    cm(
+      'voice-active',
+      window,
+      (_) => _cmVoiceWindow(
+        status: const LgCmStatusLine(
+          phase: LgCmPhase.voiceActive,
+          label: '语音通话中',
+          time: '00:12:34',
+        ),
+        voiceRow: _cmMicRow(),
+      ),
+    ),
+    cm(
+      'voice-no-microphone',
+      window,
+      (_) => _cmVoiceWindow(
+        status: const LgCmStatusLine(
+          phase: LgCmPhase.voiceActive,
+          label: '语音通话中',
+          time: '00:12:34',
+        ),
+        voiceRow: _cmMicRow(noDevices: true, tip: '未找到音频输入设备'),
+      ),
+    ),
+    // Several visitors.
+    cm(
+      'tabs',
+      window,
+      (_) => _cmWindow(
+        selected: 2,
+        tabs: const [
+          LgCmTab(kind: LgCmKind.remote, name: '李四', identity: 1, unread: 2),
+          LgCmTab(kind: LgCmKind.file, name: '李四', identity: 1),
+          LgCmTab(kind: LgCmKind.remote, name: '王五', identity: 5),
+        ],
+        panel: _cmPanel(
+          header: _cmHeader(
+            _cmWang,
+            status: const LgCmStatusLine(
+              phase: LgCmPhase.connected,
+              label: '已连接',
+              time: '00:05:41',
+            ),
+            sideButton: _cmChat(),
+          ),
+          body: _cmPerms(items: _cmRemotePerms(wang: true)),
+          actions: [_cmDisconnectRow()],
+        ),
+      ),
+    ),
+    cm(
+      'tabs-overflow',
+      window,
+      (_) => _cmWindow(
+        selected: 5,
+        tabs: const [
+          LgCmTab(kind: LgCmKind.remote, name: '李四', identity: 1, unread: 2),
+          LgCmTab(kind: LgCmKind.file, name: '李四', identity: 1),
+          LgCmTab(kind: LgCmKind.terminal, name: '王五', identity: 5),
+          LgCmTab(kind: LgCmKind.camera, name: '赵六', identity: 3),
+          LgCmTab(kind: LgCmKind.exit, name: '孙七', identity: 0),
+          LgCmTab(kind: LgCmKind.remote, name: '周八', identity: 6),
+        ],
+        panel: _cmPanel(
+          header: _cmHeader(const (
+            name: '周八',
+            id: '258 369 147',
+            identity: 6,
+          ), sideButton: _cmChat(unread: 3)),
+          body: _cmPerms(),
+          actions: [_cmDisconnectRow()],
+        ),
+      ),
+    ),
+    // Gone, blocked, closing.
+    cm(
+      'gone',
+      window,
+      (_) => _cmWindow(
+        tabs: _cmTabs(_cmLi, LgCmKind.remote, gone: true),
+        panel: _cmPanel(
+          header: _cmHeader(
+            _cmLi,
+            status: const LgCmStatusLine(
+              phase: LgCmPhase.disconnected,
+              label: '已断开',
+            ),
+            sideButton: _cmChat(),
+          ),
+          actions: [
+            const LgCmActionRow(
+              actions: [LgCmAction(label: '关闭', onPressed: _noop)],
+            ),
+          ],
+        ),
+      ),
+    ),
+    cm(
+      'blocked',
+      window,
+      (_) => _cmWindow(
+        tabs: _cmTabs(_cmLi, LgCmKind.remote),
+        panel: _cmPanel(
+          header: _cmHeader(_cmLi, sideButton: _cmChat()),
+          body: _cmPerms(),
+          actions: [_cmDisconnectRow(tip: '无法远程执行此操作')],
+        ),
+      ),
+    ),
+    cm(
+      'close-confirm',
+      window,
+      (_) => _cmWindow(
+        selected: 0,
+        tabs: const [
+          LgCmTab(kind: LgCmKind.remote, name: '李四', identity: 1),
+          LgCmTab(kind: LgCmKind.remote, name: '王五', identity: 5),
+        ],
+        panel: _cmPanel(
+          header: _cmHeader(_cmLi, sideButton: _cmChat()),
+          body: _cmPerms(),
+          actions: [_cmDisconnectRow()],
+        ),
+        overlay: LgCmCloseConfirm(
+          title: '断开全部会话？',
+          onEscape: _noop,
+          actions: const [
+            LgDialogAction(label: '取消', onPressed: _noop, isDefault: true),
+            LgDialogAction(
+              label: '断开',
+              kind: LgButtonKind.danger,
+              onPressed: _noop,
+            ),
+          ],
+        ),
+      ),
+    ),
+    // The edge strip.
+    cm('pill-remote', pill, (_) => single('正在远程控制本机')),
+    cm('pill-file', pill, (_) => single('正在使用文件传输', time: '00:03:21')),
+    cm('pill-exit', pill, (_) => single('正在将本机用作出口', time: '02:41:09')),
+    cm('pill-terminal', pill, (_) => single('正在使用终端', time: '00:08:47')),
+    cm('pill-camera', pill, (_) => single('正在查看摄像头', time: '00:05:02')),
+    cm('pill-blocked', pill, (_) => single('正在远程控制本机', blocked: '无法远程执行此操作')),
+    cm(
+      'pill-group',
+      pill,
+      (_) => LgCmPill.group(
+        people: [
+          LgCmPillPerson(letter: _cmLi.name[0], identity: _cmLi.identity),
+          LgCmPillPerson(letter: _cmWang.name[0], identity: _cmWang.identity),
+        ],
+        title: '2 个会话进行中',
+        actionLabel: '展开',
+        onAction: _noop,
+        onRestore: _noop,
+        onStartDrag: _noop,
+      ),
+    ),
+  ];
 }
 
 class _GalleryPage extends StatelessWidget {

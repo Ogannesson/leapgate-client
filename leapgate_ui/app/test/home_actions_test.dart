@@ -13,12 +13,13 @@ import 'home_fakes.dart';
 // This device's block in M2b (01 P1 blocks A, B, J, K) and the interface mode (01 §2.3).
 
 late FakeBind bind;
+late FakeLeapgate lg;
 
 Future<LocalStatusModel> pumpWith(
   WidgetTester tester, {
   String method = kUseTemporaryPassword,
   ServiceStatus status = ServiceStatus.ready,
-  int remoteSessions = 0,
+  IncomingSessions incoming = IncomingSessions.none,
   String systemError = '',
 }) => pumpHome(
   tester,
@@ -27,7 +28,7 @@ Future<LocalStatusModel> pumpWith(
   setUp: (m) => m
     ..oneTimePassword = 'a1b2c3'
     ..verificationMethod = method
-    ..remoteSessions = remoteSessions
+    ..incoming = incoming
     ..systemError = systemError,
 );
 
@@ -45,7 +46,11 @@ Future<void> tapText(WidgetTester tester, String text) async {
 }
 
 void main() {
-  setUp(() => bind = installHomeFakes().bind);
+  setUp(() {
+    final fakes = installHomeFakes();
+    bind = fakes.bind;
+    lg = fakes.lg;
+  });
 
   testWidgets('"Refresh" asks Rust for a new one-time password', (
     tester,
@@ -168,9 +173,34 @@ void main() {
     expect(find.textContaining('正在被远程控制'), findsNothing);
     await unmount(tester);
 
-    await pumpWith(tester, remoteSessions: 2, systemError: '无法写入配置文件');
+    await pumpWith(
+      tester,
+      incoming: const IncomingSessions(2, controlled: true),
+      systemError: '无法写入配置文件',
+    );
     expect(find.text('正在被远程控制（2 个会话）'), findsOneWidget);
     expect(find.text('无法写入配置文件'), findsOneWidget);
+    await unmount(tester);
+
+    // Only a file transfer and an exit: nobody operates this device (06 M3-1).
+    await pumpWith(
+      tester,
+      incoming: const IncomingSessions(2, controlled: false),
+    );
+    expect(find.text('2 个传入会话进行中'), findsOneWidget);
+    expect(find.textContaining('正在被远程控制'), findsNothing);
+    await unmount(tester);
+  });
+
+  testWidgets('"View" brings the connection manager forward (C2)', (
+    tester,
+  ) async {
+    await pumpWith(
+      tester,
+      incoming: const IncomingSessions(1, controlled: true),
+    );
+    await tapText(tester, '查看');
+    expect(lg.calls, ['showCm']);
     await unmount(tester);
   });
 
@@ -218,5 +248,7 @@ void main() {
     await tester.pump();
     expect(find.text('detail'), findsOneWidget);
     expect(bind.local[kOptionLeapgateUiMode], 'detail');
+    // The connection manager follows (S7).
+    expect(lg.calls, ['uiMode:detail']);
   });
 }

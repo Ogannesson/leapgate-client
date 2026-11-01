@@ -13,8 +13,10 @@ mod bridge_generated;
 
 use crate::{client::Interface as _, flutter_ffi::SessionID};
 use base::config::keys;
-use flutter_rust_bridge::SyncReturn;
-use hbb_common::{config::LocalConfig, protobuf::Enum as _, rendezvous_proto::ConnType};
+use flutter_rust_bridge::{StreamSink, SyncReturn};
+use hbb_common::{
+    config::LocalConfig, protobuf::Enum as _, rendezvous_proto::ConnType, ResultType,
+};
 
 // ---- Log and version ----
 
@@ -76,4 +78,36 @@ pub fn leapgate_local_display_name() -> SyncReturn<String> {
         &LocalConfig::get_option("user_info"),
         crate::username,
     ))
+}
+
+// ---- Connection manager (M3) ----
+
+/// Authorized incoming connections by type (C1), asked of the service once, as JSON: `remote`,
+/// `file_transfer`, `port_forward`, `exit`, `camera`, `terminal`; `{}` when the service does
+/// not answer. Exits are not counted in `port_forward`.
+pub fn leapgate_incoming_counts() -> String {
+    crate::leapgate_hooks::ipc::query_incoming_counts()
+        .and_then(|counts| serde_json::to_string(&counts).ok())
+        .unwrap_or_else(|| "{}".to_owned())
+}
+
+/// Brings the CM window to the front (C2); nothing happens when the CM is not running.
+pub fn leapgate_show_cm() {
+    #[cfg(not(target_os = "ios"))]
+    crate::ui_interface::send_to_cm(&crate::ipc::Data::Leapgate(leapgate::ipc::Msg::ShowCm));
+}
+
+/// Tells the CM the UI mode changed (S7).
+pub fn leapgate_ui_mode_changed(mode: String) {
+    #[cfg(not(target_os = "ios"))]
+    crate::ui_interface::send_to_cm(&crate::ipc::Data::Leapgate(leapgate::ipc::Msg::UiMode {
+        mode,
+    }));
+}
+
+/// The CM page's events from the main window (C2, S7), as JSON: `{"name":"show_cm"}`,
+/// `{"name":"ui_mode","mode":…}`. A new subscription replaces the previous one.
+pub fn leapgate_cm_events(sink: StreamSink<String>) -> ResultType<()> {
+    crate::leapgate_hooks::ipc::set_cm_events(sink);
+    Ok(())
 }

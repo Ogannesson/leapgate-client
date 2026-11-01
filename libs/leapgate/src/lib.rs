@@ -6,6 +6,7 @@ pub mod brand;
 pub(crate) mod dns;
 pub mod exit;
 pub mod ice;
+pub mod ipc;
 pub mod lan;
 pub mod lang;
 pub mod options;

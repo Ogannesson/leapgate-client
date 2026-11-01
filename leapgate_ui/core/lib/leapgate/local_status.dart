@@ -33,6 +33,37 @@ enum PasswordRow {
   unavailable,
 }
 
+/// The sessions into this device (C1): how many, and whether one of them operates it (a remote
+/// desktop or a terminal); the others (file transfer, camera, port forwarding, exit) do not.
+@immutable
+class IncomingSessions {
+  const IncomingSessions(this.total, {required this.controlled});
+
+  static const none = IncomingSessions(0, controlled: false);
+
+  /// `leapgate_incoming_counts`; `{}` when the service did not answer.
+  factory IncomingSessions.fromJson(String json) {
+    final counts = jsonDecode(json) as Map<String, dynamic>;
+    int n(String key) => counts[key] as int? ?? 0;
+    return IncomingSessions(
+      counts.values.fold(0, (sum, v) => sum + (v as int)),
+      controlled: n('remote') + n('terminal') > 0,
+    );
+  }
+
+  final int total;
+  final bool controlled;
+
+  @override
+  bool operator ==(Object other) =>
+      other is IncomingSessions &&
+      other.total == total &&
+      other.controlled == controlled;
+
+  @override
+  int get hashCode => Object.hash(total, controlled);
+}
+
 /// This device's ID and whether it can accept connections, polled once a second the way
 /// upstream's desktop home page does (`flutter/lib/desktop/pages/connection_page.dart`
 /// `updateStatus`, `desktop_home_page.dart` `fetchID`). A stand-in for the M0 placeholder page;
@@ -54,10 +85,12 @@ class LocalStatusModel extends ChangeNotifier {
   /// hint card (01 P1 block B); empty when nothing is.
   String systemError = '';
 
-  /// Remote desktop sessions into this device (`video_conn_count`, upstream
-  /// `connection_page.dart:187`): "正在被远程控制（N 个会话）" while above 0 (01 P1 block A).
-  int remoteSessions = 0;
+  /// Authorized sessions into this device of every type (C1, 06 M3-1): "正在被远程控制（N 个
+  /// 会话）" while one of them is a remote desktop or a terminal, "‹N› 个传入会话进行中"
+  /// otherwise (01 P1 block A).
+  IncomingSessions incoming = IncomingSessions.none;
   Timer? _timer;
+  Timer? _incomingTimer;
 
   /// Upstream `ServerModel.updatePasswordModel` (`models/server_model.dart:249-258`) shows "-"
   /// for the stopped service, the permanent password alone and accepting on this device; any
@@ -75,12 +108,30 @@ class LocalStatusModel extends ChangeNotifier {
   void start() {
     _poll();
     _timer = Timer.periodic(const Duration(seconds: 1), (_) => _poll());
+    // C1 asks the service over a new IPC connection and can take up to 2 s, so it is not on the
+    // one-second poll. The main window gets no event when a session starts or ends.
+    _pollIncoming();
+    _incomingTimer =
+        Timer.periodic(const Duration(seconds: 3), (_) => _pollIncoming());
   }
 
   @override
   void dispose() {
     _timer?.cancel();
+    _incomingTimer?.cancel();
     super.dispose();
+  }
+
+  /// "查看": brings the connection manager to the front (C2).
+  Future<void> showConnectionManager() => lgBind.leapgateShowCm();
+
+  Future<void> _pollIncoming() async {
+    final incoming =
+        IncomingSessions.fromJson(await lgBind.leapgateIncomingCounts());
+    if (incoming != this.incoming) {
+      this.incoming = incoming;
+      notifyListeners();
+    }
   }
 
   /// "Refresh" on the one-time password; the next poll shows the new one.
@@ -101,7 +152,6 @@ class LocalStatusModel extends ChangeNotifier {
     final verificationMethod =
         await bind.mainGetOption(key: kOptionVerificationMethod);
     final systemError = await bind.mainGetError();
-    final remoteSessions = connect['video_conn_count'] as int? ?? 0;
     final status = stopped
         ? ServiceStatus.stopped
         : switch (connect['status_num']) {
@@ -117,15 +167,13 @@ class LocalStatusModel extends ChangeNotifier {
         oneTimePassword != this.oneTimePassword ||
         approveMode != this.approveMode ||
         verificationMethod != this.verificationMethod ||
-        systemError != this.systemError ||
-        remoteSessions != this.remoteSessions) {
+        systemError != this.systemError) {
       this.id = id;
       this.status = status;
       this.oneTimePassword = oneTimePassword;
       this.approveMode = approveMode;
       this.verificationMethod = verificationMethod;
       this.systemError = systemError;
-      this.remoteSessions = remoteSessions;
       notifyListeners();
     }
   }

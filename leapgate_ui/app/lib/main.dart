@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/consts.dart';
@@ -14,6 +15,7 @@ import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:uni_links/uni_links.dart';
 import 'package:window_manager/window_manager.dart';
 
+import 'cm/cm_main.dart';
 import 'l10n/app_localizations.dart';
 import 'shell/app_window.dart';
 import 'shell/links.dart';
@@ -29,11 +31,7 @@ Future<void> main(List<String> args) async {
   _logUncaughtErrors();
 
   if (args.isNotEmpty && args.first == '--cm') {
-    // The connection manager is M3; until then the process only shows an empty window.
-    desktopType = DesktopType.cm;
-    await windowManager.ensureInitialized();
-    runApp(const LeapgateApp(home: Scaffold()));
-    windowManager.waitUntilReadyToShow(null, () => windowManager.show());
+    await runConnectionManager();
   } else if (args.contains('--install')) {
     // The install page is round 3.
     lgBind.leapgateLog(
@@ -97,16 +95,28 @@ void _listenLinks() {
 }
 
 class LeapgateApp extends StatelessWidget {
-  const LeapgateApp({super.key, required this.home, this.local});
+  const LeapgateApp(
+      {super.key, required this.home, this.local, this.detailMode});
 
   final Widget home;
 
-  /// LocalConfig, for the interface mode (01 §2.3); without it the mode is the simple one (the
-  /// connection manager reads it with M3).
+  /// LocalConfig, for the interface mode (01 §2.3); without it, or [detailMode], the mode is the
+  /// simple one.
   final OptionScope? local;
+
+  /// The connection manager's interface mode, which follows the main window's (S7).
+  final ValueListenable<bool>? detailMode;
 
   @override
   Widget build(BuildContext context) {
+    final detailMode = this.detailMode;
+    if (detailMode != null) {
+      return ValueListenableBuilder(
+        valueListenable: detailMode,
+        builder: (context, detail, _) =>
+            _app(detail ? LgMode.detail : LgMode.compact),
+      );
+    }
     final local = this.local;
     if (local == null) return _app(LgMode.compact);
     // The home page's "View" menu writes it through the same scope, so a switch applies at once.

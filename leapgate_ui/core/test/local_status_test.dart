@@ -36,10 +36,12 @@ class _StatusBind implements RustdeskImpl {
 void main() {
   group('LocalStatusModel polling', () {
     late _StatusBind bind;
+    late FakeLeapgate lg;
     setUp(() {
       bind = _StatusBind();
       platformFFI.setBindingForTesting(bind);
-      setLgBindForTesting(FakeLeapgate());
+      lg = FakeLeapgate();
+      setLgBindForTesting(lg);
     });
 
     Future<LocalStatusModel> poll() async {
@@ -74,18 +76,23 @@ void main() {
       expect(model.passwordRow, PasswordRow.unavailable);
     });
 
-    test('the system error and the remote desktop sessions into this device',
+    test('the system error and the sessions into this device (C1, 06 M3-1)',
         () async {
       var model = await poll();
       expect(model.systemError, isEmpty);
-      expect(model.remoteSessions, 0);
+      expect(model.incoming, IncomingSessions.none);
 
-      bind
-        ..error = 'Failed to write the config file'
-        ..connectStatus = '{"status_num":1,"video_conn_count":2}';
+      bind.error = 'Failed to write the config file';
+      lg.incomingCounts =
+          '{"remote":0,"file_transfer":1,"port_forward":0,"exit":2,"camera":0,"terminal":0}';
       model = await poll();
       expect(model.systemError, 'Failed to write the config file');
-      expect(model.remoteSessions, 2);
+      expect(model.incoming, const IncomingSessions(3, controlled: false));
+
+      lg.incomingCounts =
+          '{"remote":0,"file_transfer":1,"port_forward":0,"exit":0,"camera":0,"terminal":1}';
+      model = await poll();
+      expect(model.incoming, const IncomingSessions(2, controlled: true));
     });
   });
 

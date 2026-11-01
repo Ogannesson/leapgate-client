@@ -162,6 +162,28 @@ class FakeLeapgate implements lg.Leapgate {
   @override
   String leapgateLocalDisplayName({dynamic hint}) => displayName;
 
+  /// The M3 calls that go to other processes, in order: `showCm`, `uiMode:<mode>`.
+  final calls = <String>[];
+
+  /// C1's answer.
+  String incomingCounts = '{}';
+
+  /// What the main window tells the connection manager (C2, S7).
+  final cmEvents = StreamController<String>.broadcast();
+
+  @override
+  Future<String> leapgateIncomingCounts({dynamic hint}) async => incomingCounts;
+
+  @override
+  Future<void> leapgateShowCm({dynamic hint}) async => calls.add('showCm');
+
+  @override
+  Future<void> leapgateUiModeChanged({required String mode, dynamic hint}) async =>
+      calls.add('uiMode:$mode');
+
+  @override
+  Stream<String> leapgateCmEvents({dynamic hint}) => cmEvents.stream;
+
   @override
   dynamic noSuchMethod(Invocation invocation) =>
       super.noSuchMethod(invocation);

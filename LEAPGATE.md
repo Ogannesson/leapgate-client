@@ -461,10 +461,16 @@ Leapgate 自己的文件里和挂钩配套的：`report/heartbeat.rs` 在开关�
 | V1 | `src/leapgate_ffi.rs` 的 `leapgate_session_set_visible(session_id, visible)`，同步；`src/flutter.rs` 的 `on_rgba`（桌面那一份）、`on_texture` 开头各一处挂钩 | 不可见的会话标签不往界面推帧：照常收流、解码、计帧率，只是不交给 Flutter（03 §3.3 第 1 条）。界面用法：标签切走时设 `false`；切回时设 `true`，再调上游的 `session_refresh(session_id, display)` 要一帧（软件上屏、纹理上屏都一样）。状态在 `libs/leapgate/src/session.rs`，默认可见，只记被隐藏的会话；挂钩在这个对端会话的所有界面会话（`session_handlers`）都被隐藏时才跳过，同一台设备在另一个窗口里还显示着就照推。会话关闭不加挂钩：设回可见时删掉条目，每次调 `leapgate_session_set_visible` 时顺手删掉已经不在的会话（隐藏着被关掉的标签），查会话时不拿着这把锁（挂钩是拿着 `session_handlers` 读锁再拿它，反过来会有锁序问题）。不会卡住：软件上屏的"界面还没取走上一帧就不推下一帧"（`display_rgbas` 的 `valid`）只在已经发出的 `Rgba` 事件被界面处理后复位，隐藏前发出的那一条照常会被 `core` 处理（取帧、`session_next_rgba` 不依赖页面是否显示）；纹理上屏的"第一帧通知"（`notify_render_type`）隐藏期间不动，切回后的第一帧照常通知。界面要注意：上游 Dart 连上后 1.5 秒还没画面会给对方发空的系统登录密码（`model.dart` 的 `waitForImageTimer`），标签在第一帧到之前被隐藏时这个判断会误触发，`core` 要在隐藏期间不按"没画面"处理 |
 | Q3 | `src/leapgate_ffi.rs` 的 `leapgate_session_connection(session_id)`，同步；`src/client.rs` 三处挂钩（`create_relay`、`_start_inner` 和 `request_relay` 里服务器拒绝的 `bail!` 前），已有的 H-1（`race_ice`）调用不改 | 这个会话当前连接是怎么连上的（01 §4.2 第二级的"路径""中继服务器""传输"），返回 JSON 字符串：`{"path":"relay","transport":"tcp","relay":"relay-1.example.com"}`、`{"path":"lan","transport":"tcp"}`；服务器拒绝了这次连接时 `{"refused":"<原文>"}`；还没连上、正在重连、会话已不在、判不出时 `{}`。界面在每次连接就绪事件后重新取。路径码、判法、中继名和拒绝原因的取法见下面"Q3 连接路径和中继名" |
 | 本机名 | `src/leapgate_ffi.rs` 的 `leapgate_local_display_name()`，同步 | 登录时显示给对方的本机名称（"等对方接受"面板的"显示给对方的名称"），返回字符串。算法照上游 `src/client.rs` 登录时的 `display_name` 抄了一份在 `libs/leapgate/src/ui.rs` 的 `display_name`（不改上游那段去抽函数）：先读内置选项 `display-name`，再读 LocalConfig `user_info` 的 `display_name`（trim 后非空）或 `name`，再退到系统用户名，最后按空白分词、每词首字母大写、用一个空格连接。读的是调用时的值，和上一次登录时实际发出去的可能不同（中间改过登录状态时） |
+| C1 | `src/leapgate_ffi.rs` 的 `leapgate_incoming_counts()`，异步；`src/ipc.rs` 的 `Data` 末尾一个变体 `Leapgate(leapgate::ipc::Msg)`、`handle` 一处分发；`src/server/connection.rs` 已有的出口挂钩（`connect_port_forward_if_needed` 里设 `leapgate_exit` 那一行）多调一次 `leapgate_hooks::ipc::note_exit_conn` | 分类型的传入连接数。导出自己连服务进程的主进程间通道问一次（`Msg::IncomingCounts`；连接 1 秒、等回复 1 秒，最坏约 2 秒），返回 `{"remote":n,"file_transfer":n,"port_forward":n,"exit":n,"camera":n,"terminal":n}`，服务进程不在或不回时 `{}`；只数已授权的连接（上游 `AUTHED_CONNS`），端口转发里登录为出口的只算进 `exit`。出口连接的编号记在 `libs/leapgate/src/ipc.rs` 的表里，每次记新编号和每次查询时都删掉连接已经不在的编号，没人查询时表也不会一直变长（按上游 `Connection::alive_conns()`，不按 `AUTHED_CONNS`：出口编号在授权前一点记下，按 `AUTHED_CONNS` 删会和刚登录的出口撞上）。上游的连接表和 `AuthedConn` 不加字段，`ui_interface.rs` 的状态轮询不改 |
+| C2 | `src/leapgate_ffi.rs` 的 `leapgate_show_cm()`、`leapgate_cm_events(sink)`；`src/ui_cm_interface.rs` CM 消息循环一处分发 | 主窗口经上游 `send_to_cm`（连 `_cm`，和推主题、语言同一条路）发 `Msg::ShowCm`，CM 进程不在时什么也不做。CM 一侧收到后推给 `leapgate_cm_events` 订阅的 `StreamSink<String>`：`{"name":"show_cm"}`，界面自己把窗口提到前面；还没订阅时丢掉。再订阅一次替换上一个。不往上游的 `InvokeUiCM` 加方法 |
+| S7 | `src/leapgate_ffi.rs` 的 `leapgate_ui_mode_changed(mode)` | 同 C2 的路发 `Msg::UiMode`，CM 推 `{"name":"ui_mode","mode":"…"}`；`mode` 原样转发，取值由界面定。只推给 CM，不像主题、语言那样再广播给主进程的其他窗口 |
 
 - 新界面 runner 的窗口类：主窗口 `LEAPGATE_UI_MAIN`，CM（`--cm`）`LEAPGATE_UI_CM`，安装页（`--install`）`LEAPGATE_UI_INSTALL`。三者分开，按主窗口类名找时不会找到另外两个。主窗口的类名（`leapgate_ui/app/windows/runner/main.cpp` 的 `kMainWindowClass`）和 `libs/leapgate/src/ui.rs` 的 `MAIN_WINDOW_CLASS` 要一致；另外两个 Rust 不找，只在 runner 里。
 - 合并上游时核对：`core_main_invoke_new_connection` 的 Windows 分支仍按 `send_message_to_hnwd` 加 `WM_USER + 2` 把链接交给已有窗口（`uni_links_desktop` 认这个消息号）；上游有没有新增按 `FLUTTER_RUNNER_WIN32_WINDOW_CLASS` 或窗口标题找窗口的地方（`git grep -n "FLUTTER_RUNNER_WIN32_WINDOW\|FindWindow"`）。
 - 已知限制：新界面还没有安装页（第三轮）。exe 名以 `install.exe` 结尾时，core_main 会注入 `--install`、不起服务，runner 按安装页处理，新界面目前写一行日志后退出。M0 只出名叫 `leapgate.exe` 的便携目录，碰不到；做便携打包（03 §1.7 第 5 步）或安装页时处理。
+- `Msg`（`libs/leapgate/src/ipc.rs`）按 `name` 字段区分，`snake_case`；CM 的事件就是 `Msg` 本身的 JSON，所以改名等于同时改进程间消息和界面事件。以后 Leapgate 的进程间消息都追加在 `Msg` 里，不改已有变体的顺序和含义。
+- C1、C2、S7 的已知限制：新旧版本的进程短暂同时在跑时，旧进程收到 `Data::Leapgate` 解码失败（上游 `next()` 返回 `Ok(None)`，两头都静默忽略），C1 返回 `{}`、C2 和 S7 没有效果。新界面便携版和旧界面不同时运行（03 §7.1），日常碰不到。`ShowCm` 在 CM 页面订阅之前到达时丢掉，不补发。
+- C1、C2、S7 合并上游时核对：`Data` 枚举末尾有没有新变体（`Leapgate` 要留在最后，冲突固定在这一处）；`ipc.rs` 的 `handle`、`ui_cm_interface.rs` 的 `IpcTaskRunner::run` 两处消息循环仍以兜底的 `_ => {}` 结尾、分发仍在里面；`AUTHED_CONNS`、`AuthConnType`（新增类型要在 `src/leapgate_hooks/ipc.rs` 的映射和 `Counts` 里加）、`Connection::alive_conns()`、`send_to_cm` 有没有变；`connect_port_forward_if_needed` 的复用分支是否仍是出口登录唯一建 mux 的地方。
 
 #### C3 原因码
 
@@ -770,6 +776,58 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 
 **试用清单**：拖工具栏、停靠四边、窗口窄时的"更多"和未读数；聊天的收发、未读数和语音通话（要真实麦克风）；快捷键（切标签、截图、全屏、切显示器）；被控时的遮罩（在别的机器上连进来、鼠标进主页）；多显示器和"全部显示器"；隐私模式、阻止输入（被控端提权）、锁定远程设备；局域网分类和局域网直连；打印、提权、虚拟显示器驱动；Esc 关菜单；`待调.md` 第 25、29、30、33 条是否满意。
 
+#### M3 被控端连接管理小窗（2026-11-01，`ef182b887`）
+
+黑盒验收，无人值守。被控端 B（4K，系统缩放 150%，新界面便携版，小窗和主窗口都在它上面）、控制端 A（新界面做聊天、权限和远程点击，旧界面做审批、文件传输、端口转发和出口，同一台机器上新旧界面不同时运行）。依据 06 §5。B 上用 `leapgate-uia.ps1` 按语义名操作小窗（窗口类 `LEAPGATE_UI_CM`；按钮、标签、对话框按钮用 `Invoke`，菜单行和旧界面小窗的按钮要真实鼠标）。含被控端画面的截图读完即删，不留证据。被控端审批方式用 `approve-mode`（`both`、`click`、`password`）逐个改。
+
+**06 §5.1 自动测试**：通过。core `flutter analyze` 92 条 info（基线不变，全在复制件里），测试 181 个通过；app analyze 0 条，测试 503 个通过、2 个跳过。Rust：`leapgate` crate 141 个通过（含 `ipc::tests::counts_by_type_with_exits_apart`、`ipc::tests::msg_round_trips_and_cm_events_read_as_documented`）；根 crate `cargo test --lib leapgate` 11 个通过。根 crate 里 `Data::Leapgate` 两头的分发没有单独的测试，由下面的真实连接覆盖。
+
+**06 §5.2 真实连接**
+
+| 项 | 结果 |
+|---|---|
+| 审批方式"输入密码或在本机接受"（两者都可） | 通过。不带密码连入：小窗"正在请求连接本机…"，按钮"接受""接受并提升权限""拒绝"；点"接受"当场收成贴边小条。带密码连入（在被控端用新界面时）：直接连入，约 3 秒后收成小条 |
+| 审批方式"在本机接受" | 通过。请求中同样三个按钮；点"拒绝"，控制端报"连接错误"，小窗隐藏（约 1.4 秒），进程约 6 秒后退出；点"接受并提升权限"当场连入 |
+| 审批方式"输入密码" | 通过。不带密码连入：小窗"对方正在输入密码…"加"拒绝"，没有"接受"；控制端输入正确密码后连入，收成小条 |
+| 出口会话 | 通过。出口代理 socks5h 和 HTTP CONNECT 都经出口访问成功；小窗标签"作为出口"，说明"对方正在通过本机访问网络（仅 TCP），无法查看本机屏幕。"，没有权限区和聊天；只剩这一个连接时小条写"‹名字› 正在将本机用作出口"。普通端口转发的标签写"端口转发：example.com:80" |
+| 断开全部会话 | 通过。两个连接时点标题栏的关闭，弹"断开全部会话？"，"取消"后连接仍在，"断开"后全部断开、小窗进程不到 1 秒退出 |
+| 权限开关 | 通过。会话中关掉"键盘和鼠标"，控制端工具栏的"输入"变成"输入. 未获得键盘和鼠标控制权限"（灰显）；再打开恢复 |
+| 文件传输 | 通过。控制端（旧界面）上传一个 395.77 KB 文件、下载一个 195.31 KB 文件，小窗文件记录里是"上传到本机，已完成"和"从本机下载，已完成"，文件名、大小对，最新的在上面，被控端磁盘上文件大小一致（测完删除） |
+| 聊天 | 通过。控制端发一条，被控端小窗自动展开成 700 宽的聊天侧栏，显示消息、对方名字和时间；被控端在侧栏回一条，控制端收到，读屏名是"对方，时间：内容" |
+| 远程点击保护 | 通过。控制端在远程画面里（适应窗口）点被控端小窗的"断开"，连接不断开，按钮上方出现"无法远程执行此操作"（两次，截图在 `shots/remoteclick-light.png`） |
+| 主窗口本机区 | 通过。远程桌面加文件传输（或出口）时"正在被远程控制（2 个会话）"；只有端口转发加出口时"2 个传入会话进行中"；"查看"在小条状态下把小窗展开提到前面 |
+| 系统切深色再切回 | 通过。B 的系统应用主题改深色，主窗口和小窗背景一起变（取样 `#FFFFFF`→`#203033`，`#EAF1F1`→`#142529`），切回后复原 |
+| 主窗口切详细模式 | 部分通过。小窗的间距、字号收紧（权限标签不再折行），窗口尺寸不变（700×500），06 §5.2 的"换尺寸"实际是令牌，不是窗口大小 |
+| 没有来访后进程退出 | 通过。最后一个连接结束后小窗隐藏，约 6 秒后进程退出（控制端关窗：隐藏约 2 秒后再 6 秒；控制端被强杀：约 21 秒后隐藏再 6 秒） |
+| 贴边小条 | 通过。一个连接（按类型的文案）和几个连接（"N 个会话进行中"加"展开"，没有"断开"）的样子对；沿屏幕上边拖动（真实鼠标）从 x=3360 移到 2707，展开再收起仍在 2707，进程退出重来回到 3360 |
+| 已断开的标签 | 未验证。所有断开的路径（本地点"断开"、控制端关窗、被强杀）里，断开的标签都当场被移除，没有看到"已断开"加"关闭"的状态；01 §3.3 的"已断开"状态在实际使用里看不到 |
+
+**06 §5.2 旧界面五项冒烟**（构建 `ef182b887` 的 Rust，A、B 都是旧界面）：连接（ICE 胜出，登录成功）、`--relay`（日志 `Relay connection`，没有 ICE 行）、文件传输（会话建起，小窗显示"传输文件"；没有再做上传下载，这条路径 M3 没碰）、TCP 端口转发（HTTP 200）、出口（socks5h 和 HTTP CONNECT 都 200）通过。旧界面小窗：在"在本机接受"下请求中点"接受"（真实鼠标）连入，通过；权限开关、聊天未验证（旧界面小窗的权限图标没有语义名，窗口最小化，聊天要按坐标输入）。ID 加盐：空配置目录起一次，`Generated id` 是 471945469（9 位、≥ 268435456），测完放回原配置。
+
+**06 §5.3 和样稿对照**：`A-P3.html` 抽样，浅色、深色各对了请求中（输入密码）、已连接远程控制（权限区）、出口会话、聊天侧栏、文件记录、贴边小条（一个、几个）。版面层级、状态、文案、令牌颜色都对得上，唯一的差异见下面"必修"。深色看了已连接远程控制、出口、几个连接的小条，浅色看了全部（B 上切系统主题后截小窗，没有留一次性密码）。没有逐画框对的：语音来电、通话中、没有麦克风（要真实麦克风）、终端、摄像头、互换（造不出）、多个来访标签的深色。
+
+**必修（样稿对照）**：紧凑模式（320×500）下权限开关的标签折行：B 在 150% 缩放，"文件复制粘贴"变成"文件复制粘 / 贴"、"阻止本地输入"变成"阻止本地输 / 入"，样稿里都是单行；"阻止本地输入"这一行折成两行以后，第二行的"入"贴着下面的按钮，请求中（输入密码）状态下和"对方正在输入密码…"那块几乎相碰。详细模式下不折行。出口说明那段话的断行也和样稿不同（字体宽度差异，不影响）。复现：被控端 150% 缩放，对方连入后看权限区。已修（`566da0b1e`）：窗口外框 320 含 Windows 的不可见缩放边框，150% 下客户区实测约 309，样稿的 14 号字加 8 间距放不下 6 个汉字；权限标签字号固定 13、开关和文字间距改 6，按最窄客户区 304（`kLgCmNarrowestClient`）设计，画廊和测试按 304 宽核对单行，真机待试用时再看。
+
+**06 §5.3 最新 stable 检查**：Flutter 官方 releases（`storage.googleapis.com/flutter_infra_release/releases/releases_windows.json`，2026-11-01 查）最新 stable 仍是 3.47.9（2026-10-29 发布）。
+1. 按 `-Ui leapgate` 编：在 `ef182b887` 上不通过，修好后（`6ea135d92`）通过。验收时 `bridge` 步里 build_runner 的 freezed 在 core 报 `Exception: Missing implementation of visitDotShorthandPropertyAccess`，随后卡在 `freezed on lib/leapgate/local_status.dart` 不结束（证据 `80-stable-run.txt`）。
+   - 根因：core 的 build_runner 用的是 `analyzer` 7.7.1（`freezed` 2.5.8 要求 analyzer 低于 8，7.7.1 是 7.x 最后一版，不是解析漂移，3.44.9 下也是它）。3.47.9 的 `package:flutter/src/services/platform_views.dart` 里 `initUiKitView` 有一个参数默认值用了点号简写（`= .fallbackToPluginDefault`），analyzer 7.7.1 链接这个库、写 summary 时没实现这种节点，分析调度器抛异常后不再处理请求，后面的 build 步骤就一直等。source_gen 只解析带顶层注解的文件：M2b 里带顶层注解的只有 `leapgate/bridge.dart`（只引 `flutter/foundation.dart`，碰不到 services）；M3 给 `local_status.dart` 的 `IncomingSessions` 加了 `@immutable`，这个文件经 `models/platform_model.dart` 引到 `flutter/services.dart`，于是被解析、触发。去掉这一行在 3.47.9 下就通过（只用于验证，没提交）。
+   - M2b 那次没撞上，是因为它的 stable 检查里 `bridge` 步判断桥接代码是新的、跳过了生成，build_runner 根本没在 3.47.9 下跑；强制生成（`-ForceBridge`）时 `61225d783` 在 3.47.9 下通过。
+   - 修法：core 加 `build.yaml`，freezed 只对 `lib/generated_bridge.dart` 生成（core 里只有它用 freezed，它的依赖链不碰 `package:flutter`），以后哪个文件加了顶层注解也不会被 freezed 解析。没有改依赖版本：升 freezed 3 要改桥接生成的代码。3.44.9 下生成的 `generated_bridge.freezed.dart`、`generated_bridge.dart` 和加之前逐字节相同，3.47.9 生成的也相同；build_runner 的动作从 175 个降到 17 个。
+   - 复跑（`6ea135d92`，3.47.9 强制生成桥接代码）：编出来（`leapgate.exe` `BE58E4F4…`、`app.so` `B22208B7…`，官方引擎 `30494FB0…`）。
+2. 组件画廊：通过。在 `6ea135d92` 上 3.44.9 和 3.47.9 各导出 1580 张，1070 张逐像素相同，没有一张差异像素超过 1%（最大差异像素比例 0.02%，抗锯齿级别），和验收时那次一致。
+3. 4K 上屏：通过。被控端 B（4K）用 `ef182b887` 的旧界面构建，控制端只用 `--connect`，没开 UI Automation 客户端；会话约 5 分钟，直连，画面持续更新（每分钟截一次，内容都不同），进程一直在（句柄稳定在约 1500），没有崩溃事件，stderr 只有 "Using the Impeller rendering backend (OpenGLESSDF)"。
+4. analyze 和测试：app 没有问题；core 97 条（92 条 info 加复制件 `file_model.dart` 的 5 条 warning，和 M2a、M2b 相同）；core 181 个、app 503 个测试通过（跳过 2 个），这次用的是 3.47.9 自己生成的桥接代码。
+构建 worktree 已用 3.44.9 和自编引擎编回 `6ea135d92`（强制生成桥接代码）：`app.so` 和验收构建逐字节相同，`flutter_windows.dll` 是带 0003 的 `8667024A…`；`leapgate.exe` 重新链接后和验收构建只差 PE 头和调试目录里的两处链接时间戳（6 个字节），所以哈希不同；`libleapgate.dll` 因为重新链接哈希变了。
+
+**发现的问题**：
+1. 上面"必修"的权限标签折行：已修（`566da0b1e`，见上）。
+2. 最新 stable 检查第 1 步不通过：已查清并修好（`6ea135d92`，见上），四步复跑通过。
+3. 被控端点"接受并提升权限"后，系统弹 UAC 确认框（secure desktop），无人在场时一直挡着被控端的真实鼠标键盘输入（`SetCursorPos` 失败），要远程结束 `consent.exe` 才恢复；UI Automation 的 `Invoke` 不受影响。不是产品问题，试用时在场的人点掉即可，写进试用说明。
+4. 01 §3.3 的"已断开 + 关闭"状态实际看不到（见上表）。
+5. 被控端的聊天输入框用 UI Automation 的 `Type`（`SendKeys`）能输入；控制端那边台式机的中文输入法会吃掉空格，聊天里的空格丢失，是环境问题。
+
+**试用清单**：真实麦克风的语音通话（接听、选麦克风、挂断、没有麦克风的提示）；多显示器时小条在主显示器；拖动小条的手感；在完整小窗里移动鼠标取消自动收起；小条上"断开"的远程点击保护；权限开关全部八项和只读态（内置选项禁止改权限）；摄像头、终端会话的小窗（造不出）；互换后的"撤销交换"；多个来访标签和未读数；语音来电；旧界面小窗的权限开关和聊天；"接受并提升权限"的系统确认框；`待调.md` 里 CM 相关几条是否满意。
+
 ### 10.6 core 的结构（M1）
 
 03 §3.3 第 1、2、4、5、6、8 条在 `core/lib/leapgate/` 落成下面几个文件，复制进来的 models 和改写的 `FfiModel` 接在这上面。
@@ -1018,3 +1076,83 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 - core 的新代码有单测（延迟统计、分类合并搜索、排序、遮罩判断、聊天消息存储）；app 每个页面状态一个行为测试（05 §6.1）。
 - 合入前：`git diff main -- flutter/` 为空；core 的 `flutter analyze --no-fatal-infos` 在 3.44.9 下不超出 92 条 info 的基线，新复制的 `shortcut_model` 带来的上游提示单列；app 0 条；复制件不跑格式化。改已有文件时不对整个文件跑 `dart format`：M2a 的文件不是按当前格式化器的样式排的，整文件格式化会把差异放大到几百行；只格式化新文件。
 - 审查重点见 05 §3 第 2 步。
+
+### 10.10 M3 的分工约定
+
+依据：总仓库 `docs/新界面/06-M3拆法.md`（下称"06"；维护者 2026-10-31 按推荐定）。界面行为以 01 §3.3（P3 全部）为准，02 §0.4 第 2、11 条、R2-Q16 有更正；样稿 `A-P3.html`，画框名见 06 §2.2；令牌和图标以 `A-基础.html` 为准。M3 和 M2b 并行，M2b 的约定在 10.9（在 `ui/m2b` 上，合入后两节并存）。
+
+**两段**：第一段现在做（窗口、来访标签、信息头、权限区、操作区、贴边小条、远程点击保护、关窗确认、主题和语言跟随（2026-11-01 改为和主窗口一样跟随系统，见下面"主题、语言"），加 Rust 三项）；第二段等 M2b 合入 main、main 合进 `ui/m3` 以后做（聊天侧栏、文件记录侧栏、主窗口本机区的连入数和"查看"、界面模式跟随）。
+
+**分支和文件边界**（都从 `ui/m3` 切，做完合回 `ui/m3`）
+
+| 分支 | 谁 | 只改这些 |
+|---|---|---|
+| `ui/rust-m3` | Rust coder | `src/ipc.rs`（`Data` 末尾一个变体，主进程一侧 `handle` 一处分发）、`src/ui_cm_interface.rs`（CM 一侧消息循环一处分发）、`src/server/connection.rs`（只在出口连接的编号从现有挂钩拿不到时加一行）、`src/leapgate_ffi.rs`（末尾追加 M3 一段）、`src/leapgate_hooks` 下的新文件、`libs/leapgate/src/ipc.rs`（新）；测试 |
+| `ui/m3-ds` | designer | `app/lib/widgets/` 下 `lg_cm` 开头的新文件、`app/lib/gallery_main.dart` 的追加、这些组件的测试 |
+| `ui/m3-cm` | CM coder | `app/lib/cm/`（新）、`app/lib/main.dart` 的 `--cm` 分支、`app/windows/runner/main.cpp` 里 CM 窗口的初值；core 的 `models/server_model.dart`（新复制）、`leapgate/` 下 `cm_` 开头的新文件、`consts.dart`（只追加）；它们的测试 |
+
+- 和 M2b 重叠的只有 `app/lib/main.dart`（M2b 主页块改界面模式接主题那几行）、core `consts.dart`（M2b 两个 coder 也追加选项键）、`gallery_main.dart`，都只追加，整合时合并相邻行。
+- ARB 键用 `cm` 前缀，加在两个 ARB 文件末尾，中英文同时加，文案照 01 §3.3 和 §7.6，新写的句子列进提交说明。
+- CM coder 先用 M0、M2a 的组件和简单占位把逻辑写通，整合时换成 designer 的组件；占位要能被行为测试按文字和语义标签找到。
+
+**进程间消息和块 2 导出**（Rust coder 做；Rust 合进 `ui/m3` 之前，CM coder 用测试里能换掉的取值函数）
+
+`ipc::Data` 末尾加 `Leapgate(leapgate::ipc::Msg)`，`Msg` 定义在 `libs/leapgate/src/ipc.rs`，以后 Leapgate 的进程间消息都加在 `Msg` 里（03 §6.1 C1），只追加、不改已有变体的顺序和含义。上游 `Data` 两头的消息循环都有兜底的 `_ => {}`，两头各加一处分发，漏了新消息会被静默吞掉。
+
+| 导出（块 2） | 谁调 | 做什么 |
+|---|---|---|
+| `leapgate_incoming_counts()`，异步，返回 JSON 字符串 | 主窗口本机区（第二段） | 连服务进程的进程间通道问一次，返回 `{"remote":n,"file_transfer":n,"port_forward":n,"exit":n,"camera":n,"terminal":n}`；服务进程不在时 `{}`。端口转发里属于出口的只算进 `exit`。不改上游 `ui_interface.rs` 的状态轮询（C1） |
+| `leapgate_show_cm()` | 主窗口"查看"（第二段） | 经上游 `send_to_cm`（`src/ui_interface.rs`）同一条路发 `Msg::ShowCm`；CM 进程不在时什么也不做（C2） |
+| `leapgate_ui_mode_changed(mode)` | 主窗口改了界面模式以后（第二段） | 发 `Msg::UiMode(mode)` 给 CM（S7） |
+| `leapgate_cm_events(sink)`，`StreamSink<String>` | CM 启动时订阅 | CM 一侧收到 `Msg::ShowCm` 推 `{"name":"show_cm"}`，收到 `Msg::UiMode` 推 `{"name":"ui_mode","mode":"…"}`。不往上游的 `InvokeUiCM` 加方法（10.1） |
+
+- C1 的出口：出口连接的编号在已有的 Leapgate 出口挂钩里记进 `libs/leapgate`（出口在登录时判定，`port_forward_mux.leapgate_exit`）；数的时候按上游连接表（`AUTHED_CONNS`）分类，端口转发里编号在出口表中的算出口，出口表里已经不在连接表的编号顺手删掉（V1 的做法）。上游的连接表和 `AuthedConn` 不加字段。
+- 已知限制：新旧版本的进程短暂同时在跑时，旧进程收不懂新变体，解码失败（上游 `Data::DrmCursor` 的注释写过同类问题）。新界面便携版和旧界面不同时运行（03 §7.1），日常碰不到。
+- C1 在 M6 也要用（关出口前的确认）。
+
+**组件（designer）**：规则同 10.8"组件约定"。要做的见 06 §2.2：CM 外框（可拖动的标题区、"收起""关闭"，紧凑和展开两种宽度）、来访标签条、信息头（头像规则同 01 §3.1 区块 D）、几种会话类型的信息区、权限区（带文字的开关两列、只读态）、操作区的各种组合、贴边小条（一个连接按类型的文案、几个连接）、远程点击被拦下的提示、文件记录侧栏的列表行和空状态、关窗确认。聊天侧栏是第二段 designer 做的 `LgCmChat`（`app/lib/widgets/lg_cm_chat.dart`：M2b 聊天气泡的嵌入形态，铺满侧栏、没有标题和关闭，带只读态；`LgChatMessage` 加了可选的 `sender`）。CM 的颜色跟主题，信息头用固定的浅青功能底（01 §2.4），不用来访者的身份色。
+
+**CM 页面（CM coder，第一段）**
+
+- 初始化：`--cm` 分支照上游 `flutter/lib/main.dart:285-302`：先建 `AppCore`，再按 CM 初始化平台接口（`kAppTypeConnectionManager`，它会调 Rust 的 `cm_init`，`core/lib/models/native_model.dart` 里已有这一处），登记 CM 的全局事件 `add_connection`、`on_client_remove`、`show_elevation`、`update_voice_call_state`（登记在 `appCore.events`，10.6；`theme`、`language` 不登记，见下面"主题、语言"），第二段加了 `chat_server_mode`、`cm_file_transfer_log`（见下面"第二段"）。不读 `hide_cm`（03 §5.2 M3）。
+- 复制件：`flutter/lib/models/server_model.dart` 复制进 core，CM 用到的部分按"只删界面调用"保留（客户端列表、`addConnection`、`onClientRemove`、接受和拒绝、断开、提权、撤销交换、语音状态、关闭全部、500 ms 的轮询和约 6 秒退出），主窗口和 Android 的部分（密码、ID、起停服务）整段删掉，来源行写明删了什么。标签不用上游的 `DesktopTabController`，用自己的列表。一条连接的两次 `add_connection`、`on_client_remove` 的关闭标记、同一个人重连时删旧的那条，照上游的规则（06 §4.2）。
+- 窗口：紧凑态 320×500、贴主显示器工作区右上角、置顶、不能改大小；展开侧栏时向左展开到 700×500（2026-10-31 组件审查后定：样稿是 320×500，01 §3.3 写"约 300~320 宽"，选 320；外框 320 含不可见缩放边框，客户区 150% 下约 309，组件按最窄客户区 304 设计，见 §10.5 M3 必修项的修法；尺寸用组件里的 `kLgCmWidth`、`kLgCmHeight`、`kLgCmExpandedWidth`，不另写一套）；隐藏照上游用透明加隐藏、不销毁；runner 里 CM 的初值（现在 800×600）改成和 Dart 一致。
+- 贴边小条：同一个窗口缩成一条，贴主显示器上边、靠右，沿上边左右拖动、位置只在本次运行内记住（记在 `LgCmWindow` 的内存里，不写 LocalConfig：CM 进程的 LocalConfig 是启动时读的快照，写任何一个键都会把整份旧配置存回文件，盖掉主窗口之后改过的本地配置；第一段原来写的 `leapgate-cm-strip-offset` 键第二段审查后去掉）；授权后自动收起的时机和取消条件照上游 `server_model.dart:571-590`、`server_page.dart:180-186`（01 §3.3 改成"收成小条"而不是最小化）；新来访时恢复成完整小窗并置顶。
+- 远程点击保护：照上游 `server_page.dart:1237-1253`，被拦下时在按钮旁提示"无法远程执行此操作"；`allow-remote-cm-modification` 开着时放行。小条上的"断开"同样受保护。
+- 关窗：多于一个连接时始终确认"断开全部会话？"，不读 `enable-confirm-closing-tabs`（R2-Q16）；关闭照上游 `closeAll`。标题栏"关闭"和确认里的"断开"也做远程点击保护，问的是任意一个还连着的来访（已断开的问不到、会读到旧值）；一个都没连着时直接执行。整个窗口（标题栏按钮、标签、面板、确认框、小条）都不接键盘焦点（`allow-remote-cm-modification` 开着时除外）：服务端只在左键抬起和回车时更新对方的输入时间，Tab 加空格能绕过点击判断。
+- 主题、语言（2026-11-01 整体审查后定，代替原来"启动时读设置、运行中收事件切换"的写法）：CM 和新主窗口一样跟随系统，不读 LocalConfig 的 `theme`、`lang`，也不登记 `theme`、`language` 事件（新主窗口现在只跟系统、不会发）；到 M6 设置页存下用户的选择时，主窗口和 CM 一起接。语言只有简体中文和英文，系统是其他语言时用英文（IQ10）。
+
+**测试和合入**
+
+- core：客户端列表的增删和两次事件、已断开的保留和清理、自动收起的取消条件、没有来访时退出的计时（用假时钟），各有单测；Rust：C1 的分类（含出口表清理）、`Msg` 的编解码。app：06 §5.1 列的每种状态一个行为测试。
+- 合入前：`git diff main -- flutter/` 为空；core 的 `flutter analyze --no-fatal-infos` 在 3.44.9 下不超出 92 条 info 的基线，新复制的 `server_model` 带来的上游提示单列；app 0 条；复制件不跑格式化；改已有文件时不对整个文件跑 `dart format`。
+- 审查重点：Rust 看两头分发都在、出口计数和清理、旧界面的 CM 不受影响；CM 看事件处理和上游规则一致、窗口和小条的状态切换、远程点击保护；组件看样稿必修项。
+
+**CM 的已知限制**
+
+- 远程点击保护靠"本地点击比对方最近一次输入晚 120 ms 以上"判断：CM 进程卡顿超过 120 ms 时，对方的点击可能被当成本地点击放行。
+- 它也挡不住经讲述人或 UI Automation 按语义调用 CM 的按钮。能控制键盘鼠标的人本来就能在本机运行程序，不另做防护。
+- 按 Alt+F4 关闭 CM 不弹"断开全部会话？"，直接断开全部会话（同上游）。
+- 第二位来访者的自动收起计时会覆盖第一位的：在小窗里移动鼠标只取消最后一个，前一个到时照样收起（同上游）。
+
+**第二段**（2026-11-01，M2b 合入 main 后把 main 合进 `ui/m3` 再做）
+
+- 侧栏：信息头按钮开关侧栏（远程点击保护照旧）。侧栏只在所选来访者有侧栏时显示（已授权的远程桌面、摄像头是聊天，文件传输是文件记录；`_hasSide`），窗口宽度跟着它：显示时 700（`kLgCmExpandedWidth`），否则 320。`LgCmWindow.setExpanded` 记住这个宽度，`_toFront`（新来访、从小条展开、"查看"）照它摆，不再一律放回 320。侧栏开着时来了新来访：新来访者已授权（密码直接通过）时侧栏照开、宽度不变；还在请求中时没有侧栏，窗口回到 320，接受后回到 700。所有来访者都没了时侧栏关上，6 秒内再来的来访者从关着开始。
+- 聊天：`leapgate/cm_chat.dart` 的 `CmChatModel`，管上游 `ChatModel` 在 CM 里的那部分。消息按来访者 ID 存（上游 `MessageKey` 也只比 ID），重连后还能看到；发送用所在标签的连接编号，所以上游 `_addTab` 里的 `chatModel.updateConnIdOfKey` 没有加回（复制件来源行已写明）。收到消息时（上游 `receive`）：窗口提到前面（小条会展开；已经是完整小窗时只显示、取得焦点，不挪回角落，同上游 `main.dart:321-329`），切到发消息的人的标签并打开聊天；正在聊天里写字（侧栏开着、输入框有焦点）时不切，发消息的是另一个人（按 `peerId` 比，同一个人的远程桌面和摄像头共用一份聊天）才计入他标签上的未读数。发送时当场取出文字、清空输入框，再走远程点击保护（要等约 120 ms），所以连按不会发两次、等待期间输入的新草稿不会被清掉；被拦下时输入框还空着就把原文填回去。回车发送后输入框留着焦点（`LgTextField` 透传 `onEditingComplete`，会话页的 `LgChatPanel` 一起改）。点有未读的标签会打开它的侧栏（上游 `server_page.dart:131-145`）。对方断开后聊天只读，提示"对方已断开连接"。
+- 文件记录：`models/cm_file_model.dart` 复制上游并改写（来源行列了差异）：日志解析、每条记录的状态规则、删目录时去掉其下的删除记录照抄；记录表在第一条日志到时建（上游在标签被选中时建，没选中过的连接的日志会被丢掉）；"侧栏正显示这个连接"由页面设 `shownConnId`。方向按 Windows 上 CM 的读写定：`isRemote`（CM 读文件、对方下载）是"从本机下载"，其余是"上传到本机"；名字只显示最后一段路径，重命名是"旧名 → 新名"；最新的在上面；已取消或跳过的显示"已跳过"。
+- 未读数：聊天和文件记录共用上游的 `Client.unreadChatMessageCount`，改它的地方都会接着通知页面（聊天、文件记录 model 的通知，页面自己的 `setState`），标签和侧栏按钮跟着变。
+- 焦点：`LgCmFrame` 加了 `sideFocusOnly`（默认 false，和原来一样不管焦点）。CM 页面传 `!allowRemoteCmModification()`：标题行、标签、面板、确认层不接焦点，侧栏可以（聊天输入框要能打字），代替第一段在整个窗口外包的 `ExcludeFocus`。发送只有两条路：输入框里按回车、鼠标点"发送"，都走远程点击保护（服务端在对方按回车和左键抬起时更新对方的输入时间，所以对方的回车和点击都会被拦下，提示出现在侧栏上方）。"发送"按钮不接焦点（`LgCmChat` 里包了 `ExcludeFocus`）：Tab 加空格不会更新对方的输入时间，否则对方点进输入框打字后能用它以本机身份发出。"查看"在 CM 没有来访者时不处理，免得弹出空窗口。
+- 语音：通话中操作区一行是麦克风选择加"挂断"（`LgCmMicRow`）。设备照上游 `AudioInput`（`isCm: true`）：能用"系统声音"时它在第一项、也是默认；一个设备都没有时点选择框提示"未找到音频输入设备" 3 秒。选设备不做远程点击保护（同上游），"挂断"做。
+- 主窗口：本机区按 06 M3-1，N 是 C1 的全部类型之和，有远程桌面或终端时"正在被远程控制（N 个会话）"，否则"‹N› 个传入会话进行中"，旁边"查看"调 `leapgate_show_cm`。`LocalStatusModel` 每 3 秒问一次 `leapgate_incoming_counts`（单独的计时器，不放在每秒的状态轮询里）：主窗口收不到会话开始、结束的事件，`video_conn_count` 又只数远程桌面；一次查询是本机的一次进程间连接，服务进程在内存里数，最坏约 2 秒，3 秒的间隔不会叠起来。原来的 `remoteSessions`（`video_conn_count`）删掉。
+- 界面模式：主窗口切换简洁 / 详细（`setDetailMode`）后调 `leapgate_ui_mode_changed`，值和 LocalConfig 里的一样（`detail` 或空）。CM 启动时读一次 LocalConfig，并订阅 `leapgate_cm_events`（`listenToMainWindow`）：`ui_mode` 换 `LeapgateApp` 的 `detailMode`，只换尺寸；`show_cm` 把窗口提到前面。CM 不把收到的模式写回 LocalConfig：CM 进程里的 LocalConfig 是启动时读的，写一次会把这份旧的整个存回去，盖掉主窗口之后的改动。
+
+**第二段的已知限制**
+
+- 所有来访者共用一份聊天草稿（同上游只有一个输入框）：给 A 写了一半切到 B，草稿还在输入框里。
+- 远程点击被拦下的提示出现或消失时侧栏会重建，输入框失去焦点（草稿不丢）。
+- 主窗口的连入数最多晚约 5 秒（3 秒间隔加一次查询）。
+- 选麦克风不做远程点击保护（同上游）。
+- 没有聊天侧栏的连接（文件传输、终端）发来聊天时，标签切过去但消息看不到，也不计未读（同上游）。
+- 收成小条时侧栏正开着某个连接的文件记录，这期间该连接的新记录不计未读。
+- 麦克风列表只在通话那一行出现时读一次（上游每次点都重读）；读回来之前点选择框，会短暂提示"未找到音频输入设备"。
+- 文件日志每来一块就让整个 CM 页面重建一次（Flutter 按帧合并），上游只重建文件记录那一页。

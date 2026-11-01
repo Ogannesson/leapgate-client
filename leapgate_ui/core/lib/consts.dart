@@ -467,3 +467,14 @@ const Map<int, String> physicalKeyMap = <int, String>{
   0x000c019e: 'LOCK_SCREEN',
   0x000c0208: 'VK_PRINT',
 };
+
+// The connection manager (M3), in upstream's order.
+
+/// [kAppTypeConnectionManager] only for 'Desktop CM Page'
+const String kAppTypeConnectionManager = "cm";
+
+const String kOptionEnablePermChangeInAcceptWindow =
+    "enable-perm-change-in-accept-window";
+const String kOptionHideElevateButtonInAcceptWindow =
+    "hide-elevate-button-in-accept-window";
+const String kOptionAllowRemoteCmModification = "allow-remote-cm-modification";

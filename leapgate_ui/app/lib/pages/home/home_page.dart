@@ -282,11 +282,14 @@ class _SideColumn extends StatelessWidget {
                         kind: LgButtonKind.text,
                         onPressed: status.startService,
                       ),
-                    // "View" (bring the connection manager forward) comes with M3.
-                    if (status.remoteSessions > 0) ...[
+                    if (status.incoming.total > 0) ...[
                       const SizedBox(height: LgSpace.s2),
                       LgControlledNote(
-                        text: l10n.homeRemoteControlled(status.remoteSessions),
+                        text: status.incoming.controlled
+                            ? l10n.homeRemoteControlled(status.incoming.total)
+                            : l10n.homeIncomingSessions(status.incoming.total),
+                        viewLabel: l10n.homeShowCm,
+                        onView: status.showConnectionManager,
                       ),
                     ],
                     // The hint card (01 P1 block B): only the system error in M2b.
