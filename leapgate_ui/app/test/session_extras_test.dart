@@ -350,6 +350,29 @@ void main() {
       expect(find.text('无法取消阻止远程设备的本地输入（Driver missing）'), findsOneWidget);
     });
 
+    testMainWindow('privacy mode that failed says so, with the reason when given', (
+      tester,
+    ) async {
+      await pumpMainWindow(tester);
+      final s = await connected(tester);
+      await emit(
+        tester,
+        fakes,
+        s,
+        msgbox('custom-error', 'Privacy mode', 'Failed'),
+      );
+      await emit(
+        tester,
+        fakes,
+        s,
+        msgbox('custom-error', 'Privacy mode', 'Not supported'),
+      );
+
+      expect(find.text('无法开启隐私模式'), findsOneWidget);
+      expect(find.text('无法切换隐私模式（Not supported）'), findsOneWidget);
+      expect(find.text('失败'), findsNothing);
+    });
+
     testMainWindow('a permission taken away is told', (tester) async {
       await pumpMainWindow(tester);
       // Given permissions are never sent; the remote user turns one off after the login.

@@ -78,7 +78,12 @@ String noticeText(AppLocalizations l10n, SessionNotice notice) {
     'Peer denied' when privacy => l10n.sessionNoticePrivacyDenied,
     'Peer exit' when privacy => l10n.sessionNoticePrivacyPeerExit,
     'Turned off' when privacy => l10n.sessionNoticePrivacyTurnedOff,
+    // Failing to turn it on or off: Rust's fallback text, or the remote device's reason, which
+    // does not say which (`io_loop.rs` `handle_back_msg_privacy_mode`).
+    'Failed' when privacy => l10n.noticePrivacyOnFailed,
+    'Failed to turn off' when privacy => l10n.noticePrivacyOffFailed,
     'display_is_plugged_out_msg' => l10n.sessionNoticeDisplayUnplugged,
+    _ when privacy => l10n.noticePrivacyFailed(notice.key),
     _ => null,
   };
   if (text != null) return text;
