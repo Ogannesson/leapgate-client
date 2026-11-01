@@ -35,6 +35,10 @@ void main() {
         kLgCmExpandedWidth * scale,
         kLgCmWidth * scale,
       ]);
+
+      // Already up (a chat message, "查看"): it stays where the user moved it.
+      await window.bringToFront();
+      expect(widths, hasLength(4));
     },
   );
 }

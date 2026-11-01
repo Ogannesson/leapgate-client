@@ -502,6 +502,11 @@ void main() {
       await tester.testTextInput.receiveAction(TextInputAction.done);
       await tester.pump();
       expect(log, ['send 收到']);
+      // The field keeps the focus for the next message.
+      expect(
+        tester.widget<EditableText>(find.byType(EditableText)).focusNode.hasFocus,
+        true,
+      );
     });
 
     testWidgets('the close button and the drag of the title call back', (

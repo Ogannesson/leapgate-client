@@ -59,17 +59,18 @@ void registerCmEvents(ServerModel model, CmChatModel chat, CmFileModel files) {
   events.on('cm_file_transfer_log', files.onFileTransferLog);
 }
 
-/// What the main window tells the CM (C2, S7): "查看" brings the window to the front; a new
-/// interface mode goes to [detailMode]. Subscribed when the CM starts: Rust drops a message
-/// that comes before. The mode is not written to LocalConfig here: the CM's copy of it was read
-/// when it started, and a write would store that old copy over the main window's later changes.
+/// What the main window tells the CM (C2, S7): "查看" brings the window to the front, unless
+/// there is nobody to show (the window would be empty); a new interface mode goes to
+/// [detailMode]. Subscribed when the CM starts: Rust drops a message that comes before. The mode
+/// is not written to LocalConfig here: the CM's copy of it was read when it started, and a write
+/// would store that old copy over the main window's later changes.
 StreamSubscription<String> listenToMainWindow(
-        CmWindow window, ValueNotifier<bool> detailMode) =>
+        ServerModel model, ValueNotifier<bool> detailMode) =>
     lgBind.leapgateCmEvents().listen((event) {
       final evt = jsonDecode(event) as Map<String, dynamic>;
       switch (evt['name']) {
         case 'show_cm':
-          window.bringToFront();
+          if (model.clients.isNotEmpty) model.window.bringToFront();
         case 'ui_mode':
           detailMode.value = evt['mode'] == 'detail';
       }

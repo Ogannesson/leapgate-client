@@ -5,6 +5,7 @@ import 'package:fake_async/fake_async.dart';
 import 'package:flutter_hbb/common.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
+import 'package:flutter_hbb/leapgate/bridge.dart';
 import 'package:flutter_hbb/leapgate/cm_chat.dart';
 import 'package:flutter_hbb/leapgate/cm_core.dart';
 import 'package:flutter_hbb/models/cm_file_model.dart';
@@ -352,19 +353,31 @@ void main() {
 
   test('the main window\'s "View" and interface mode (C2, S7)', () {
     fakeAsync((async) {
-      final fakes = installFakes();
+      final lg = FakeLeapgate();
+      setLgBindForTesting(lg);
+      final model = start();
       final detail = ValueNotifier(false);
-      final sub = listenToMainWindow(window, detail);
-      fakes.lg.cmEvents.add('{"name":"ui_mode","mode":"detail"}');
+      final sub = listenToMainWindow(model, detail);
+      lg.cmEvents.add('{"name":"ui_mode","mode":"detail"}');
       async.flushMicrotasks();
       expect(detail.value, true);
-      fakes.lg.cmEvents.add('{"name":"show_cm"}');
+
+      // Nobody to show: the window stays hidden rather than come up empty.
+      lg.cmEvents.add('{"name":"show_cm"}');
       async.flushMicrotasks();
-      expect(window.calls, ['bringToFront']);
-      fakes.lg.cmEvents.add('{"name":"ui_mode","mode":""}');
+      expect(window.count('bringToFront'), 0);
+      send(async, added(client(1, authorized: true)));
+      async.elapse(Duration.zero);
+      final before = window.count('bringToFront');
+      lg.cmEvents.add('{"name":"show_cm"}');
+      async.flushMicrotasks();
+      expect(window.count('bringToFront'), before + 1);
+
+      lg.cmEvents.add('{"name":"ui_mode","mode":""}');
       async.flushMicrotasks();
       expect(detail.value, false);
       sub.cancel();
+      model.dispose();
     });
   });
 }

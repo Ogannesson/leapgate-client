@@ -120,9 +120,8 @@ void main() {
       expect(log, ['send 收到']);
     });
 
-    testWidgets('the button can be reached and used with the keyboard', (
-      tester,
-    ) async {
+    // The CM's remote click guard does not see Tab and Space: only Enter in the field sends.
+    testWidgets('the button is not reached with Tab', (tester) async {
       final log = <String>[];
       final controller = TextEditingController(text: '好');
       await pumpLg(tester, _chat(controller, log));
@@ -132,7 +131,23 @@ void main() {
       await tester.pump();
       await tester.sendKeyEvent(LogicalKeyboardKey.space);
       await tester.pump();
-      expect(log, ['send 好']);
+      expect(log, isEmpty);
+    });
+
+    testWidgets('Enter keeps the focus in the field for the next message', (
+      tester,
+    ) async {
+      final log = <String>[];
+      final controller = TextEditingController();
+      await pumpLg(tester, _chat(controller, log));
+      await tester.enterText(find.byType(EditableText), '第一条');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pump();
+      expect(log, ['send 第一条']);
+      expect(
+        tester.widget<EditableText>(find.byType(EditableText)).focusNode.hasFocus,
+        true,
+      );
     });
   });
 

@@ -186,12 +186,17 @@ class _CmPageState extends State<CmPage> with WindowListener {
   }
 
   /// Upstream `ChatModel.receive` in the CM: the window comes up with the sender's chat, unless
-  /// the user is writing to another visitor; the sender's tab then counts it as unread.
+  /// the user is writing in the chat; a message from another visitor then counts as unread on
+  /// the sender's tab.
   void _onChatReceived(Client client) {
     widget.window.bringToFront();
     final shown = _sideClient;
-    if (shown != null && shown.id != client.id && _chatFocus.hasFocus) {
-      client.unreadChatMessageCount.value += 1;
+    if (shown != null && _chatFocus.hasFocus) {
+      // By the visitor, not the connection: their remote desktop and camera share one chat,
+      // which shows the message already.
+      if (shown.peerId != client.peerId) {
+        client.unreadChatMessageCount.value += 1;
+      }
       setState(() {});
       return;
     }
@@ -524,15 +529,27 @@ class _CmPageState extends State<CmPage> with WindowListener {
           emptyText: l10n.cmChatEmpty,
           readOnly: client.disconnected,
           readOnlyText: l10n.cmChatPeerLeft,
-          onSend: (text) => _guarded(client, _hintSide, () {
-            if (widget.chat.send(client, text)) _chatInput.clear();
-          })(),
+          onSend: (text) => _sendChat(client, text),
         ),
       );
     }
     return LgCmTipAnchor(
       tip: _blocked == _hintSide ? l10n.cmBlockedRemotely : null,
       child: panel,
+    );
+  }
+
+  /// The text leaves the input at once, so that nothing is sent twice or cleared while the
+  /// guard waits its 120 ms; a dropped one comes back unless something new was typed.
+  void _sendChat(Client client, String text) {
+    _chatInput.clear();
+    cmCheckClickTime(
+      client.id,
+      () => widget.chat.send(client, text),
+      onBlocked: () {
+        if (_chatInput.text.isEmpty) _chatInput.text = text;
+        _showBlocked(_hintSide);
+      },
     );
   }
 

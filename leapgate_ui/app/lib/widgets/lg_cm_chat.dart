@@ -185,16 +185,23 @@ class _LgCmChatState extends State<LgCmChat> {
                           placeholder: w.placeholder,
                           semanticLabel: w.placeholder,
                           onSubmitted: (_) => _send(),
+                          // Enter keeps the focus for the next message.
+                          onEditingComplete: () {},
                         ),
                 ),
                 const SizedBox(width: LgSpace.s2),
-                ListenableBuilder(
-                  listenable: w.controller,
-                  builder: (context, _) => _SendButton(
-                    label: w.sendLabel,
-                    onPressed: w.readOnly || w.controller.text.trim().isEmpty
-                        ? null
-                        : _send,
+                // Not reachable by Tab: the service takes the remote user's input time on Enter
+                // and a left button release only, so Tab and Space on it would get past the
+                // CM's remote click guard. Enter in the input sends.
+                ExcludeFocus(
+                  child: ListenableBuilder(
+                    listenable: w.controller,
+                    builder: (context, _) => _SendButton(
+                      label: w.sendLabel,
+                      onPressed: w.readOnly || w.controller.text.trim().isEmpty
+                          ? null
+                          : _send,
+                    ),
                   ),
                 ),
               ],

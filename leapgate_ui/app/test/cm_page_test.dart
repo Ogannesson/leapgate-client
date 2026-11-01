@@ -808,6 +808,8 @@ void main() {
       final sent = cm.bind.callsTo(#cmSendChat).single.namedArguments;
       expect((sent[#connId], sent[#msg]), (1, '好的，谢谢！'));
       expect(find.text('好的，谢谢！'), findsOneWidget);
+      // Enter keeps the input ready for the next message.
+      expect(tester.widget<EditableText>(chatInput()).focusNode.hasFocus, true);
 
       // The keyboard still reaches nothing else.
       final checks = cm.bind.callsTo(#cmCheckClickTime).length;
@@ -819,6 +821,14 @@ void main() {
       await tester.pump(const Duration(milliseconds: 200));
       expect(cm.bind.callsTo(#cmCheckClickTime), hasLength(checks));
       expect(cm.window.calls, isNot(contains('close')));
+
+      // A draft does not go out with Tab and Space: the guard would not see them (the service
+      // takes the remote user's input time on Enter and a left click only).
+      await tester.enterText(chatInput(), '草稿');
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.sendKeyEvent(LogicalKeyboardKey.space);
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(cm.bind.callsTo(#cmSendChat), hasLength(1));
 
       await send(tester, {'name': 'on_client_remove', 'id': '1', 'close': 'false'});
       expect(find.text('对方已断开连接'), findsOneWidget);
@@ -837,9 +847,50 @@ void main() {
     await type(tester, '不该发出去');
     expect(cm.bind.callsTo(#cmSendChat), isEmpty);
     expect(find.text('无法远程执行此操作'), findsOneWidget);
+    // The text comes back to the input.
+    expect(tester.widget<EditableText>(chatInput()).controller.text, '不该发出去');
     await tester.pump(const Duration(seconds: 3));
     await finish(tester, cm);
   });
+
+  testWidgets(
+    'sending takes the text at once: a second press sends nothing, a new draft stays',
+    (tester) async {
+      final cm = await pumpCm(tester);
+      expandView(tester);
+      await arrive(tester, visitor(1));
+      await chatFrom(tester, 1, '在吗');
+      await tester.enterText(chatInput(), '第一条');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pump(const Duration(milliseconds: 1));
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.enterText(chatInput(), '新草稿');
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(
+        cm.bind.callsTo(#cmSendChat).map((c) => c.namedArguments[#msg]),
+        ['第一条'],
+      );
+      expect(tester.widget<EditableText>(chatInput()).controller.text, '新草稿');
+      await finish(tester, cm);
+    },
+  );
+
+  testWidgets(
+    'writing to a visitor, their message on another connection is no unread of another tab',
+    (tester) async {
+      final cm = await pumpCm(tester);
+      expandView(tester);
+      await arrive(tester, visitor(1));
+      await arrive(tester, visitor(2, camera: true));
+      await chatFrom(tester, 1, '第一条');
+      await tester.showKeyboard(chatInput());
+      await chatFrom(tester, 2, '第二条');
+      // The same chat shows it; nothing counts as unread.
+      expect(find.text('第二条'), findsOneWidget);
+      expect(find.text('1'), findsNothing);
+      await finish(tester, cm);
+    },
+  );
 
   testWidgets(
     'writing to one visitor, a message from another counts on their tab; their tab opens it',

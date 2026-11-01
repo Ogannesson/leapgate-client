@@ -248,6 +248,8 @@ class _LgChatPanelState extends State<LgChatPanel> {
                       placeholder: w.placeholder,
                       semanticLabel: w.placeholder,
                       dense: true,
+                      // Enter keeps the focus for the next message.
+                      onEditingComplete: () {},
                       onSubmitted: (_) => _send(),
                     ),
                   ),

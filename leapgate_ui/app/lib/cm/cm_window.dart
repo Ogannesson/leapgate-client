@@ -1,7 +1,6 @@
 import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/cm_core.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -11,10 +10,6 @@ import '../widgets/lg_cm_pill.dart';
 // The connection manager's window (01 §3.3): 320×500 at the top right of the primary display's
 // work area, on top of other windows, not resizable; collapsed, the same window becomes a strip
 // along the top edge of that display. Upstream: `flutter/lib/main.dart:285-351`.
-
-/// Where the strip was left: its distance from the right edge of the work area, in logical
-/// pixels (a LocalConfig key of Leapgate's own).
-const kOptionLeapgateCmStripOffset = 'leapgate-cm-strip-offset';
 
 enum CmView { hidden, full, strip }
 
@@ -56,6 +51,11 @@ class LgCmWindow implements CmShellWindow {
   ({int cursorX, Future<double> left})? _drag;
 
   bool _expanded = false;
+
+  /// Where the strip was left: its distance from the right edge of the work area, in logical
+  /// pixels. Kept for this run only: the CM's LocalConfig is the copy read when it started, and
+  /// writing a key stores that whole copy over what the main window changed since.
+  double _stripOffset = 0;
 
   @override
   ValueListenable<CmView> get view => _view;
@@ -103,8 +103,14 @@ class LgCmWindow implements CmShellWindow {
     await _toFront();
   }
 
+  /// A full window stays where the user moved it (upstream `main.dart:321-329` does not move a
+  /// visible window either); hidden or collapsed, it comes back at the corner.
   @override
-  Future<void> bringToFront() => _toFront();
+  Future<void> bringToFront() async {
+    if (_view.value != CmView.full) return _toFront();
+    await windowManager.show();
+    await windowManager.focus();
+  }
 
   @override
   Future<void> close() => windowManager.close();
@@ -152,11 +158,7 @@ class LgCmWindow implements CmShellWindow {
       Offset(x, work.top),
       ignoreDevicePixelRatio: true,
     );
-    final offset = (work.right - width - x) / scale;
-    await appCore.options.local.set(
-      kOptionLeapgateCmStripOffset,
-      offset.round().toString(),
-    );
+    _stripOffset = (work.right - width - x) / scale;
   }
 
   @override
@@ -194,12 +196,7 @@ class LgCmWindow implements CmShellWindow {
     final size = (v == CmView.strip ? kCmStripSize : full) * scale;
     var right = work.right;
     if (v == CmView.strip) {
-      final offset =
-          double.tryParse(
-            appCore.options.local.get(kOptionLeapgateCmStripOffset),
-          ) ??
-          0;
-      right = (work.right - offset * scale).clamp(
+      right = (work.right - _stripOffset * scale).clamp(
         work.left + size.width,
         work.right,
       );

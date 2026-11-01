@@ -30,7 +30,7 @@ Future<void> runConnectionManager() async {
   final files = CmFileModel(model);
   registerCmEvents(model, chat, files);
   final detailMode = ValueNotifier(isDetailMode(appCore.options.local));
-  listenToMainWindow(window, detailMode);
+  listenToMainWindow(model, detailMode);
   runApp(
     LeapgateApp(
       detailMode: detailMode,

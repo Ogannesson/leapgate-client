@@ -23,6 +23,7 @@ class LgTextField extends StatefulWidget {
     this.trailing,
     this.onChanged,
     this.onSubmitted,
+    this.onEditingComplete,
     this.semanticLabel,
     this.dense = false,
     this.maxLength,
@@ -43,6 +44,10 @@ class LgTextField extends StatefulWidget {
   final Widget? trailing;
   final ValueChanged<String>? onChanged;
   final ValueChanged<String>? onSubmitted;
+
+  /// As [TextField.onEditingComplete]: when set, Enter no longer takes the focus away (a chat
+  /// input stays ready for the next message).
+  final VoidCallback? onEditingComplete;
   final String? semanticLabel;
 
   /// A button high instead of an input high, with the medium text: the field
@@ -138,6 +143,7 @@ class _LgTextFieldState extends State<LgTextField> {
               autofocus: widget.autofocus,
               onChanged: widget.onChanged,
               onSubmitted: widget.onSubmitted,
+              onEditingComplete: widget.onEditingComplete,
               style: textStyle,
               cursorColor: c.accent,
               cursorWidth: 2,

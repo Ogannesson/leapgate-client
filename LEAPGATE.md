@@ -1065,7 +1065,7 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 - 初始化：`--cm` 分支照上游 `flutter/lib/main.dart:285-302`：先建 `AppCore`，再按 CM 初始化平台接口（`kAppTypeConnectionManager`，它会调 Rust 的 `cm_init`，`core/lib/models/native_model.dart` 里已有这一处），登记 CM 的全局事件 `add_connection`、`on_client_remove`、`show_elevation`、`update_voice_call_state`（登记在 `appCore.events`，10.6；`theme`、`language` 不登记，见下面"主题、语言"），第二段加了 `chat_server_mode`、`cm_file_transfer_log`（见下面"第二段"）。不读 `hide_cm`（03 §5.2 M3）。
 - 复制件：`flutter/lib/models/server_model.dart` 复制进 core，CM 用到的部分按"只删界面调用"保留（客户端列表、`addConnection`、`onClientRemove`、接受和拒绝、断开、提权、撤销交换、语音状态、关闭全部、500 ms 的轮询和约 6 秒退出），主窗口和 Android 的部分（密码、ID、起停服务）整段删掉，来源行写明删了什么。标签不用上游的 `DesktopTabController`，用自己的列表。一条连接的两次 `add_connection`、`on_client_remove` 的关闭标记、同一个人重连时删旧的那条，照上游的规则（06 §4.2）。
 - 窗口：紧凑态 320×500、贴主显示器工作区右上角、置顶、不能改大小；展开侧栏时向左展开到 700×500（2026-10-31 组件审查后定：样稿是 320×500，01 §3.3 写"约 300~320 宽"，300 宽时两列权限放不下"阻止本地输入"；尺寸用组件里的 `kLgCmWidth`、`kLgCmHeight`、`kLgCmExpandedWidth`，不另写一套）；隐藏照上游用透明加隐藏、不销毁；runner 里 CM 的初值（现在 800×600）改成和 Dart 一致。
-- 贴边小条：同一个窗口缩成一条，贴主显示器上边、靠右，沿上边左右拖动、位置记住（新的 LocalConfig 键，`leapgate-` 开头，放在用它的文件里，10.7 接入办法第 2 条）；授权后自动收起的时机和取消条件照上游 `server_model.dart:571-590`、`server_page.dart:180-186`（01 §3.3 改成"收成小条"而不是最小化）；新来访时恢复成完整小窗并置顶。
+- 贴边小条：同一个窗口缩成一条，贴主显示器上边、靠右，沿上边左右拖动、位置只在本次运行内记住（记在 `LgCmWindow` 的内存里，不写 LocalConfig：CM 进程的 LocalConfig 是启动时读的快照，写任何一个键都会把整份旧配置存回文件，盖掉主窗口之后改过的本地配置；第一段原来写的 `leapgate-cm-strip-offset` 键第二段审查后去掉）；授权后自动收起的时机和取消条件照上游 `server_model.dart:571-590`、`server_page.dart:180-186`（01 §3.3 改成"收成小条"而不是最小化）；新来访时恢复成完整小窗并置顶。
 - 远程点击保护：照上游 `server_page.dart:1237-1253`，被拦下时在按钮旁提示"无法远程执行此操作"；`allow-remote-cm-modification` 开着时放行。小条上的"断开"同样受保护。
 - 关窗：多于一个连接时始终确认"断开全部会话？"，不读 `enable-confirm-closing-tabs`（R2-Q16）；关闭照上游 `closeAll`。标题栏"关闭"和确认里的"断开"也做远程点击保护，问的是任意一个还连着的来访（已断开的问不到、会读到旧值）；一个都没连着时直接执行。整个窗口（标题栏按钮、标签、面板、确认框、小条）都不接键盘焦点（`allow-remote-cm-modification` 开着时除外）：服务端只在左键抬起和回车时更新对方的输入时间，Tab 加空格能绕过点击判断。
 - 主题、语言（2026-11-01 整体审查后定，代替原来"启动时读设置、运行中收事件切换"的写法）：CM 和新主窗口一样跟随系统，不读 LocalConfig 的 `theme`、`lang`，也不登记 `theme`、`language` 事件（新主窗口现在只跟系统、不会发）；到 M6 设置页存下用户的选择时，主窗口和 CM 一起接。语言只有简体中文和英文，系统是其他语言时用英文（IQ10）。
@@ -1086,10 +1086,10 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 **第二段**（2026-11-01，M2b 合入 main 后把 main 合进 `ui/m3` 再做）
 
 - 侧栏：信息头按钮开关侧栏（远程点击保护照旧）。侧栏只在所选来访者有侧栏时显示（已授权的远程桌面、摄像头是聊天，文件传输是文件记录；`_hasSide`），窗口宽度跟着它：显示时 700（`kLgCmExpandedWidth`），否则 320。`LgCmWindow.setExpanded` 记住这个宽度，`_toFront`（新来访、从小条展开、"查看"）照它摆，不再一律放回 320。侧栏开着时来了新来访：新来访者已授权（密码直接通过）时侧栏照开、宽度不变；还在请求中时没有侧栏，窗口回到 320，接受后回到 700。所有来访者都没了时侧栏关上，6 秒内再来的来访者从关着开始。
-- 聊天：`leapgate/cm_chat.dart` 的 `CmChatModel`，管上游 `ChatModel` 在 CM 里的那部分。消息按来访者 ID 存（上游 `MessageKey` 也只比 ID），重连后还能看到；发送用所在标签的连接编号，所以上游 `_addTab` 里的 `chatModel.updateConnIdOfKey` 没有加回（复制件来源行已写明）。收到消息时（上游 `receive`）：窗口提到前面（小条会展开），切到发消息的人的标签并打开聊天；只有正在给另一位来访者写消息（侧栏显示另一位、输入框有焦点）时不切，计入那位标签上的未读数。点有未读的标签会打开它的侧栏（上游 `server_page.dart:131-145`）。对方断开后聊天只读，提示"对方已断开连接"。
+- 聊天：`leapgate/cm_chat.dart` 的 `CmChatModel`，管上游 `ChatModel` 在 CM 里的那部分。消息按来访者 ID 存（上游 `MessageKey` 也只比 ID），重连后还能看到；发送用所在标签的连接编号，所以上游 `_addTab` 里的 `chatModel.updateConnIdOfKey` 没有加回（复制件来源行已写明）。收到消息时（上游 `receive`）：窗口提到前面（小条会展开；已经是完整小窗时只显示、取得焦点，不挪回角落，同上游 `main.dart:321-329`），切到发消息的人的标签并打开聊天；正在聊天里写字（侧栏开着、输入框有焦点）时不切，发消息的是另一个人（按 `peerId` 比，同一个人的远程桌面和摄像头共用一份聊天）才计入他标签上的未读数。发送时当场取出文字、清空输入框，再走远程点击保护（要等约 120 ms），所以连按不会发两次、等待期间输入的新草稿不会被清掉；被拦下时输入框还空着就把原文填回去。回车发送后输入框留着焦点（`LgTextField` 透传 `onEditingComplete`，会话页的 `LgChatPanel` 一起改）。点有未读的标签会打开它的侧栏（上游 `server_page.dart:131-145`）。对方断开后聊天只读，提示"对方已断开连接"。
 - 文件记录：`models/cm_file_model.dart` 复制上游并改写（来源行列了差异）：日志解析、每条记录的状态规则、删目录时去掉其下的删除记录照抄；记录表在第一条日志到时建（上游在标签被选中时建，没选中过的连接的日志会被丢掉）；"侧栏正显示这个连接"由页面设 `shownConnId`。方向按 Windows 上 CM 的读写定：`isRemote`（CM 读文件、对方下载）是"从本机下载"，其余是"上传到本机"；名字只显示最后一段路径，重命名是"旧名 → 新名"；最新的在上面；已取消或跳过的显示"已跳过"。
 - 未读数：聊天和文件记录共用上游的 `Client.unreadChatMessageCount`，改它的地方都会接着通知页面（聊天、文件记录 model 的通知，页面自己的 `setState`），标签和侧栏按钮跟着变。
-- 焦点：`LgCmFrame` 加了 `sideFocusOnly`（默认 false，和原来一样不管焦点）。CM 页面传 `!allowRemoteCmModification()`：标题行、标签、面板、确认层不接焦点，侧栏可以（聊天输入框要能打字），代替第一段在整个窗口外包的 `ExcludeFocus`。发送走远程点击保护：对方按回车会更新输入时间，对方的回车和点击都会被拦下，提示出现在侧栏上方。
+- 焦点：`LgCmFrame` 加了 `sideFocusOnly`（默认 false，和原来一样不管焦点）。CM 页面传 `!allowRemoteCmModification()`：标题行、标签、面板、确认层不接焦点，侧栏可以（聊天输入框要能打字），代替第一段在整个窗口外包的 `ExcludeFocus`。发送只有两条路：输入框里按回车、鼠标点"发送"，都走远程点击保护（服务端在对方按回车和左键抬起时更新对方的输入时间，所以对方的回车和点击都会被拦下，提示出现在侧栏上方）。"发送"按钮不接焦点（`LgCmChat` 里包了 `ExcludeFocus`）：Tab 加空格不会更新对方的输入时间，否则对方点进输入框打字后能用它以本机身份发出。"查看"在 CM 没有来访者时不处理，免得弹出空窗口。
 - 语音：通话中操作区一行是麦克风选择加"挂断"（`LgCmMicRow`）。设备照上游 `AudioInput`（`isCm: true`）：能用"系统声音"时它在第一项、也是默认；一个设备都没有时点选择框提示"未找到音频输入设备" 3 秒。选设备不做远程点击保护（同上游），"挂断"做。
 - 主窗口：本机区按 06 M3-1，N 是 C1 的全部类型之和，有远程桌面或终端时"正在被远程控制（N 个会话）"，否则"‹N› 个传入会话进行中"，旁边"查看"调 `leapgate_show_cm`。`LocalStatusModel` 每 3 秒问一次 `leapgate_incoming_counts`（单独的计时器，不放在每秒的状态轮询里）：主窗口收不到会话开始、结束的事件，`video_conn_count` 又只数远程桌面；一次查询是本机的一次进程间连接，服务进程在内存里数，最坏约 2 秒，3 秒的间隔不会叠起来。原来的 `remoteSessions`（`video_conn_count`）删掉。
 - 界面模式：主窗口切换简洁 / 详细（`setDetailMode`）后调 `leapgate_ui_mode_changed`，值和 LocalConfig 里的一样（`detail` 或空）。CM 启动时读一次 LocalConfig，并订阅 `leapgate_cm_events`（`listenToMainWindow`）：`ui_mode` 换 `LeapgateApp` 的 `detailMode`，只换尺寸；`show_cm` 把窗口提到前面。CM 不把收到的模式写回 LocalConfig：CM 进程里的 LocalConfig 是启动时读的，写一次会把这份旧的整个存回去，盖掉主窗口之后的改动。
@@ -1100,3 +1100,7 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 - 远程点击被拦下的提示出现或消失时侧栏会重建，输入框失去焦点（草稿不丢）。
 - 主窗口的连入数最多晚约 5 秒（3 秒间隔加一次查询）。
 - 选麦克风不做远程点击保护（同上游）。
+- 没有聊天侧栏的连接（文件传输、终端）发来聊天时，标签切过去但消息看不到，也不计未读（同上游）。
+- 收成小条时侧栏正开着某个连接的文件记录，这期间该连接的新记录不计未读。
+- 麦克风列表只在通话那一行出现时读一次（上游每次点都重读）；读回来之前点选择框，会短暂提示"未找到音频输入设备"。
+- 文件日志每来一块就让整个 CM 页面重建一次（Flutter 按帧合并），上游只重建文件记录那一页。
