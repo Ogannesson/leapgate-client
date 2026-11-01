@@ -14,28 +14,36 @@ import 'lg_button.dart';
 import 'lg_text_field.dart';
 
 /// One message: the text, the time as written ("10:24") and whether this
-/// computer sent it. Two messages with the same three values are equal.
+/// computer sent it. Two messages with the same values are equal.
 @immutable
 class LgChatMessage {
   const LgChatMessage({
     required this.text,
     required this.time,
     required this.mine,
+    this.sender,
   });
 
   final String text;
   final String time;
   final bool mine;
 
+  /// Who wrote it, for the chat of the connection manager (`LgCmChat`), which
+  /// sits next to several visitors: shown under the other person's bubble
+  /// ("李四  14:02"). Never shown for this computer's own messages, and not by
+  /// the session's [LgChatPanel], which talks to one person.
+  final String? sender;
+
   @override
   bool operator ==(Object other) =>
       other is LgChatMessage &&
       other.text == text &&
       other.time == time &&
-      other.mine == mine;
+      other.mine == mine &&
+      other.sender == sender;
 
   @override
-  int get hashCode => Object.hash(text, time, mine);
+  int get hashCode => Object.hash(text, time, mine, sender);
 }
 
 class LgChatPanel extends StatefulWidget {
@@ -214,7 +222,7 @@ class _LgChatPanelState extends State<LgChatPanel> {
                       itemCount: w.messages.length,
                       separatorBuilder: (_, _) =>
                           const SizedBox(height: LgSpace.s4),
-                      itemBuilder: (context, i) => _Bubble(
+                      itemBuilder: (context, i) => LgChatBubble(
                         message: w.messages[i],
                         who: w.messages[i].mine ? w.mineLabel : w.theirsLabel,
                         maxWidth: (w.width - 2 * LgSpace.s4) * .82,
@@ -264,25 +272,42 @@ class _LgChatPanelState extends State<LgChatPanel> {
   }
 }
 
-class _Bubble extends StatelessWidget {
-  const _Bubble({
+/// One message as a bubble with its time under it, on the right when it is
+/// this computer's. The defaults are the session panel's bubble (`.chatp .bub`);
+/// the connection manager's chat (`LgCmChat`) sets [padding] and [showSender].
+class LgChatBubble extends StatelessWidget {
+  const LgChatBubble({
+    super.key,
     required this.message,
     required this.who,
     required this.maxWidth,
+    this.padding = const EdgeInsets.symmetric(
+      horizontal: LgSpace.s4,
+      vertical: LgSpace.s2,
+    ),
+    this.showSender = false,
   });
 
   final LgChatMessage message;
+
+  /// "我" or "对方", for a screen reader; a shown sender replaces it.
   final String who;
   final double maxWidth;
+  final EdgeInsets padding;
+
+  /// Put [LgChatMessage.sender] in front of the time under the other person's
+  /// bubble.
+  final bool showSender;
 
   @override
   Widget build(BuildContext context) {
     final t = LgTokens.of(context);
     final c = t.colors;
     final mine = message.mine;
+    final sender = showSender && !mine ? message.sender : null;
     return Semantics(
       container: true,
-      label: '$who, ${message.time}: ${message.text}',
+      label: '${sender ?? who}, ${message.time}: ${message.text}',
       child: ExcludeSemantics(
         child: Align(
           alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
@@ -295,10 +320,7 @@ class _Bubble extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: LgSpace.s4,
-                    vertical: LgSpace.s2,
-                  ),
+                  padding: padding,
                   decoration: BoxDecoration(
                     color: mine ? c.accent : c.surface2,
                     borderRadius: BorderRadius.only(
@@ -318,7 +340,32 @@ class _Bubble extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: LgSpace.s1),
-                Text(message.time, style: t.textS.copyWith(color: c.text2)),
+                if (sender == null)
+                  Text(message.time, style: t.textS.copyWith(color: c.text2))
+                else
+                  // `.tm`: the name in bold, 8 px, the time.
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Flexible(
+                        child: Text(
+                          sender,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: t.textS.copyWith(
+                            color: c.text2,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: LgSpace.s2),
+                      Text(
+                        message.time,
+                        maxLines: 1,
+                        style: t.textS.copyWith(color: c.text2),
+                      ),
+                    ],
+                  ),
               ],
             ),
           ),

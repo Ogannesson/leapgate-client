@@ -22,6 +22,7 @@ import 'widgets/lg_button.dart';
 import 'widgets/lg_canvas_parts.dart';
 import 'widgets/lg_chat.dart';
 import 'widgets/lg_cm_actions.dart';
+import 'widgets/lg_cm_chat.dart';
 import 'widgets/lg_cm_close_confirm.dart';
 import 'widgets/lg_cm_files.dart';
 import 'widgets/lg_cm_frame.dart';
@@ -52,6 +53,7 @@ import 'widgets/lg_text_field.dart';
 import 'widgets/lg_title_bar.dart';
 import 'widgets/lg_tooltip.dart';
 
+part 'gallery_cm_chat.dart';
 part 'gallery_m2b.dart';
 
 const _exportDir = String.fromEnvironment('LG_GALLERY_EXPORT');
@@ -739,6 +741,7 @@ List<Specimen> buildSpecimens() {
     }),
   );
   list.addAll(_m3Specimens());
+  list.addAll(_cmChatSpecimens());
   return list;
 }
 
