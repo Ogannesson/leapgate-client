@@ -12,6 +12,7 @@ import 'package:window_manager/window_manager.dart';
 import '../../shell/tab_overlays.dart';
 import '../../shell/toast_view.dart';
 import '../../theme/lg_tokens.dart';
+import '../../widgets/lg_session_toolbar.dart' show LgToolbarMenuClosed;
 import 'canvas_hints.dart';
 import 'chat/chat.dart';
 import 'connection_panel.dart';
@@ -180,7 +181,8 @@ class _SessionPageState extends State<SessionPage>
     if (_cursorOverImage.value &&
         _canFocusRemoteInput &&
         !_rawKeyFocusNode.hasFocus &&
-        !_textInputFocused) {
+        !_textInputFocused &&
+        !_menuFocused) {
       _rawKeyFocusNode.requestFocus();
     }
     if (_ffi.inputModel.relativeMouseMode.value) {
@@ -196,15 +198,22 @@ class _SessionPageState extends State<SessionPage>
   void _enterView(PointerEnterEvent evt) {
     _ffi.canvasModel.rearmEdgeScroll();
     _cursorOverImage.value = true;
-    // Focus only while the window is really active, or a background window would grab system
-    // keys. onFocusChange does enterOrLeave.
-    if (!_isWindowBlur &&
-        _canFocusRemoteInput &&
-        !_rawKeyFocusNode.hasFocus &&
-        !_textInputFocused &&
-        !_menuFocused) {
-      _rawKeyFocusNode.requestFocus();
-    }
+    if (_mayTakeKeyboard) _rawKeyFocusNode.requestFocus();
+  }
+
+  /// Focus only while the window is really active, or a background window would grab system
+  /// keys, and while nothing over the image has the keyboard. onFocusChange does enterOrLeave.
+  bool get _mayTakeKeyboard =>
+      !_isWindowBlur &&
+      _canFocusRemoteInput &&
+      !_rawKeyFocusNode.hasFocus &&
+      !_textInputFocused &&
+      !_menuFocused;
+
+  /// A toolbar menu closed with the pointer still on the image: no "pointer entered" comes, so
+  /// the image takes the keyboard back here.
+  void _onToolbarMenuClosed() {
+    if (_cursorOverImage.value && _mayTakeKeyboard) _rawKeyFocusNode.requestFocus();
   }
 
   /// An open toolbar menu has the keyboard (it takes it on opening): the pointer crossing the
@@ -309,10 +318,16 @@ class _SessionPageState extends State<SessionPage>
             Positioned.fill(child: CanvasHints(ffi: _ffi)),
             if (_ffi.ffiModel.pi.isSet.isTrue)
               Positioned.fill(
-                child: SessionToolbar(
-                    ffi: _ffi,
-                    cursorOverImage: _cursorOverImage,
-                    overlays: widget.overlays),
+                child: NotificationListener<LgToolbarMenuClosed>(
+                  onNotification: (_) {
+                    _onToolbarMenuClosed();
+                    return true;
+                  },
+                  child: SessionToolbar(
+                      ffi: _ffi,
+                      cursorOverImage: _cursorOverImage,
+                      overlays: widget.overlays),
+                ),
               ),
             // At the right below the toolbar (`LgNoticeStack`: right 16, top 12 + bar + 12).
             Positioned(

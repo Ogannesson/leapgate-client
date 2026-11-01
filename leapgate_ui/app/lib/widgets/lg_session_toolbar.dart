@@ -237,6 +237,17 @@ Offset? _menuPosition(LgToolbarDock dock, Size button, double menuWidth) =>
       LgToolbarDock.right => Offset(-menuWidth - LgSpace.s2, 0),
     };
 
+/// Sent up the tree when a menu of the bar has closed. The menu took the
+/// keyboard on opening; the session page gives it back to the image if the
+/// pointer is on it, since no "pointer entered" comes then.
+class LgToolbarMenuClosed extends Notification {
+  const LgToolbarMenuClosed();
+}
+
+void _menuClosed(BuildContext context) {
+  if (context.mounted) const LgToolbarMenuClosed().dispatch(context);
+}
+
 /// A menu button of the bar (`.ti` with a down arrow): the name, and in detail
 /// mode the [icon] before it. Open, it is tinted and bold, like a selected
 /// button, while its [items] hang under it. On a bar at a side it is the icon
@@ -287,6 +298,7 @@ class LgToolbarMenuButton extends StatelessWidget {
       items: items,
       width: width,
       triggerFocus: true,
+      onClose: () => _menuClosed(context),
       builder: (context, controller) => LgPressable(
         onPressed: greyed && !explained
             ? null
@@ -432,6 +444,7 @@ class _MoreButton extends StatelessWidget {
     return LgMenuAnchor(
       items: items,
       triggerFocus: true,
+      onClose: () => _menuClosed(context),
       builder: (context, controller) => LgPressable(
         onPressed: () {
           if (controller.isOpen) {

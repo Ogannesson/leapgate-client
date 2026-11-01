@@ -409,9 +409,10 @@ void main() {
       expect(callsTo(fakes, #sessionEnterOrLeave).last[#enter], false);
     });
 
-    testMainWindow('a toolbar menu takes the keyboard from the image; Escape closes it',
-        (tester) async {
-      await pumpMainWindow(tester);
+    /// A session with a frame and the keyboard on the image; [menu] opened from the toolbar,
+    /// then the pointer moved onto the image at [onImage].
+    Future<(FocusNode, TestGesture)> menuOpen(WidgetTester tester, Finder menu,
+        {Offset onImage = const Offset(80, 500)}) async {
       final a = await _open(tester);
       await emit(tester, fakes, a, connectionReady(direct: true));
       await emit(tester, fakes, a, peerInfo());
@@ -425,22 +426,61 @@ void main() {
       await tester.pump();
       expect(callsTo(fakes, #sessionEnterOrLeave).last[#enter], true);
 
-      await tester.tap(find.text('操作'));
+      await tester.tap(menu);
       await tester.pumpAndSettle();
-      expect(find.text('重启远程设备'), findsOneWidget);
       // Rust's hook stops taking the keys, so Escape is not sent to the remote device.
       expect(image.hasFocus, false);
       expect(callsTo(fakes, #sessionEnterOrLeave).last[#enter], false);
       // The pointer crossing the image while the menu is open does not take it back.
       final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
-      await mouse.addPointer(location: const Offset(1270, 790));
-      await mouse.moveTo(const Offset(80, 500));
+      await mouse.addPointer(location: const Offset(1, 1));
+      await mouse.moveTo(onImage);
       await tester.pump();
       expect(image.hasFocus, false);
+      return (image, mouse);
+    }
+
+    testMainWindow('a toolbar menu takes the keyboard from the image; Escape closes it',
+        (tester) async {
+      await pumpMainWindow(tester);
+      final (image, mouse) = await menuOpen(tester, find.text('操作'));
+      expect(find.text('重启远程设备'), findsOneWidget);
 
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pumpAndSettle();
       expect(find.text('重启远程设备'), findsNothing);
+      // The pointer is still on the image: it has the keyboard again.
+      expect(image.hasFocus, true);
+      expect(callsTo(fakes, #sessionEnterOrLeave).last[#enter], true);
+      await mouse.removePointer();
+    });
+
+    testMainWindow('the same through "更多" in a narrow window', (tester) async {
+      await pumpMainWindow(tester);
+      tester.view.physicalSize = const Size(700, 600);
+      await tester.pump();
+      Finder shown(Finder f) => f.hitTestable();
+      final (image, mouse) = await menuOpen(tester, find.bySemanticsLabel('更多'),
+          onImage: const Offset(60, 300));
+      expect(shown(find.text('会话')), findsOneWidget);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(shown(find.text('会话')), findsNothing);
+      expect(image.hasFocus, true);
+      await mouse.removePointer();
+    });
+
+    testMainWindow('the window coming back while a menu is open leaves the keyboard to it',
+        (tester) async {
+      await pumpMainWindow(tester);
+      final (image, mouse) = await menuOpen(tester, find.text('操作'));
+
+      await windowEvent(tester, 'blur');
+      await windowEvent(tester, 'focus');
+      await tester.pumpAndSettle();
+      expect(find.text('重启远程设备'), findsOneWidget);
+      expect(image.hasFocus, false);
       await mouse.removePointer();
     });
   });
