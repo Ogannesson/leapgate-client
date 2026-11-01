@@ -12,6 +12,7 @@ import 'package:window_manager/window_manager.dart';
 
 import '../l10n/app_localizations.dart';
 import '../pages/home/home_page.dart';
+import '../pages/session/connection_panel.dart';
 import '../pages/session/reasons.dart';
 import '../pages/session/session_names.dart';
 import '../pages/session/session_page.dart';
@@ -21,7 +22,9 @@ import '../widgets/lg_tab_tip.dart';
 import '../widgets/lg_title_bar.dart';
 import 'keep_display_on.dart';
 import 'navigation.dart';
+import 'tab_menu.dart';
 import 'tab_overlays.dart';
+import 'tab_shortcuts.dart';
 import 'toast_view.dart';
 import 'window_close.dart';
 
@@ -180,6 +183,14 @@ class _MainWindowState extends State<MainWindow>
   // M2a opens one view per tab, the remote desktop.
   FFI _viewOf(String device) => appCore.sessions.sessionsOf(device).first;
 
+  /// Next or previous tab, wrapping around; home is the first (01 §2.1).
+  void _selectBy(int step) {
+    final devices = appCore.sessions.devices;
+    final current = _selected == null ? 0 : devices.indexOf(_selected!) + 1;
+    final next = (current + step) % (devices.length + 1);
+    _select(next == 0 ? null : devices[next - 1]);
+  }
+
   /// The tab's status mark and hover content (01 §2.1, P2 block A).
   LgSessionTab _tabOf(FFI s, AppLocalizations l10n) {
     final conn = s.connection;
@@ -190,7 +201,7 @@ class _MainWindowState extends State<MainWindow>
     final tipViews = <(String, Widget)>[];
     if (conn.stage == ConnStage.failed) {
       final reason = conn.reason!;
-      lines.add(reasonView(l10n, reason, s.id).text);
+      lines.add(failureText(l10n, s));
       final countdown = conn.retryCountdown;
       if (countdown != null) {
         status = LgStatusText(LgStatus.warning, l10n.sessionInterrupted);
@@ -218,6 +229,7 @@ class _MainWindowState extends State<MainWindow>
       name: name,
       identity: identityGroup(s.id),
       status: status,
+      unread: tabUnread(s),
       disconnected: disconnected,
       tooltip: LgTabTip(
           name: name, id: formatPeerId(s.id), views: tipViews, lines: lines),
@@ -265,7 +277,7 @@ class _MainWindowState extends State<MainWindow>
 
     final titleBar = ListenableBuilder(
       listenable: Listenable.merge([
-        for (final s in views) ...[s.connection, s.ffiModel],
+        for (final s in views) ...[s.connection, s.ffiModel, s.chatModel],
       ]),
       builder: (context, _) {
         _syncTitle(_selected == null
@@ -287,6 +299,8 @@ class _MainWindowState extends State<MainWindow>
           onSelect: (i) => _select(i == 0 ? null : devices[i - 1]),
           onCloseTab: (i) => appCore.sessions.closeDevice(devices[i - 1]),
           onNewTab: () => showHome(focusConnectBox: true),
+          onTabContextMenu: (i, position) =>
+              showSessionTabMenu(context, devices[i - 1], position),
           maximized: _maximized,
           onMinimize: windowManager.minimize,
           onToggleMaximize: _toggleMaximize,
@@ -301,7 +315,10 @@ class _MainWindowState extends State<MainWindow>
       },
     );
 
-    return Scaffold(
+    return TabShortcuts(
+      onNext: () => _selectBy(1),
+      onPrevious: () => _selectBy(-1),
+      child: Scaffold(
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -322,7 +339,7 @@ class _MainWindowState extends State<MainWindow>
                   sizing: StackFit.expand,
                   children: [
                     _scope(null, _selected == null,
-                        HomePage(status: widget.status)),
+                        HomePage(status: widget.status, overlays: _overlays)),
                     for (final s in views)
                       KeyedSubtree(
                         key: ObjectKey(s),
@@ -345,6 +362,6 @@ class _MainWindowState extends State<MainWindow>
           ),
         ],
       ),
-    );
+    ));
   }
 }

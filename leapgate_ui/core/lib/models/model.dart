@@ -25,7 +25,6 @@ import 'package:flutter_hbb/utils/scale.dart';
 import 'package:flutter_hbb/generated_bridge.dart';
 import 'package:flutter_hbb/native/custom_cursor.dart';
 import 'package:flutter_hbb/utils/platform_channel.dart';
-import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/notices.dart';
 import 'package:flutter_hbb/leapgate/session.dart';
 export 'package:flutter_hbb/leapgate/session.dart';

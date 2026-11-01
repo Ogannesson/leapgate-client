@@ -30,6 +30,7 @@ class LgPasswordField extends StatefulWidget {
     this.onChanged,
     this.onSubmitted,
     this.semanticLabel,
+    this.maxLength,
   });
 
   final TextEditingController controller;
@@ -43,6 +44,9 @@ class LgPasswordField extends StatefulWidget {
   final String? semanticLabel;
   final String showLabel;
   final String hideLabel;
+
+  /// See [LgTextField.maxLength].
+  final int? maxLength;
 
   @override
   State<LgPasswordField> createState() => _LgPasswordFieldState();
@@ -64,6 +68,7 @@ class _LgPasswordFieldState extends State<LgPasswordField> {
       onChanged: widget.onChanged,
       onSubmitted: widget.onSubmitted,
       semanticLabel: widget.semanticLabel ?? widget.placeholder,
+      maxLength: widget.maxLength,
       trailing: LgIconButton(
         icon: _shown ? LgIcons.eyeOff : LgIcons.eye,
         label: _shown ? widget.hideLabel : widget.showLabel,

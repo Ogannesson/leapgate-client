@@ -259,7 +259,8 @@ class ConnectionModel with ChangeNotifier {
       _show(ConnStage.verifying, input: ConnInput.remoteAccept);
     } else if (type == 'on-uac' || type == 'on-foreground-elevated') {
       // Rust takes these back with `cancel_msgbox` by type. Upstream also skips them while its
-      // elevation request dialog is open; that dialog comes with the session toolbar (M2b).
+      // elevation request dialog is open; that dialog is the app's, over the tab, and core
+      // cannot see it, so the notice still comes then (a known limit).
       if (ffi.notices.items.any((n) => n.tag == 'wait-uac')) return;
       _notice(ffi, type, title, text, link, tag: type);
     } else if (type == 'wait-uac') {

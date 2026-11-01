@@ -7,7 +7,9 @@ import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/bridge.dart';
 import 'package:flutter_hbb/leapgate/local_status.dart';
+import 'package:flutter_hbb/leapgate/options.dart';
 import 'package:flutter_hbb/leapgate/ui_error_log.dart';
+import 'package:flutter_hbb/leapgate/ui_mode.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:uni_links/uni_links.dart';
 import 'package:window_manager/window_manager.dart';
@@ -45,7 +47,9 @@ Future<void> main(List<String> args) async {
     await bind.mainCheckConnectStatus();
     final version = lgBind.leapgateVersion();
     lgBind.leapgateLog(level: 3, msg: 'leapgate ui: version $version');
-    runApp(LeapgateApp(home: MainWindow(status: LocalStatusModel()..start())));
+    runApp(LeapgateApp(
+        home: MainWindow(status: LocalStatusModel()..start()),
+        local: appCore.options.local));
     // A launch that found no main window keeps its `--connect` or link on its own command
     // line (M0 acceptance, LEAPGATE.md §10.5). Both need the navigation the main window sets
     // in its first build.
@@ -90,18 +94,32 @@ void _listenLinks() {
 }
 
 class LeapgateApp extends StatelessWidget {
-  const LeapgateApp({super.key, required this.home});
+  const LeapgateApp({super.key, required this.home, this.local});
 
   final Widget home;
 
+  /// LocalConfig, for the interface mode (01 §2.3); without it the mode is the simple one (the
+  /// connection manager reads it with M3).
+  final OptionScope? local;
+
   @override
   Widget build(BuildContext context) {
-    // Light / dark follow the system and the mode is compact until the settings page (M6) stores
-    // the user's choice.
+    final local = this.local;
+    if (local == null) return _app(LgMode.compact);
+    // The home page's "View" menu writes it through the same scope, so a switch applies at once.
+    return ListenableBuilder(
+      listenable: local.listenable(kOptionLeapgateUiMode),
+      builder: (context, _) =>
+          _app(isDetailMode(local) ? LgMode.detail : LgMode.compact),
+    );
+  }
+
+  Widget _app(LgMode mode) {
+    // Light / dark follow the system until the settings page (M6) stores the user's choice.
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      theme: buildLgTheme(brightness: Brightness.light, mode: LgMode.compact),
-      darkTheme: buildLgTheme(brightness: Brightness.dark, mode: LgMode.compact),
+      theme: buildLgTheme(brightness: Brightness.light, mode: mode),
+      darkTheme: buildLgTheme(brightness: Brightness.dark, mode: mode),
       // The tokens switch mode halfway through a theme animation; switch at once instead.
       themeAnimationDuration: Duration.zero,
       onGenerateTitle: (context) => AppLocalizations.of(context)!.appName,

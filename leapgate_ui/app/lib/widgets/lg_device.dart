@@ -12,6 +12,7 @@ import 'package:flutter_hbb/leapgate/identity_color.dart';
 
 import '../icons/lg_icon.dart';
 import '../theme/lg_tokens.dart';
+import 'lg_device_parts.dart';
 import 'lg_pressable.dart';
 import 'lg_status.dart';
 import 'lg_tooltip.dart';
@@ -79,6 +80,12 @@ enum LgDeviceStatus { online, offline, querying }
 const double _statusWidth = 104;
 const double _idWidth = 124;
 const double _actionWidth = 112;
+
+/// With the "⋯" button after "connect" (the device menu of the device page).
+const double _actionWidthMore = 160;
+
+/// The pick box of multi-select in front of the row.
+const double _pickWidth = 24;
 const double _columnGap = LgSpace.s3;
 const int _nameFlex = 16;
 const int _hostFlex = 15;
@@ -159,12 +166,221 @@ class LgDeviceListHeader extends StatelessWidget {
   }
 }
 
+/// A column of the list view, in the order the list shows them.
+enum LgDeviceColumn { status, name, id, userHost, tags, source }
+
+/// A column title of [LgDeviceTable]; [sortable] makes it a button.
+class LgTableColumn {
+  const LgTableColumn(this.column, this.label, {this.sortable = false});
+
+  final LgDeviceColumn column;
+  final String label;
+  final bool sortable;
+}
+
+/// Which column the list is ordered by, and which way.
+class LgTableSort {
+  const LgTableSort(this.column, {this.ascending = true});
+
+  final LgDeviceColumn column;
+  final bool ascending;
+}
+
+/// Column titles of the list view (`.tr.th`). The columns are the ones the rows
+/// have: [pickColumn] when the rows show the pick box, [moreColumn] when they
+/// have a "⋯". A [sortable] title is a button: it calls [onSort] with its
+/// column; the sorted one shows an arrow, and its accessible value says which
+/// way ([ascendingLabel] / [descendingLabel]).
+class LgDeviceTableHeader extends StatelessWidget {
+  const LgDeviceTableHeader({
+    super.key,
+    required this.columns,
+    this.sort,
+    this.onSort,
+    this.pickColumn = false,
+    this.moreColumn = false,
+    this.ascendingLabel,
+    this.descendingLabel,
+  });
+
+  final List<LgTableColumn> columns;
+  final LgTableSort? sort;
+  final ValueChanged<LgDeviceColumn>? onSort;
+  final bool pickColumn;
+  final bool moreColumn;
+  final String? ascendingLabel;
+  final String? descendingLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = LgTokens.of(context);
+    final c = t.colors;
+    final style = t.textS.copyWith(color: c.text2, fontWeight: FontWeight.w700);
+    LgTableColumn? find(LgDeviceColumn column) =>
+        columns.where((e) => e.column == column).firstOrNull;
+
+    Widget title(LgTableColumn col) {
+      final sorted = sort?.column == col.column;
+      final text = Text(
+        col.label,
+        style: sorted ? style.copyWith(color: c.text) : style,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      );
+      if (!col.sortable || onSort == null) return text;
+      final radius = BorderRadius.circular(LgRadius.r6);
+      return Align(
+        alignment: Alignment.centerLeft,
+        child: LgPressable(
+          onPressed: () => onSort!(col.column),
+          semanticLabel: col.label,
+          builder: (context, states) => Semantics(
+            value: !sorted
+                ? null
+                : (sort!.ascending ? ascendingLabel : descendingLabel),
+            child: LgFocusRing(
+              show: states.contains(WidgetState.focused),
+              radius: radius,
+              child: Container(
+                height: t.sizes.button - 8,
+                padding: const EdgeInsets.symmetric(horizontal: LgSpace.s1),
+                decoration: BoxDecoration(
+                  color: lgStateOverlay(c, states),
+                  borderRadius: radius,
+                ),
+                child: ExcludeSemantics(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Flexible(child: text),
+                      if (sorted) ...[
+                        const SizedBox(width: LgSpace.s1),
+                        LgIcon(
+                          sort!.ascending ? LgIcons.chevU : LgIcons.chevD,
+                          size: 16,
+                          color: c.accent,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    Widget cell(LgDeviceColumn column, {double? width, int? flex}) {
+      final col = find(column);
+      final child = col == null ? const SizedBox.shrink() : title(col);
+      return width != null
+          ? SizedBox(width: width, child: child)
+          : Expanded(flex: flex!, child: child);
+    }
+
+    final tail = find(LgDeviceColumn.tags) != null
+        ? LgDeviceColumn.tags
+        : LgDeviceColumn.source;
+    return Semantics(
+      container: true,
+      explicitChildNodes: true,
+      child: Container(
+        height: t.sizes.button,
+        padding: const EdgeInsets.symmetric(horizontal: LgSpace.s3),
+        child: Row(
+          children: [
+            if (pickColumn) const SizedBox(width: _pickWidth + _columnGap),
+            cell(LgDeviceColumn.status, width: _statusWidth),
+            const SizedBox(width: _columnGap),
+            cell(LgDeviceColumn.name, flex: _nameFlex),
+            const SizedBox(width: _columnGap),
+            cell(LgDeviceColumn.id, width: _idWidth),
+            const SizedBox(width: _columnGap),
+            cell(LgDeviceColumn.userHost, flex: _hostFlex),
+            if (find(tail) != null) ...[
+              const SizedBox(width: _columnGap),
+              cell(tail, flex: _sourceFlex),
+            ],
+            const SizedBox(width: _columnGap),
+            SizedBox(width: moreColumn ? _actionWidthMore : _actionWidth),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The list view of the device page (`.tbl`): the title row and the rows on
+/// one surface. The [rows] are `LgDeviceRow`s of the same columns as
+/// [columns]; give every row but the first `topDivider: true`, and the first
+/// `false`. [footer] goes under the rows ("仅显示前 1000 台设备…").
+class LgDeviceTable extends StatelessWidget {
+  const LgDeviceTable({
+    super.key,
+    required this.columns,
+    required this.rows,
+    this.sort,
+    this.onSort,
+    this.pickColumn = false,
+    this.moreColumn = false,
+    this.ascendingLabel,
+    this.descendingLabel,
+    this.semanticLabel,
+  });
+
+  final List<LgTableColumn> columns;
+  final List<Widget> rows;
+  final LgTableSort? sort;
+  final ValueChanged<LgDeviceColumn>? onSort;
+  final bool pickColumn;
+  final bool moreColumn;
+  final String? ascendingLabel;
+  final String? descendingLabel;
+
+  /// Name of the list for a screen reader ("最近连接的设备").
+  final String? semanticLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      container: true,
+      explicitChildNodes: true,
+      label: semanticLabel,
+      child: LgListSurface(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            LgDeviceTableHeader(
+              columns: columns,
+              sort: sort,
+              onSort: onSort,
+              pickColumn: pickColumn,
+              moreColumn: moreColumn,
+              ascendingLabel: ascendingLabel,
+              descendingLabel: descendingLabel,
+            ),
+            ...rows,
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// One device in a list (`.tr`): state, name with the platform icon, ID,
 /// `user@host`, and with [source] the category it came from. A click selects
 /// ([onTap]), a double click or Enter connects ([onDoubleTap], [onConnect]);
 /// while the pointer or the keyboard is on the row the "connect" button of
 /// [onConnect] shows at its end. [highlighted] is the row the arrow keys of
 /// the connection box moved to.
+///
+/// The device page's list view adds [tags] (in the column [source] has; give
+/// one of them), the marks of a [favorite] and a [savedPassword], the "⋯" of
+/// the device menu ([onMore]) and, in multi-select, [picked] (the pick box in
+/// front of the row). Every row of one list gives the same optional columns,
+/// and the header ([LgDeviceTableHeader]) lists the same ones.
 class LgDeviceRow extends StatefulWidget {
   const LgDeviceRow({
     super.key,
@@ -175,15 +391,26 @@ class LgDeviceRow extends StatefulWidget {
     required this.statusLabel,
     this.userHost,
     this.source,
+    this.tags,
+    this.favorite = false,
+    this.savedPassword = false,
+    this.favoriteLabel,
+    this.savedPasswordLabel,
     this.selected = false,
     this.highlighted = false,
+    this.picked,
     this.topDivider = true,
     this.onTap,
     this.onDoubleTap,
     this.onConnect,
     this.connectLabel,
+    this.onMore,
+    this.moreLabel,
+    this.onContextMenu,
     this.focusNode,
-  }) : assert(onConnect == null || connectLabel != null);
+  }) : assert(onConnect == null || connectLabel != null),
+       assert(onMore == null || moreLabel != null),
+       assert(source == null || tags == null);
 
   final String name;
 
@@ -196,8 +423,16 @@ class LgDeviceRow extends StatefulWidget {
   final String statusLabel;
   final String? userHost;
   final String? source;
+  final List<LgDeviceTag>? tags;
+  final bool favorite;
+  final bool savedPassword;
+  final String? favoriteLabel;
+  final String? savedPasswordLabel;
   final bool selected;
   final bool highlighted;
+
+  /// Null outside multi-select.
+  final bool? picked;
 
   /// The 1 px line between rows; the first row of a list leaves it out.
   final bool topDivider;
@@ -205,6 +440,9 @@ class LgDeviceRow extends StatefulWidget {
   final VoidCallback? onDoubleTap;
   final VoidCallback? onConnect;
   final String? connectLabel;
+  final VoidCallback? onMore;
+  final String? moreLabel;
+  final ValueChanged<Offset>? onContextMenu;
   final FocusNode? focusNode;
 
   @override
@@ -215,10 +453,19 @@ class _LgDeviceRowState extends State<LgDeviceRow> {
   static const _doubleClick = Duration(milliseconds: 300);
   Duration? _lastDown;
 
+  // Set by the buttons at the end of the row, which hear the press before the
+  // row does: a press on them is not a click on the row.
+  bool _onButtons = false;
+
   // A click selects at once; a second click inside the window is a double
   // click. GestureDetector.onDoubleTap would delay the selection.
   void _onPointerDown(PointerDownEvent e) {
     if (e.buttons != kPrimaryButton) return;
+    if (_onButtons) {
+      _onButtons = false;
+      _lastDown = null;
+      return;
+    }
     final last = _lastDown;
     if (last != null && e.timeStamp - last <= _doubleClick) {
       _lastDown = null;
@@ -234,28 +481,38 @@ class _LgDeviceRowState extends State<LgDeviceRow> {
     final t = LgTokens.of(context);
     final c = t.colors;
     final radius = BorderRadius.circular(LgRadius.r10);
-    final label = [
-      w.name,
-      w.statusLabel,
-      w.id,
-      if (w.userHost != null) w.userHost!,
-      if (w.source != null) w.source!,
-    ].join(', ');
+    final label = lgDeviceLabel(
+      name: w.name,
+      statusLabel: w.statusLabel,
+      id: w.id,
+      userHost: w.userHost,
+      source: w.source,
+      tags: w.tags ?? const [],
+      favorite: w.favorite,
+      favoriteLabel: w.favoriteLabel,
+      savedPassword: w.savedPassword,
+      savedPasswordLabel: w.savedPasswordLabel,
+    );
     final row = LgPressable(
       onPressed: w.onTap ?? w.onConnect,
       onActivate: w.onConnect ?? w.onTap,
+      onSecondaryTapUp: w.onContextMenu == null
+          ? null
+          : (d) => w.onContextMenu!(d.globalPosition),
       focusNode: w.focusNode,
       // The row the arrow keys moved to is "selected" for a screen reader too.
-      selected: w.selected || w.highlighted,
+      selected: w.selected || w.highlighted || w.picked == true,
       semanticLabel: label,
       builder: (context, states) {
         final hot =
             states.contains(WidgetState.hovered) ||
             states.contains(WidgetState.pressed);
         final focused = states.contains(WidgetState.focused);
-        final on = w.selected || w.highlighted;
+        final on = w.selected || w.highlighted || w.picked == true;
         final Color? bg = on ? c.active : (hot ? c.surface2 : null);
-        final showConnect = w.onConnect != null && (hot || focused || on);
+        final showButtons = w.picked == null && (hot || focused || on);
+        final showConnect = w.onConnect != null && showButtons;
+        final showMore = w.onMore != null && showButtons;
         final cellStyle = t.text.copyWith(color: c.text);
         final status = switch (w.status) {
           LgDeviceStatus.online => LgStatus.online,
@@ -285,6 +542,10 @@ class _LgDeviceRowState extends State<LgDeviceRow> {
                     maxLines: 1,
                     child: Row(
                       children: [
+                        if (w.picked != null) ...[
+                          LgPickBox(picked: w.picked!),
+                          const SizedBox(width: _columnGap),
+                        ],
                         SizedBox(
                           width: _statusWidth,
                           child: LgStatusText(status, w.statusLabel),
@@ -301,13 +562,19 @@ class _LgDeviceRowState extends State<LgDeviceRow> {
                                 tile: false,
                               ),
                               const SizedBox(width: LgSpace.s2),
-                              Expanded(
+                              Flexible(
                                 child: LgEllipsisText(
                                   w.name,
                                   style: cellStyle.copyWith(
                                     fontWeight: FontWeight.w700,
                                   ),
                                 ),
+                              ),
+                              LgDeviceMarks(
+                                favorite: w.favorite,
+                                savedPassword: w.savedPassword,
+                                favoriteLabel: w.favoriteLabel,
+                                savedPasswordLabel: w.savedPasswordLabel,
                               ),
                             ],
                           ),
@@ -342,16 +609,43 @@ class _LgDeviceRowState extends State<LgDeviceRow> {
                             ),
                           ),
                         ],
+                        if (w.tags != null) ...[
+                          const SizedBox(width: _columnGap),
+                          Expanded(
+                            flex: _sourceFlex,
+                            child: LgTagChips(w.tags!),
+                          ),
+                        ],
                         const SizedBox(width: _columnGap),
                         SizedBox(
-                          width: _actionWidth,
-                          child: showConnect
-                              ? Align(
-                                  alignment: Alignment.centerRight,
-                                  child: _ConnectButton(
-                                    label: w.connectLabel!,
-                                    name: w.name,
-                                    onPressed: w.onConnect!,
+                          width: w.onMore == null
+                              ? _actionWidth
+                              : _actionWidthMore,
+                          child: showConnect || showMore
+                              ? Listener(
+                                  onPointerDown: (e) {
+                                    if (e.buttons == kPrimaryButton) {
+                                      _onButtons = true;
+                                    }
+                                  },
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.end,
+                                    children: [
+                                      if (showConnect)
+                                        _ConnectButton(
+                                          label: w.connectLabel!,
+                                          name: w.name,
+                                          onPressed: w.onConnect!,
+                                        ),
+                                      if (showConnect && showMore)
+                                        const SizedBox(width: 4),
+                                      if (showMore)
+                                        _MoreButton(
+                                          label: w.moreLabel!,
+                                          name: w.name,
+                                          onPressed: w.onMore!,
+                                        ),
+                                    ],
                                   ),
                                 )
                               : null,
@@ -376,11 +670,14 @@ class _LgDeviceRowState extends State<LgDeviceRow> {
     );
     return Listener(
       onPointerDown: _onPointerDown,
-      child: w.onConnect == null
+      child: w.onConnect == null && w.onMore == null
           ? row
           : Semantics(
               customSemanticsActions: {
-                CustomSemanticsAction(label: w.connectLabel!): w.onConnect!,
+                if (w.onConnect != null)
+                  CustomSemanticsAction(label: w.connectLabel!): w.onConnect!,
+                if (w.onMore != null)
+                  CustomSemanticsAction(label: w.moreLabel!): w.onMore!,
               },
               child: row,
             ),
@@ -430,6 +727,47 @@ class _ConnectButton extends StatelessWidget {
               color: c.onAccent,
               fontWeight: FontWeight.w700,
             ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// The "⋯" at the end of a hovered row (`.tr .ra .ib`): the device menu.
+class _MoreButton extends StatelessWidget {
+  const _MoreButton({
+    required this.label,
+    required this.name,
+    required this.onPressed,
+  });
+
+  final String label;
+  final String name;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = LgTokens.of(context);
+    final c = t.colors;
+    final radius = BorderRadius.circular(LgRadius.r10);
+    return LgPressable(
+      onPressed: onPressed,
+      semanticLabel: '$label $name',
+      builder: (context, states) {
+        final side = t.sizes.tableRow - 4;
+        return LgFocusRing(
+          show: states.contains(WidgetState.focused),
+          radius: radius,
+          child: Container(
+            width: side,
+            height: side,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: lgStateOverlay(c, states),
+              borderRadius: radius,
+            ),
+            child: LgIcon(LgIcons.more, size: t.sizes.icon, color: c.text2),
           ),
         );
       },

@@ -1,14 +1,20 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/local_status.dart';
+import 'package:flutter_hbb/leapgate/remote_block.dart';
 
 import '../../icons/lg_icon.dart';
 import '../../l10n/app_localizations.dart';
 import '../../shell/navigation.dart';
+import '../../shell/tab_overlays.dart';
 import '../../theme/lg_tokens.dart';
+import '../../widgets/lg_banner.dart';
 import '../../widgets/lg_button.dart';
+import '../../widgets/lg_list_chrome.dart';
 import '../../widgets/lg_pressable.dart';
 import '../../widgets/lg_status.dart';
 import 'devices_page.dart';
+import 'home_dialogs.dart';
 import 'password_row.dart';
 
 /// Pages of the home tab's navigation (01 §3.1 block C).
@@ -29,31 +35,44 @@ const double _textButtonPadding = 10;
 /// M2a fills the password row and the devices page; the account area and the
 /// other pages come with later blocks.
 class HomePage extends StatefulWidget {
-  const HomePage({super.key, required this.status});
+  const HomePage({super.key, required this.status, required this.overlays});
 
   final LocalStatusModel status;
+
+  /// The home tab's dialogs (scope null).
+  final TabOverlays overlays;
 
   @override
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   HomeSection _section = HomeSection.devices;
   final _connectBox = TextEditingController();
   final _connectBoxFocus = FocusNode();
+  final _block = RemoteBlock();
 
   @override
   void initState() {
     super.initState();
     connectBoxFocusRequests.addListener(_onFocusRequest);
+    WidgetsBinding.instance.addObserver(this);
   }
 
   @override
   void dispose() {
     connectBoxFocusRequests.removeListener(_onFocusRequest);
+    WidgetsBinding.instance.removeObserver(this);
     _connectBox.dispose();
     _connectBoxFocus.dispose();
+    _block.dispose();
     super.dispose();
+  }
+
+  // As upstream `desktop_home_page.dart:882-886`.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _block.check();
   }
 
   /// "+" on the title bar and "修改 ID" on a connection panel ([MainNavigation.showHome]).
@@ -80,7 +99,7 @@ class _HomePageState extends State<HomePage> {
       HomeSection.exitNodes => l10n.navExitNodes,
       HomeSection.settings => l10n.navSettings,
     };
-    return Row(
+    final page = Row(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         SizedBox(
@@ -89,6 +108,11 @@ class _HomePageState extends State<HomePage> {
             status: widget.status,
             section: _section,
             onSection: (s) => setState(() => _section = s),
+            // The installed version unlocks first (01 P1 block A, R2-Q31), with the settings
+            // page (M6).
+            onChangePassword: appCore.options.isInstalled
+                ? null
+                : () => showPermanentPasswordDialog(widget.overlays, l10n),
           ),
         ),
         Expanded(
@@ -120,6 +144,7 @@ class _HomePageState extends State<HomePage> {
                       controller: _connectBox,
                       focusNode: _connectBoxFocus,
                       status: widget.status,
+                      overlays: widget.overlays,
                     ),
                   ),
                 ],
@@ -129,6 +154,21 @@ class _HomePageState extends State<HomePage> {
         ),
       ],
     );
+    // Upstream `buildRemoteBlock` (`flutter/lib/common.dart:3180-3205`) over the home tab only
+    // (01 P1 block J): no clicks or keyboard focus while it covers the page.
+    return MouseRegion(
+      onEnter: (_) => _block.check(),
+      onExit: (_) => _block.leave(),
+      child: ListenableBuilder(
+        listenable: _block,
+        builder: (context, child) => LgBlockedOverlay(
+          blocked: _block.blocked,
+          message: l10n.homeLocked,
+          child: child!,
+        ),
+        child: page,
+      ),
+    );
   }
 }
 
@@ -137,11 +177,13 @@ class _SideColumn extends StatelessWidget {
     required this.status,
     required this.section,
     required this.onSection,
+    required this.onChangePassword,
   });
 
   final LocalStatusModel status;
   final HomeSection section;
   final ValueChanged<HomeSection> onSection;
+  final VoidCallback? onChangePassword;
 
   @override
   Widget build(BuildContext context) {
@@ -204,7 +246,10 @@ class _SideColumn extends StatelessWidget {
                             ],
                           ),
                     SizedBox(height: short ? LgSpace.s2 : LgSpace.s3),
-                    PasswordRowView(status: status),
+                    PasswordRowView(
+                      status: status,
+                      onChange: onChangePassword,
+                    ),
                     SizedBox(height: short ? LgSpace.s2 : LgSpace.s5),
                     DefaultTextStyle(
                       style: t.textM,
@@ -231,6 +276,24 @@ class _SideColumn extends StatelessWidget {
                         ),
                       },
                     ),
+                    if (status.status == ServiceStatus.stopped)
+                      LgButton(
+                        label: l10n.homeStartService,
+                        kind: LgButtonKind.text,
+                        onPressed: status.startService,
+                      ),
+                    // "View" (bring the connection manager forward) comes with M3.
+                    if (status.remoteSessions > 0) ...[
+                      const SizedBox(height: LgSpace.s2),
+                      LgControlledNote(
+                        text: l10n.homeRemoteControlled(status.remoteSessions),
+                      ),
+                    ],
+                    // The hint card (01 P1 block B): only the system error in M2b.
+                    if (status.systemError.isNotEmpty) ...[
+                      SizedBox(height: short ? LgSpace.s2 : LgSpace.s3),
+                      LgLocalNotice(tone: LgTone.error, text: status.systemError),
+                    ],
                   ],
                 ),
               ),

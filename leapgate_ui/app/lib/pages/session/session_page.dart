@@ -12,8 +12,12 @@ import 'package:window_manager/window_manager.dart';
 import '../../shell/tab_overlays.dart';
 import '../../shell/toast_view.dart';
 import '../../theme/lg_tokens.dart';
+import '../../widgets/lg_session_toolbar.dart' show LgToolbarMenuClosed;
+import 'canvas_hints.dart';
+import 'chat/chat.dart';
 import 'connection_panel.dart';
 import 'image_paint.dart';
+import 'quality_overlay.dart';
 import 'remote_input.dart';
 import 'session_notices.dart';
 import 'session_toolbar.dart';
@@ -77,6 +81,8 @@ class _SessionPageState extends State<SessionPage>
     // started it before the page.
     _ffi.showRemoteCursor.value = _ffi.options.getToggle('show-remote-cursor');
     _zoomCursor = _ffi.options.getToggle(kOptionZoomCursor).obs;
+    // "光标随画面缩放" in the toolbar's "画面" menu.
+    _ffi.options.listenable(kOptionZoomCursor).addListener(_onZoomCursor);
     windowManager.addListener(this);
     appCore.sessions.addListener(_onRegistry);
     _ffi.connection.addListener(_onConnection);
@@ -94,8 +100,12 @@ class _SessionPageState extends State<SessionPage>
     _ffi.setVisible(widget.active);
   }
 
+  void _onZoomCursor() =>
+      _zoomCursor.value = _ffi.options.getToggle(kOptionZoomCursor);
+
   @override
   void dispose() {
+    _ffi.options.listenable(kOptionZoomCursor).removeListener(_onZoomCursor);
     windowManager.removeListener(this);
     appCore.sessions.removeListener(_onRegistry);
     _ffi.connection.removeListener(_onConnection);
@@ -170,7 +180,9 @@ class _SessionPageState extends State<SessionPage>
     // (Alt+Tab, taskbar), so enterView() never fires again.
     if (_cursorOverImage.value &&
         _canFocusRemoteInput &&
-        !_rawKeyFocusNode.hasFocus) {
+        !_rawKeyFocusNode.hasFocus &&
+        !_textInputFocused &&
+        !_menuFocused) {
       _rawKeyFocusNode.requestFocus();
     }
     if (_ffi.inputModel.relativeMouseMode.value) {
@@ -186,14 +198,39 @@ class _SessionPageState extends State<SessionPage>
   void _enterView(PointerEnterEvent evt) {
     _ffi.canvasModel.rearmEdgeScroll();
     _cursorOverImage.value = true;
-    // Focus only while the window is really active, or a background window would grab system
-    // keys. onFocusChange does enterOrLeave.
-    if (!_isWindowBlur &&
-        _canFocusRemoteInput &&
-        !_rawKeyFocusNode.hasFocus) {
-      _rawKeyFocusNode.requestFocus();
-    }
+    if (_mayTakeKeyboard) _rawKeyFocusNode.requestFocus();
   }
+
+  /// Focus only while the window is really active, or a background window would grab system
+  /// keys, and while nothing over the image has the keyboard. onFocusChange does enterOrLeave.
+  bool get _mayTakeKeyboard =>
+      !_isWindowBlur &&
+      _canFocusRemoteInput &&
+      !_rawKeyFocusNode.hasFocus &&
+      !_textInputFocused &&
+      !_menuFocused;
+
+  /// A toolbar menu closed with the pointer still on the image: no "pointer entered" comes, so
+  /// the image takes the keyboard back here.
+  void _onToolbarMenuClosed() {
+    if (_cursorOverImage.value && _mayTakeKeyboard) _rawKeyFocusNode.requestFocus();
+  }
+
+  /// An open toolbar menu has the keyboard (it takes it on opening): the pointer crossing the
+  /// image does not take it away, so Escape still closes the menu instead of going to the
+  /// remote device; a click on the image does.
+  bool get _menuFocused {
+    final focused = FocusManager.instance.primaryFocus?.context;
+    return focused != null && (MenuController.maybeOf(focused)?.isOpen ?? false);
+  }
+
+  /// A text field over the image (the chat input) has the keyboard: the pointer coming back to
+  /// the image or the window coming back does not take it away; a click on the image does
+  /// (`onPointerDown`).
+  bool get _textInputFocused =>
+      FocusManager.instance.primaryFocus?.context
+          ?.findAncestorWidgetOfExactType<EditableText>() !=
+      null;
 
   void _leaveView(PointerExitEvent evt) {
     _ffi.canvasModel.disableEdgeScroll();
@@ -276,12 +313,16 @@ class _SessionPageState extends State<SessionPage>
                 ),
               ),
             ),
+            // Above the image, in 01 P2 block C's order; each fills the area and places itself.
+            Positioned.fill(child: QualityOverlay(ffi: _ffi)),
+            Positioned.fill(child: CanvasHints(ffi: _ffi)),
             if (_ffi.ffiModel.pi.isSet.isTrue)
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: Center(
+              Positioned.fill(
+                child: NotificationListener<LgToolbarMenuClosed>(
+                  onNotification: (_) {
+                    _onToolbarMenuClosed();
+                    return true;
+                  },
                   child: SessionToolbar(
                       ffi: _ffi,
                       cursorOverImage: _cursorOverImage,
@@ -292,8 +333,9 @@ class _SessionPageState extends State<SessionPage>
             Positioned(
               top: LgSpace.s3 + t.sizes.bar + LgSpace.s3,
               right: LgSpace.s4,
-              child: SessionNoticesView(ffi: _ffi),
+              child: SessionNoticesView(ffi: _ffi, overlays: widget.overlays),
             ),
+            Positioned.fill(child: ChatLayer(ffi: _ffi)),
             // The panel dims the last frame itself while the remote device restarts.
             if (conn.stage != ConnStage.connected) ...[
               const ModalBarrier(dismissible: false),

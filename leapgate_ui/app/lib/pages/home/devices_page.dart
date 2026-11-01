@@ -3,20 +3,32 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/connect_box.dart';
 import 'package:flutter_hbb/leapgate/local_status.dart';
+import 'package:flutter_hbb/leapgate/peer_list.dart';
+import 'package:flutter_hbb/leapgate/peer_tabs.dart';
 import 'package:flutter_hbb/leapgate/recent_peers.dart';
+import 'package:flutter_hbb/leapgate/ui_mode.dart';
 import 'package:flutter_hbb/models/peer_model.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../../icons/lg_icon.dart';
 import '../../l10n/app_localizations.dart';
 import '../../shell/navigation.dart';
+import '../../shell/tab_overlays.dart';
 import '../../theme/lg_tokens.dart';
+import '../../widgets/lg_button.dart';
 import '../../widgets/lg_connect_box.dart';
 import '../../widgets/lg_device.dart';
+import '../../widgets/lg_device_card.dart';
+import '../../widgets/lg_list_chrome.dart';
 import '../../widgets/lg_menu.dart';
-import '../peer_platform.dart';
+import '../../widgets/lg_menu_items.dart';
+import '../../widgets/lg_selection.dart';
+import 'home_dialogs.dart';
+import 'peer_views.dart';
 
 // Examples in the connect box help, from the documentation ranges (01 §7.1 "示例数据").
 const _helpExamples = (
@@ -30,12 +42,20 @@ const _helpExamples = (
 /// "Connect to ‹input›" as the current row; device IDs are never empty.
 const _connectToRow = '';
 
-/// The devices page (01 P1 blocks E and F): the connect box, and under it "Recent" or, while
-/// there is input, the search results. M2a has only the "Recent" category.
+/// The list view's column for each sort order (user name sorts the `user@host` column).
+const _sortColumns = {
+  PeerSort.status: LgDeviceColumn.status,
+  PeerSort.name: LgDeviceColumn.name,
+  PeerSort.id: LgDeviceColumn.id,
+  PeerSort.username: LgDeviceColumn.userHost,
+};
+
+/// The devices page (01 P1 blocks E and F): the connect box, the category bar with its tools
+/// (or the multiple selection bar), and the selected category's devices or, while there is
+/// input, the search results across the categories, in the chosen view.
 ///
 /// One current row stands for both the clicked device and the row the arrow keys moved to;
-/// Enter and "Connect" run it. It is drawn as `selected` in "Recent" and as `highlighted` in
-/// the search results. While searching and before the keys move, it is
+/// Enter and "Connect" run it. While searching and before the keys move, it is
 /// [ConnectBoxSearch.defaultRow].
 class DevicesPage extends StatefulWidget {
   const DevicesPage({
@@ -43,6 +63,7 @@ class DevicesPage extends StatefulWidget {
     required this.controller,
     required this.focusNode,
     required this.status,
+    required this.overlays,
   });
 
   /// Owned by the home page, which puts text and the cursor into the box on request.
@@ -52,21 +73,28 @@ class DevicesPage extends StatefulWidget {
   /// Whether the server, which answers the online queries, is out of reach.
   final LocalStatusModel status;
 
+  /// The home tab's dialogs.
+  final TabOverlays overlays;
+
   @override
   State<DevicesPage> createState() => _DevicesPageState();
 }
 
 class _DevicesPageState extends State<DevicesPage> with WindowListener {
-  final _recent = appCore.recentPeers;
-  late final _onlines = OnlineQuery(_recent.queryOnlines);
+  final _tabs = PeerTabs(appCore.options);
+  final _selection = PeerSelection();
+  late final _onlines = OnlineQuery(appCore.recentPeers.queryOnlines);
   String _text = '';
 
   /// The current row's device ID, or [_connectToRow]; set by a click or the arrow keys, null
-  /// follows the default. Kept by ID: Rust pushes the list again whenever a session in another
+  /// follows the default. Kept by ID: Rust pushes the lists again whenever a session in another
   /// tab reconnects, and Enter must still run the device the user moved to.
   String? _current;
   bool _windowFocused = true;
   bool _onScreen = true;
+
+  /// "Adjust the categories shown and their order" folded open in the "View" menu.
+  bool _categoriesOpen = false;
   DateTime _restoredAt = DateTime(0);
 
   @override
@@ -75,7 +103,11 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
     _text = widget.controller.text;
     widget.controller.addListener(_onText);
     windowManager.addListener(this);
-    _recent.load();
+    // All three, for the search across categories (01 P1 block E).
+    for (final c in searchedCategories) {
+      c.load();
+    }
+    if (_tabs.current == PeerCategory.lan) appCore.lanPeers.discover();
     _onlines.start();
   }
 
@@ -91,6 +123,8 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
     widget.controller.removeListener(_onText);
     windowManager.removeListener(this);
     _onlines.dispose();
+    _tabs.dispose();
+    _selection.dispose();
     super.dispose();
   }
 
@@ -132,16 +166,41 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
 
   String get _input => _text.trim();
 
-  ConnectBoxSearch? get _search =>
-      _input.isEmpty ? null : ConnectBoxSearch(_input, _recent.peers);
+  List<CategoryPeers> get _searched =>
+      [for (final c in searchedCategories) if (_tabs.isEnabled(c.category)) c];
+
+  /// The search results with where each device came from.
+  ({ConnectBoxSearch search, Map<String, PeerCategory> sources})? get _search {
+    if (_input.isEmpty) return null;
+    final sourced = searchablePeers(_searched);
+    return (
+      search: ConnectBoxSearch(_input, [for (final s in sourced) s.peer]),
+      sources: {for (final s in sourced) s.peer.id: s.source},
+    );
+  }
+
+  /// The selected category's devices: "Recent" in time order, the others sorted.
+  List<Peer> _listed(PeerCategory category) {
+    final peers = categoryPeers(category).peers;
+    return category == PeerCategory.recent
+        ? peers
+        : sortPeers(peers, _tabs.sort);
+  }
+
+  List<Peer> _capped(List<Peer> peers) =>
+      peers.length > kMaxShownPeers ? peers.sublist(0, kMaxShownPeers) : peers;
 
   /// The rows in order: [_connectToRow] first while searching, then device IDs.
-  List<String> _rowIds(ConnectBoxSearch? search) => search == null
-      ? [
-          if (_recent.loaded)
-            for (final p in _recent.peers) p.id,
-        ]
-      : [_connectToRow, for (final p in search.matches) p.id];
+  List<String> _rowIds(ConnectBoxSearch? search) {
+    if (search != null) {
+      return [_connectToRow, for (final p in _capped(search.matches)) p.id];
+    }
+    final category = categoryPeers(_tabs.current);
+    return [
+      if (category.loaded)
+        for (final p in _capped(_listed(_tabs.current))) p.id,
+    ];
+  }
 
   /// Where the current row is now; the default once its device is no longer listed.
   int? _currentRow(ConnectBoxSearch? search) {
@@ -154,11 +213,11 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
 
   /// Enter, "Connect" and its menu: the current row.
   void _runCurrent({bool relay = false}) {
-    final search = _search;
+    final search = _search?.search;
     final row = _currentRow(search);
     if (row == null) return;
     if (search == null) {
-      _connect(_recent.peers[row].id, relay: relay);
+      _connect(_rowIds(null)[row], relay: relay);
     } else if (row == 0) {
       _connect(_input, relay: relay);
     } else {
@@ -167,7 +226,7 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
   }
 
   void _move(int by) {
-    final search = _search;
+    final search = _search?.search;
     final ids = _rowIds(search);
     if (ids.isEmpty) return;
     final row = _currentRow(search);
@@ -205,29 +264,51 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
     return KeyEventResult.ignored;
   }
 
+  void _selectCategory(PeerCategory category) {
+    _tabs.select(category);
+    categoryPeers(category).load();
+    if (category == PeerCategory.lan) appCore.lanPeers.discover();
+    setState(() => _current = null);
+  }
+
+  String _categoryName(AppLocalizations l10n, PeerCategory category) =>
+      switch (category) {
+        PeerCategory.favorites => l10n.peersFavorites,
+        PeerCategory.lan => l10n.peersLan,
+        _ => l10n.recentCategory,
+      };
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     return ListenableBuilder(
-      listenable: Listenable.merge([_recent, widget.status]),
+      listenable: Listenable.merge([
+        ...searchedCategories,
+        widget.status,
+        _tabs,
+        _selection,
+        appCore.options.local.listenable(kOptionLeapgateUiMode),
+      ]),
       builder: (context, _) {
-        final search = _search;
+        final found = _search;
+        final search = found?.search;
         final current = _currentRow(search);
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             _connectBar(l10n),
             const SizedBox(height: LgSpace.s6),
-            LgSectionTitle(
-              search == null
-                  ? l10n.recentCategory
-                  : l10n.connectBoxSearchResults,
-            ),
+            if (search != null)
+              LgSectionTitle(l10n.connectBoxSearchResults)
+            else if (_selection.active)
+              _selectionBar(l10n)
+            else
+              _toolbar(l10n),
             const SizedBox(height: LgSpace.s2),
             Expanded(
-              child: search == null
-                  ? _recentList(l10n, current)
-                  : _results(l10n, search, current!),
+              child: found == null
+                  ? _categoryList(l10n, current)
+                  : _results(l10n, found.search, found.sources, current!),
             ),
           ],
         );
@@ -282,136 +363,430 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
     );
   }
 
-  Widget _recentList(AppLocalizations l10n, int? current) {
-    // The loading and empty states scroll in a window too short for them.
-    if (!_recent.loaded) {
-      return SingleChildScrollView(
-        child: LgDeviceSkeleton(semanticLabel: l10n.recentLoading),
-      );
-    }
-    final peers = _recent.peers;
-    if (peers.isEmpty) {
-      return SingleChildScrollView(child: LgEmptyState(l10n.recentEmpty));
-    }
-    return _deviceList(
-      l10n,
-      peers,
-      source: null,
-      isCurrent: (i) => (selected: i == current, highlighted: false),
+  /// The category bar and the list tools (01 P1 block F, `p1-menu-view`, `p1-menu-sort`).
+  Widget _toolbar(AppLocalizations l10n) {
+    final shown = _tabs.shown;
+    final fixedText = l10n.peersFixed;
+    final viewFixed = _tabs.isFixed(kOptionPeerCardUiType);
+    final sortFixed = _tabs.isFixed(kOptionPeerSorting);
+    final categoriesFixed = _tabs.isFixed(kOptionPeerTabVisible);
+    final detail = isDetailMode(appCore.options.local);
+    return LgListToolbar(
+      tabs: LgCategoryTabs<PeerCategory>(
+        categories: [
+          for (final c in shown) LgCategory(c, _categoryName(l10n, c)),
+        ],
+        selected: _tabs.current,
+        onSelect: _selectCategory,
+        semanticLabel: l10n.peersCategories,
+      ),
+      tools: [
+        LgListToolMenu(
+          icon: LgIcons.grid,
+          label: l10n.peersView,
+          items: [
+            LgMenuGroup(l10n.peersView),
+            for (final (view, label) in [
+              (PeerView.cards, l10n.peersCards),
+              (PeerView.list, l10n.peersList),
+            ])
+              LgMenuItem(
+                label: label,
+                checked: _tabs.view == view,
+                disabledNote: viewFixed ? fixedText : null,
+                onPressed: viewFixed ? null : () => _tabs.setView(view),
+              ),
+            LgMenuGroup(l10n.uiModeTitle),
+            LgMenuSegmentedItem<bool>(
+              segments: [
+                LgSegment(false, l10n.uiModeSimple),
+                LgSegment(true, l10n.uiModeDetail),
+              ],
+              selected: detail,
+              onChanged: (on) => setDetailMode(appCore.options.local, on),
+            ),
+            const LgMenuDivider(),
+            LgMenuExpandRow(
+              label: l10n.peersAdjustCategories,
+              expanded: _categoriesOpen,
+              onToggle: () => setState(() => _categoriesOpen = !_categoriesOpen),
+            ),
+            if (_categoriesOpen)
+              CategoryOrderList(
+                tabs: _tabs,
+                names: (c) => _categoryName(l10n, c),
+                fixedNote: categoriesFixed ? fixedText : null,
+              ),
+          ],
+        ),
+        // "Recent" keeps its time order (01 P1 block F).
+        if (_tabs.current != PeerCategory.recent)
+          LgListToolMenu(
+            icon: LgIcons.sort,
+            label: l10n.peersSort,
+            items: [
+              for (final (sort, label) in _sortLabels(l10n))
+                LgMenuItem(
+                  label: label,
+                  checked: _tabs.sort == sort,
+                  disabledNote: sortFixed ? fixedText : null,
+                  onPressed: sortFixed ? null : () => _tabs.setSort(sort),
+                ),
+            ],
+          ),
+        LgListToolButton(
+          icon: LgIcons.select,
+          label: l10n.peersSelect,
+          onPressed: _selection.start,
+        ),
+      ],
     );
   }
 
-  Widget _results(AppLocalizations l10n, ConnectBoxSearch search, int current) {
+  List<(PeerSort, String)> _sortLabels(AppLocalizations l10n) => [
+    (PeerSort.name, l10n.peersSortName),
+    (PeerSort.id, l10n.peersSortId),
+    (PeerSort.username, l10n.peersSortUsername),
+    (PeerSort.status, l10n.peersSortStatus),
+  ];
+
+  /// The multiple selection bar in place of the category bar (01 P1 block F, `p1-multisel`).
+  Widget _selectionBar(AppLocalizations l10n) {
+    final category = _tabs.current;
+    final ids = _selection.ids;
+    // Removing from favorites neither asks nor looks dangerous, as in the menu of one device
+    // (01 P1 block F); removing from the LAN list and deleting ask with [title].
+    final (label, icon, title, toast) = switch (category) {
+      PeerCategory.favorites => (
+          l10n.peersRemoveFavorites,
+          LgIcons.star,
+          null,
+          'peersToastRemovedFavorites',
+        ),
+      PeerCategory.lan => (
+          l10n.peersRemove,
+          LgIcons.trash,
+          l10n.peersRemoveMany(ids.length),
+          'peersToastRemoved',
+        ),
+      _ => (
+          l10n.peersDelete,
+          LgIcons.trash,
+          l10n.peersDeleteMany(ids.length),
+          'peersToastDeleted',
+        ),
+    };
+    // The toast keys are ARB keys; the shell's `toastText` shows them.
+    void done(String toast) {
+      _selection.finish();
+      appCore.toasts.show(toast);
+    }
+
+    return LgSelectionBar(
+      semanticLabel: l10n.peersSelect,
+      actions: [
+        LgSelectionAction(
+          label: label,
+          icon: icon,
+          danger: title != null,
+          onPressed: ids.isEmpty
+              ? null
+              : () async {
+                  if (title != null &&
+                      !await confirmOnHome(widget.overlays,
+                          title: title, action: label, cancel: l10n.homeCancel)) {
+                    return;
+                  }
+                  await deletePeers(category, ids);
+                  done(toast);
+                },
+        ),
+        if (category == PeerCategory.recent)
+          LgSelectionAction(
+            label: l10n.peersAddFavorites,
+            icon: LgIcons.star,
+            onPressed: ids.isEmpty
+                ? null
+                : () async {
+                    await addFavorites(ids);
+                    done('peersToastAddedFavorites');
+                  },
+          ),
+      ],
+      countText: l10n.peersSelected(ids.length),
+      selectAllLabel: l10n.peersSelectAll,
+      onSelectAll: () => _selection.selectAll(_rowIds(null)),
+      doneLabel: l10n.peersDone,
+      onDone: _selection.finish,
+    );
+  }
+
+  Widget _categoryList(AppLocalizations l10n, int? current) {
+    final category = _tabs.current;
+    final peers = categoryPeers(category);
+    // The loading and empty states scroll in a window too short for them.
+    if (!peers.loaded) {
+      return SingleChildScrollView(
+        child: _tabs.view == PeerView.cards
+            ? LgDeviceCardGrid(
+                semanticLabel: l10n.recentLoading,
+                children: const [
+                  LgDeviceCardSkeleton(),
+                  LgDeviceCardSkeleton(),
+                  LgDeviceCardSkeleton(),
+                ],
+              )
+            : LgDeviceSkeleton(semanticLabel: l10n.recentLoading),
+      );
+    }
+    final listed = _listed(category);
+    if (listed.isEmpty) {
+      return SingleChildScrollView(
+        child: LgEmptyState(switch (category) {
+          PeerCategory.favorites => l10n.peersEmptyFavorites,
+          PeerCategory.lan => l10n.peersEmptyLan,
+          _ => l10n.recentEmpty,
+        }),
+      );
+    }
+    final shown = _capped(listed);
+    return _devices(
+      l10n,
+      [for (final p in shown) _item(l10n, p, category, source: null)],
+      over: listed.length > shown.length,
+      isCurrent: (i) => i == current,
+    );
+  }
+
+  Widget _results(
+    AppLocalizations l10n,
+    ConnectBoxSearch search,
+    Map<String, PeerCategory> sources,
+    int current,
+  ) {
+    final shown = _capped(search.matches);
+    final loading = _searched.any((c) => !c.loaded);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        LgConnectToRow(
-          text: l10n.connectBoxConnectTo(_input),
-          emphasis: _input,
-          highlighted: current == 0,
-          onTap: () => _connect(_input),
+        Row(
+          children: [
+            Expanded(
+              child: LgConnectToRow(
+                text: l10n.connectBoxConnectTo(_input),
+                emphasis: _input,
+                highlighted: current == 0,
+                onTap: () => _connect(_input),
+              ),
+            ),
+            // The "⋯" at the end of "Connect to" (`p1-cb-conn`; `LgConnectToRow` has no slot for
+            // it, so it stands beside the row). What was typed has no known platform, so the
+            // connection types are those of M2b (05 §1.3).
+            LgMenuAnchor(
+              items: [
+                LgMenuItem(
+                  label: l10n.connectBoxRemoteDesktop,
+                  onPressed: () => _connect(_input),
+                ),
+                LgMenuItem(
+                  label: l10n.connectBoxViaRelay,
+                  description: l10n.connectBoxViaRelayNote,
+                  onPressed: () => _connect(_input, relay: true),
+                ),
+              ],
+              builder: (context, controller) => LgIconButton(
+                icon: LgIcons.more,
+                label: l10n.peersOtherConnectionTypes,
+                onPressed: () =>
+                    controller.isOpen ? controller.close() : controller.open(),
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: LgSpace.s3),
-        if (search.matches.isEmpty)
+        if (search.matches.isEmpty && !loading)
           LgNoResultsNote(l10n.connectBoxNoMatch)
         else
           Expanded(
-            child: _deviceList(
+            child: _devices(
               l10n,
-              search.matches,
-              source: l10n.recentCategory,
-              isCurrent: (i) =>
-                  (selected: false, highlighted: i + 1 == current),
+              [
+                for (final p in shown)
+                  _item(l10n, p, sources[p.id]!,
+                      source: _categoryName(l10n, sources[p.id]!)),
+              ],
+              over: search.matches.length > shown.length,
+              loadingOthers: loading,
+              isCurrent: (i) => i + 1 == current,
             ),
           ),
       ],
     );
   }
 
-  /// The rows on their surface, as tall as they need up to the space there is; the list
-  /// scrolls beyond that. Rows only exist on screen, so the rows that ask for online state are
-  /// the visible ones.
-  Widget _deviceList(
-    AppLocalizations l10n,
-    List<Peer> peers, {
-    required String? source,
-    required ({bool selected, bool highlighted}) Function(int i) isCurrent,
-  }) {
-    final t = LgTokens.of(context);
-    final rowHeight = t.sizes.tableRow;
-    // The surface's own padding (`LgListSurface`) and the column titles.
-    final chrome = LgSpace.s1 + LgSpace.s2 + t.sizes.button;
+  PeerItem _item(AppLocalizations l10n, Peer peer, PeerCategory category,
+      {required String? source}) {
     // The UI process asks the server itself, service or not; only an unreachable server leaves
     // the query unanswered (`src/client.rs` `query_online_states`): offline then, not
     // "checking" forever. "Connecting" (the state at start) and a stopped service still ask.
     final serverUnreachable = widget.status.status == ServiceStatus.notReady;
-    return LayoutBuilder(
-      builder: (context, box) => Align(
-        alignment: Alignment.topCenter,
-        child: LgListSurface(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              LgDeviceListHeader(
-                status: l10n.recentColumnStatus,
-                name: l10n.recentColumnName,
-                id: l10n.recentColumnId,
-                userHost: l10n.recentColumnUserHost,
-                source: source == null ? null : l10n.recentColumnSource,
+    final (status, label) = !serverUnreachable &&
+            !categoryPeers(category).hasOnlineState(peer.id)
+        ? (LgDeviceStatus.querying, l10n.recentQuerying)
+        : peer.online
+            ? (LgDeviceStatus.online, l10n.recentOnline)
+            : (LgDeviceStatus.offline, l10n.recentOffline);
+    return PeerItem(
+      peer: peer,
+      category: category,
+      status: status,
+      statusLabel: label,
+      favorite: isFavorite(peer.id),
+      source: source,
+    );
+  }
+
+  PeerItemActions _actions(PeerItem item, List<PeerItem> items, bool current) {
+    final id = item.peer.id;
+    // The search results are not picked: the selection bar acts on the selected category.
+    final selecting = _selection.active && _input.isEmpty;
+    return PeerItemActions(
+      overlays: widget.overlays,
+      selecting: selecting,
+      selected: selecting && _selection.contains(id),
+      current: current,
+      onConnect: () => _connect(id),
+      onTap: () {
+        if (selecting) {
+          _selection.tap(id, [for (final i in items) i.peer.id],
+              shift: shiftPressed);
+          return;
+        }
+        setState(() => _current = id);
+        // A click outside the box takes the focus away on Windows; Enter runs the row from the
+        // box.
+        widget.focusNode.requestFocus();
+      },
+    );
+  }
+
+  /// [items] as cards or as the list, whichever view is chosen (01 P1 block F; the search
+  /// results as well, `待调.md` 25), with the notes under them.
+  Widget _devices(
+    AppLocalizations l10n,
+    List<PeerItem> items, {
+    required bool over,
+    bool loadingOthers = false,
+    required bool Function(int i) isCurrent,
+  }) {
+    final notes = [
+      if (over) LgListNote(l10n.peersOver1000),
+      if (loadingOthers) LgListNote(l10n.peersLoadingOther),
+    ];
+    Widget asked(PeerItem item, Widget child) => _AskedRow(
+        key: ValueKey(item.peer.id),
+        id: item.peer.id,
+        onlines: _onlines,
+        child: child);
+    if (_tabs.view == PeerView.cards) {
+      // Built lazily, so only the cards on screen ask for their online state; the component's
+      // `LgDeviceCardGrid` lays out all of them.
+      return Semantics(
+        container: true,
+        explicitChildNodes: true,
+        label: l10n.peersDeviceList,
+        child: CustomScrollView(
+          scrollCacheExtent: const ScrollCacheExtent.pixels(0),
+          slivers: [
+            SliverGrid.builder(
+              gridDelegate: const LgDeviceCardGridDelegate(),
+              itemCount: items.length,
+              itemBuilder: (context, i) => asked(
+                items[i],
+                PeerCard(
+                    item: items[i],
+                    actions: _actions(items[i], items, isCurrent(i))),
               ),
-              SizedBox(
-                height: math.max(
-                  0,
-                  math.min(peers.length * rowHeight, box.maxHeight - chrome),
-                ),
-                child: ListView.builder(
-                  scrollCacheExtent: const ScrollCacheExtent.pixels(0),
-                  itemExtent: rowHeight,
-                  itemCount: peers.length,
-                  itemBuilder: (context, i) {
-                    final peer = peers[i];
-                    final (
-                      status,
-                      label,
-                    ) = !serverUnreachable && !_recent.hasOnlineState(peer.id)
-                        ? (LgDeviceStatus.querying, l10n.recentQuerying)
-                        : peer.online
-                        ? (LgDeviceStatus.online, l10n.recentOnline)
-                        : (LgDeviceStatus.offline, l10n.recentOffline);
-                    final userHost = peerUserHost(peer);
-                    final current = isCurrent(i);
-                    return _AskedRow(
-                      key: ValueKey(peer.id),
-                      id: peer.id,
-                      onlines: _onlines,
-                      child: LgDeviceRow(
-                        name: peerDisplayName(peer),
-                        id: formatPeerId(peer.id),
-                        platform: lgPlatformOf(peer.platform),
-                        status: status,
-                        statusLabel: label,
-                        userHost: userHost.isEmpty ? null : userHost,
-                        source: source,
-                        selected: current.selected,
-                        highlighted: current.highlighted,
-                        topDivider: i > 0,
-                        connectLabel: l10n.connectBoxConnect,
-                        onTap: () {
-                          setState(() => _current = peer.id);
-                          // A click outside the box takes the focus away on Windows; Enter
-                          // runs the row from the box.
-                          widget.focusNode.requestFocus();
-                        },
-                        onDoubleTap: () => _connect(peer.id),
-                        onConnect: () => _connect(peer.id),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
+            ),
+            SliverList.list(children: notes),
+          ],
         ),
+      );
+    }
+    final t = LgTokens.of(context);
+    final rowHeight = t.sizes.tableRow;
+    // The surface's own padding (`LgListSurface`), the column titles and the notes.
+    final chrome = LgSpace.s1 + LgSpace.s2 + t.sizes.button;
+    final searching = items.isNotEmpty && items.first.source != null;
+    // Sorting by a title, as the "Sort" menu (not in "Recent", nor in the search results).
+    final sortable = !searching && _tabs.current != PeerCategory.recent;
+    final selecting = _selection.active && _input.isEmpty;
+    // `LgDeviceTable`'s parts, with the rows built lazily for the same reason as the cards.
+    return LayoutBuilder(
+      builder: (context, box) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          LgListSurface(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                LgDeviceTableHeader(
+                  columns: [
+                    LgTableColumn(
+                        LgDeviceColumn.status, l10n.recentColumnStatus,
+                        sortable: sortable),
+                    LgTableColumn(LgDeviceColumn.name, l10n.recentColumnName,
+                        sortable: sortable),
+                    LgTableColumn(LgDeviceColumn.id, l10n.recentColumnId,
+                        sortable: sortable),
+                    LgTableColumn(
+                        LgDeviceColumn.userHost, l10n.recentColumnUserHost,
+                        sortable: sortable),
+                    searching
+                        ? LgTableColumn(
+                            LgDeviceColumn.source, l10n.recentColumnSource)
+                        : LgTableColumn(
+                            LgDeviceColumn.tags, l10n.peersColumnTags),
+                  ],
+                  sort: sortable
+                      ? LgTableSort(_sortColumns[_tabs.sort]!)
+                      : null,
+                  onSort: sortable && !_tabs.isFixed(kOptionPeerSorting)
+                      ? (column) => _tabs.setSort(_sortColumns.entries
+                          .firstWhere((e) => e.value == column)
+                          .key)
+                      : null,
+                  pickColumn: selecting,
+                  moreColumn: true,
+                  ascendingLabel: l10n.peersSortAscending,
+                  descendingLabel: l10n.peersSortDescending,
+                ),
+                SizedBox(
+                  height: math.max(
+                    0,
+                    math.min(items.length * rowHeight,
+                        box.maxHeight - chrome - notes.length * rowHeight),
+                  ),
+                  child: ListView.builder(
+                    scrollCacheExtent: const ScrollCacheExtent.pixels(0),
+                    itemExtent: rowHeight,
+                    itemCount: items.length,
+                    itemBuilder: (context, i) => asked(
+                      items[i],
+                      PeerTableRow(
+                        item: items[i],
+                        actions: _actions(items[i], items, isCurrent(i)),
+                        topDivider: i > 0,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          ...notes,
+        ],
       ),
     );
   }

@@ -30,7 +30,7 @@ use hbb_common::{
 use leapgate::ice::{Accepted, Agent, AnswerParams, Offer, Opened, Selected, ICE_VER};
 use std::{
     future::Future,
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     sync::atomic::{AtomicUsize, Ordering},
     time::{Duration, Instant},
 };
@@ -74,6 +74,7 @@ pub(crate) async fn lan_connect(
         Ok::<_, anyhow::Error>((conn, pk))
     };
     let (conn, pk) = leapgate::lan::connect_candidates(candidates, secure).await?;
+    leapgate::session::note_lan();
     Some((conn, true, pk, None, "TCP"))
 }
 
@@ -104,6 +105,9 @@ pub(crate) async fn lan_fallback(
     my_addr: SocketAddr,
     allow_tcp_punch: bool,
 ) -> (SocketAddr, bool) {
+    if is_local {
+        leapgate::session::note_lan();
+    }
     let tcp = allow_tcp_punch && !candidates.contains(&peer_addr);
     if !tcp {
         return (my_addr, tcp);
@@ -149,6 +153,9 @@ const ICE_PEER_SILENCE_CLOSE: Duration = Duration::from_secs(20);
 /// Races Leapgate's ICE (contract 05 §4.8.1) against upstream's `_start` (`upstream`) and returns
 /// the winner in `_start`'s shape. ICE never fails a connection: when it loses or fails, the
 /// result and the error text are upstream's, which the UI matches whole (the offline retry).
+///
+/// Also records for the new UI how the connection was made, or the server's refusal (Q3,
+/// `LEAPGATE.md` §10.4); nothing is recorded while the attempt runs.
 pub(crate) async fn race_ice<I, F>(
     peer: &str,
     key: &str,
@@ -159,13 +166,60 @@ where
     I: Interface,
     F: Future<Output = ResultType<Connected>>,
 {
+    use leapgate::session::{self, Connection};
+    let conn_type = interface.get_lch().read().unwrap().conn_type as i32;
+    session::set_connection(peer, conn_type, None);
+    let (r, attempt) = session::record(race_ice_legs(peer, key, interface, upstream)).await;
+    let connection = match &r {
+        Ok((c, ice)) => Some(session::classify(won(peer, c, *ice).await, &attempt)),
+        Err(_) => attempt.refused().map(|reason| Connection {
+            refused: Some(reason.to_owned()),
+            ..Default::default()
+        }),
+    };
+    session::set_connection(peer, conn_type, connection);
+    r.map(|(c, _)| c)
+}
+
+/// `race_ice` itself, with the remote address of the pair ICE selected when ICE won.
+async fn race_ice_legs<I, F>(
+    peer: &str,
+    key: &str,
+    interface: &I,
+    upstream: F,
+) -> ResultType<(Connected, Option<IpAddr>)>
+where
+    I: Interface,
+    F: Future<Output = ResultType<Connected>>,
+{
     if !ice_enabled(peer, key, interface) {
-        return upstream.await;
+        return upstream.await.map(|c| (c, None));
     }
     let window_ms = relay_fallback_delay_ms();
     match race_legs(ice_leg(peer, key), upstream, window_ms, |r: &Connected| r.0 .1).await? {
-        Either::Left(win) => Ok(win.commit().await),
-        Either::Right(up) => Ok(up),
+        Either::Left(win) => {
+            let remote = win.remote;
+            Ok((win.commit().await, Some(remote)))
+        }
+        Either::Right(up) => Ok((up, None)),
+    }
+}
+
+async fn won(peer: &str, c: &Connected, ice: Option<IpAddr>) -> leapgate::session::Won {
+    use leapgate::session::Won;
+    let ((stream, direct, _, _, typ), _, _) = c;
+    if crate::common::is_direct_ip_access(peer) {
+        return Won::DirectIp;
+    }
+    if let Some(remote) = ice {
+        return Won::Ice(remote);
+    }
+    Won::Upstream {
+        typ: *typ,
+        direct: *direct,
+        websocket: matches!(stream, Stream::WebSocket(_)),
+        local: stream.local_addr().ip(),
+        webrtc_ipv6: stream.webrtc_remote_ipv6().await.unwrap_or(false),
     }
 }
 
@@ -241,6 +295,7 @@ struct IceWin {
     stream: Stream,
     pk: Option<Vec<u8>>,
     kcp: KcpStream,
+    remote: IpAddr,
     local_kind: Kind,
     remote_kind: Kind,
     family: u32,
@@ -395,6 +450,7 @@ async fn ice_leg(peer: &str, key: &str) -> ResultType<IceWin> {
         stream,
         pk,
         kcp,
+        remote: sel.remote.ip(),
         local_kind: sel.local_kind,
         remote_kind: sel.remote_kind,
         family: sel.family,

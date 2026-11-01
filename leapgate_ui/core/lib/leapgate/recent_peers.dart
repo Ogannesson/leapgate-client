@@ -6,15 +6,17 @@ import 'package:flutter/foundation.dart';
 import '../models/peer_model.dart';
 import '../models/platform_model.dart';
 
-/// The "Recent" category (01 P1 block F): upstream's `Peers` fed by `load_recent_peers`, plus
-/// whether the first load has arrived (the list shows "loading" until then) and which devices
-/// have an online answer yet (until then a row shows "checking", not "offline").
-class RecentPeers extends Peers {
-  RecentPeers()
-      : super(
-            name: 'recent',
-            loadEvent: 'load_recent_peers',
-            getInitPeers: null) {
+/// The device list categories, in upstream's order (`models/peer_tab_model.dart`
+/// `PeerTabIndex`): the index is what the `peer-tab-*` options store. The address book and team
+/// devices come with M4.
+enum PeerCategory { recent, favorites, lan, addressBook, group }
+
+/// One category of the home page (01 P1 block F): upstream's `Peers` fed by its load event,
+/// plus whether the first load has arrived (the list shows "loading" until then) and which
+/// devices have an online answer yet (until then a row shows "checking", not "offline").
+class CategoryPeers extends Peers {
+  CategoryPeers._(this.category, String name, String loadEvent, this._load)
+      : super(name: name, loadEvent: loadEvent, getInitPeers: null) {
     // Run after `Peers`' own handlers, which registered first under [name].
     platformFFI.registerEventHandler(loadEvent, _handler, (evt) async {
       if (!loaded) {
@@ -31,7 +33,24 @@ class RecentPeers extends Peers {
     });
   }
 
-  static const _handler = 'recent-state';
+  /// Rust also pushes it on every new connection (`FfiModel.handlePeerInfo`).
+  CategoryPeers.recent()
+      : this._(PeerCategory.recent, 'recent', 'load_recent_peers',
+            () => bind.mainLoadRecentPeers());
+
+  CategoryPeers.favorites()
+      : this._(PeerCategory.favorites, 'fav', 'load_fav_peers',
+            () => bind.mainLoadFavPeers());
+
+  /// The devices found so far; [discover] looks for more.
+  CategoryPeers.lan()
+      : this._(PeerCategory.lan, 'lan', 'load_lan_peers',
+            () => bind.mainLoadLanPeers());
+
+  final PeerCategory category;
+  final Future<void> Function() _load;
+
+  String get _handler => '$name-state';
   static const _onlinesEvent = 'callback_query_onlines';
 
   bool loaded = false;
@@ -40,11 +59,15 @@ class RecentPeers extends Peers {
   /// Whether an online query has answered for [id]; until then `Peer.online` means nothing.
   bool hasOnlineState(String id) => _answered.contains(id);
 
-  /// Asks Rust to push the list again (it also does on every new connection,
-  /// `FfiModel.handlePeerInfo`).
-  void load() => bind.mainLoadRecentPeers();
+  /// Asks Rust to push the list again.
+  void load() => _load();
 
-  /// Rust answers with `callback_query_onlines`; feed it to an [OnlineQuery].
+  /// Asks Rust to look for devices on the LAN again (upstream `DiscoveredPeersView.build`);
+  /// they arrive with `load_lan_peers`.
+  void discover() => bind.mainDiscover();
+
+  /// Rust answers with `callback_query_onlines`, which every category takes; feed it to an
+  /// [OnlineQuery].
   void queryOnlines(List<String> ids) => bind.queryOnlines(ids: ids);
 
   @override

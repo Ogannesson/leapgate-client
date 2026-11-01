@@ -11,9 +11,12 @@
 #[path = "leapgate_bridge/bridge_generated.rs"]
 mod bridge_generated;
 
-use crate::flutter_ffi::SessionID;
+use crate::{client::Interface as _, flutter_ffi::SessionID};
+use base::config::keys;
 use flutter_rust_bridge::{StreamSink, SyncReturn};
-use hbb_common::ResultType;
+use hbb_common::{
+    config::LocalConfig, protobuf::Enum as _, rendezvous_proto::ConnType, ResultType,
+};
 
 // ---- Log and version ----
 
@@ -46,6 +49,35 @@ pub fn leapgate_session_set_visible(session_id: SessionID, visible: bool) -> Syn
         crate::flutter::sessions::get_session_by_session_id(id).is_some()
     });
     SyncReturn(())
+}
+
+/// How the session's current connection was made (Q3), as JSON: `path`, `transport` and for a
+/// relay `relay`; `refused` after a server refused the attempt; `{}` while connecting or when not
+/// known (`LEAPGATE.md` §10.4). Read it again after each connection-ready event.
+pub fn leapgate_session_connection(session_id: SessionID) -> SyncReturn<String> {
+    use crate::flutter::sessions;
+    let connection = sessions::get_session_by_session_id(&session_id)
+        .map(|s| {
+            let conn_type = s.lc.read().unwrap().conn_type;
+            leapgate::session::connection(&s.get_id(), conn_type as i32, |id, t| {
+                ConnType::from_i32(t)
+                    .is_some_and(|t| sessions::get_session_by_peer_id(id.to_owned(), t).is_some())
+            })
+        })
+        .unwrap_or_default();
+    SyncReturn(serde_json::to_string(&connection).unwrap_or_default())
+}
+
+// ---- Device ----
+
+/// The name the peer is shown for this device at login, for the panel shown while waiting for
+/// the peer to accept.
+pub fn leapgate_local_display_name() -> SyncReturn<String> {
+    SyncReturn(leapgate::ui::display_name(
+        &crate::common::get_builtin_option(keys::OPTION_DISPLAY_NAME),
+        &LocalConfig::get_option("user_info"),
+        crate::username,
+    ))
 }
 
 // ---- Connection manager (M3) ----
