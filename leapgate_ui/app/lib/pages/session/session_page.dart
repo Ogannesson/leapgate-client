@@ -201,9 +201,18 @@ class _SessionPageState extends State<SessionPage>
     if (!_isWindowBlur &&
         _canFocusRemoteInput &&
         !_rawKeyFocusNode.hasFocus &&
-        !_textInputFocused) {
+        !_textInputFocused &&
+        !_menuFocused) {
       _rawKeyFocusNode.requestFocus();
     }
+  }
+
+  /// An open toolbar menu has the keyboard (it takes it on opening): the pointer crossing the
+  /// image does not take it away, so Escape still closes the menu instead of going to the
+  /// remote device; a click on the image does.
+  bool get _menuFocused {
+    final focused = FocusManager.instance.primaryFocus?.context;
+    return focused != null && (MenuController.maybeOf(focused)?.isOpen ?? false);
   }
 
   /// A text field over the image (the chat input) has the keyboard: the pointer coming back to

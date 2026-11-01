@@ -286,6 +286,7 @@ class LgToolbarMenuButton extends StatelessWidget {
     final button = LgMenuAnchor(
       items: items,
       width: width,
+      triggerFocus: true,
       builder: (context, controller) => LgPressable(
         onPressed: greyed && !explained
             ? null
@@ -297,6 +298,8 @@ class LgToolbarMenuButton extends StatelessWidget {
                 final size = (context.findRenderObject()! as RenderBox).size;
                 final at = _menuPosition(dock, size, width);
                 at == null ? controller.open() : controller.open(position: at);
+                final focus = Focus.of(context);
+                if (!focus.hasFocus) focus.requestFocus();
               },
         semanticLabel: label,
         toggled: controller.isOpen,
@@ -428,6 +431,7 @@ class _MoreButton extends StatelessWidget {
     final dock = LgToolbarScope.of(context);
     return LgMenuAnchor(
       items: items,
+      triggerFocus: true,
       builder: (context, controller) => LgPressable(
         onPressed: () {
           if (controller.isOpen) {
@@ -437,6 +441,8 @@ class _MoreButton extends StatelessWidget {
           final size = (context.findRenderObject()! as RenderBox).size;
           final at = _menuPosition(dock, size, kLgMenuWidth);
           at == null ? controller.open() : controller.open(position: at);
+          final focus = Focus.of(context);
+          if (!focus.hasFocus) focus.requestFocus();
         },
         semanticLabel: label,
         toggled: controller.isOpen,

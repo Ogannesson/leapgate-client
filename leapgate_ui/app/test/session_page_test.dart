@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
@@ -406,6 +407,41 @@ void main() {
           msgbox('error', 'Connection Error', 'Timeout', hasRetry: true));
       expect(image.hasFocus, false);
       expect(callsTo(fakes, #sessionEnterOrLeave).last[#enter], false);
+    });
+
+    testMainWindow('a toolbar menu takes the keyboard from the image; Escape closes it',
+        (tester) async {
+      await pumpMainWindow(tester);
+      final a = await _open(tester);
+      await emit(tester, fakes, a, connectionReady(direct: true));
+      await emit(tester, fakes, a, peerInfo());
+      // A frame, so the image takes the pointer.
+      await tester.runAsync(() async {
+        a.canvasModel.updateSize();
+        await a.imageModel.update(await createTestImage(width: 1920, height: 1080));
+      });
+      final image = _imageFocus(tester, a);
+      image.requestFocus();
+      await tester.pump();
+      expect(callsTo(fakes, #sessionEnterOrLeave).last[#enter], true);
+
+      await tester.tap(find.text('操作'));
+      await tester.pumpAndSettle();
+      expect(find.text('重启远程设备'), findsOneWidget);
+      // Rust's hook stops taking the keys, so Escape is not sent to the remote device.
+      expect(image.hasFocus, false);
+      expect(callsTo(fakes, #sessionEnterOrLeave).last[#enter], false);
+      // The pointer crossing the image while the menu is open does not take it back.
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: const Offset(1270, 790));
+      await mouse.moveTo(const Offset(80, 500));
+      await tester.pump();
+      expect(image.hasFocus, false);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(find.text('重启远程设备'), findsNothing);
+      await mouse.removePointer();
     });
   });
 

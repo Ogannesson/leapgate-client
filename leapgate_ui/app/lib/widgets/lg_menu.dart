@@ -57,6 +57,7 @@ class LgMenuAnchor extends StatelessWidget {
     this.width = kLgMenuWidth,
     this.controller,
     this.onClose,
+    this.triggerFocus = false,
   });
 
   final List<Widget> items;
@@ -68,6 +69,12 @@ class LgMenuAnchor extends StatelessWidget {
   /// Called when the menu has closed, however it was closed.
   final VoidCallback? onClose;
 
+  /// Puts [builder]'s widget in a focus node of its own, `Focus.of(context)`
+  /// in [builder]. A trigger over the session image takes it when it opens the
+  /// menu, as upstream's SubmenuButton does (`menu_anchor.dart` `_handleOpen`):
+  /// the image lets go of the keyboard and Escape reaches the menu.
+  final bool triggerFocus;
+
   @override
   Widget build(BuildContext context) {
     final c = LgTokens.of(context).colors;
@@ -78,7 +85,15 @@ class LgMenuAnchor extends StatelessWidget {
       clipBehavior: Clip.none,
       alignmentOffset: const Offset(0, LgSpace.s1),
       menuChildren: [_panelBody(width, items)],
-      builder: (context, controller, _) => builder(context, controller),
+      builder: (context, controller, _) => triggerFocus
+          ? Focus(
+              skipTraversal: true,
+              includeSemantics: false,
+              child: Builder(
+                builder: (context) => builder(context, controller),
+              ),
+            )
+          : builder(context, controller),
     );
   }
 }
