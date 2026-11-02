@@ -78,6 +78,27 @@ abstract class _FormState<T extends StatefulWidget> extends State<T> {
   bool busy = false;
   String? error;
 
+  /// Closes the dialog without a result.
+  void dismiss();
+
+  // Signed out meanwhile (by the server's answer to this very change, say): the address book
+  // is gone, and so is the dialog.
+  void _onModel() {
+    if (appCore.addressBook.current == null) dismiss();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    appCore.addressBook.addListener(_onModel);
+  }
+
+  @override
+  void dispose() {
+    appCore.addressBook.removeListener(_onModel);
+    super.dispose();
+  }
+
   /// [submit] returns the error to show, null to close.
   Future<void> run(
     Future<String?> Function() submit,
@@ -89,7 +110,9 @@ abstract class _FormState<T extends StatefulWidget> extends State<T> {
     });
     final e = await submit();
     if (!mounted) return;
-    if (e == null) {
+    if (appCore.addressBook.current == null) {
+      dismiss();
+    } else if (e == null) {
       close();
     } else {
       setState(() {
@@ -161,13 +184,17 @@ class _AddDeviceDialogState extends _FormState<_AddDeviceDialog> {
     super.dispose();
   }
 
+  @override
+  void dismiss() => widget.close();
+
   /// The ID as typed, without the spaces of its groups.
   String get _cleanId => _id.text.replaceAll(RegExp(r'\s'), '');
 
   void _submit() {
     final l10n = AppLocalizations.of(context)!;
     final ab = appCore.addressBook;
-    final book = ab.current!;
+    final book = ab.current;
+    if (book == null) return;
     if (ab.contains(book, _cleanId)) {
       setState(() => _idError = l10n.abIdExists);
       return;
@@ -195,7 +222,8 @@ class _AddDeviceDialogState extends _FormState<_AddDeviceDialog> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final ab = appCore.addressBook;
-    final book = ab.current!;
+    final book = ab.current;
+    if (book == null) return const SizedBox.shrink();
     final shared = !ab.isPersonal(book);
     return form(
       title: l10n.abAddDevice,
@@ -303,6 +331,9 @@ class _TextDialog extends StatefulWidget {
 }
 
 class _TextDialogState extends _FormState<_TextDialog> {
+  @override
+  void dismiss() => widget.close();
+
   late final _text = TextEditingController(text: widget.initial)
     ..selection = TextSelection(
       baseOffset: 0,
@@ -388,6 +419,7 @@ Future<void> showAbAddTagDialog(TabOverlays overlays, AppLocalizations l10n) {
       .trim()
       .split(RegExp(r'[\s,;\n]+'))
       .where((t) => t.isNotEmpty)
+      .toSet()
       .toList();
   return _textDialog(
     overlays,
@@ -407,7 +439,10 @@ Future<void> showAbAddTagDialog(TabOverlays overlays, AppLocalizations l10n) {
     },
     submit: (text) async {
       final e = await ab.addTags(names(text));
-      return e == null ? null : l10n.abAddTagFailed(abReason(l10n, e));
+      if (e == null) return null;
+      return e.kind == ApiErrorKind.conflict
+          ? l10n.abTagExists
+          : l10n.abAddTagFailed(abReason(l10n, e));
     },
   );
 }
@@ -523,6 +558,9 @@ class _EditTagsDialogState extends _FormState<_EditTagsDialog> {
   late final _tags = {for (final t in widget.initial) t.toString()};
 
   @override
+  void dismiss() => widget.close();
+
+  @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final ab = appCore.addressBook;
@@ -592,6 +630,9 @@ class _TagColorDialog extends StatefulWidget {
 }
 
 class _TagColorDialogState extends _FormState<_TagColorDialog> {
+  @override
+  void dismiss() => widget.close();
+
   late final int _old = abTagColor(widget.tag).toARGB32();
   late int _color = _old;
   late final _value = TextEditingController(text: _hex(_old));
@@ -686,21 +727,35 @@ class _TagColorDialogState extends _FormState<_TagColorDialog> {
 // ---- Add to address book (upstream `addPeersToAbDialog`).
 
 /// Adds [peers] to a book chosen among [targets]; straight into it when the personal book is the
-/// only book there is. True when they were added.
+/// only book there is, and only when that fails the dialog comes up to say why. True when they
+/// were added.
 Future<bool> showAbAddToDialog(
   TabOverlays overlays,
+  AppLocalizations l10n,
   List<Peer> peers,
   List<AbProfile> targets,
 ) async {
   final ab = appCore.addressBook;
+  String? failed;
   if (ab.books.length == 1 && targets.length == 1) {
-    final e = await ab.addPeersTo(targets.single, peers);
-    if (e != null && e.kind != ApiErrorKind.unauthorized) ab.pushFailed(e);
-    return e == null;
+    final book = targets.single;
+    if (ab.isFull(book)) {
+      failed = l10n.abFull;
+    } else {
+      final e = await ab.addPeersTo(book, peers);
+      if (e == null) return true;
+      if (e.kind == ApiErrorKind.unauthorized) return false;
+      failed = l10n.abAddDeviceFailed(abReason(l10n, e));
+    }
   }
   return await _show<bool>(
         overlays,
-        (close) => _AddToDialog(peers: peers, targets: targets, close: close),
+        (close) => _AddToDialog(
+          peers: peers,
+          targets: targets,
+          close: close,
+          error: failed,
+        ),
       ) ??
       false;
 }
@@ -710,11 +765,15 @@ class _AddToDialog extends StatefulWidget {
     required this.peers,
     required this.targets,
     required this.close,
+    this.error,
   });
 
   final List<Peer> peers;
   final List<AbProfile> targets;
   final void Function(bool? added) close;
+
+  /// Why adding straight away failed.
+  final String? error;
 
   @override
   State<_AddToDialog> createState() => _AddToDialogState();
@@ -722,6 +781,15 @@ class _AddToDialog extends StatefulWidget {
 
 class _AddToDialogState extends _FormState<_AddToDialog> {
   late AbProfile _book = widget.targets.first;
+
+  @override
+  void initState() {
+    super.initState();
+    error = widget.error;
+  }
+
+  @override
+  void dismiss() => widget.close(false);
 
   @override
   Widget build(BuildContext context) {

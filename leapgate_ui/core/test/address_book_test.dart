@@ -94,11 +94,37 @@ class _Account extends AccountModel {
 class _SlowApi extends FakeAccountApi {
   final pending = <Completer<ApiResult<AbBooks>>>[];
 
+  /// The books whose [book] waits, and the answers they wait for.
+  final slowBooks = <String>{};
+  final pendingBook = <String, Completer<ApiResult<AbBookData>>>{};
+
+  /// Every [updatePeer] waits for this when set.
+  Completer<ApiResult<void>>? pendingWrite;
+
   @override
   Future<ApiResult<AbBooks>> books() {
     final answer = Completer<ApiResult<AbBooks>>();
     pending.add(answer);
     return answer.future;
+  }
+
+  @override
+  Future<ApiResult<AbBookData>> book(String guid,
+      {required String name, required bool personal}) {
+    if (!slowBooks.contains(guid)) {
+      return super.book(guid, name: name, personal: personal);
+    }
+    calls.add(('book', [guid, name, personal]));
+    return (pendingBook[guid] = Completer()).future;
+  }
+
+  @override
+  Future<ApiResult<void>> updatePeer(
+      String guid, String id, Map<String, dynamic> fields) {
+    final wait = pendingWrite;
+    if (wait == null) return super.updatePeer(guid, id, fields);
+    calls.add(('updatePeer', [guid, id, fields]));
+    return wait.future;
   }
 }
 
@@ -340,6 +366,82 @@ void main() {
       expect([for (final b in ab.books) b.guid], ['g-bob']);
       expect(ab.tags, isEmpty);
     });
+
+    test('after signing out and back in as the same user', () async {
+      _bind.flutter[kOptionCurrentAbName] = _friends.name;
+      slow.slowBooks.add(_friends.guid);
+      final pulled = ab.pull();
+      slow.pending.single.complete(alices);
+      await Future<void>.delayed(Duration.zero);
+      final account = appCore.account as _Account;
+      account.switchTo(null);
+      account.switchTo('zhangsan');
+      slow.pendingBook[_friends.guid]!
+          .complete(const ApiResult.ok(AbBookData(peers: [], tags: [])));
+      await pulled;
+      expect(ab.books, isEmpty);
+    });
+
+    test('a change answered after another user signed in', () async {
+      slow.bookResults['g-alice'] =
+          ApiResult.ok(AbBookData(peers: [_peer('123456789')], tags: const []));
+      final account = appCore.account as _Account;
+      // Pulled, then the note is on its way.
+      final first = ab.pull();
+      slow.pending.last.complete(alices);
+      await first;
+      slow.pendingWrite = Completer();
+      final written = ab.setNote('123456789', 'x');
+      account.switchTo('bob');
+      slow.pendingWrite!
+          .complete(const ApiResult.error(ApiError(ApiErrorKind.unauthorized)));
+      expect(await written, isNull);
+      expect(account.signedOut, 0);
+      expect(account.loggedIn, isTrue);
+    });
+  });
+
+  test('a book left before its failure came back does not show it', () async {
+    final slow = _SlowApi();
+    accountApi = slow;
+    appCore = _Core();
+    slow.bookResults['g-me'] =
+        const ApiResult.ok(AbBookData(peers: [], tags: []));
+    slow.slowBooks.add(_friends.guid);
+    final pulled = ab.pull();
+    slow.pending.single.complete(const ApiResult.ok(
+        AbBooks(maxPeers: 0, personal: 'g-me', shared: [_friends])));
+    await pulled;
+    final left = ab.select(ab.books[1]);
+    await ab.select(ab.books[0]);
+    slow.pendingBook[_friends.guid]!
+        .complete(const ApiResult.error(ApiError(ApiErrorKind.server, 'x')));
+    await left;
+    expect(ab.pullError, isNull);
+  });
+
+  test('a change the server refused still pulls the book again', () async {
+    _serve();
+    await ab.pull();
+    final before = api.callsTo('book').length;
+    api.writeResult = const ApiResult.error(ApiError(ApiErrorKind.notFound));
+    final error = await ab.setNote('123456789', 'x');
+    expect(error?.kind, ApiErrorKind.notFound);
+    expect(api.callsTo('book').length, before + 1);
+  });
+
+  test('a cached tag without a colour gets upstream\'s default', () async {
+    api.abCacheResult = [
+      {
+        'guid': 'g-me',
+        'name': kAbPersonalName,
+        'peers': const [],
+        'tags': ['red'],
+        'tag_colors': '{}',
+      }
+    ];
+    await ab.loadCache();
+    expect(ab.tags.single.color, 0xFFF44336);
   });
 
   test('a server without an address book says so', () async {

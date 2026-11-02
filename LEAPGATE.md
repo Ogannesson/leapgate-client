@@ -1266,7 +1266,7 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 | core `leapgate/peer_tabs.dart` | `isEnabled` 对两类仍是 false | A |
 | core `leapgate/app_core.dart` | `addressBook`、`group`、`account` 三个 `late final`；上面那个全局事件的登记 | 共用 |
 
-- `peerMenu` 照 01 区块 F 的菜单表：管理组补"加入地址簿"（已登录，各分类）、"编辑标签""编辑备注""设置共享密码"（地址簿；共享密码只在共享簿）、"查看所在地址簿"；危险组在地址簿里是"从地址簿中删除"；同组设备只有连接方式和"加入地址簿"；只读簿的写操作灰显（`LgMenuItem.disabledNote`），说明只在第一个出现灰显项的组标题旁写一次。地址簿分类里的"重命名"改的是簿里的别名，"清除保存的密码"在个人簿有 `hash` 时清的是簿里的（上游 `common/widgets/peer_card.dart` 的 `AddressBookPeerCard`），这两项由 `abPeerMenuItem` 接管。
+- `peerMenu` 照 01 区块 F 的菜单表：管理组补"加入地址簿"（已登录，各分类）、"编辑标签""编辑备注""设置共享密码"（地址簿；共享密码只在共享簿）、"查看所在地址簿"；危险组在地址簿里是"从地址簿中删除"；同组设备只有连接方式和"加入地址簿"；只读簿的写操作灰显（`LgMenuItem.disabledNote`），说明只在第一个出现灰显项的组标题旁写一次。地址簿分类里的"重命名"改的是簿里的别名（上游 `common/widgets/peer_card.dart` 的 `AddressBookPeerCard`），由 `abPeerMenuItem` 接管；"清除保存的密码"在所有分类都由 `abPeerMenuItem` 接管：设备在个人簿里时连簿里的 `hash` 一起清，再清本机保存的密码（上游 `_unrememberPasswordAction`，否则 Rust 下次连接仍会从 `_ab` 缓存自动填）。
 - 骨架里多选条的写法（`if (!accountCategory)` 下面那段没有重新缩进）是为了不动原有的行，整合时可以格式化这一段。
 
 **组件（designer）**：规则同 10.8"组件约定"（只管画、文字由调用方传、带语义标签、两套主题和两套尺寸、画廊里每种状态一项、有行为测试）。要做的和样稿画框见 07 §2.2。接口要点：
@@ -1303,3 +1303,6 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 - 缓存只存个人簿和最近拉过的共享簿（上游是"当前簿"，界面里两者相同）。
 - `currentUser` 回 400 和 401 一样处理（理由见上面"错误的形状"）。
 - API 地址不认程序文件名里带的配置（M4-8）。
+- 地址簿正在拉取时，写操作之后的静默重新拉取被跳过，那次拉取的结果可能盖掉刚做的本地改动，直到下一次拉取（上游 `abPulling` 同样）。
+- 从连接框搜到别的共享簿里的设备，连接时不带那本簿的共享密码，只看当前簿（上游 `connectInPeerTab` 同样）。
+- 退出后马上用同一账号登回来，旧那轮拉取在簿列表回来之前分不清两次登录，可能接着写完（数据是同一账号的）；簿列表回来之后的部分已挡住（地址簿按"拉取开始时的用户名"和"簿列表是否被换掉"核对）。彻底分清要代次计数，不做。

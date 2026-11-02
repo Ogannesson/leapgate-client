@@ -218,7 +218,7 @@ class AddressBookModel extends ChangeNotifier implements AccountData {
 
   @override
   Future<void> loadCache() async {
-    if (_loaded || _pulling) return;
+    if (_loaded || _pulling || disabled) return;
     final me = _me;
     final entries = await _api.abCache();
     if (_me != me || _loaded || _pulling || entries.isEmpty) return;
@@ -239,6 +239,11 @@ class AddressBookModel extends ChangeNotifier implements AccountData {
       final colors = e['tag_colors'] is String
           ? Map<String, dynamic>.from(jsonDecode(e['tag_colors']) as Map)
           : const <String, dynamic>{};
+      // A tag without a colour takes upstream's default (`getCurrentAbTagColor`).
+      final existing = [
+        for (final c in colors.values)
+          if (c is int) c
+      ];
       _data[guid] = _Book()
         ..peers = [
           for (final p in e['peers'] as List? ?? const [])
@@ -246,7 +251,10 @@ class AddressBookModel extends ChangeNotifier implements AccountData {
         ]
         ..tags = [
           for (final t in e['tags'] as List? ?? const [])
-            AbTag(t.toString(), colors[t] as int? ?? 0),
+            AbTag(
+                t.toString(),
+                colors[t] as int? ??
+                    abDefaultTagColor(t.toString(), existing: existing)),
         ];
     }
     _currentGuid = _lastBook() ?? _books.firstOrNull?.guid;
@@ -276,19 +284,24 @@ class AddressBookModel extends ChangeNotifier implements AccountData {
       _personalGuid = b.personal;
       final shared = [...b.shared]
         ..sort((x, y) => x.name.toLowerCase().compareTo(y.name.toLowerCase()));
-      _books = [AbProfile(guid: b.personal, name: kAbPersonalName), ...shared];
+      // A reset, and the next pull, put a new list in place: this round is over then.
+      final books = _books = [
+        AbProfile(guid: b.personal, name: kAbPersonalName),
+        ...shared
+      ];
+      bool over() => _me != me || !identical(_books, books);
       _data.removeWhere((guid, _) => !_books.any((x) => x.guid == guid));
       if (current == null) {
         _currentGuid = _lastBook() ?? b.personal;
       }
       final current_ = current!;
       await _pullBook(current_, quiet: false);
-      if (_me != me) return;
+      if (over()) return;
       if (!isPersonal(current_)) {
-        final personal = _books.first;
-        if (!(_data[personal.guid]?.initialized ?? false)) {
+        final personal = _books.where(isPersonal).firstOrNull;
+        if (personal != null && !(_data[personal.guid]?.initialized ?? false)) {
           await _pullBook(personal, quiet: true);
-          if (_me != me) return;
+          if (over()) return;
         }
       }
       _startSync();
@@ -338,7 +351,8 @@ class AddressBookModel extends ChangeNotifier implements AccountData {
     } else if (r.error!.kind == ApiErrorKind.unauthorized) {
       appCore.account.signedOutByServer();
       return;
-    } else if (!quiet) {
+    } else if (!quiet && book.guid == _currentGuid) {
+      // A book left meanwhile does not put its failure over the one shown.
       _pullError = r.error;
     }
     notifyListeners();
@@ -445,9 +459,12 @@ class AddressBookModel extends ChangeNotifier implements AccountData {
     Future<ApiResult<void>> Function(T item) call,
     void Function(_Book data, T item) local,
   ) async {
-    var done = false;
+    // Pulled again whether it went through or not, as upstream: a device or tag someone else
+    // removed (`not_found`) leaves the list too.
+    var called = false;
     final me = _me;
     for (final item in items) {
+      called = true;
       final r = await call(item);
       if (_me != me) return null;
       if (!r.ok) {
@@ -455,15 +472,14 @@ class AddressBookModel extends ChangeNotifier implements AccountData {
           appCore.account.signedOutByServer();
           return r.error;
         }
-        if (done) await _pullBook(book, quiet: true);
+        await _pullBook(book, quiet: true);
         return r.error;
       }
-      done = true;
       final data = _data[book.guid];
       if (data != null) local(data, item);
       notifyListeners();
     }
-    if (done) await _pullBook(book, quiet: true);
+    if (called) await _pullBook(book, quiet: true);
     return null;
   }
 

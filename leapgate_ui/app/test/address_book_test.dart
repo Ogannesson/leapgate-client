@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/leapgate/account.dart';
 import 'package:flutter_hbb/leapgate/account_api.dart';
@@ -8,6 +10,7 @@ import 'package:flutter_hbb/models/peer_model.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:leapgate_ui/l10n/app_localizations.dart';
+import 'package:leapgate_ui/pages/home/address_book/ab_dialogs.dart';
 import 'package:leapgate_ui/pages/home/address_book/address_book.dart';
 import 'package:leapgate_ui/pages/home/peer_views.dart';
 import 'package:leapgate_ui/shell/navigation.dart';
@@ -37,6 +40,13 @@ class _Account extends AccountModel {
 
   @override
   ApiError? get error => failed;
+
+  @override
+  void signedOutByServer() {
+    signedIn = null;
+    appCore.addressBook.reset();
+    notifyListeners();
+  }
 }
 
 class _Core extends AppCore {
@@ -65,6 +75,41 @@ class _Navigation extends FakeNavigation {
 
 late FakeAccountApi api;
 late _Navigation _nav;
+late FakeBind _bind;
+
+/// The device menu of [item] drawn in place.
+Future<void> _pumpMenu(
+  WidgetTester tester,
+  PeerItem item, {
+  bool hasPassword = false,
+}) => tester.pumpWidget(
+  MaterialApp(
+    locale: const Locale('zh'),
+    localizationsDelegates: AppLocalizations.localizationsDelegates,
+    supportedLocales: AppLocalizations.supportedLocales,
+    theme: buildLgTheme(brightness: Brightness.light, mode: LgMode.compact),
+    home: Builder(
+      builder: (context) => SingleChildScrollView(
+        child: LgMenuPanel(
+          items: peerMenuItems(
+            AppLocalizations.of(context)!,
+            item,
+            overlays: overlays,
+            hasPassword: hasPassword,
+          ),
+        ),
+      ),
+    ),
+  ),
+);
+
+PeerItem _item(Peer peer, PeerCategory category) => PeerItem(
+  peer: peer,
+  category: category,
+  status: LgDeviceStatus.online,
+  statusLabel: '在线',
+  favorite: false,
+);
 final overlays = TabOverlays();
 
 _Account get _signedIn => appCore.account as _Account;
@@ -190,8 +235,8 @@ void main() {
 
 void _categoryTests() {
   setUp(() {
-    final bind = FakeBind();
-    platformFFI.setBindingForTesting(bind);
+    _bind = FakeBind();
+    platformFFI.setBindingForTesting(_bind);
     setLgBindForTesting(FakeLeapgate());
     api = FakeAccountApi();
     accountApi = api;
@@ -342,6 +387,111 @@ void _categoryTests() {
       }
     },
   );
+
+  testWidgets(
+    'the server refusing the sign-in check: the whole list says so, "重试" checks again',
+    (tester) async {
+      _signedIn.failed = const ApiError(ApiErrorKind.server, '服务暂时不可用');
+      await _pump(tester);
+      expect(find.text('无法加载地址簿。服务器返回：服务暂时不可用。'), findsOneWidget);
+      expect(find.text('重试'), findsOneWidget);
+    },
+  );
+
+  testWidgets('a failed change: the banner, gone once "重试" pulls again', (
+    tester,
+  ) async {
+    _serve(personal: [_peer('123456789')]);
+    await appCore.addressBook.pull();
+    await _pump(tester);
+    api.writeResult = const ApiResult.error(
+      ApiError(ApiErrorKind.server, '服务暂时不可用'),
+    );
+    await tester.tap(find.text('家里'), buttons: 2);
+    await _settle(tester);
+    await tester.tap(find.text('删除'));
+    await _settle(tester);
+    expect(
+      find.textContaining('无法保存地址簿的更改。服务器返回：服务暂时不可用。', findRichText: true),
+      findsOneWidget,
+    );
+    api.writeResult = const ApiResult.ok(null);
+    await tester.tap(find.text('重试'));
+    await _settle(tester);
+    expect(find.textContaining('无法保存地址簿的更改', findRichText: true), findsNothing);
+  });
+
+  testWidgets('"清除保存的密码" in "最近" clears the personal book\'s copy too', (
+    tester,
+  ) async {
+    _serve(
+      personal: [
+        Peer.fromJson({'id': '123456789', 'hash': 'h'}),
+      ],
+    );
+    await appCore.addressBook.pull();
+    await _pumpMenu(
+      tester,
+      _item(_peer('123456789'), PeerCategory.recent),
+      hasPassword: true,
+    );
+    await tester.tap(find.text('清除保存的密码'));
+    await _settle(tester);
+    expect(api.callsTo('updatePeer'), [
+      [
+        'g-me',
+        '123456789',
+        {'hash': ''},
+      ],
+    ]);
+    expect(_bind.callsTo(#mainForgetPassword), hasLength(1));
+    await toastGone(tester);
+  });
+
+  testWidgets(
+    'adding straight into the only book: a failure opens the dialog to say so',
+    (tester) async {
+      _serve();
+      await appCore.addressBook.pull();
+      await _pump(tester);
+      api.writeResult = const ApiResult.error(
+        ApiError(ApiErrorKind.server, '服务暂时不可用'),
+      );
+      final l10n = lookupAppLocalizations(const Locale('zh'));
+      unawaited(
+        showAbAddToDialog(overlays, l10n, [
+          _peer('987654321'),
+        ], appCore.addressBook.addTargets(PeerCategory.recent)),
+      );
+      await _settle(tester);
+      expect(
+        find.textContaining('无法添加设备。服务器返回：服务暂时不可用。', findRichText: true),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets('a token found expired while a dialog submits closes it', (
+    tester,
+  ) async {
+    _serve();
+    await appCore.addressBook.pull();
+    await _pump(tester);
+    await tester.tap(find.bySemanticsLabel('更多'));
+    await _settle(tester);
+    await tester.tap(find.text('添加设备'));
+    await _settle(tester);
+    api.writeResult = const ApiResult.error(
+      ApiError(ApiErrorKind.unauthorized),
+    );
+    await tester.enterText(find.bySemanticsLabel('ID').last, '246813579');
+    await tester.pump();
+    await tester.tap(find.text('添加').last);
+    await _settle(tester);
+    expect(tester.takeException(), isNull);
+    expect(find.text('添加到：我的地址簿'), findsNothing);
+    expect(find.text('登录后可查看地址簿'), findsOneWidget);
+  });
 
   testWidgets('connecting from a shared book takes its stored password', (
     tester,

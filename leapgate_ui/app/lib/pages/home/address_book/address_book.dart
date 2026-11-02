@@ -73,12 +73,30 @@ AccountCategoryView addressBookCategory(
       ),
     );
   }
+  // The server refused the check of the sign-in: nothing was pulled (01 P1 block F).
+  if (accountError != null) {
+    return AccountCategoryView(
+      tools: [refresh],
+      state: AbStateWithAction(
+        text: l10n.abLoadFailed(abReason(l10n, accountError)),
+        icon: LgIcons.err,
+        action: l10n.abRetry,
+        onPressed: retry,
+      ),
+    );
+  }
   final hidden = appCore.options.local.listenable(kOptionHideAbTagsPanel);
   bool tagsHidden() => appCore.options.local.get(kOptionHideAbTagsPanel) == 'Y';
   final banner = error != null
       ? (l10n.abLoadFailed(abReason(l10n, error)), retry)
       : ab.pushError != null
-      ? (l10n.abSaveFailed(abReason(l10n, ab.pushError!)), ab.pull)
+      ? (
+          l10n.abSaveFailed(abReason(l10n, ab.pushError!)),
+          () {
+            ab.dismissErrors();
+            ab.pull();
+          },
+        )
       : null;
   return AccountCategoryView(
     tools: [
@@ -241,8 +259,8 @@ String? abPeerKeyLabel(AppLocalizations l10n, PeerItem item) =>
     : null;
 
 /// The device menu's item for [action] where the address book has its own: the six address book
-/// actions everywhere, and in the address book category "重命名" (the book's alias) and "清除保存的
-/// 密码" in the personal book (the book's hash as well). Null keeps the page's own item. The items
+/// actions and "清除保存的密码" (the personal book's hash as well) everywhere, and in the address book
+/// category "重命名" (the book's alias). Null keeps the page's own item. The items
 /// that write a read-only book are greyed (01 P1 block F); [abMenuGroupNote] says why.
 Widget? abPeerMenuItem(
   AppLocalizations l10n,
@@ -260,7 +278,7 @@ Widget? abPeerMenuItem(
     PeerAction.addToAb => LgMenuItem(
       label: l10n.abAddToAb,
       onPressed: () async {
-        if (await showAbAddToDialog(overlays, [
+        if (await showAbAddToDialog(overlays, l10n, [
           peer,
         ], ab.addTargets(item.category))) {
           toast('abToastAdded');
@@ -312,18 +330,15 @@ Widget? abPeerMenuItem(
         e == null ? toast('peerMenuToastRenamed') : _failed(e);
       }),
     ),
-    PeerAction.clearPassword
-        when inAb &&
-            ab.current != null &&
-            ab.isPersonal(ab.current!) &&
-            peer.hash.isNotEmpty =>
-      LgMenuItem(
-        label: l10n.peerMenuClearPassword,
-        onPressed: () async {
-          final e = await ab.clearPassword(peer.id);
-          e == null ? toast('peerMenuToastPasswordCleared') : _failed(e);
-        },
-      ),
+    // In every category: the personal book's hash as well, or Rust would still fill it in from
+    // the cache (upstream `_unrememberPasswordAction`).
+    PeerAction.clearPassword => LgMenuItem(
+      label: l10n.peerMenuClearPassword,
+      onPressed: () async {
+        final e = await ab.clearPassword(peer.id);
+        e == null ? toast('peerMenuToastPasswordCleared') : _failed(e);
+      },
+    ),
     _ => null,
   };
 }
@@ -381,6 +396,7 @@ List<LgSelectionAction> abSelectionActions(
             : () async {
                 if (await showAbAddToDialog(
                   overlays,
+                  l10n,
                   _picked(category, ids),
                   targets,
                 )) {
