@@ -1276,6 +1276,7 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 - 簿切换下拉：当前簿名，旁边的权限文字和所有者（调用方拼好）；展开后有搜索框、簿的列表（簿名、权限文字、所有者、选中态）、底部一行说明；`onSelect`。
 - 标签筛选条：第一项"未标记"（文字由调用方给），其余每项是 `LgDeviceTag` 加选中态（描边加勾，不用标签色铺满）；`onToggle`、`onContextMenu(tag, globalPosition)`（标签右键）；放不下时横向滚动。
 - 地址簿"更多"菜单、只读簿的设备菜单：用现成的菜单项拼，designer 只核对 `p1-ab-more`、`p1-ab-readonly`、`p1-ab-readonly-card`。
+- 其余小对话框（添加标签、重命名、编辑标签、编辑备注、设置共享密码、加入地址簿、查看所在地址簿）统一用 designer 另做的表单外壳 `LgFormDialog` + `LgFormField` + `LgTextArea` 拼（2026-11-02 改：原写"用 `LgConfirmDialog` 加输入件拼，不另做组件"）。忙态时正在操作的控件一禁用焦点就会掉，失败后由调用方把焦点放回出错的输入框（例如登录失败放回密码框）。
 - 人员列表：搜索框；每行头像字、显示名、"我"标记；选中行带 ×（`onClear`）；`onSelect`。
 - 卡片和列表视图的备注：`LgDeviceCard`、`LgDeviceRow` 加 `note`（null 不显示那一行或那一格），`LgDeviceColumn` 加 `note`，有没有这一列由调用方的表头决定（地址簿和同组设备有）。
 - 列表状态：没登录（一句话加"登录"按钮）、网络错误（一句话加"重试"）、报错横幅（现有 `lg_banner.dart` 加"重试"按钮、可关闭，两句文字由调用方拼）、两类空、加载中骨架（现成的）。"服务器不提供地址簿"用空状态的样式。
