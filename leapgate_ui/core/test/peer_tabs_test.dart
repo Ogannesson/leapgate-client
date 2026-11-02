@@ -31,6 +31,21 @@ class _Bind implements RustdeskImpl {
           {required String k, required String v, dynamic hint}) async =>
       flutter[k] = v;
 
+  /// The built-in options. The account is off unless a test turns it on, so the address book and
+  /// team devices stand for the categories a build hides.
+  bool disableAccount = true;
+  bool disableAb = false;
+  bool disableGroupPanel = false;
+
+  @override
+  bool isDisableAccount({dynamic hint}) => disableAccount;
+
+  @override
+  bool isDisableAb({dynamic hint}) => disableAb;
+
+  @override
+  bool isDisableGroupPanel({dynamic hint}) => disableGroupPanel;
+
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
@@ -45,12 +60,25 @@ void main() {
   PeerTabs tabs() => PeerTabs(OptionsModel());
 
   group('categories (peer_tab_model.dart)', () {
-    test('recent, favorites and LAN; the address book and team devices wait',
+    test('recent, favorites and LAN; the account option hides the other two',
         () {
       final t = tabs();
       expect(t.shown,
           [PeerCategory.recent, PeerCategory.favorites, PeerCategory.lan]);
       expect(t.current, PeerCategory.recent);
+    });
+
+    test(
+        'the address book and team devices show unless their own option hides '
+        'them', () {
+      bind.disableAccount = false;
+      expect(tabs().shown, PeerCategory.values);
+      bind.disableAb = true;
+      expect(tabs().shown, isNot(contains(PeerCategory.addressBook)));
+      bind
+        ..disableAb = false
+        ..disableGroupPanel = true;
+      expect(tabs().shown, isNot(contains(PeerCategory.group)));
     });
 
     test('the built-in option hides LAN', () {

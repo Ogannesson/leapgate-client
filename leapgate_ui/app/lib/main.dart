@@ -46,6 +46,8 @@ Future<void> main(List<String> args) async {
     await platformFFI.init(kAppTypeMain);
     // Starts syncing options and the connection status with the service.
     await bind.mainCheckConnectStatus();
+    // The stored sign-in, then the address book and the team devices (`LEAPGATE.md` §10.11).
+    appCore.account.start();
     final version = lgBind.leapgateVersion();
     lgBind.leapgateLog(level: 3, msg: 'leapgate ui: version $version');
     runApp(LeapgateApp(
