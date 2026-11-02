@@ -6,7 +6,7 @@ import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:leapgate_ui/shell/tab_overlays.dart';
 import 'package:leapgate_ui/widgets/lg_button.dart';
-import 'package:leapgate_ui/widgets/lg_feedback.dart';
+import 'package:leapgate_ui/widgets/lg_login_dialog.dart';
 
 import '../../core/test/account_fakes.dart';
 import 'home_fakes.dart';
@@ -64,7 +64,7 @@ Future<void> settle(WidgetTester tester) async {
 }
 
 Finder _inDialog(Finder f) =>
-    find.descendant(of: find.byType(LgConfirmDialog), matching: f);
+    find.descendant(of: find.byType(LgLoginDialog), matching: f);
 
 Finder _button(String label) => find.widgetWithText(LgButton, label);
 
@@ -123,7 +123,7 @@ void main() {
       expect(find.text('登录后可查看同组设备'), findsOneWidget);
       await tester.tap(_button('登录').last);
       await settle(tester);
-      expect(find.byType(LgConfirmDialog), findsOneWidget);
+      expect(find.byType(LgLoginDialog), findsOneWidget);
       await unmount(tester);
     },
   );
@@ -172,7 +172,7 @@ void main() {
         await fillLogin(tester, 'alice', 'secret');
         expect(find.text(text), findsOneWidget);
       }
-      expect(find.byType(LgConfirmDialog), findsOneWidget);
+      expect(find.byType(LgLoginDialog), findsOneWidget);
       expect(appCore.account.loggedIn, isFalse);
       await unmount(tester);
     });
@@ -195,7 +195,7 @@ void main() {
 
         api.loginGate!.complete();
         await settle(tester);
-        expect(find.byType(LgConfirmDialog), findsNothing);
+        expect(find.byType(LgLoginDialog), findsNothing);
         expect(api.callsTo('login'), [
           ['alice', 'secret'],
         ]);
@@ -251,7 +251,7 @@ void main() {
     await pumpAccount(tester, signedIn: true, team: ApiResult.ok(_team()));
     await tester.tap(find.text('张三'));
     await settle(tester);
-    expect(find.text('@alice'), findsOneWidget);
+    expect(find.text('账号信息'), findsOneWidget);
     await tester.tap(find.text('退出登录'));
     await settle(tester);
     expect(find.text('退出登录？'), findsOneWidget);
@@ -313,7 +313,7 @@ void main() {
             tester.getTopLeft(find.text('李四')).dy,
         isTrue,
       );
-      expect(find.text('我'), findsOneWidget);
+      expect(find.text('（我）'), findsOneWidget);
       await tester.tap(find.text('李四'));
       await settle(tester);
       expect(find.text('DESKTOP-ZHANG'), findsNothing);
@@ -331,7 +331,7 @@ void main() {
         team: ApiResult.ok(_team(onlyMe: true)),
       );
       await openGroup(tester);
-      expect(find.text('我'), findsOneWidget);
+      expect(find.text('（我）'), findsOneWidget);
       expect(find.text('李四'), findsNothing);
       expect(find.text('DESKTOP-ZHANG'), findsOneWidget);
       await unmount(tester);

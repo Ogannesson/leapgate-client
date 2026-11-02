@@ -667,7 +667,10 @@
   "groupRetry": "重试",
   "groupLoadFailed": "无法加载同组设备。服务器返回：{reason}。",
   "groupPeople": "人员",
-  "groupSearch": "搜索",
-  "groupMe": "我",
-  "groupClearPerson": "显示所有人的设备"
+  "groupSearch": "搜索人员",
+  "groupMe": "（我）",
+  "groupClearPerson": "取消筛选",
+  "accountInfo": "账号信息",
+  "loginUsernamePlaceholder": "输入用户名",
+  "loginPasswordPlaceholder": "输入密码"
 }

@@ -6,16 +6,15 @@ import '../../../icons/lg_icon.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../shell/tab_overlays.dart';
 import '../../../theme/lg_tokens.dart';
+import '../../../widgets/lg_account.dart';
 import '../../../widgets/lg_button.dart';
 import '../../../widgets/lg_feedback.dart';
+import '../../../widgets/lg_login_dialog.dart';
 import '../../../widgets/lg_menu.dart';
-import '../../../widgets/lg_pressable.dart';
-import '../../../widgets/lg_text_field.dart';
 
 // The account area and the login dialog (01 P1 blocks D and K, M4; `LEAPGATE.md` §10.11), after
 // upstream's `common/widgets/login.dart` `loginDialog` and the account button of
-// `desktop/pages/desktop_setting_page.dart`. Placeholders until the designer's components
-// (M4 integration); the states and texts are final.
+// `desktop/pages/desktop_setting_page.dart`.
 
 /// The avatar's letter: the first character of the name, Latin letters in upper case (01 P1
 /// block D: "张三" gives "张", "alice" gives "A").
@@ -58,75 +57,62 @@ class _AccountAreaState extends State<_AccountArea> {
     await appCore.account.logout();
   }
 
+  void _cancel() => setState(() => _confirming = false);
+
   @override
   Widget build(BuildContext context) {
     final account = appCore.account;
     if (account.disabled) return const SizedBox.shrink();
     final l10n = AppLocalizations.of(context)!;
     final t = LgTokens.of(context);
-    final small = t.textS.copyWith(color: t.colors.text2);
     return Padding(
-      padding: const EdgeInsets.only(top: LgSpace.s5),
+      padding: const EdgeInsets.fromLTRB(LgSpace.s4, 0, LgSpace.s4, LgSpace.s4),
       child: ListenableBuilder(
         listenable: account,
         builder: (context, _) {
           final user = account.user;
           if (account.signingOut) {
-            return Text(l10n.accountSigningOut, style: small);
+            return Text(
+              l10n.accountSigningOut,
+              style: t.textS.copyWith(color: t.colors.text2),
+            );
           }
           if (user == null) {
             // Signed out by the server with the confirmation open.
             _confirming = false;
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                LgButton(
-                  label: l10n.accountSignIn,
-                  icon: LgIcons.login,
-                  onPressed: () => showLoginDialog(widget.overlays),
-                ),
-                const SizedBox(height: LgSpace.s2),
-                Text(l10n.accountSignedOutNote, style: small),
-              ],
+            return LgAccountArea.signedOut(
+              loginLabel: l10n.accountSignIn,
+              hint: l10n.accountSignedOutNote,
+              onLogin: () => showLoginDialog(widget.overlays),
             );
           }
           if (_confirming) {
-            return Semantics(
-              container: true,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    l10n.accountSignOutTitle,
-                    style: t.textM.copyWith(fontWeight: FontWeight.w700),
-                  ),
-                  const SizedBox(height: LgSpace.s1),
-                  Text(l10n.accountSignOutBody, style: small),
-                  const SizedBox(height: LgSpace.s2),
-                  Wrap(
-                    spacing: LgSpace.s2,
-                    runSpacing: LgSpace.s2,
-                    children: [
-                      LgButton(
-                        label: l10n.accountSignOut,
-                        kind: LgButtonKind.dangerSolid,
-                        onPressed: _signOut,
-                      ),
-                      LgButton(
-                        label: l10n.homeCancel,
-                        onPressed: () => setState(() => _confirming = false),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
+            return LgAccountConfirm(
+              title: l10n.accountSignOutTitle,
+              body: l10n.accountSignOutBody,
+              onEscape: _cancel,
+              actions: [
+                LgDialogAction(label: l10n.homeCancel, onPressed: _cancel),
+                LgDialogAction(
+                  label: l10n.accountSignOut,
+                  kind: LgButtonKind.dangerSolid,
+                  isDefault: true,
+                  onPressed: _signOut,
+                ),
+              ],
             );
           }
-          return _AccountButton(
-            user: user,
-            menuLabel: l10n.accountMenu,
-            items: [
-              LgMenuItem(label: '@${user.name}', onPressed: null),
+          final name = user.displayNameOrName;
+          return LgAccountArea.signedIn(
+            initial: accountLetter(name),
+            name: name,
+            handle: '@${user.name}',
+            semanticLabel: '${l10n.accountMenu} $name @${user.name}',
+            menuItems: [
+              LgAccountMenuInfo(
+                label: l10n.accountInfo,
+                handle: '@${user.name}',
+              ),
               LgMenuItem(
                 label: l10n.accountSignOut,
                 icon: LgIcons.logout,
@@ -135,54 +121,6 @@ class _AccountAreaState extends State<_AccountArea> {
             ],
           );
         },
-      ),
-    );
-  }
-}
-
-/// The avatar and the display name; pressing it opens the account menu.
-class _AccountButton extends StatelessWidget {
-  const _AccountButton({
-    required this.user,
-    required this.menuLabel,
-    required this.items,
-  });
-
-  final AccountUser user;
-  final String menuLabel;
-  final List<Widget> items;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = LgTokens.of(context);
-    final c = t.colors;
-    final name = user.displayNameOrName;
-    return LgMenuAnchor(
-      items: items,
-      builder: (context, controller) => LgPressable(
-        semanticLabel: '$menuLabel $name',
-        onPressed: () =>
-            controller.isOpen ? controller.close() : controller.open(),
-        builder: (context, states) => Row(
-          children: [
-            CircleAvatar(
-              radius: 14,
-              backgroundColor: c.surface2,
-              child: Text(
-                accountLetter(name),
-                style: t.textM.copyWith(color: c.text),
-              ),
-            ),
-            const SizedBox(width: LgSpace.s2),
-            Expanded(
-              child: Text(
-                name,
-                overflow: TextOverflow.ellipsis,
-                style: t.textM,
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -262,60 +200,34 @@ class _LoginDialogState extends State<_LoginDialog> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final t = LgTokens.of(context);
-    return LgConfirmDialog(
-      title: l10n.loginTitle,
-      actions: [
-        LgDialogAction(
-          label: l10n.homeCancel,
-          onPressed: () => widget.close(false),
-        ),
-        LgDialogAction(
-          label: _busy ? l10n.loginBusy : l10n.loginSubmit,
-          kind: LgButtonKind.primary,
-          onPressed: _busy ? null : () => _submit(l10n),
-        ),
-      ],
-      children: [
-        LgTextField(
-          controller: _username,
-          placeholder: l10n.loginUsername,
-          semanticLabel: l10n.loginUsername,
-          errorText: _usernameError,
-          enabled: !_busy,
-          autofocus: _username.text.isEmpty,
-          onChanged: (_) {
-            if (_usernameError != null) setState(() => _usernameError = null);
-          },
-          onSubmitted: (_) => _submit(l10n),
-        ),
-        const SizedBox(height: LgSpace.s3),
-        LgTextField(
-          controller: _password,
-          placeholder: l10n.loginPassword,
-          semanticLabel: l10n.loginPassword,
-          errorText: _passwordError,
-          obscureText: true,
-          enabled: !_busy,
-          autofocus: _username.text.isNotEmpty,
-          onChanged: (_) {
-            if (_passwordError != null) setState(() => _passwordError = null);
-          },
-          onSubmitted: (_) => _submit(l10n),
-        ),
-        if (_optionsFailed) ...[
-          const SizedBox(height: LgSpace.s3),
-          Text(
-            l10n.loginOptionsFailed,
-            style: t.textS.copyWith(color: t.colors.text2),
-          ),
-          LgButton(
-            label: l10n.loginRetry,
-            kind: LgButtonKind.text,
-            onPressed: _checkOptions,
-          ),
-        ],
-      ],
+    return LgLoginDialog(
+      labels: LgLoginDialogLabels(
+        title: l10n.loginTitle,
+        usernameLabel: l10n.loginUsername,
+        usernamePlaceholder: l10n.loginUsernamePlaceholder,
+        passwordLabel: l10n.loginPassword,
+        passwordPlaceholder: l10n.loginPasswordPlaceholder,
+        showPassword: l10n.connShowPassword,
+        hidePassword: l10n.connHidePassword,
+        cancel: l10n.homeCancel,
+        submit: l10n.loginSubmit,
+        busySubmit: l10n.loginBusy,
+        retry: l10n.loginRetry,
+      ),
+      usernameController: _username,
+      passwordController: _password,
+      usernameError: _usernameError,
+      passwordError: _passwordError,
+      loadError: _optionsFailed ? l10n.loginOptionsFailed : null,
+      onRetry: _checkOptions,
+      busy: _busy,
+      onChanged: (_) {
+        if (_usernameError != null || _passwordError != null) {
+          setState(() => _usernameError = _passwordError = null);
+        }
+      },
+      onSubmit: () => _submit(l10n),
+      onCancel: () => widget.close(false),
     );
   }
 }

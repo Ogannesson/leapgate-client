@@ -764,7 +764,10 @@
   "groupLoadFailed": "Can't load team devices. The server returned: {reason}.",
   "@groupLoadFailed": {"placeholders": {"reason": {"type": "String"}}},
   "groupPeople": "People",
-  "groupSearch": "Search",
-  "groupMe": "Me",
-  "groupClearPerson": "Show everyone's devices"
+  "groupSearch": "Search people",
+  "groupMe": "(me)",
+  "groupClearPerson": "Clear filter",
+  "accountInfo": "Account info",
+  "loginUsernamePlaceholder": "Enter username",
+  "loginPasswordPlaceholder": "Enter password"
 }
