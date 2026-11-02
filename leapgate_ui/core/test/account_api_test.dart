@@ -74,6 +74,15 @@ void main() {
     expect(parseApiResult('{}', (m) => m).ok, isTrue);
   });
 
+  test('an answer of the wrong shape is a server error, not a throw', () {
+    final error = parseApiResult(
+      '{"users":[{"name":5}],"peers":[]}',
+      GroupData.fromJson,
+    ).error;
+    expect(error?.kind, ApiErrorKind.server);
+    expect(error?.text, 'HTTP 200');
+  });
+
   test(
       'a team device takes its owner and platform as upstream PeerPayload.toPeer',
       () {

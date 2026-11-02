@@ -306,6 +306,25 @@ void main() {
     ]);
   });
 
+  test('Rust\'s event after a login with a typed password reaches the personal book',
+      () async {
+    _serve();
+    await ab.pull();
+    await appCore.events.dispatch({
+      'name': 'sync_peer_hash_password_to_personal_ab',
+      'id': '123456789',
+      'hash': 'h',
+    });
+    expect(api.callsTo('updatePeer'), [
+      [
+        'g-me',
+        '123456789',
+        {'hash': 'h'}
+      ],
+    ]);
+    expect(ab.peers.first.hash, 'h');
+  });
+
   test('connecting from a shared book takes its stored password', () async {
     _serve(shared: [_home]);
     api.bookResults['g-home'] = ApiResult.ok(AbBookData(

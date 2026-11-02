@@ -60,7 +60,8 @@ class ApiResult<T> {
 }
 
 /// An export's JSON: `{"error":…,"text":…}` is an error, anything else goes to [ok]. A kind this
-/// UI does not know counts as `server`.
+/// UI does not know counts as `server`, and so does an answer of the wrong shape: a field of
+/// another type would otherwise throw out of the pull and leave it running for good.
 ApiResult<T> parseApiResult<T>(
     String json, T Function(Map<String, dynamic> m) ok) {
   final m = jsonDecode(json) as Map<String, dynamic>;
@@ -69,7 +70,11 @@ ApiResult<T> parseApiResult<T>(
     return ApiResult.error(ApiError(
         _errorKinds[error] ?? ApiErrorKind.server, m['text'] as String? ?? ''));
   }
-  return ApiResult.ok(ok(m));
+  try {
+    return ApiResult.ok(ok(m));
+  } on TypeError {
+    return const ApiResult.error(ApiError(ApiErrorKind.server, 'HTTP 200'));
+  }
 }
 
 /// A signed-in user, or a person in the team devices: the server's user object (upstream
