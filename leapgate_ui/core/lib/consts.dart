@@ -478,3 +478,13 @@ const String kOptionEnablePermChangeInAcceptWindow =
 const String kOptionHideElevateButtonInAcceptWindow =
     "hide-elevate-button-in-accept-window";
 const String kOptionAllowRemoteCmModification = "allow-remote-cm-modification";
+
+// The address book (M4): upstream's `consts.dart` keys, then those of `models/ab_model.dart`,
+// under their upstream names.
+
+const String kOptionHideAbTagsPanel = "hideAbTagsPanel";
+const String kOptionCurrentAbName = "current-ab-name";
+
+const String syncAbOption = 'sync-ab-with-recent-sessions';
+const String sortAbTagsOption = 'sync-ab-tags';
+const String filterAbTagOption = 'filter-ab-by-intersection';
