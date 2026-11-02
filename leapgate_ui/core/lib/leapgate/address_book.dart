@@ -472,7 +472,10 @@ class AddressBookModel extends ChangeNotifier implements AccountData {
           appCore.account.signedOutByServer();
           return r.error;
         }
-        await _pullBook(book, quiet: true);
+        // Unreachable server: a second request would only wait out another timeout.
+        if (r.error!.kind != ApiErrorKind.network) {
+          await _pullBook(book, quiet: true);
+        }
         return r.error;
       }
       final data = _data[book.guid];
@@ -500,7 +503,9 @@ class AddressBookModel extends ChangeNotifier implements AccountData {
     String note = '',
     List<String> tags = const [],
   }) {
-    final book = current!;
+    final book = current;
+    // Signed out while a confirmation was open: nothing to change any more.
+    if (book == null) return Future.value();
     _syncAll = true;
     final peer = {
       'id': id,
@@ -541,7 +546,9 @@ class AddressBookModel extends ChangeNotifier implements AccountData {
   }
 
   Future<ApiError?> setTags(List<String> ids, List<String> tags) {
-    final book = current!;
+    final book = current;
+    // Signed out while a confirmation was open: nothing to change any more.
+    if (book == null) return Future.value();
     return _writeEach(
         book,
         ids,
@@ -551,7 +558,9 @@ class AddressBookModel extends ChangeNotifier implements AccountData {
 
   /// "Rename" in the address book: the book's alias, and the device's own as upstream does.
   Future<ApiError?> setAlias(String id, String alias) async {
-    final book = current!;
+    final book = current;
+    // Signed out while a confirmation was open: nothing to change any more.
+    if (book == null) return Future.value();
     final error = await _write(
         book,
         () => _api.updatePeer(book.guid, id, {'alias': alias}),
@@ -561,13 +570,17 @@ class AddressBookModel extends ChangeNotifier implements AccountData {
   }
 
   Future<ApiError?> setNote(String id, String note) {
-    final book = current!;
+    final book = current;
+    // Signed out while a confirmation was open: nothing to change any more.
+    if (book == null) return Future.value();
     return _write(book, () => _api.updatePeer(book.guid, id, {'note': note}),
         (d) => _peer(d, id)?.note = note);
   }
 
   Future<ApiError?> setSharedPassword(String id, String password) {
-    final book = current!;
+    final book = current;
+    // Signed out while a confirmation was open: nothing to change any more.
+    if (book == null) return Future.value();
     return _write(
         book,
         () => _api.updatePeer(book.guid, id, {'password': password}),
@@ -598,7 +611,9 @@ class AddressBookModel extends ChangeNotifier implements AccountData {
   }
 
   Future<ApiError?> deletePeers(List<String> ids) {
-    final book = current!;
+    final book = current;
+    // Signed out while a confirmation was open: nothing to change any more.
+    if (book == null) return Future.value();
     return _write(book, () => _api.deletePeers(book.guid, ids),
         (d) => d.peers.removeWhere((p) => ids.contains(p.id)));
   }
@@ -606,7 +621,9 @@ class AddressBookModel extends ChangeNotifier implements AccountData {
   /// "Add tag": [names] one by one with upstream's colours (`str2color2`), stopping at the first
   /// error.
   Future<ApiError?> addTags(List<String> names) {
-    final book = current!;
+    final book = current;
+    // Signed out while a confirmation was open: nothing to change any more.
+    if (book == null) return Future.value();
     final colors = [for (final t in _current?.tags ?? const <AbTag>[]) t.color];
     final tags = [
       for (final name in names)
@@ -620,7 +637,9 @@ class AddressBookModel extends ChangeNotifier implements AccountData {
   }
 
   Future<ApiError?> renameTag(String oldName, String newName) {
-    final book = current!;
+    final book = current;
+    // Signed out while a confirmation was open: nothing to change any more.
+    if (book == null) return Future.value();
     return _write(book, () => _api.renameTag(book.guid, oldName, newName), (d) {
       d.tags = [
         for (final t in d.tags) t.name == oldName ? AbTag(newName, t.color) : t,
@@ -633,7 +652,9 @@ class AddressBookModel extends ChangeNotifier implements AccountData {
   }
 
   Future<ApiError?> setTagColor(String name, int color) {
-    final book = current!;
+    final book = current;
+    // Signed out while a confirmation was open: nothing to change any more.
+    if (book == null) return Future.value();
     return _write(book, () => _api.setTagColor(book.guid, name, color), (d) {
       d.tags = [
         for (final t in d.tags) t.name == name ? AbTag(name, color) : t
@@ -642,7 +663,9 @@ class AddressBookModel extends ChangeNotifier implements AccountData {
   }
 
   Future<ApiError?> deleteTag(String name) {
-    final book = current!;
+    final book = current;
+    // Signed out while a confirmation was open: nothing to change any more.
+    if (book == null) return Future.value();
     return _write(book, () => _api.deleteTags(book.guid, [name]), (d) {
       d.tags.removeWhere((t) => t.name == name);
       for (final p in d.peers) {

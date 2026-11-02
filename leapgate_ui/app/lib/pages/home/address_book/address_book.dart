@@ -317,6 +317,7 @@ Widget? abPeerMenuItem(
         )) {
           return;
         }
+        if (ab.current == null) return; // Signed out meanwhile.
         final e = await ab.deletePeers([peer.id]);
         e == null ? toast('abToastDeleted') : _failed(e);
       }),
@@ -325,7 +326,7 @@ Widget? abPeerMenuItem(
       label: l10n.peerMenuRename,
       onPressed: unlessGreyed(() async {
         final alias = await askAlias(overlays, l10n, alias: peer.alias);
-        if (alias == null || alias == peer.alias) return;
+        if (alias == null || alias == peer.alias || ab.current == null) return;
         final e = await ab.setAlias(peer.id, alias);
         e == null ? toast('peerMenuToastRenamed') : _failed(e);
       }),
@@ -427,6 +428,7 @@ List<LgSelectionAction> abSelectionActions(
                 )) {
                   return;
                 }
+                if (ab.current == null) return; // Signed out meanwhile.
                 final e = await ab.deletePeers(ids.toList());
                 e == null ? done('abToastDeleted') : _failed(e);
               }

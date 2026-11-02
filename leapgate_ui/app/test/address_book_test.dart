@@ -18,6 +18,7 @@ import 'package:leapgate_ui/shell/tab_overlays.dart';
 import 'package:leapgate_ui/theme/lg_theme.dart';
 import 'package:leapgate_ui/theme/lg_tokens.dart';
 import 'package:leapgate_ui/widgets/lg_device.dart';
+import 'package:leapgate_ui/widgets/lg_feedback.dart';
 import 'package:leapgate_ui/widgets/lg_menu.dart';
 
 import '../../core/test/account_fakes.dart';
@@ -391,10 +392,24 @@ void _categoryTests() {
   testWidgets(
     'the server refusing the sign-in check: the whole list says so, "重试" checks again',
     (tester) async {
+      // What the cache showed before the check failed is not listed under a banner.
+      api.abCacheResult = [
+        {
+          'guid': 'g-me',
+          'name': 'My address book',
+          'peers': [
+            {'id': '123456789'},
+          ],
+          'tags': const [],
+          'tag_colors': '{}',
+        },
+      ];
+      await appCore.addressBook.loadCache();
       _signedIn.failed = const ApiError(ApiErrorKind.server, '服务暂时不可用');
       await _pump(tester);
       expect(find.text('无法加载地址簿。服务器返回：服务暂时不可用。'), findsOneWidget);
       expect(find.text('重试'), findsOneWidget);
+      expect(find.text('device 123456789'), findsNothing);
     },
   );
 
@@ -490,6 +505,8 @@ void _categoryTests() {
     await _settle(tester);
     expect(tester.takeException(), isNull);
     expect(find.text('添加到：我的地址簿'), findsNothing);
+    // Gone altogether, not an empty layer still covering the home page.
+    expect(find.byType(LgDialogScrim), findsNothing);
     expect(find.text('登录后可查看地址簿'), findsOneWidget);
   });
 

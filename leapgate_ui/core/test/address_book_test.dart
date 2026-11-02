@@ -380,6 +380,7 @@ void main() {
           .complete(const ApiResult.ok(AbBookData(peers: [], tags: [])));
       await pulled;
       expect(ab.books, isEmpty);
+      expect(ab.loaded, isFalse);
     });
 
     test('a change answered after another user signed in', () async {
@@ -427,6 +428,10 @@ void main() {
     api.writeResult = const ApiResult.error(ApiError(ApiErrorKind.notFound));
     final error = await ab.setNote('123456789', 'x');
     expect(error?.kind, ApiErrorKind.notFound);
+    expect(api.callsTo('book').length, before + 1);
+    // Not when the server can't be reached: it would only time out again.
+    api.writeResult = const ApiResult.error(ApiError(ApiErrorKind.network));
+    await ab.setNote('123456789', 'x');
     expect(api.callsTo('book').length, before + 1);
   });
 
