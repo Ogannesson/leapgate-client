@@ -1295,7 +1295,11 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 1. 合 R：重新生成块 2 的桥；`RustAccountApi` 的方法体换成 `lgBind` 调用加 `parseApiResult`；`core/test/fakes.dart` 的 `FakeLeapgate` 补上新导出（测试走 `FakeAccountApi`，补的可以直接抛错）。
 2. 换上 designer 的组件；`PeerCard`、`PeerTableRow` 在地址簿和同组设备里传 `note`，表头加备注列。
 3. 合 A、B：两个 ARB 文件的末尾合并；`peer_views.dart` 里 `peerMenu` 的调用参数以 B 为准。
-4. 整体审查，再按 07 §5 验收。
+4. `shell/toast_view.dart` 的 `toastText` 补 B 的两个轻提示 `abToastAdded`、`abToastDeleted`（不补会显示键名）。
+5. 整体审查时看一眼 B 的 `pull()` 用 `_pulling` 判断"中途被复位"：退出后马上重新登录会把 `_pulling` 重新置真，旧那轮拉取的后半段会接着跑（H1 审查交回的提示）。
+6. 整体审查，再按 07 §5 验收。
+
+2026-11-02 主会话定的（B 交回的问题）：共享簿的默认共享密码（上游设备自己没存密码时退回用簿资料里的默认密码）不做，Leapgate 服务端的簿资料 `info` 恒为空，写进已知限制；从地址簿连接时把地址簿别名抄到本机记录（上游行为）不做，写进已知限制；网络错误时整块显示"无法连接服务器"盖住缓存，照 01 和上游；同组设备菜单照 01 没有"始终经中继连接""创建桌面快捷方式"，地址簿分类菜单照 01 有收藏项，删除标签照上游不确认。
 
 **已知限制和与上游的不同**
 
