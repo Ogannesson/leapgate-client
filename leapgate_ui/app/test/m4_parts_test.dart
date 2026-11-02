@@ -14,6 +14,7 @@ import 'package:leapgate_ui/widgets/lg_device.dart';
 import 'package:leapgate_ui/widgets/lg_device_card.dart';
 import 'package:leapgate_ui/widgets/lg_device_parts.dart';
 import 'package:leapgate_ui/widgets/lg_feedback.dart';
+import 'package:leapgate_ui/widgets/lg_menu.dart';
 import 'package:leapgate_ui/widgets/lg_status.dart';
 
 import 'helpers.dart';
@@ -390,6 +391,63 @@ void main() {
         lgDeviceLabel(name: 'a', statusLabel: '在线', id: '1', note: 'n'),
         'a, 在线, 1, n',
       );
+    });
+  });
+
+  group('menus of a read-only book', () {
+    testWidgets('the note of a group title ends at the right edge of the row', (
+      tester,
+    ) async {
+      await pumpLg(
+        tester,
+        const LgMenuPanel(
+          width: 300,
+          items: [LgMenuGroup('管理', note: '此地址簿为只读')],
+        ),
+      );
+      final row = tester.getRect(find.byType(LgMenuGroup));
+      expect(tester.getTopRight(find.text('此地址簿为只读')).dx, row.right - 16);
+      expect(tester.getTopLeft(find.text('管理')).dx, row.left + 16);
+    });
+
+    testWidgets('a long note leaves room for the title', (tester) async {
+      await pumpLg(
+        tester,
+        const LgMenuPanel(
+          width: 300,
+          items: [
+            LgMenuGroup(
+              'Manage',
+              note: 'This address book is read-only for you',
+            ),
+          ],
+        ),
+      );
+      expect(tester.takeException(), isNull);
+      expect(find.text('Manage'), findsOneWidget);
+    });
+
+    testWidgets('a destructive row that cannot be used is plain and grey', (
+      tester,
+    ) async {
+      FontWeight? weight(String label) => DefaultTextStyle.of(
+        tester.element(find.text(label)),
+      ).style.fontWeight;
+      await pumpLg(
+        tester,
+        LgMenuPanel(
+          items: [
+            LgMenuItem(label: '从地址簿中删除', danger: true, onPressed: () {}),
+            const LgMenuItem(
+              label: '从另一本地址簿中删除',
+              danger: true,
+              onPressed: null,
+            ),
+          ],
+        ),
+      );
+      expect(weight('从地址簿中删除'), FontWeight.w700);
+      expect(weight('从另一本地址簿中删除'), FontWeight.w400);
     });
   });
 }

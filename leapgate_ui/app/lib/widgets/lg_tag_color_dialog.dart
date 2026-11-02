@@ -216,7 +216,8 @@ class _LgTagColorDialogState extends State<LgTagColorDialog> {
         LgFormField(
           label: l.colorLabel,
           child: Padding(
-            padding: const EdgeInsets.only(top: LgSpace.s1, bottom: LgSpace.s1),
+            // `.tcsw`: 8 above and 4 inside, 4 under (room for the ring).
+            padding: const EdgeInsets.only(top: LgSpace.s2, bottom: LgSpace.s1),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -231,7 +232,7 @@ class _LgTagColorDialogState extends State<LgTagColorDialog> {
           ),
         ),
         Padding(
-          padding: const EdgeInsets.only(top: LgSpace.s2),
+          padding: const EdgeInsets.only(top: LgSpace.s3),
           child: Align(
             alignment: Alignment.centerLeft,
             child: _CustomToggle(

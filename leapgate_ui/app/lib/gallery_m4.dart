@@ -205,7 +205,9 @@ Widget _m4BookPage(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
       _listToolbar(selected: 3, sort: true, multi: false, refresh: true),
-      const SizedBox(height: LgSpace.s4),
+      // `.bk` 20 under the tabs, `.tgf` 12 under the book row, the cards 20
+      // under the tags; the tag bar has 3 px of its own above and under.
+      const SizedBox(height: LgSpace.s5),
       ?above,
       LgBookSwitcher(
         books: _m4Books,
@@ -221,7 +223,7 @@ Widget _m4BookPage(
           items: _m4MoreMenu(),
         ),
       ),
-      const SizedBox(height: LgSpace.s2),
+      const SizedBox(height: LgSpace.s3 - 3),
       LgTagFilterBar(
         items: _m4TagItems(context, on: tagsOn),
         onToggle: (_) {},
@@ -229,7 +231,7 @@ Widget _m4BookPage(
         noMenu: const {'none'},
         semanticLabel: '标签筛选',
       ),
-      const SizedBox(height: LgSpace.s2),
+      const SizedBox(height: LgSpace.s5 - 3),
       LgDeviceCardGrid(
         semanticLabel: '地址簿中的设备',
         children: [

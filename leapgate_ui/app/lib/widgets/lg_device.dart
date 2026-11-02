@@ -998,7 +998,7 @@ class LgEmptyState extends StatelessWidget {
             ),
           ),
           if (actionLabel != null) ...[
-            const SizedBox(height: LgSpace.s4),
+            const SizedBox(height: LgSpace.s3),
             LgButton(
               label: actionLabel!,
               icon: actionIcon,

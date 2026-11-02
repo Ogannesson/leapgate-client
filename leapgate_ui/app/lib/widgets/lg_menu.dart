@@ -402,7 +402,9 @@ class LgMenuItem extends StatelessWidget {
       style: _itemStyle(
         t,
         danger: danger,
-        bold: danger || checked == true,
+        // A destructive row that cannot be used (a read-only book) is grey and
+        // plain like any other greyed row.
+        bold: (danger && onPressed != null) || checked == true,
         tall: description != null,
         indent: indent,
       ),
@@ -502,28 +504,36 @@ class LgMenuGroup extends StatelessWidget {
       ),
       child: Semantics(
         header: true,
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: style,
-              ),
-            ),
-            if (note != null) ...[
-              const SizedBox(width: LgSpace.s3),
-              Flexible(
+        // The note is the last thing in the row, at its right edge (`.mg.why`):
+        // as wide as it is, up to two thirds of the row, the title has the rest.
+        child: LayoutBuilder(
+          builder: (context, constraints) => Row(
+            children: [
+              Expanded(
                 child: Text(
-                  note!,
+                  title,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: style.copyWith(fontWeight: FontWeight.w400),
+                  style: style,
                 ),
               ),
+              if (note != null) ...[
+                const SizedBox(width: LgSpace.s3),
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: constraints.maxWidth * 2 / 3,
+                  ),
+                  child: Text(
+                    note!,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.end,
+                    style: style.copyWith(fontWeight: FontWeight.w400),
+                  ),
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );
