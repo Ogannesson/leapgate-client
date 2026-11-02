@@ -667,9 +667,9 @@
   "groupRetry": "重试",
   "groupLoadFailed": "无法加载同组设备。服务器返回：{reason}。",
   "groupPeople": "人员",
-  "groupSearch": "搜索",
-  "groupMe": "我",
-  "groupClearPerson": "显示所有人的设备",
+  "groupSearch": "搜索人员",
+  "groupMe": "（我）",
+  "groupClearPerson": "取消筛选",
   "abIdPlaceholder": "输入设备 ID",
   "abAliasPlaceholder": "输入别名",
   "abPasswordPlaceholder": "输入密码",
@@ -677,5 +677,8 @@
   "abTagFilter": "标签筛选",
   "abTagColorBrightness": "明度",
   "abTagColorWheel": "色轮",
-  "abSaving": "正在保存…"
+  "abSaving": "正在保存…",
+  "accountInfo": "账号信息",
+  "loginUsernamePlaceholder": "输入用户名",
+  "loginPasswordPlaceholder": "输入密码"
 }

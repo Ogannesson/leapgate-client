@@ -204,8 +204,12 @@ class _SideColumn extends StatelessWidget {
           borderRadius: BorderRadius.circular(LgRadius.r20),
         ),
         clipBehavior: Clip.antiAlias,
-        // The whole column scrolls when the window is shorter than its content.
-        child: SingleChildScrollView(
+        // The account area sits at the bottom (01 P1 block D); the rest of the column scrolls
+        // when the window is shorter than its content. Not re-indented, to keep the lines above.
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+        Expanded(child: SingleChildScrollView(
           padding: const EdgeInsets.all(LgSpace.s4),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -322,10 +326,12 @@ class _SideColumn extends StatelessWidget {
                   onPressed: () => onSection(s),
                 ),
               ],
-              // 01 P1 block D (M4, coder A; `LEAPGATE.md` §10.11).
-              accountArea(context, overlays),
             ],
           ),
+        )),
+        // 01 P1 block D (M4, coder A; `LEAPGATE.md` §10.11).
+        accountArea(context, overlays),
+          ],
         ),
       ),
     );
