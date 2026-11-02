@@ -22,13 +22,23 @@ import 'lg_form_dialog.dart';
 import 'lg_pressable.dart';
 import 'lg_text_field.dart';
 
-/// The ready colours, in the order of the row: the seven identity colours of the
-/// light theme and a slate grey. They are fixed numbers, not the theme's: a tag
-/// is saved with its colour, and the same tag must be the same colour whichever
-/// theme the next person looks at it in.
-final List<Color> lgTagPresetColors = [
-  for (final k in LgColors.light.identity) k.solid,
-  LgColors.light.text2,
+/// The ready colours, in the order of the row (`.tcsw` in A-P1.html): the three
+/// tag colours of the mockup (`--lg-tag-home`, `--lg-tag-work`,
+/// `--lg-tag-common`, light theme), four identity colours (`--lg-k2-s` to
+/// `--lg-k5-s`) and a slate grey (`--lg-text2`). They are fixed numbers, not the
+/// theme's: a tag is saved with its colour, and the same tag must be the same
+/// colour whichever theme the next person looks at it in. The names a screen
+/// reader says for them are [LgTagColorDialogLabels.presetNames], in this order:
+/// 玫红、陶橙、赭黄、苔绿、湖青、蓝、紫、灰.
+const List<Color> lgTagPresetColors = [
+  Color(0xFFC4527D),
+  Color(0xFFBD6E53),
+  Color(0xFFA07E2A),
+  Color(0xFF65873E),
+  Color(0xFF009184),
+  Color(0xFF3F7CB3),
+  Color(0xFF8A6FD1),
+  Color(0xFF475B5D),
 ];
 
 /// The words of the dialog, localised by the caller.
@@ -45,7 +55,14 @@ class LgTagColorDialogLabels {
     required this.cancel,
     required this.save,
     required this.busySave,
+    this.presetNames,
   });
+
+  /// The names of the ready colours for a screen reader and for a script, in
+  /// the order of [lgTagPresetColors] ("玫红", "陶橙", "赭黄", "苔绿", "湖青",
+  /// "蓝", "紫", "灰"): eight, one for each. A caller gives them; a colour
+  /// without a name is read as its `#RRGGBB`.
+  final List<String>? presetNames;
 
   /// "修改标签颜色".
   final String title;
@@ -90,6 +107,7 @@ class LgTagColorDialog extends StatefulWidget {
     this.busy = false,
     this.error,
     this.startCustom = false,
+    this.startColor,
     this.width = 440,
   });
 
@@ -104,6 +122,10 @@ class LgTagColorDialog extends StatefulWidget {
 
   /// The colour the tag has now; "保存" stays grey until another one is picked.
   final Color initialColor;
+
+  /// The colour the picker opens on, when it is not the tag's own (the gallery
+  /// shows a colour already picked this way). Null is [initialColor].
+  final Color? startColor;
 
   /// "保存" was pressed: the colour as a number, `0xFFRRGGBB`.
   final ValueChanged<int> onSave;
@@ -140,8 +162,9 @@ class _LgTagColorDialogState extends State<LgTagColorDialog> {
   @override
   void initState() {
     super.initState();
-    _hsv = HSVColor.fromColor(widget.initialColor);
-    _hex = TextEditingController(text: _hexOf(widget.initialColor));
+    final start = widget.startColor ?? widget.initialColor;
+    _hsv = HSVColor.fromColor(start);
+    _hex = TextEditingController(text: _hexOf(start));
     _custom = widget.startCustom;
   }
 
@@ -221,9 +244,10 @@ class _LgTagColorDialogState extends State<LgTagColorDialog> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                for (final preset in lgTagPresetColors)
+                for (final (i, preset) in lgTagPresetColors.indexed)
                   _Swatch(
                     color: preset,
+                    name: l.presetNames?.elementAtOrNull(i),
                     on: preset.toARGB32() == color.toARGB32(),
                     onPressed: on ? () => _setColor(preset) : null,
                   ),
@@ -371,11 +395,15 @@ class _Preview extends StatelessWidget {
 class _Swatch extends StatelessWidget {
   const _Swatch({
     required this.color,
+    required this.name,
     required this.on,
     required this.onPressed,
   });
 
   final Color color;
+
+  /// What a reader calls it; its `#RRGGBB` when the caller gave no names.
+  final String? name;
   final bool on;
   final VoidCallback? onPressed;
 
@@ -384,10 +412,9 @@ class _Swatch extends StatelessWidget {
     final t = LgTokens.of(context);
     final c = t.colors;
     final radius = BorderRadius.circular(LgRadius.r10);
-    final hex = _LgTagColorDialogState._hexOf(color);
     return LgPressable(
       onPressed: onPressed,
-      semanticLabel: hex,
+      semanticLabel: name ?? _LgTagColorDialogState._hexOf(color),
       selected: on,
       builder: (context, states) {
         final overlay = lgStateOverlay(c, states);
@@ -465,7 +492,7 @@ class _CustomToggle extends StatelessWidget {
     return LgPressable(
       onPressed: onPressed,
       semanticLabel: label,
-      toggled: open,
+      expanded: open,
       builder: (context, states) => LgFocusRing(
         show: states.contains(WidgetState.focused),
         radius: radius,

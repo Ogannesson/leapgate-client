@@ -38,6 +38,7 @@ class LgPressable extends StatefulWidget {
     this.semanticLabel,
     this.selected,
     this.toggled,
+    this.expanded,
   });
 
   final VoidCallback? onPressed;
@@ -56,6 +57,11 @@ class LgPressable extends StatefulWidget {
   final String? semanticLabel;
   final bool? selected;
   final bool? toggled;
+
+  /// For a control that opens something (a drop-down, a menu, a folded part of
+  /// a dialog): whether it is open now. A reader says "expanded" or
+  /// "collapsed", not "on" or "off".
+  final bool? expanded;
 
   @override
   State<LgPressable> createState() => _LgPressableState();
@@ -133,6 +139,7 @@ class _LgPressableState extends State<LgPressable> {
           label: widget.semanticLabel,
           selected: widget.selected,
           toggled: widget.toggled,
+          expanded: widget.expanded,
           child: widget.builder(context, states),
         ),
       ),

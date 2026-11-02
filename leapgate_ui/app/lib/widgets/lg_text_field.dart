@@ -22,6 +22,28 @@ class LgDialogFields extends InheritedWidget {
   bool updateShouldNotify(LgDialogFields old) => false;
 }
 
+/// The form field (`LgFormField`) a field stands in: its visible label is the
+/// field's name unless the field is given one of its own, and "required" is
+/// said by the field's semantics too.
+class LgFormFieldInfo extends InheritedWidget {
+  const LgFormFieldInfo({
+    super.key,
+    required this.label,
+    this.isRequired = false,
+    required super.child,
+  });
+
+  final String label;
+  final bool isRequired;
+
+  static LgFormFieldInfo? maybeOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<LgFormFieldInfo>();
+
+  @override
+  bool updateShouldNotify(LgFormFieldInfo old) =>
+      old.label != label || old.isRequired != isRequired;
+}
+
 /// Input field (`.field` in A-基础.html): `--lg-h-main` high, 1.5 px inset
 /// border; 2 px accent when focused, 2 px error with [errorText], which is
 /// shown under the field (password wrong, 01 §4.3).
@@ -127,6 +149,8 @@ class _LgTextFieldState extends State<LgTextField> {
       border = Border.all(color: c.borderStrong, width: 1.5);
     }
     final base = widget.dense ? t.textM : t.text;
+    final form = LgFormFieldInfo.maybeOf(context);
+    final named = widget.semanticLabel != null || form != null;
     final flat = !widget.enabled && LgDialogFields.of(context);
     final ink = flat ? c.text2 : c.text;
     final textStyle = widget.obscureText
@@ -151,30 +175,53 @@ class _LgTextFieldState extends State<LgTextField> {
             widget.leading!,
             const SizedBox(width: LgSpace.s3),
           ],
+          // One semantics node for the input itself, so the buttons at its
+          // ends (show password, clear) keep names of their own. Its name is
+          // the label (the field's own, else that of the form field it stands
+          // in, else the placeholder) and the error text; the placeholder is
+          // its hint, not part of the name.
           Expanded(
-            child: TextField(
-              controller: widget.controller,
-              focusNode: _node,
-              enabled: widget.enabled,
-              obscureText: widget.obscureText,
-              obscuringCharacter: '•',
-              autofocus: widget.autofocus,
-              onChanged: widget.onChanged,
-              onSubmitted: widget.onSubmitted,
-              onEditingComplete: widget.onEditingComplete,
-              style: textStyle,
-              cursorColor: c.accent,
-              cursorWidth: 2,
-              maxLines: 1,
-              inputFormatters: [
-                if (widget.maxLength != null)
-                  LengthLimitingTextInputFormatter(widget.maxLength),
-              ],
-              decoration: InputDecoration.collapsed(
-                hintText: widget.placeholder,
-                hintStyle: base.copyWith(
-                  color: c.text2,
-                  overflow: TextOverflow.ellipsis,
+            child: MergeSemantics(
+              child: Semantics(
+                label: _name(form, error),
+                hint: named ? widget.placeholder : null,
+                isRequired: form?.isRequired == true ? true : null,
+                validationResult: error
+                    ? SemanticsValidationResult.invalid
+                    : SemanticsValidationResult.none,
+                child: TextField(
+                  controller: widget.controller,
+                  focusNode: _node,
+                  enabled: widget.enabled,
+                  obscureText: widget.obscureText,
+                  obscuringCharacter: '•',
+                  autofocus: widget.autofocus,
+                  onChanged: widget.onChanged,
+                  onSubmitted: widget.onSubmitted,
+                  onEditingComplete: widget.onEditingComplete,
+                  style: textStyle,
+                  cursorColor: c.accent,
+                  cursorWidth: 2,
+                  maxLines: 1,
+                  inputFormatters: [
+                    if (widget.maxLength != null)
+                      LengthLimitingTextInputFormatter(widget.maxLength),
+                  ],
+                  // The placeholder is drawn as a widget, not as `hintText`:
+                  // the text of `hintText` would join the name of the field.
+                  decoration: InputDecoration.collapsed(
+                    hintText: null,
+                    hint: widget.placeholder == null
+                        ? null
+                        : ExcludeSemantics(
+                            child: Text(
+                              widget.placeholder!,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: base.copyWith(color: c.text2),
+                            ),
+                          ),
+                  ),
                 ),
               ),
             ),
@@ -186,16 +233,18 @@ class _LgTextFieldState extends State<LgTextField> {
         ],
       ),
     );
-    // One semantics node: the label and the error text belong to the field.
-    return MergeSemantics(
-      child: Semantics(
-        label: widget.semanticLabel,
-        validationResult: error
-            ? SemanticsValidationResult.invalid
-            : SemanticsValidationResult.none,
-        child: error ? _withError(field) : field,
-      ),
-    );
+    final box = error ? _withError(field) : field;
+    if (widget.leading == null && widget.trailing == null) return box;
+    // The buttons at the ends are nodes beside the input's, in a group of
+    // their own, so that they do not take over the node of what stands around
+    // the field.
+    return Semantics(container: true, explicitChildNodes: true, child: box);
+  }
+
+  String? _name(LgFormFieldInfo? form, bool error) {
+    final label = widget.semanticLabel ?? form?.label ?? widget.placeholder;
+    if (!error) return label;
+    return [if (label != null) label, widget.errorText!].join('\n');
   }
 
   Widget _withError(Widget field) {
@@ -205,7 +254,8 @@ class _LgTextFieldState extends State<LgTextField> {
       children: [
         field,
         const SizedBox(height: LgSpace.s2),
-        LgFieldError(widget.errorText!),
+        // Read as part of the field's name (above).
+        ExcludeSemantics(child: LgFieldError(widget.errorText!)),
       ],
     );
   }

@@ -153,7 +153,7 @@ class LgAccountArea extends StatelessWidget {
             onPressed: () =>
                 controller.isOpen ? controller.close() : controller.open(),
             semanticLabel: semanticLabel ?? '$name $handle',
-            toggled: controller.isOpen,
+            expanded: controller.isOpen,
             builder: (context, states) {
               final open =
                   controller.isOpen || states.contains(WidgetState.selected);

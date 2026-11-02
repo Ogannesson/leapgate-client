@@ -160,8 +160,11 @@ class LgFormDialog extends StatelessWidget {
 /// `LgPasswordField`, an `LgTextArea`, a group of tag buttons), and [hint]
 /// under it.
 ///
-/// The label is only seen. Give the field itself the same words as its
-/// `semanticLabel`, so that a screen reader and an automation script find it.
+/// The field in it is named by the label alone (unless it is given a
+/// `semanticLabel` of its own), so that a screen reader and an automation script
+/// find it by what it is called on screen; its placeholder is its hint, and
+/// [required] is said too. The counter and the [hint] under the field are read
+/// as they stand.
 class LgFormField extends StatelessWidget {
   const LgFormField({
     super.key,
@@ -195,12 +198,14 @@ class LgFormField extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
-          ExcludeSemantics(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.baseline,
-              textBaseline: TextBaseline.alphabetic,
-              children: [
-                Expanded(
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Expanded(
+                // The field is named by it (see [LgFormFieldInfo]); read here
+                // it would be said twice.
+                child: ExcludeSemantics(
                   child: Text.rich(
                     TextSpan(
                       children: [
@@ -215,15 +220,15 @@ class LgFormField extends StatelessWidget {
                     style: style,
                   ),
                 ),
-                if (counter != null) ...[
-                  const SizedBox(width: LgSpace.s3),
-                  Text(counter!, style: style),
-                ],
+              ),
+              if (counter != null) ...[
+                const SizedBox(width: LgSpace.s3),
+                Text(counter!, style: style),
               ],
-            ),
+            ],
           ),
           const SizedBox(height: LgSpace.s1),
-          child,
+          LgFormFieldInfo(label: label, isRequired: required, child: child),
           if (hint != null)
             Padding(
               padding: const EdgeInsets.only(top: LgSpace.s1),
@@ -309,9 +314,14 @@ class _LgTextAreaState extends State<LgTextArea> {
         : focused
         ? Border.all(color: c.accent, width: 2)
         : Border.all(color: c.borderStrong, width: 1.5);
+    final form = LgFormFieldInfo.maybeOf(context);
     return MergeSemantics(
       child: Semantics(
-        label: widget.semanticLabel,
+        label: widget.semanticLabel ?? form?.label ?? widget.placeholder,
+        hint: (widget.semanticLabel != null || form != null)
+            ? widget.placeholder
+            : null,
+        isRequired: form?.isRequired == true ? true : null,
         child: Container(
           height: widget.height,
           padding: const EdgeInsets.symmetric(
@@ -342,8 +352,15 @@ class _LgTextAreaState extends State<LgTextArea> {
                 LengthLimitingTextInputFormatter(widget.maxLength),
             ],
             decoration: InputDecoration.collapsed(
-              hintText: widget.placeholder,
-              hintStyle: t.text.copyWith(color: c.text2),
+              hintText: null,
+              hint: widget.placeholder == null
+                  ? null
+                  : ExcludeSemantics(
+                      child: Text(
+                        widget.placeholder!,
+                        style: t.text.copyWith(color: c.text2),
+                      ),
+                    ),
             ),
           ),
         ),

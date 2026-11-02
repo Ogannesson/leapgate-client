@@ -88,13 +88,13 @@ void main() {
       expect(node, findsOneWidget);
       expect(
         tester.getSemantics(node),
-        isSemantics(isButton: true, hasToggledState: true, isToggled: false),
+        isSemantics(isButton: true, hasExpandedState: true, isExpanded: false),
       );
       await tester.tap(node);
       await tester.pumpAndSettle();
       expect(
         tester.getSemantics(find.bySemanticsLabel('账号：张三 @zhangsan')),
-        isSemantics(isButton: true, hasToggledState: true, isToggled: true),
+        isSemantics(isButton: true, hasExpandedState: true, isExpanded: true),
       );
       handle.dispose();
     });

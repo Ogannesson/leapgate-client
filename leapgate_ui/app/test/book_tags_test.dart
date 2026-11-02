@@ -74,13 +74,13 @@ void main() {
       await pumpLg(tester, _switcher([]));
       expect(
         tester.getSemantics(_trigger),
-        isSemantics(isButton: true, hasToggledState: true, isToggled: false),
+        isSemantics(isButton: true, hasExpandedState: true, isExpanded: false),
       );
       await tester.tap(_trigger);
       await tester.pumpAndSettle();
       expect(
         tester.getSemantics(_trigger),
-        isSemantics(isButton: true, hasToggledState: true, isToggled: true),
+        isSemantics(isButton: true, hasExpandedState: true, isExpanded: true),
       );
       for (final t in [
         '我的地址簿',
@@ -218,6 +218,182 @@ void main() {
     });
   });
 
+  group('LgBookSwitcher with many books', () {
+    final many = [
+      for (var i = 1; i <= 20; i++)
+        LgBook(id: 'b$i', name: '地址簿 $i', detail: '可编辑 · 所有者：张三'),
+    ];
+
+    // The switcher at the top or at the bottom of a 800 x 600 window.
+    Widget placed(List<String> calls, {bool bottom = false}) => SizedBox(
+      width: 780,
+      height: 560,
+      child: Align(
+        alignment: bottom ? Alignment.bottomLeft : Alignment.topLeft,
+        child: LgBookSwitcher(
+          books: many,
+          selectedId: 'b1',
+          onSelect: calls.add,
+          searchPlaceholder: '搜索地址簿',
+          noMatchLabel: '未找到匹配的地址簿',
+          hint: '共享地址簿的成员和权限由管理员设置',
+          semanticLabel: '切换地址簿',
+        ),
+      ),
+    );
+
+    Rect panel(WidgetTester tester) => tester.getRect(find.byType(LgBookPanel));
+    Rect window(WidgetTester tester) =>
+        Offset.zero & tester.view.physicalSize / tester.view.devicePixelRatio;
+
+    testWidgets('the panel stays in the window, the books scroll between the '
+        'search field and the line at the end', (tester) async {
+      await pumpLg(tester, placed([]));
+      await tester.tap(find.text('地址簿 1'));
+      await tester.pumpAndSettle();
+      final p = panel(tester);
+      expect(p.bottom, lessThanOrEqualTo(window(tester).bottom));
+      expect(p.height, greaterThan(300));
+      // The last book is beyond the panel until the list is scrolled to it.
+      expect(tester.getRect(find.text('地址簿 20')).top, greaterThan(p.bottom));
+      final search = tester.getRect(find.byType(TextField));
+      final hint = tester.getRect(find.text('共享地址簿的成员和权限由管理员设置'));
+      expect(hint.bottom, lessThanOrEqualTo(p.bottom));
+      // The wheel over the books scrolls them, the field and the line stay.
+      final wheel = TestPointer(1, PointerDeviceKind.mouse);
+      await tester.sendEventToBinding(
+        wheel.hover(tester.getCenter(find.text('地址簿 3'))),
+      );
+      await tester.sendEventToBinding(wheel.scroll(const Offset(0, 4000)));
+      await tester.pumpAndSettle();
+      expect(tester.getRect(find.byType(TextField)), search);
+      expect(tester.getRect(find.text('共享地址簿的成员和权限由管理员设置')).top, hint.top);
+      expect(
+        tester.getRect(find.text('地址簿 20')).bottom,
+        lessThanOrEqualTo(hint.top),
+      );
+    });
+
+    testWidgets('moving down with the keys brings the focused book into '
+        'view, the last one too', (tester) async {
+      final calls = <String>[];
+      await pumpLg(tester, placed(calls));
+      await tester.tap(find.text('地址簿 1'));
+      await tester.pumpAndSettle();
+      for (var i = 0; i < 20; i++) {
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+        await tester.pumpAndSettle();
+      }
+      final p = panel(tester);
+      final last = tester.getRect(find.text('地址簿 20'));
+      expect(last.top, greaterThanOrEqualTo(p.top));
+      expect(last.bottom, lessThanOrEqualTo(p.bottom));
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(calls, ['b20']);
+    });
+
+    testWidgets('searching narrows the list and the panel with it', (
+      tester,
+    ) async {
+      await pumpLg(tester, placed([]));
+      await tester.tap(find.text('地址簿 1'));
+      await tester.pumpAndSettle();
+      final full = panel(tester).height;
+      await tester.enterText(find.byType(TextField), '地址簿 2');
+      await tester.pumpAndSettle();
+      // 2, 20.
+      expect(find.text('地址簿 20'), findsOneWidget);
+      expect(find.text('地址簿 3'), findsNothing);
+      expect(panel(tester).height, lessThan(full));
+    });
+
+    testWidgets('at the bottom of the window it opens above the button', (
+      tester,
+    ) async {
+      await pumpLg(tester, placed([], bottom: true));
+      final button = tester.getRect(find.byType(LgBookSwitcher));
+      await tester.tap(find.text('地址簿 1'));
+      await tester.pumpAndSettle();
+      final p = panel(tester);
+      expect(p.bottom, lessThanOrEqualTo(button.top));
+      expect(p.top, greaterThanOrEqualTo(window(tester).top));
+      // It scrolls there too.
+      expect(tester.getRect(find.text('地址簿 20')).top, greaterThan(p.bottom));
+      for (var i = 0; i < 20; i++) {
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+        await tester.pumpAndSettle();
+      }
+      expect(
+        tester.getRect(find.text('地址簿 20')).bottom,
+        lessThanOrEqualTo(p.bottom),
+      );
+    });
+
+    testWidgets('the window getting smaller shortens the panel', (
+      tester,
+    ) async {
+      await pumpLg(tester, placed([]));
+      await tester.tap(find.text('地址簿 1'));
+      await tester.pumpAndSettle();
+      final before = panel(tester).height;
+      tester.view.physicalSize = const Size(800, 420);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpAndSettle();
+      expect(panel(tester).height, lessThan(before));
+      expect(panel(tester).bottom, lessThanOrEqualTo(420));
+    });
+
+    testWidgets('the mouse over the books does not take the keyboard from '
+        'the search field', (tester) async {
+      await pumpLg(tester, placed([]));
+      await tester.tap(find.text('地址簿 1'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), '地址');
+      await tester.pump();
+      final field = tester.widget<EditableText>(find.byType(EditableText));
+      expect(field.focusNode.hasFocus, isTrue);
+      final mouse = await hover(tester, find.text('地址簿 5'));
+      await mouse.moveTo(tester.getCenter(find.text('地址簿 7')));
+      await tester.pump();
+      expect(field.focusNode.hasFocus, isTrue);
+      // What is typed after it is not lost.
+      await tester.enterText(find.byType(TextField), '地址簿 1');
+      await tester.pump();
+      expect(find.text('地址簿 12'), findsOneWidget);
+      expect(field.focusNode.hasFocus, isTrue);
+    });
+
+    testWidgets('a menu row takes the keyboard on hover by default, and not '
+        'when it is told not to', (tester) async {
+      final node = FocusNode();
+      addTearDown(node.dispose);
+      await pumpLg(
+        tester,
+        LgMenuPanel(
+          items: [
+            TextField(focusNode: node, autofocus: true),
+            LgMenuItem(label: '默认', onPressed: () {}),
+            LgMenuItem(
+              label: '不抢',
+              requestFocusOnHover: false,
+              onPressed: () {},
+            ),
+          ],
+        ),
+      );
+      await tester.pump();
+      expect(node.hasFocus, isTrue);
+      final mouse = await hover(tester, find.text('不抢'));
+      await tester.pump();
+      expect(node.hasFocus, isTrue);
+      await mouse.moveTo(tester.getCenter(find.text('默认')));
+      await tester.pump();
+      expect(node.hasFocus, isFalse);
+    });
+  });
+
   group('LgTagFilterBar', () {
     List<LgTagToggleItem> items({Set<String> on = const {}, int extra = 0}) => [
       LgTagToggleItem(id: 'none', label: '未标记', on: on.contains('none')),
@@ -333,12 +509,127 @@ void main() {
       expect(calls, ['home']);
     });
 
-    testWidgets('without a handler the tags are grey and do nothing', (
+    testWidgets('without a handler the tags are grey and cannot be used', (
       tester,
     ) async {
+      final handle = tester.ensureSemantics();
       await pumpLg(tester, LgTagFilterBar(items: items(), onToggle: null));
-      await tester.tap(find.text('家里'));
-      expect(tester.takeException(), isNull);
+      // Greyed to the eye ...
+      final opacity = tester.widget<Opacity>(
+        find
+            .ancestor(of: find.text('家里'), matching: find.byType(Opacity))
+            .first,
+      );
+      expect(opacity.opacity, .6);
+      // ... and to a reader: a button that is off.
+      expect(
+        tester.getSemantics(find.bySemanticsLabel('家里')),
+        isSemantics(isButton: true, hasEnabledState: true, isEnabled: false),
+      );
+      // The keyboard does not stop on them.
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      expect(
+        FocusManager.instance.primaryFocus?.context
+            ?.findAncestorWidgetOfExactType<LgTagToggle>(),
+        isNull,
+      );
+      handle.dispose();
+    });
+
+    testWidgets('the wheel is the bar\'s only when the bar can move that way', (
+      tester,
+    ) async {
+      final page = ScrollController();
+      addTearDown(page.dispose);
+      Future<void> wheel(Finder at) async {
+        final pointer = TestPointer(1, PointerDeviceKind.mouse);
+        await tester.sendEventToBinding(pointer.hover(tester.getCenter(at)));
+        await tester.sendEventToBinding(pointer.scroll(const Offset(0, 80)));
+        await tester.pump();
+      }
+
+      // A bar that fits leaves the wheel to the page.
+      await pumpLg(
+        tester,
+        SizedBox(
+          height: 300,
+          width: 600,
+          child: SingleChildScrollView(
+            controller: page,
+            child: Column(
+              children: [
+                LgTagFilterBar(items: items(), onToggle: (_) {}),
+                const SizedBox(height: 1000),
+              ],
+            ),
+          ),
+        ),
+      );
+      await wheel(find.text('家里'));
+      expect(page.offset, 80);
+
+      // A bar that does not fit takes it, and gives it back at its end.
+      await pumpLg(
+        tester,
+        SizedBox(
+          height: 300,
+          width: 300,
+          child: SingleChildScrollView(
+            controller: page,
+            child: Column(
+              children: [
+                LgTagFilterBar(items: items(extra: 6), onToggle: (_) {}),
+                const SizedBox(height: 1000),
+              ],
+            ),
+          ),
+        ),
+      );
+      page.jumpTo(0);
+      final first = tester.getTopLeft(find.text('未标记')).dx;
+      await wheel(find.text('家里'));
+      expect(tester.getTopLeft(find.text('未标记')).dx, lessThan(first));
+      expect(page.offset, 0);
+      // (The tags move away under the pointer: aim at the bar.)
+      for (var i = 0; i < 20; i++) {
+        await wheel(find.byType(LgTagFilterBar));
+      }
+      expect(page.offset, greaterThan(0));
+    });
+
+    testWidgets('the menu key and Shift+F10 open the menu of the tag that '
+        'has the keyboard, under it', (tester) async {
+      final calls = <String>[];
+      await pumpLg(
+        tester,
+        LgTagFilterBar(
+          items: items(),
+          onToggle: (_) {},
+          onContextMenu: (id, p) =>
+              calls.add('$id@${p.dx.round()},${p.dy.round()}'),
+          noMenu: const {'none'},
+        ),
+      );
+      // "未标记" has the keyboard first: it has no menu.
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.sendKeyEvent(LogicalKeyboardKey.contextMenu);
+      expect(calls, isEmpty);
+      // Then "家里".
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      final chip = tester.getRect(
+        find.ancestor(of: find.text('家里'), matching: find.byType(LgTagToggle)),
+      );
+      await tester.sendKeyEvent(LogicalKeyboardKey.contextMenu);
+      expect(calls, ['home@${chip.left.round()},${chip.bottom.round()}']);
+      // Shift+F10 does the same for "工作"; F10 alone does not.
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.sendKeyEvent(LogicalKeyboardKey.f10);
+      expect(calls, hasLength(1));
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.f10);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      expect(calls, hasLength(2));
+      expect(calls.last, startsWith('work@'));
     });
   });
 

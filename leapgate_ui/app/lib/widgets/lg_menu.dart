@@ -371,6 +371,7 @@ class LgMenuItem extends StatelessWidget {
     this.danger = false,
     this.indent = false,
     this.keepOpen = false,
+    this.requestFocusOnHover = true,
   });
 
   final String label;
@@ -389,6 +390,11 @@ class LgMenuItem extends StatelessWidget {
   final bool indent;
   final bool keepOpen;
 
+  /// The pointer moving over the row gives it the keyboard, as in any menu.
+  /// A list with a text field above its rows turns it off: the keyboard stays
+  /// in the field, and typing is not cut off by the mouse passing over a row.
+  final bool requestFocusOnHover;
+
   @override
   Widget build(BuildContext context) {
     final t = LgTokens.of(context);
@@ -396,6 +402,7 @@ class LgMenuItem extends StatelessWidget {
     final item = MenuItemButton(
       onPressed: onPressed,
       closeOnActivate: !keepOpen,
+      requestFocusOnHover: requestFocusOnHover,
       statesController: _forced(context),
       // Inside a menu MenuAnchor already uses this; it matters for LgMenuPanel.
       overflowAxis: Axis.vertical,

@@ -8,6 +8,8 @@
 // Only drawing: the books, the texts and what a choice does are the caller's.
 // Filtering the list by what is typed in the field is done here, by name.
 
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -32,9 +34,19 @@ class LgBook {
 
 const double _panelWidth = 340;
 
+// What the drop-down wants under its button before it looks over it: the search
+// field, two books and the line at the end; the gap it keeps to the window's
+// edge; and the height it has when it cannot tell (the button is not laid out).
+const double _wantedRoom = 260;
+const double _edge = LgSpace.s2;
+const double _tallest = 600;
+
 /// The panel of the drop-down: search field, books, explanation. [LgBookSwitcher]
 /// shows it under its button; the gallery draws it in place.
-class LgBookPanel extends StatelessWidget {
+///
+/// With [maxHeight] the panel is at most that high: the search field above and
+/// the line at the end stay, and the books between them scroll.
+class LgBookPanel extends StatefulWidget {
   const LgBookPanel({
     super.key,
     required this.books,
@@ -46,6 +58,7 @@ class LgBookPanel extends StatelessWidget {
     required this.hint,
     this.onSearchChanged,
     this.autofocusSearch = false,
+    this.maxHeight,
     this.width = _panelWidth,
   });
 
@@ -65,56 +78,105 @@ class LgBookPanel extends StatelessWidget {
 
   /// The line at the end ("共享地址簿的成员和权限由管理员设置").
   final String hint;
+
+  /// The most the whole panel may take up; null lets it be as high as its books.
+  final double? maxHeight;
   final double width;
+
+  @override
+  State<LgBookPanel> createState() => _LgBookPanelState();
+}
+
+// The panel has 8 px of padding above and under its rows (`.menu`).
+const double _panelPadding = LgSpace.s2 * 2;
+
+class _LgBookPanelState extends State<LgBookPanel> {
+  final _scroll = ScrollController();
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final t = LgTokens.of(context);
     final c = t.colors;
-    return LgMenuPanel(
-      width: width,
-      items: [
+    final w = widget;
+    final search = Padding(
+      padding: const EdgeInsets.fromLTRB(LgSpace.s3, 0, LgSpace.s3, LgSpace.s2),
+      child: LgTextField(
+        controller: w.searchController,
+        placeholder: w.searchPlaceholder,
+        semanticLabel: w.searchPlaceholder,
+        dense: true,
+        autofocus: w.autofocusSearch,
+        leading: LgIcon(LgIcons.search, size: 20, color: c.text2),
+        onChanged: w.onSearchChanged,
+      ),
+    );
+    final rows = [
+      if (w.books.isEmpty)
         Padding(
-          padding: const EdgeInsets.fromLTRB(
-            LgSpace.s3,
-            0,
-            LgSpace.s3,
-            LgSpace.s2,
+          padding: const EdgeInsets.symmetric(
+            horizontal: LgSpace.s4,
+            vertical: LgSpace.s3,
           ),
-          child: LgTextField(
-            controller: searchController,
-            placeholder: searchPlaceholder,
-            semanticLabel: searchPlaceholder,
-            dense: true,
-            autofocus: autofocusSearch,
-            leading: LgIcon(LgIcons.search, size: 20, color: c.text2),
-            onChanged: onSearchChanged,
-          ),
+          child: Text(w.noMatchLabel, style: t.text.copyWith(color: c.text2)),
         ),
-        if (books.isEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: LgSpace.s4,
-              vertical: LgSpace.s3,
-            ),
-            child: Text(noMatchLabel, style: t.text.copyWith(color: c.text2)),
+      for (final book in w.books)
+        LgMenuItem(
+          label: book.name,
+          description: book.detail,
+          checked: book.id == w.selectedId,
+          // The keyboard stays in the search field while the mouse passes
+          // over the rows.
+          requestFocusOnHover: false,
+          onPressed: () => w.onSelect(book.id),
+        ),
+    ];
+    final hint = Padding(
+      // Lined up with the names: the check column (20) and its gap.
+      padding: const EdgeInsets.fromLTRB(
+        LgSpace.s4 + 20 + LgSpace.s3,
+        LgSpace.s2,
+        LgSpace.s4,
+        LgSpace.s1,
+      ),
+      child: Text(w.hint, style: t.textS.copyWith(color: c.text2)),
+    );
+    final max = w.maxHeight;
+    if (max == null) {
+      return LgMenuPanel(width: w.width, items: [search, ...rows, hint]);
+    }
+    return LgMenuPanel(
+      width: w.width,
+      items: [
+        ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: math.max(0, max - _panelPadding),
           ),
-        for (final book in books)
-          LgMenuItem(
-            label: book.name,
-            description: book.detail,
-            checked: book.id == selectedId,
-            onPressed: () => onSelect(book.id),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              search,
+              Flexible(
+                child: Scrollbar(
+                  controller: _scroll,
+                  child: SingleChildScrollView(
+                    controller: _scroll,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: rows,
+                    ),
+                  ),
+                ),
+              ),
+              hint,
+            ],
           ),
-        Padding(
-          // Lined up with the names: the check column (20) and its gap.
-          padding: const EdgeInsets.fromLTRB(
-            LgSpace.s4 + 20 + LgSpace.s3,
-            LgSpace.s2,
-            LgSpace.s4,
-            LgSpace.s1,
-          ),
-          child: Text(hint, style: t.textS.copyWith(color: c.text2)),
         ),
       ],
     );
@@ -195,6 +257,35 @@ class _LgBookSwitcherState extends State<LgBookSwitcher> {
   LgBook? get _current =>
       widget.books.where((b) => b.id == widget.selectedId).firstOrNull;
 
+  /// Where the drop-down goes and how high it may be: under the button while
+  /// there is room for the search field and a few books, else over it if there
+  /// is more room there. Asked again when the window changes size.
+  ///
+  /// [overlayHeight] is the height the overlay has now, from the constraints
+  /// of the layout: the render box of the overlay still has the old height
+  /// when the window has just changed.
+  ({bool up, double height}) _room(
+    BuildContext overlayContext,
+    double overlayHeight,
+  ) {
+    final box = context.findRenderObject();
+    final overlay = Overlay.of(overlayContext).context.findRenderObject();
+    if (box is! RenderBox ||
+        !box.attached ||
+        overlay is! RenderBox ||
+        !overlayHeight.isFinite) {
+      return (up: false, height: _tallest);
+    }
+    final top = box.localToGlobal(Offset.zero, ancestor: overlay).dy;
+    final bottom = top + box.size.height;
+    final below = overlayHeight - bottom - LgSpace.s1 - _edge;
+    final above = top - LgSpace.s1 - _edge;
+    if (below >= _wantedRoom || below >= above) {
+      return (up: false, height: math.max(below, 0));
+    }
+    return (up: true, height: math.max(above, 0));
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = LgTokens.of(context);
@@ -205,7 +296,7 @@ class _LgBookSwitcherState extends State<LgBookSwitcher> {
       onPressed: () => _portal.isShowing ? _close() : _open(),
       focusNode: _node,
       semanticLabel: [?widget.semanticLabel, ?current?.name].join(': '),
-      toggled: _portal.isShowing,
+      expanded: _portal.isShowing,
       builder: (context, states) {
         final open = _portal.isShowing || states.contains(WidgetState.selected);
         final fg = open ? c.accent : c.text;
@@ -264,25 +355,37 @@ class _LgBookSwitcherState extends State<LgBookSwitcher> {
           onTapOutside: (_) => _close(refocus: false),
           child: OverlayPortal(
             controller: _portal,
-            overlayChildBuilder: (context) => TapRegion(
-              groupId: this,
-              child: Align(
-                alignment: Alignment.topLeft,
-                child: CompositedTransformFollower(
-                  link: _link,
-                  showWhenUnlinked: false,
-                  targetAnchor: Alignment.bottomLeft,
-                  followerAnchor: Alignment.topLeft,
-                  offset: const Offset(0, LgSpace.s1),
-                  child: _Drop(
-                    switcher: widget,
-                    search: _search,
-                    onPick: _pick,
-                    onClose: _close,
-                  ),
-                ),
-              ),
-            ),
+            overlayChildBuilder: (overlayContext) {
+              return LayoutBuilder(
+                builder: (context, constraints) {
+                  final room = _room(overlayContext, constraints.maxHeight);
+                  return TapRegion(
+                    groupId: this,
+                    child: Align(
+                      alignment: Alignment.topLeft,
+                      child: CompositedTransformFollower(
+                        link: _link,
+                        showWhenUnlinked: false,
+                        targetAnchor: room.up
+                            ? Alignment.topLeft
+                            : Alignment.bottomLeft,
+                        followerAnchor: room.up
+                            ? Alignment.bottomLeft
+                            : Alignment.topLeft,
+                        offset: Offset(0, room.up ? -LgSpace.s1 : LgSpace.s1),
+                        child: _Drop(
+                          switcher: widget,
+                          search: _search,
+                          onPick: _pick,
+                          onClose: _close,
+                          maxHeight: room.height,
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              );
+            },
             child: CompositedTransformTarget(link: _link, child: trigger),
           ),
         ),
@@ -311,12 +414,14 @@ class _Drop extends StatefulWidget {
     required this.search,
     required this.onPick,
     required this.onClose,
+    required this.maxHeight,
   });
 
   final LgBookSwitcher switcher;
   final TextEditingController search;
   final ValueChanged<String> onPick;
   final VoidCallback onClose;
+  final double maxHeight;
 
   @override
   State<_Drop> createState() => _DropState();
@@ -371,6 +476,7 @@ class _DropState extends State<_Drop> {
             noMatchLabel: s.noMatchLabel,
             hint: s.hint,
             autofocusSearch: true,
+            maxHeight: widget.maxHeight,
           ),
         ),
       ),

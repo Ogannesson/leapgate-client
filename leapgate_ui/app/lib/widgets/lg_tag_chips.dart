@@ -10,6 +10,7 @@
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../icons/lg_icon.dart';
 import '../theme/lg_tokens.dart';
@@ -38,7 +39,9 @@ class LgTagToggleItem {
 
 /// A tag as a button (`.tf`): `--lg-h-btn` high, the text at the medium size.
 /// A click calls [onPressed]; a right click calls [onContextMenu] with where it
-/// happened, for the menu of a tag (rename, change the colour, delete).
+/// happened, for the menu of a tag (rename, change the colour, delete). With the
+/// keyboard on the tag, the menu key or Shift+F10 calls it too, with the place
+/// under the tag's left end.
 class LgTagToggle extends StatelessWidget {
   const LgTagToggle({
     super.key,
@@ -58,7 +61,7 @@ class LgTagToggle extends StatelessWidget {
     final t = LgTokens.of(context);
     final c = t.colors;
     final radius = BorderRadius.circular(LgRadius.r10);
-    return LgPressable(
+    final pressable = LgPressable(
       onPressed: onPressed,
       onSecondaryTapUp: onContextMenu == null
           ? null
@@ -122,6 +125,30 @@ class LgTagToggle extends StatelessWidget {
         );
       },
     );
+    if (onContextMenu == null) return pressable;
+    // The menu key and Shift+F10 open the menu of the tag that has the
+    // keyboard, below it (the right click has no key of its own).
+    return Focus(
+      canRequestFocus: false,
+      skipTraversal: true,
+      onKeyEvent: (node, event) {
+        if (event is! KeyDownEvent || onPressed == null) {
+          return KeyEventResult.ignored;
+        }
+        final key = event.logicalKey;
+        final menuKey =
+            key == LogicalKeyboardKey.contextMenu ||
+            (key == LogicalKeyboardKey.f10 &&
+                HardwareKeyboard.instance.isShiftPressed);
+        final box = node.context?.findRenderObject();
+        if (!menuKey || box is! RenderBox || !box.attached) {
+          return KeyEventResult.ignored;
+        }
+        onContextMenu!(box.localToGlobal(Offset(0, box.size.height)));
+        return KeyEventResult.handled;
+      },
+      child: pressable,
+    );
   }
 }
 
@@ -163,14 +190,20 @@ class _LgTagFilterBarState extends State<LgTagFilterBar> {
     super.dispose();
   }
 
-  // The wheel moves a row of tags sideways. A shifted wheel is the scroll
-  // view's own.
+  // The wheel moves a row of tags sideways, but only when the row can move
+  // that way; otherwise it is left to the page, which scrolls up and down. A
+  // shifted wheel is the scroll view's own.
   void _onSignal(PointerSignalEvent event) {
     if (event is! PointerScrollEvent || !_scroll.hasClients) return;
-    GestureBinding.instance.pointerSignalResolver.register(event, (event) {
-      final delta = (event as PointerScrollEvent).scrollDelta.dy;
-      final p = _scroll.position;
-      _scroll.jumpTo((p.pixels + delta).clamp(0.0, p.maxScrollExtent));
+    final p = _scroll.position;
+    if (p.maxScrollExtent <= 0) return;
+    final target = (p.pixels + event.scrollDelta.dy).clamp(
+      0.0,
+      p.maxScrollExtent,
+    );
+    if (target == p.pixels) return;
+    GestureBinding.instance.pointerSignalResolver.register(event, (_) {
+      _scroll.jumpTo(target);
     });
   }
 

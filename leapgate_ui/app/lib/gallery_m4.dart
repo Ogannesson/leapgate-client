@@ -174,6 +174,7 @@ const _m4ColorLabels = LgTagColorDialogLabels(
   cancel: '取消',
   save: '保存',
   busySave: '正在保存…',
+  presetNames: ['玫红', '陶橙', '赭黄', '苔绿', '湖青', '蓝', '紫', '灰'],
 );
 
 const _m4ColorLabelsEn = LgTagColorDialogLabels(
@@ -188,6 +189,16 @@ const _m4ColorLabelsEn = LgTagColorDialogLabels(
   cancel: 'Cancel',
   save: 'Save',
   busySave: 'Saving…',
+  presetNames: [
+    'Rose',
+    'Terracotta',
+    'Ochre',
+    'Moss',
+    'Teal',
+    'Blue',
+    'Purple',
+    'Grey',
+  ],
 );
 
 /// The address book page as `p1-ab-editable` draws it: the tabs and tools, the
@@ -488,6 +499,9 @@ List<Specimen> _m4Specimens() {
     String id, {
     List<LgBook> books = _m4Books,
     bool tools = true,
+    // The button is shown open by an override of the states; "更多" beside it
+    // is not open with it.
+    bool plainTools = false,
   }) => LgBookSwitcher(
     books: books,
     selectedId: id,
@@ -498,24 +512,37 @@ List<Specimen> _m4Specimens() {
         ? 'Members and permissions of shared address books are set by the administrator'
         : '共享地址簿的成员和权限由管理员设置',
     semanticLabel: books == _m4BooksEn ? 'Switch address book' : '切换地址簿',
-    trailing: tools
-        ? LgListToolMenu(
+    trailing: !tools
+        ? null
+        : plainTools
+        ? LgStateOverride(
+            states: const {},
+            child: LgListToolMenu(
+              icon: LgIcons.more,
+              label: books == _m4BooksEn ? 'More' : '更多',
+              items: _m4MoreMenu(),
+            ),
+          )
+        : LgListToolMenu(
             icon: LgIcons.more,
             label: books == _m4BooksEn ? 'More' : '更多',
             items: _m4MoreMenu(),
-          )
-        : null,
+          ),
   );
   Widget openPanel(
     String id, {
     String search = '',
     List<LgBook> books = _m4Books,
+    double? maxHeight,
   }) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
       LgStateOverride(
         states: const {WidgetState.selected},
-        child: SizedBox(width: 1040, child: switcher(id, books: books)),
+        child: SizedBox(
+          width: 1040,
+          child: switcher(id, books: books, plainTools: true),
+        ),
       ),
       const SizedBox(height: LgSpace.s1),
       LgBookPanel(
@@ -525,6 +552,7 @@ List<Specimen> _m4Specimens() {
         ],
         selectedId: id,
         onSelect: (_) {},
+        maxHeight: maxHeight,
         searchController: TextEditingController(text: search),
         searchPlaceholder: books == _m4BooksEn
             ? 'Search address books'
@@ -592,6 +620,23 @@ List<Specimen> _m4Specimens() {
       ),
     )
     ..add(book('open', (_) => openPanel('me'), size: const Size(1072, 400)))
+    // Many shared books: the panel keeps to the room it has, the books scroll
+    // between the search field and the line at the end.
+    ..add(
+      book(
+        'open-many',
+        (_) => openPanel(
+          'home',
+          books: [
+            ..._m4Books,
+            for (var i = 1; i <= 17; i++)
+              LgBook(id: 'shared$i', name: '共享地址簿 $i', detail: '只读 · 所有者：李四'),
+          ],
+          maxHeight: 360,
+        ),
+        size: const Size(1072, 440),
+      ),
+    )
     ..add(
       book(
         'open-no-match',
@@ -1285,7 +1330,8 @@ List<Specimen> _m4Specimens() {
   Specimen colorDialog(
     String name, {
     LgTagColorDialogLabels labels = _m4ColorLabels,
-    Color initial = const Color(0xFFA65B80),
+    Color initial = const Color(0xFFC4527D),
+    Color? start,
     bool custom = false,
     bool busy = false,
     String? error,
@@ -1304,6 +1350,7 @@ List<Specimen> _m4Specimens() {
         tagName: tag,
         previewName: device,
         initialColor: initial,
+        startColor: start,
         startCustom: custom,
         busy: busy,
         error: error,
@@ -1321,12 +1368,14 @@ List<Specimen> _m4Specimens() {
         height: 640,
       ),
     )
-    ..add(colorDialog('custom', custom: true, initial: const Color(0xFFE0852B)))
+    // A colour picked on the wheel: it differs from the tag's own, so "保存"
+    // is on.
+    ..add(colorDialog('custom', custom: true, start: const Color(0xFFE0852B)))
     ..add(
       colorDialog(
         'custom-dark-color',
         custom: true,
-        initial: const Color(0xFF3A2457),
+        start: const Color(0xFF3A2457),
       ),
     )
     ..add(
@@ -1350,7 +1399,7 @@ List<Specimen> _m4Specimens() {
         'english',
         labels: _m4ColorLabelsEn,
         custom: true,
-        initial: const Color(0xFFE0852B),
+        start: const Color(0xFFE0852B),
         tag: 'Home',
         device: 'Study desktop',
       ),
@@ -1369,7 +1418,7 @@ List<Specimen> _m4Specimens() {
           labels: _m4ColorLabels,
           tagName: '家里',
           previewName: '书房台式机',
-          initialColor: const Color(0xFFA65B80),
+          initialColor: const Color(0xFFC4527D),
           startCustom: true,
           onSave: (_) {},
           onCancel: _noop,

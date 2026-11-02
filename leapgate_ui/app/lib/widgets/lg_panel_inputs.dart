@@ -67,7 +67,7 @@ class _LgPasswordFieldState extends State<LgPasswordField> {
       obscureText: !_shown,
       onChanged: widget.onChanged,
       onSubmitted: widget.onSubmitted,
-      semanticLabel: widget.semanticLabel ?? widget.placeholder,
+      semanticLabel: widget.semanticLabel,
       maxLength: widget.maxLength,
       trailing: LgIconButton(
         icon: _shown ? LgIcons.eyeOff : LgIcons.eye,

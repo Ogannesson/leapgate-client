@@ -47,6 +47,11 @@ const _addLabels = LgAddDeviceLabels(
   busySubmit: '正在添加…',
 );
 
+Finder get _noteField => find.descendant(
+  of: find.byType(LgTextArea),
+  matching: find.byType(TextField),
+);
+
 Future<void> _tall(WidgetTester tester, Widget child, {LgMode? mode}) {
   tester.view.physicalSize = const Size(1280, 1100);
   tester.view.devicePixelRatio = 1;
@@ -327,20 +332,10 @@ void main() {
       tester,
     ) async {
       await _tall(tester, dialog());
-      await tester.enterText(
-        find.byWidgetPredicate(
-          (w) => w is TextField && w.decoration?.hintText == '最多 300 字',
-        ),
-        '放在阳台',
-      );
+      await tester.enterText(_noteField, '放在阳台');
       await tester.pump();
       expect(find.text('4 / 300'), findsOneWidget);
-      await tester.enterText(
-        find.byWidgetPredicate(
-          (w) => w is TextField && w.decoration?.hintText == '最多 300 字',
-        ),
-        '字' * 400,
-      );
+      await tester.enterText(_noteField, '字' * 400);
       await tester.pump();
       expect(note.text.length, 300);
       expect(find.text('300 / 300'), findsOneWidget);
@@ -350,9 +345,7 @@ void main() {
       tester,
     ) async {
       await _tall(tester, dialog());
-      final noteField = find.byWidgetPredicate(
-        (w) => w is TextField && w.decoration?.hintText == '最多 300 字',
-      );
+      final noteField = _noteField;
       await tester.tap(noteField);
       await tester.enterText(noteField, 'a');
       await tester.sendKeyEvent(LogicalKeyboardKey.enter);
@@ -497,6 +490,192 @@ void main() {
       expect(tester.getSize(find.byType(LgTextArea)).height, 72);
       await tester.enterText(find.byType(TextField), '第一行\n第二行');
       expect(c.text, '第一行\n第二行');
+    });
+
+    testWidgets('a field is named by the label of its form field, a name of '
+        'its own wins, the placeholder is the hint', (tester) async {
+      final handle = tester.ensureSemantics();
+      await _tall(
+        tester,
+        const LgFormDialog(
+          title: '编辑',
+          icon: LgIcons.note,
+          actions: [LgDialogAction(label: '取消', onPressed: null)],
+          children: [
+            LgFormField(
+              label: '名称',
+              required: true,
+              child: LgTextField(placeholder: '输入名称'),
+            ),
+            LgFormField(
+              label: '备注',
+              child: LgTextArea(placeholder: '最多 300 字'),
+            ),
+            LgFormField(
+              label: '网址',
+              child: LgTextField(placeholder: '输入网址', semanticLabel: '服务器网址'),
+            ),
+          ],
+        ),
+      );
+      expect(
+        tester.getSemantics(find.bySemanticsLabel('名称')),
+        isSemantics(
+          label: '名称',
+          hint: '输入名称',
+          isTextField: true,
+          isRequired: true,
+        ),
+      );
+      expect(
+        tester.getSemantics(find.bySemanticsLabel('备注')),
+        isSemantics(label: '备注', hint: '最多 300 字', isTextField: true),
+      );
+      expect(
+        tester.getSemantics(find.bySemanticsLabel('服务器网址')),
+        isSemantics(label: '服务器网址', hint: '输入网址', isTextField: true),
+      );
+      // The visible labels are not read a second time.
+      expect(find.bySemanticsLabel('名称'), findsOneWidget);
+      handle.dispose();
+    });
+
+    testWidgets('a field that is not in a form field keeps the placeholder as '
+        'its name', (tester) async {
+      final handle = tester.ensureSemantics();
+      await pumpLg(tester, const LgTextField(placeholder: '搜索设备'));
+      expect(
+        tester.getSemantics(find.byType(EditableText)),
+        isSemantics(label: '搜索设备', isTextField: true),
+      );
+      handle.dispose();
+    });
+
+    testWidgets('the counter and the line under a field are read', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      await _tall(
+        tester,
+        const LgFormDialog(
+          title: '编辑',
+          icon: LgIcons.note,
+          actions: [LgDialogAction(label: '取消', onPressed: null)],
+          children: [
+            LgFormField(
+              label: '备注',
+              counter: '3 / 300',
+              hint: '这些内容对其他成员可见',
+              child: LgTextArea(),
+            ),
+          ],
+        ),
+      );
+      expect(find.bySemanticsLabel('3 / 300'), findsOneWidget);
+      expect(find.bySemanticsLabel('这些内容对其他成员可见'), findsOneWidget);
+      handle.dispose();
+    });
+
+    testWidgets('a busy default button is not run by Enter in a field that '
+        'can still be used', (tester) async {
+      final calls = <String>[];
+      await _tall(
+        tester,
+        LgFormDialog(
+          title: '保存',
+          icon: LgIcons.note,
+          actions: [
+            LgDialogAction(label: '取消', onPressed: () => calls.add('cancel')),
+            LgDialogAction(
+              label: '正在保存…',
+              kind: LgButtonKind.primary,
+              isDefault: true,
+              busy: true,
+              onPressed: () => calls.add('save'),
+            ),
+          ],
+          children: [
+            LgFormField(
+              label: '名称',
+              child: LgTextField(
+                controller: TextEditingController(text: 'a'),
+                autofocus: true,
+              ),
+            ),
+          ],
+        ),
+      );
+      await tester.pump();
+      expect(tester.widget<TextField>(find.byType(TextField)).enabled, isTrue);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      expect(calls, isEmpty);
+      await tester.tap(find.text('正在保存…'));
+      expect(calls, isEmpty);
+    });
+  });
+
+  group('names of the fields of the dialogs', () {
+    testWidgets('the add-device dialog: the label alone is the name, '
+        'the placeholder the hint, ID is required', (tester) async {
+      final handle = tester.ensureSemantics();
+      await _tall(
+        tester,
+        LgAddDeviceDialog(
+          labels: _addLabels,
+          idController: TextEditingController(),
+          aliasController: TextEditingController(),
+          passwordController: TextEditingController(),
+          passwordHint: '这些内容对此地址簿的其他成员可见',
+          noteController: TextEditingController(),
+          onSubmit: () {},
+          onCancel: () {},
+        ),
+      );
+      expect(
+        tester.getSemantics(find.bySemanticsLabel('ID')),
+        isSemantics(
+          label: 'ID',
+          hint: '输入设备 ID',
+          isTextField: true,
+          isRequired: true,
+        ),
+      );
+      expect(
+        tester.getSemantics(find.bySemanticsLabel('别名')),
+        isSemantics(label: '别名', hint: '输入别名', isTextField: true),
+      );
+      expect(
+        tester.getSemantics(find.bySemanticsLabel('密码')),
+        isSemantics(label: '密码', hint: '输入密码', isTextField: true),
+      );
+      expect(
+        tester.getSemantics(find.bySemanticsLabel('备注')),
+        isSemantics(label: '备注', hint: '最多 300 字', isTextField: true),
+      );
+      handle.dispose();
+    });
+
+    testWidgets('the login dialog: the same', (tester) async {
+      final handle = tester.ensureSemantics();
+      await _tall(
+        tester,
+        LgLoginDialog(
+          labels: _loginLabels,
+          usernameController: TextEditingController(),
+          passwordController: TextEditingController(),
+          onSubmit: () {},
+          onCancel: () {},
+        ),
+      );
+      expect(
+        tester.getSemantics(find.bySemanticsLabel('用户名')),
+        isSemantics(label: '用户名', hint: '输入用户名', isTextField: true),
+      );
+      expect(
+        tester.getSemantics(find.bySemanticsLabel('密码')),
+        isSemantics(label: '密码', hint: '输入密码', isTextField: true),
+      );
+      handle.dispose();
     });
   });
 }
