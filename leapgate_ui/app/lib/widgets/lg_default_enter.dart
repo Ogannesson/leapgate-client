@@ -3,7 +3,7 @@ import 'package:flutter/services.dart';
 
 /// The Enter rule of the cards that ask something (the connection panel and
 /// the confirmations): Enter runs [onEnter], the default action, only while the
-/// focus is in an input field of the card. Anywhere else Enter is left alone:
+/// focus is in a one-line input field of the card. Anywhere else Enter is left alone:
 /// a button, a check box, a drop-down and its menu items take it themselves
 /// (Tab to "取消" and Enter cancels; Enter on an item of an open menu picks it),
 /// and a card without inputs gives the default button the focus when it
@@ -31,9 +31,10 @@ class LgDefaultEnter extends StatelessWidget {
           return KeyEventResult.ignored;
         }
         final focused = FocusManager.instance.primaryFocus?.context;
-        if (focused?.findAncestorWidgetOfExactType<EditableText>() == null) {
-          return KeyEventResult.ignored;
-        }
+        final field = focused?.findAncestorWidgetOfExactType<EditableText>();
+        // A field of several lines (the note of a device) keeps Enter for a
+        // new line.
+        if (field == null || field.maxLines != 1) return KeyEventResult.ignored;
         onEnter!();
         return KeyEventResult.handled;
       },

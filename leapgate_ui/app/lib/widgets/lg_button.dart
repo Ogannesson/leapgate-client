@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../icons/lg_icon.dart';
 import '../theme/lg_tokens.dart';
 import 'lg_pressable.dart';
+import 'lg_status.dart';
 import 'lg_tooltip.dart';
 
 /// Button kinds of `.btn` in A-基础.html: primary (`.pri`), secondary
@@ -27,6 +28,7 @@ class LgButton extends StatelessWidget {
     this.autofocus = false,
     this.horizontalPadding,
     this.semanticLabel,
+    this.busy = false,
   });
 
   final String label;
@@ -46,13 +48,18 @@ class LgButton extends StatelessWidget {
   /// screen reader and to a UI Automation script.
   final String? semanticLabel;
 
+  /// The request this button started is on its way: the button is greyed like
+  /// a disabled one, a spinner takes the place of [icon], and [label] should
+  /// say what is going on ("正在登录…"). It does not respond while busy.
+  final bool busy;
+
   @override
   Widget build(BuildContext context) {
     final t = LgTokens.of(context);
     final c = t.colors;
     final radius = BorderRadius.circular(large ? LgRadius.r12 : LgRadius.r10);
     return LgPressable(
-      onPressed: onPressed,
+      onPressed: busy ? null : onPressed,
       focusNode: focusNode,
       autofocus: autofocus,
       semanticLabel: semanticLabel ?? label,
@@ -123,7 +130,10 @@ class LgButton extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  if (icon != null) ...[
+                  if (busy) ...[
+                    const LgSpinner(size: 20),
+                    const SizedBox(width: LgSpace.s2),
+                  ] else if (icon != null) ...[
                     LgIcon(icon!, size: 20),
                     const SizedBox(width: LgSpace.s2),
                   ],

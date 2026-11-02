@@ -17,7 +17,10 @@ import 'package:flutter_hbb/leapgate/identity_color.dart';
 import 'icons/lg_icon.dart';
 import 'theme/lg_theme.dart';
 import 'theme/lg_tokens.dart';
+import 'widgets/lg_account.dart';
+import 'widgets/lg_add_device_dialog.dart';
 import 'widgets/lg_banner.dart';
+import 'widgets/lg_book_switcher.dart';
 import 'widgets/lg_button.dart';
 import 'widgets/lg_canvas_parts.dart';
 import 'widgets/lg_chat.dart';
@@ -30,18 +33,22 @@ import 'widgets/lg_cm_head.dart';
 import 'widgets/lg_cm_permissions.dart';
 import 'widgets/lg_cm_pill.dart';
 import 'widgets/lg_cm_tabs.dart';
+import 'widgets/lg_color_wheel.dart';
 import 'widgets/lg_connect_box.dart';
 import 'widgets/lg_connection_panel.dart';
 import 'widgets/lg_device.dart';
 import 'widgets/lg_device_card.dart';
 import 'widgets/lg_device_parts.dart';
 import 'widgets/lg_feedback.dart';
+import 'widgets/lg_form_dialog.dart';
 import 'widgets/lg_list_chrome.dart';
+import 'widgets/lg_login_dialog.dart';
 import 'widgets/lg_menu.dart';
 import 'widgets/lg_menu_items.dart';
 import 'widgets/lg_panel_inputs.dart';
 import 'widgets/lg_password_dialog.dart';
 import 'widgets/lg_password_row.dart';
+import 'widgets/lg_people_list.dart';
 import 'widgets/lg_pressable.dart';
 import 'widgets/lg_route_details.dart';
 import 'widgets/lg_selection.dart';
@@ -49,12 +56,15 @@ import 'widgets/lg_session_toolbar.dart';
 import 'widgets/lg_slider.dart';
 import 'widgets/lg_status.dart';
 import 'widgets/lg_tab_tip.dart';
+import 'widgets/lg_tag_chips.dart';
+import 'widgets/lg_tag_color_dialog.dart';
 import 'widgets/lg_text_field.dart';
 import 'widgets/lg_title_bar.dart';
 import 'widgets/lg_tooltip.dart';
 
 part 'gallery_cm_chat.dart';
 part 'gallery_m2b.dart';
+part 'gallery_m4.dart';
 
 const _exportDir = String.fromEnvironment('LG_GALLERY_EXPORT');
 
@@ -742,6 +752,7 @@ List<Specimen> buildSpecimens() {
   );
   list.addAll(_m3Specimens());
   list.addAll(_cmChatSpecimens());
+  list.addAll(_m4Specimens());
   return list;
 }
 

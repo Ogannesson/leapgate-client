@@ -12,6 +12,7 @@ import 'package:flutter_hbb/leapgate/identity_color.dart';
 
 import '../icons/lg_icon.dart';
 import '../theme/lg_tokens.dart';
+import 'lg_button.dart';
 import 'lg_device_parts.dart';
 import 'lg_pressable.dart';
 import 'lg_status.dart';
@@ -89,6 +90,7 @@ const double _pickWidth = 24;
 const double _columnGap = LgSpace.s3;
 const int _nameFlex = 16;
 const int _hostFlex = 15;
+const int _noteFlex = 12;
 const int _sourceFlex = 10;
 
 /// Surface the rows (`.tbl`) sit on.
@@ -166,8 +168,10 @@ class LgDeviceListHeader extends StatelessWidget {
   }
 }
 
-/// A column of the list view, in the order the list shows them.
-enum LgDeviceColumn { status, name, id, userHost, tags, source }
+/// A column of the list view, in the order the list shows them. [note] is the
+/// column of the address book and the team devices, between the user and host
+/// and the tags.
+enum LgDeviceColumn { status, name, id, userHost, note, tags, source }
 
 /// A column title of [LgDeviceTable]; [sortable] makes it a button.
 class LgTableColumn {
@@ -298,6 +302,10 @@ class LgDeviceTableHeader extends StatelessWidget {
             cell(LgDeviceColumn.id, width: _idWidth),
             const SizedBox(width: _columnGap),
             cell(LgDeviceColumn.userHost, flex: _hostFlex),
+            if (find(LgDeviceColumn.note) != null) ...[
+              const SizedBox(width: _columnGap),
+              cell(LgDeviceColumn.note, flex: _noteFlex),
+            ],
             if (find(tail) != null) ...[
               const SizedBox(width: _columnGap),
               cell(tail, flex: _sourceFlex),
@@ -390,6 +398,7 @@ class LgDeviceRow extends StatefulWidget {
     required this.status,
     required this.statusLabel,
     this.userHost,
+    this.note,
     this.source,
     this.tags,
     this.favorite = false,
@@ -422,6 +431,11 @@ class LgDeviceRow extends StatefulWidget {
   /// "在线", "离线", "正在查询…".
   final String statusLabel;
   final String? userHost;
+
+  /// The cell of the note column. Null means the list has no such column; a
+  /// list that has it gives every row a string, empty when the device has no
+  /// note.
+  final String? note;
   final String? source;
   final List<LgDeviceTag>? tags;
   final bool favorite;
@@ -486,6 +500,7 @@ class _LgDeviceRowState extends State<LgDeviceRow> {
       statusLabel: w.statusLabel,
       id: w.id,
       userHost: w.userHost,
+      note: w.note,
       source: w.source,
       tags: w.tags ?? const [],
       favorite: w.favorite,
@@ -598,6 +613,18 @@ class _LgDeviceRowState extends State<LgDeviceRow> {
                                   style: cellStyle.copyWith(color: c.text2),
                                 ),
                         ),
+                        if (w.note != null) ...[
+                          const SizedBox(width: _columnGap),
+                          Expanded(
+                            flex: _noteFlex,
+                            child: w.note!.isEmpty
+                                ? const SizedBox.shrink()
+                                : LgEllipsisText(
+                                    w.note!,
+                                    style: cellStyle.copyWith(color: c.text2),
+                                  ),
+                          ),
+                        ],
                         if (w.source != null) ...[
                           const SizedBox(width: _columnGap),
                           Expanded(
@@ -911,57 +938,86 @@ class LgNoResultsNote extends StatelessWidget {
   }
 }
 
-/// A list with nothing in it (`.box`): an icon tile and one sentence.
+/// A list with nothing in it (`.box`): an icon tile and one sentence. A state
+/// that has a way out puts one button under the sentence ([actionLabel], "登录"
+/// when the address book needs an account, "重试" when the server could not
+/// be reached); [iconColor] tints the tile's icon (the error colour for the
+/// network error).
 class LgEmptyState extends StatelessWidget {
-  const LgEmptyState(this.text, {super.key, this.icon = LgIcons.monitor});
+  const LgEmptyState(
+    this.text, {
+    super.key,
+    this.icon = LgIcons.monitor,
+    this.iconColor,
+    this.actionLabel,
+    this.actionIcon,
+    this.onAction,
+  }) : assert(actionLabel == null || onAction != null);
 
   final String text;
   final LgIcons icon;
+  final Color? iconColor;
+  final String? actionLabel;
+  final LgIcons? actionIcon;
+  final VoidCallback? onAction;
 
   @override
   Widget build(BuildContext context) {
     final t = LgTokens.of(context);
     final c = t.colors;
+    final body = Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(
+        vertical: LgSpace.s8,
+        horizontal: LgSpace.s6,
+      ),
+      decoration: BoxDecoration(
+        color: c.surface,
+        borderRadius: BorderRadius.circular(LgRadius.r16),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: c.surface2,
+              borderRadius: BorderRadius.circular(LgRadius.r12),
+            ),
+            child: LgIcon(icon, size: 24, color: iconColor ?? c.text2),
+          ),
+          const SizedBox(height: LgSpace.s3),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 480),
+            child: Text(
+              text,
+              textAlign: TextAlign.center,
+              style: t.text.copyWith(color: c.text),
+            ),
+          ),
+          if (actionLabel != null) ...[
+            const SizedBox(height: LgSpace.s3),
+            LgButton(
+              label: actionLabel!,
+              icon: actionIcon,
+              kind: LgButtonKind.primary,
+              onPressed: onAction,
+            ),
+          ],
+        ],
+      ),
+    );
+    if (actionLabel != null) {
+      // The sentence and the button are two nodes: the button can be found and
+      // pressed by its name.
+      return Semantics(container: true, explicitChildNodes: true, child: body);
+    }
     return Semantics(
       container: true,
       label: text,
-      child: ExcludeSemantics(
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(
-            vertical: LgSpace.s8,
-            horizontal: LgSpace.s6,
-          ),
-          decoration: BoxDecoration(
-            color: c.surface,
-            borderRadius: BorderRadius.circular(LgRadius.r16),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: c.surface2,
-                  borderRadius: BorderRadius.circular(LgRadius.r12),
-                ),
-                child: LgIcon(icon, size: 24, color: c.text2),
-              ),
-              const SizedBox(height: LgSpace.s3),
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 480),
-                child: Text(
-                  text,
-                  textAlign: TextAlign.center,
-                  style: t.text.copyWith(color: c.text),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+      child: ExcludeSemantics(child: body),
     );
   }
 }
