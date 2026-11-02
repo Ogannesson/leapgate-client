@@ -561,5 +561,7 @@
   "cmChooseMicrophone": "选择麦克风",
   "cmNoAudioInput": "未找到音频输入设备",
   "homeIncomingSessions": "{count} 个传入会话进行中",
-  "homeShowCm": "查看"
+  "homeShowCm": "查看",
+  "abCategory": "地址簿",
+  "groupCategory": "同组设备"
 }

@@ -16,9 +16,25 @@ import '../../widgets/lg_device_card.dart';
 import '../../widgets/lg_menu.dart';
 import '../../widgets/lg_menu_items.dart';
 import '../peer_platform.dart';
+import 'address_book/address_book.dart';
 import 'home_dialogs.dart';
 
 // The device cards, the list view rows and the "⋯" menu of the devices page (01 P1 block F).
+
+/// Opens [id]; from the address book with the shared password the book stores (01 P1 block F,
+/// upstream `connectInPeerTab`). [category] is where the device is listed, null for what was
+/// typed.
+void connectPeer(String id, {PeerCategory? category, bool relay = false}) {
+  final shared = category == PeerCategory.addressBook
+      ? appCore.addressBook.sharedPasswordOf(id)
+      : null;
+  mainNavigation.connect(
+    id,
+    password: shared ?? '',
+    isSharedPassword: shared != null,
+    forceRelay: relay,
+  );
+}
 
 /// What one device shows in a card or a row.
 class PeerItem {
@@ -81,6 +97,7 @@ class PeerCard extends StatelessWidget {
     final a = actions;
     final peer = item.peer;
     final userHost = peerUserHost(peer);
+    final keyLabel = abPeerKeyLabel(l10n, item);
     return LgDeviceCard(
       name: peerDisplayName(peer),
       id: formatPeerId(peer.id),
@@ -88,6 +105,9 @@ class PeerCard extends StatelessWidget {
       status: item.status,
       statusLabel: item.statusLabel,
       userHost: userHost.isEmpty ? null : userHost,
+      tags: abPeerTags(item),
+      savedPassword: keyLabel != null,
+      savedPasswordLabel: keyLabel,
       source: item.source,
       favorite: item.favorite,
       favoriteLabel: l10n.peersFavorite,
@@ -125,6 +145,7 @@ class PeerTableRow extends StatelessWidget {
     final a = actions;
     final peer = item.peer;
     final userHost = peerUserHost(peer);
+    final keyLabel = abPeerKeyLabel(l10n, item);
     return LgDeviceRow(
       name: peerDisplayName(peer),
       id: formatPeerId(peer.id),
@@ -133,7 +154,9 @@ class PeerTableRow extends StatelessWidget {
       statusLabel: item.statusLabel,
       userHost: userHost.isEmpty ? null : userHost,
       source: item.source,
-      tags: item.source == null ? const [] : null,
+      tags: item.source == null ? abPeerTags(item) : null,
+      savedPassword: keyLabel != null,
+      savedPasswordLabel: keyLabel,
       favorite: item.favorite,
       favoriteLabel: l10n.peersFavorite,
       selected: a.selected || (a.current && item.source == null),
@@ -218,18 +241,22 @@ List<Widget> peerMenuItems(
   String titleOf(List<PeerAction> group) => switch (group.first) {
     PeerAction.remoteDesktop => titles[0],
     PeerAction.alwaysRelay => titles[1],
-    PeerAction.delete || PeerAction.remove => titles[3],
+    PeerAction.delete || PeerAction.remove || PeerAction.deleteFromAb =>
+      titles[3],
     _ => titles[2],
   };
-  Widget itemOf(PeerAction action) => switch (action) {
+  Widget itemOf(PeerAction action) =>
+      abPeerMenuItem(l10n, item, action, overlays: overlays) ??
+      switch (action) {
     PeerAction.remoteDesktop => LgMenuItem(
       label: l10n.connectBoxRemoteDesktop,
-      onPressed: () => mainNavigation.connect(id),
+      onPressed: () => connectPeer(id, category: item.category),
     ),
     PeerAction.viaRelay => LgMenuItem(
       label: l10n.connectBoxViaRelay,
       description: l10n.connectBoxViaRelayNote,
-      onPressed: () => mainNavigation.connect(id, forceRelay: true),
+      onPressed: () =>
+          connectPeer(id, category: item.category, relay: true),
     ),
     // The menu stays open, so the box follows the value it set.
     PeerAction.alwaysRelay => StatefulBuilder(
@@ -301,10 +328,20 @@ List<Widget> peerMenuItems(
         done(delete ? 'peersToastDeleted' : 'peersToastRemoved');
       },
     ),
+    // [abPeerMenuItem] builds these.
+    PeerAction.addToAb ||
+    PeerAction.editTags ||
+    PeerAction.editNote ||
+    PeerAction.setSharedPassword ||
+    PeerAction.showBooks ||
+    PeerAction.deleteFromAb => const SizedBox.shrink(),
   };
   return [
     for (final group in groups) ...[
-      LgMenuGroup(titleOf(group)),
+      LgMenuGroup(
+        titleOf(group),
+        note: abMenuGroupNote(l10n, item, group, groups),
+      ),
       for (final action in group) itemOf(action),
     ],
   ];

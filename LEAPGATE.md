@@ -1156,3 +1156,150 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 - 收成小条时侧栏正开着某个连接的文件记录，这期间该连接的新记录不计未读。
 - 麦克风列表只在通话那一行出现时读一次（上游每次点都重读）；读回来之前点选择框，会短暂提示"未找到音频输入设备"。
 - 文件日志每来一块就让整个 CM 页面重建一次（Flutter 按帧合并），上游只重建文件记录那一页。
+
+### 10.11 M4 的分工约定
+
+依据：总仓库 `docs/新界面/07-M4拆法.md`（下称"07"；维护者 2026-11-02 把 M4-1~M4-9 全部按推荐定）。界面行为以 01 §3.1 区块 D、E、F、G、H、K 为准，账号的文案看 02 §1.5.3，标签颜色看 02 §3.6；样稿 `A-P1.html`，画框名见 07 §2.2；令牌和图标以 `A-基础.html` 为准。07 §6 列的不做。
+
+**分支和文件边界**（都从 `ui/m4` 切，做完合回 `ui/m4`；`ui/m4` 上已有下面"挂载点"的骨架）
+
+| 分支 | 谁 | 只改这些 |
+|---|---|---|
+| `ui/rust-h1` | coder R（H1） | `libs/leapgate/src/api.rs`（加一个带 Bearer 的通用请求函数）、`libs/leapgate/src/account/`（新）、`libs/leapgate/src/lib.rs`（声明模块一行）、`src/leapgate_ffi.rs`（末尾追加 M4 一段）；测试。不改 Dart，不生成桥 |
+| `ui/m4-ds` | designer | `app/lib/widgets/`（新组件；`LgDeviceCard`、`LgDeviceRow`、`LgDeviceTable` 加备注）、`app/lib/gallery_main.dart`、组件的测试 |
+| `ui/m4-account` | coder A（账号、登录、同组设备） | core `leapgate/account.dart`、`leapgate/group.dart`、`leapgate/peer_tabs.dart`（只改 `isEnabled`）；app `pages/home/account/`、`pages/home/group/`、`pages/home/home_page.dart` 的 `_SideColumn`（账号区摆在哪、间距）、`main.dart`（启动时调 `appCore.account.start()` 那几行）；它们的测试 |
+| `ui/m4-ab` | coder B（地址簿） | core `leapgate/address_book.dart`、`leapgate/peer_list.dart` 的 `peerMenu`（条件和参数）、`consts.dart`（只追加地址簿的选项键）；app `pages/home/address_book/`、`peer_views.dart` 里 `peerMenuItems` 调 `peerMenu` 那几行（跟着参数改）；它们的测试 |
+
+- 共用文件只往挂载点里填，挂载点以外的行不改：`devices_page.dart`、`peer_views.dart`、`account_category.dart`，core 的 `account_api.dart`、`app_core.dart`，`core/test/account_fakes.dart`。挂载点的签名不够用、或者要改共用文件的别处时，写进汇报，由主会话改。
+- ARB：A 的键以 `account`、`login`、`group` 开头，B 以 `ab` 开头，加在两个 ARB 文件末尾，中英文同时加，文案照 01 §7.6：01 里写好的句子逐字照抄，新写的句子列进提交说明。分类名 `abCategory`、`groupCategory` 骨架里已经加了。
+- 两个 coder 先用 M0~M3 的组件和简单的占位控件把逻辑写通，整合时换成 designer 的组件。占位不求好看，但行为测试要能按文字和语义标签找到它们。
+- 测试里换掉导出：设 `accountApi = FakeAccountApi()`（`core/test/account_fakes.dart`；app 的测试照 `home_fakes.dart` 引 `FakeLeapgate` 的办法用相对路径引它）。三个 model 第一次用到时才建，`accountApi` 要在第一次用 `appCore.account`、`addressBook`、`group` 之前设好。
+
+**H1 的块 2 导出**（coder R；R 合进 `ui/m4` 之前，A、B 只经 `account_api.dart`，测试用 `FakeAccountApi`）
+
+都放在 `src/leapgate_ffi.rs` 末尾新的 "Account (M4)" 一段，逻辑在 `libs/leapgate/src/account/`，`src/` 只做薄壳。除 `leapgate_account_local` 外在 Dart 侧都是异步：Rust 函数照 `leapgate_incoming_counts` 的写法同步返回 `String`，请求放在用 `#[tokio::main(flavor = "current_thread")]` 包的函数里跑（frb 在工作线程上调，不在运行时里，符合 AGENTS.md 的 Tokio 规则）。返回值都是 JSON 字符串，出错时是下面"错误的形状"。
+
+| 导出 | 参数 | 成功时返回 | 做什么 |
+|---|---|---|---|
+| `leapgate_account_local()`，同步 | | 有令牌时 `{"user":<user_info>}`，没有时 `{}` | 不发请求：读 LocalConfig 的 `access_token`（只看是否非空）和 `user_info` |
+| `leapgate_account_login_options()` | | `{}` | `GET /api/login-options`，2xx 就算成功，内容不解析（M4-4；rustdesk-api 回 `common-oidc/null` 也照样成功） |
+| `leapgate_account_login(username, password)` | 原样，trim 由界面做 | `{"user":<用户对象>}` | `POST /api/login`，体 `{username, password, id, uuid, autoLogin: true, type: "account", deviceInfo}`（上游 `common/hbbs/hbbs.dart` `LoginRequest`，不带验证码字段）；`id`、`uuid`、`deviceInfo` 由导出在 `src/` 取（`ui_interface::get_id()`、`get_uuid()`、`get_login_device_info()`）再传进 `libs/leapgate`。成功后写 `access_token`、`user_info` |
+| `leapgate_account_current_user()` | | `{"user":<用户对象>}` | `POST /api/currentUser`，体 `{id, uuid}`；成功后重写 `user_info` |
+| `leapgate_account_logout()` | | 总是 `{}` | `POST /api/logout`，体 `{id, uuid}`，2 秒超时；不管结果如何都删 `access_token`、`user_info`、两份缓存（M4-9） |
+| `leapgate_ab_cache()` | | `{"entries":[…]}` | 不发请求：`_ab` 缓存里的令牌和当前令牌相同时，原样给它的 `ab_entries`（每条 `guid`、`name`、`peers`、`tags`、`tag_colors`），否则空数组 |
+| `leapgate_group_cache()` | | `{"users":[…],"peers":[…]}` 或 `{}` | 不发请求：`_group` 缓存的令牌相同时给它的 `users`、`peers`（上游 `toGroupCacheJson` 的格式），否则 `{}` |
+| `leapgate_ab_books()` | | `{"max_peers":n,"personal":"<guid>","shared":[{"guid","name","owner","note","rule"}…]}` | `POST /api/ab/personal`、`/api/ab/settings`、`/api/ab/shared/profiles`（分页）。任一个失败整个失败；`personal` 回 404 是 `unsupported`（07 §4.4）；`max_peers` 是 0 表示不限 |
+| `leapgate_ab_book(guid, name, personal)` | 簿的 guid；`name`、`personal` 只用来写缓存 | `{"peers":[…],"tags":[{"name","color"}…]}` | `POST /api/ab/peers?current&pageSize&ab=<guid>`（分页，按 ID 去重，某一页没有新 ID 就停，07 §4.3）、`POST /api/ab/tags/<guid>`。`peers` 是服务器给的设备对象原样（个人簿带 `hash`、共享簿带 `password`，M4-3）。成功后写 `_ab` 缓存（见下面"缓存"） |
+| `leapgate_ab_add_peer(guid, peer)` | `peer`：设备对象的 JSON 字符串 | `{}` | `POST /api/ab/peer/add/<guid>`，体原样（个人簿去掉 `password`、共享簿去掉 `hash` 由界面做，上游 `addPeers`） |
+| `leapgate_ab_update_peer(guid, peer)` | `peer`：`id` 加要改的字段的 JSON 字符串 | `{}` | `PUT /api/ab/peer/update/<guid>`，体原样。上游 5 处都走它：标签、别名、备注、`hash` 或 `password`、与最近会话同步 |
+| `leapgate_ab_delete_peers(guid, ids)` | `ids: Vec<String>` | `{}` | `DELETE /api/ab/peer/<guid>`，体是 ID 数组 |
+| `leapgate_ab_add_tag(guid, name, color)` | `color: i64`（ARGB，同 Flutter `Color.value`） | `{}` | `POST /api/ab/tag/add/<guid>`，体 `{name, color}` |
+| `leapgate_ab_rename_tag(guid, old_name, new_name)` | | `{}` | `PUT /api/ab/tag/rename/<guid>`，体 `{old, new}` |
+| `leapgate_ab_set_tag_color(guid, name, color)` | `color: i64` | `{}` | `PUT /api/ab/tag/update/<guid>`，体 `{name, color}` |
+| `leapgate_ab_delete_tags(guid, names)` | `names: Vec<String>` | `{}` | `DELETE /api/ab/tag/<guid>`，体是标签名数组 |
+| `leapgate_group()` | | `{"users":[<用户对象>…],"peers":[<设备对象>…]}` | `GET /api/users`、`GET /api/peers`（都带 `accessible`、`status=1`，分页，`current` 和 `page` 都带，07 §4.3）；两个都成功才算成功，成功后整份重写 `_group` 缓存。不调 `/api/device-group/accessible`（M4-6） |
+
+- 共 17 个导出，覆盖 07 的 18 个端点。写操作按端点各一个、不合成"操作种类 + 参数"的一个：各端点的体和 404、409 的含义都不同，合成一个要在 JSON 里再编一层，界面调用反而不清楚。参数名避开 Dart 的保留字（`new`），所以叫 `old_name`、`new_name`。一次加一台设备、一个标签（上游 `addPeers`、`addTags` 也是逐个发），多选"加入地址簿"由界面循环，遇到第一个错误就停（上游同样）。
+- 用户对象、设备对象都是服务器给的原样（用户对象有 `name`、`display_name`、`avatar`、`email`、`note`、`status`、`is_admin`），界面按 `account_api.dart` 的数据类解析。
+- 写 `user_info` 照上游 `UserPayload.toJson`：`{"name","display_name","avatar","status"}`，`status` 照它的换算（0 停用、-1 未验证、其余 1）。Rust 别处在读它：登录消息的显示名（`src/client.rs`）、本机显示名导出。
+- 写操作 2xx 且体为空或体里没有 `error` 时算成功（上游 `_jsonDecodeActionResp`）。
+
+**错误的形状**：`{"error":"<种类>","text":"<原文>"}`。`text` 取服务器 JSON 的 `error` 字段，没有时 `HTTP <状态码>`；`network` 时是错误描述。`text` 截到 200 个字符，不含令牌。
+
+| 种类 | 什么时候 | Rust 顺带做的 |
+|---|---|---|
+| `unauthorized` | 登录以外的接口回 401；`currentUser` 回 400 | 删 `access_token`、`user_info`、`_ab`、`_group` |
+| `wrong_credentials` | 登录回 401：Leapgate 服务端用它表示用户名或密码错误（07 §4.1） | 不动令牌 |
+| `verification_required` | 登录 2xx 但 `type` 不是 `access_token`（要验证码或 2FA，M4-1） | 不写令牌；界面显示"此服务器要求验证码登录，Leapgate 暂不支持" |
+| `not_found` | 写操作回 404（设备、标签不在这本簿里） | |
+| `conflict` | 409（新标签名已存在） | |
+| `unsupported` | `ab/personal` 回 404 | |
+| `network` | 连不上、TLS 失败、超时（单次 12 秒，登出 2 秒） | |
+| `server` | 其余：别的 4xx（含限流 429、只读簿写入的 403、簿满的 400）和 5xx，2xx 里带 `error`（`currentUser` 的内部错误），回的不是预期的 JSON；`settings`、`shared/profiles` 的 404 也在这里（07 §4.4） | |
+
+- `currentUser` 的 400 照上游（`models/user_model.dart:85-88`）也清令牌。上游 400 只清令牌、不当场复位地址簿和组，但紧接着 finally 里的拉取因为没有令牌也会复位它们，结果和 401 相同，所以这里两者一样处理。
+- 界面不认识的种类当 `server`（`parseApiResult`）。
+
+**缓存**（M4-2、M4-9）
+
+- `_ab`：格式照 `hbb_common::config::Ab`（`access_token` 加 `ab_entries`）。个人簿那条的 `name` 必须是 `My address book`：`AbEntry::personal()` 按名字认，`src/client.rs` 的 `try_get_password_from_personal_ab` 靠它找个人簿里存的密码（07 §4.2）。`leapgate_ab_book` 成功后改写：最多两条，个人簿一条、最近拉过的共享簿一条（上游存"个人簿 + 当前簿"，界面拉的共享簿就是当前簿）；`personal` 为真时换个人簿那条，否则换共享簿那条；文件里的令牌和当前令牌不同时先清空再写。条目的 `peers` 照 `AbPeer` 只留 `id`、`username`、`hostname`、`platform`、`alias`、`tags`，个人簿另带 `hash`（上游 `toCustomJson(includingHash:)`）；`tag_colors` 是 `{"名字": 颜色}` 的 JSON 字符串。
+- `_group`：照 `config::Group`，`leapgate_group` 成功后整份重写。
+- 退出、`unauthorized` 时两份都删。登录成功时不删（令牌不同的缓存不会被读到）。
+
+**令牌和请求**（M4-3、M4-8、IQ7）：`access_token` 只在 Rust 里读写，Dart 不读不写它，也不写 `user_info`。API 地址用 `report::api_root()`（已知限制：不认程序文件名里带的配置，M4-8）。请求用 `api.rs` 的严格客户端（系统根证书加 webpki、不跟随重定向、证书失败不回退、按上游规则走代理），带 `Authorization: Bearer <令牌>`。日志不记令牌、密码、`hash`、共享密码，失败只记端点路径和状态码。
+
+**Dart 侧的调用层**：`core/lib/leapgate/account_api.dart`（骨架，共用）
+
+- 数据类：`AccountUser`（`displayNameOrName`）、`ShareRule`（上游同名枚举去掉文字）、`AbProfile`、`AbBooks`、`AbTag`、`AbBookData`（设备用 core 的 `Peer.fromJson`）、`GroupData`（设备经 `groupPeer`，照抄上游 `PeerPayload.toPeer`，`loginName` 是主人的用户名）。
+- `ApiErrorKind`（上表八种）、`ApiError(kind, text)`、`ApiResult<T>`（`ok`、`value`、`error`）、`parseApiResult(json, ok)`。
+- 接口 `AccountApi`，方法和导出一一对应：`localUser`、`loginOptions`、`login`、`currentUser`、`logout`、`abCache`（返回 `entries` 的列表）、`groupCache`、`books`、`book(guid, name:, personal:)`、`addPeer(guid, peer)`、`updatePeer(guid, id, fields)`（`id` 由它并进体里）、`deletePeers`、`addTag`、`renameTag`、`setTagColor`、`deleteTags`、`group`。全局 `accountApi` 默认是 `RustAccountApi`，测试换成 `FakeAccountApi`。
+- `RustAccountApi` 现在是占位：`localUser` 回 null，两份缓存回空，`logout` 什么也不做，其余回 `unsupported`。整合时每个方法体换成一行 `lgBind.leapgate…` 加 `parseApiResult`。
+
+**core 的三个 model**（`ChangeNotifier`，同 M1 的做法，不用 Get、Rx；挂在 `appCore` 上，`late final`，第一次用时建）
+
+| model | 文件 | 谁 | 别的路要用的成员 |
+|---|---|---|---|
+| `AccountModel` | `leapgate/account.dart` | A | `user`（null 是没登录）、`loggedIn`、`error`（最近一次和服务器核对失败的原因，仍算登录着）、`disabled`、`start()`、`checkLoginOptions()`、`login(username, password)`、`logout()`、`refresh()`、`signedOutByServer()` |
+| `AddressBookModel` | `leapgate/address_book.dart` | B | `disabled`、`loaded`、`loading`、`unsupported`、`pullError`、`books`（个人簿第一、共享簿按名字）、`current`、`isPersonal(book)`、`peers`、`shownPeers`（经标签筛选）、`allPeers`（已加载的各簿，连接框用）、`canWrite`、`writableBooks`（"加入地址簿"列的簿）、`sharedPasswordOf(id)`、`syncPeerHash(id, hash)` |
+| `GroupModel` | `leapgate/group.dart` | A | `disabled`、`loaded`、`loading`、`error`、`users`（自己第一）、`peers`、`selectedUser`、`selectUser(name)`、`shownPeers` |
+
+- 地址簿和组都实现 `AccountData`（`loadCache()`、`pull()`、`reset()`，定义在 `account.dart`）。`AccountModel` 构造时拿到 `[addressBook, group]`（M5 的出口目录以后也加进来），由它按下面的顺序调这三个方法；页面上的"刷新""重试"直接调各自 model 的 `pull()`。其余成员各路自定，不进约定。
+- 顺序（A 实现，照上游 `refreshCurrentUser`、`updateOtherModels`）：`start()` 先读 `localUser()`，有就当已登录、调各 `loadCache()` 先显示；再 `currentUser()`：成功就更新用户、并行调各 `pull()`；`network`、`server` 记进 `error`、保持登录、不拉（上游 `pullAb`、`group.pull` 在有网络错误时直接返回），"重试"调 `refresh()` 再走一遍；`unauthorized` 走 `signedOutByServer()`。`login` 成功后更新用户、并行拉。`logout()` 调导出后清用户、`reset()` 各个。`signedOutByServer()` 清用户和 `error`、`reset()` 各个（令牌 Rust 已经删了）。
+- 地址簿和组的请求回 `unauthorized` 时，调 `appCore.account.signedOutByServer()`，不自己复位别人。
+- 在线状态：地址簿和同组设备的 `Peer.online` 由各自的 model 更新：照 `CategoryPeers` 用 `platformFFI.registerEventHandler('callback_query_onlines', <自己的 handler 名>, …)`，只改自己列表里的设备，变了就通知。页面判断"有没有回答"沿用 `categoryPeers(...).hasOnlineState`（每个 `CategoryPeers` 都收下全部 ID，不用改）。
+- 内置选项：`disabled` 分别读 `bind.isDisableAccount()`、`isDisableAb()`、`isDisableGroupPanel()`。`PeerTabs.isEnabled` 对地址簿是"账号、地址簿都没禁用"，对同组设备是"账号、组面板都没禁用"（上游 `models/peer_tab_model.dart` 的 `isEnabled`）；没登录时分类照常显示，内容是"登录后可查看…"。
+- 本地选项：上游的 `current-ab-name`（Flutter 选项）、`sync-ab-with-recent-sessions`、`sync-ab-tags`、`filter-ab-by-intersection`（LocalConfig）照上游的键和值，归 B，键追加进 core 的 `consts.dart`（10.7 接入办法第 2 条）。登录框"预填上次的用户名"：上游读 `user_info` 的 `name`，退出后就空了；要做到 01 的"上次的"，A 加一个 Leapgate 自己的 LocalConfig 键在登录成功时记下（键放 `account.dart`）。
+- 全局事件 `sync_peer_hash_password_to_personal_ab`（`src/client.rs` 登录后推）已在 `AppCore` 构造函数里登记，转给 `addressBook.syncPeerHash`（B 填；上游 `changePersonalHashPassword`：这台设备在个人簿里才写）。
+
+**挂载点**（`ui/m4` 上的骨架提交，行为和 M3 相同）
+
+| 文件 | 现在的内容 | 谁填 |
+|---|---|---|
+| `pages/home/account/account.dart` | `accountArea(context, overlays)`：左栏最下面的账号区，现在是空；`showLoginDialog(overlays)`：登录对话框，返回是否登录成功，地址簿和同组设备"没登录"状态的登录按钮也调它 | A |
+| `pages/home/group/group.dart` | `groupCategory(context, overlays)`，返回 `AccountCategoryView` | A |
+| `pages/home/address_book/address_book.dart` | `addressBookCategory(context, overlays)`；连接框的 `withAccountPeers(sourced)`（在最近、收藏、局域网之后接地址簿和同组设备里还没出现的设备）、`accountPeersLoading()`；卡片和列表的 `abPeerTags(item)`、`abPeerKeyLabel(l10n, item)`（共享簿存了密码时的钥匙说明，null 不显示）；设备菜单的 `abPeerMenuItem(l10n, item, action, overlays:)`（返回 null 时用页面自己的项）、`abMenuGroupNote(l10n, item, group, groups)`；多选条的 `abSelectionActions(l10n, category, ids, overlays:, done:)` | B |
+| `pages/home/account_category.dart` | `AccountCategoryView`：`tools`（接在"多选"后面：刷新、标签筛选开关）、`header`（列表上方：簿切换、标签条、报错横幅）、`side`（列表左边：人员列表）、`state`（代替列表：没登录、加载中、不提供地址簿、网络错误、空；null 时列出设备） | 共用 |
+| `pages/home/devices_page.dart` | 地址簿、同组设备两类走 `_accountList`：设备是 model 的 `shownPeers`，照当前视图和排序、1000 台上限照旧；上面 `header`、左边 `side`，有 `state` 时显示它；工具条接 `tools`；搜索结果经 `withAccountPeers`，"正在加载其他分类…"加上 `accountPeersLoading()`；多选条在这两类里只有 `abSelectionActions`，在其他分类里接在原有动作后面；单击"连接"、回车、搜索结果都经 `connectPeer` 并带上设备所在的分类 | 共用 |
+| `pages/home/peer_views.dart` | `connectPeer(id, category:, relay:)`：地址簿分类带上 `sharedPasswordOf(id)` 的共享密码（`isSharedPassword`，上游 `connectInPeerTab`）；卡片和行的标签、钥匙接上面两个函数；菜单项先问 `abPeerMenuItem`，组标题旁的说明问 `abMenuGroupNote`；`PeerAction` 新加的六个只由 `abPeerMenuItem` 画，`deleteFromAb` 归危险组 | 共用（B 改 `peerMenu` 的调用参数） |
+| `pages/home/home_page.dart` | `_SideColumn` 多了 `overlays`，导航之后是 `accountArea(...)` | A（摆放和间距） |
+| core `leapgate/peer_list.dart` | `PeerAction` 加了 `addToAb`、`editTags`、`editNote`、`setSharedPassword`、`showBooks`、`deleteFromAb`；`peerMenu` 还不出它们 | B |
+| core `leapgate/peer_tabs.dart` | `isEnabled` 对两类仍是 false | A |
+| core `leapgate/app_core.dart` | `addressBook`、`group`、`account` 三个 `late final`；上面那个全局事件的登记 | 共用 |
+
+- `peerMenu` 照 01 区块 F 的菜单表：管理组补"加入地址簿"（已登录，各分类）、"编辑标签""编辑备注""设置共享密码"（地址簿；共享密码只在共享簿）、"查看所在地址簿"；危险组在地址簿里是"从地址簿中删除"；同组设备只有连接方式和"加入地址簿"；只读簿的写操作灰显（`LgMenuItem.disabledNote`），说明只在第一个出现灰显项的组标题旁写一次。地址簿分类里的"重命名"改的是簿里的别名，"清除保存的密码"在个人簿有 `hash` 时清的是簿里的（上游 `common/widgets/peer_card.dart` 的 `AddressBookPeerCard`），这两项由 `abPeerMenuItem` 接管。
+- 骨架里多选条的写法（`if (!accountCategory)` 下面那段没有重新缩进）是为了不动原有的行，整合时可以格式化这一段。
+
+**组件（designer）**：规则同 10.8"组件约定"（只管画、文字由调用方传、带语义标签、两套主题和两套尺寸、画廊里每种状态一项、有行为测试）。要做的和样稿画框见 07 §2.2。接口要点：
+
+- 账号区：没登录（"登录"按钮、下面一行说明，`onLogin`）；已登录（头像字、显示名，点开菜单向上展开：`@用户名` 那一行、"退出登录"，菜单项由调用方给）；退出的页内确认条（问句、正文、两个按钮）。头像字由调用方算好传入（01 区块 D 的规则归 A）。
+- 登录对话框：用户名、密码两个输入框（控制器由调用方给）、"登录"按钮（忙时转圈，输入框不可改）；错误文字三处：用户名框下、密码框下（服务器返回的错误也在这）、整块的"无法获取登录选项"加"重试"（`onRetry`）；回车提交。
+- 簿切换下拉：当前簿名，旁边的权限文字和所有者（调用方拼好）；展开后有搜索框、簿的列表（簿名、权限文字、所有者、选中态）、底部一行说明；`onSelect`。
+- 标签筛选条：第一项"未标记"（文字由调用方给），其余每项是 `LgDeviceTag` 加选中态（描边加勾，不用标签色铺满）；`onToggle`、`onContextMenu(tag, globalPosition)`（标签右键）；放不下时横向滚动。
+- 地址簿"更多"菜单、只读簿的设备菜单：用现成的菜单项拼，designer 只核对 `p1-ab-more`、`p1-ab-readonly`、`p1-ab-readonly-card`。
+- 人员列表：搜索框；每行头像字、显示名、"我"标记；选中行带 ×（`onClear`）；`onSelect`。
+- 卡片和列表视图的备注：`LgDeviceCard`、`LgDeviceRow` 加 `note`（null 不显示那一行或那一格），`LgDeviceColumn` 加 `note`，有没有这一列由调用方的表头决定（地址簿和同组设备有）。
+- 列表状态：没登录（一句话加"登录"按钮）、网络错误（一句话加"重试"）、报错横幅（现有 `lg_banner.dart` 加"重试"按钮、可关闭，两句文字由调用方拼）、两类空、加载中骨架（现成的）。"服务器不提供地址簿"用空状态的样式。
+- 添加设备对话框：ID、别名、密码（只在共享簿，下面一行提示）、备注（300 字上限）、标签选择（浅底小块，可多选）；提交中、ID 重复、簿满、服务器报错四种状态的文字由调用方给。其余小对话框（添加标签、重命名标签、编辑标签、编辑备注、设置共享密码、加入地址簿、查看所在地址簿）照它的样式用 `LgConfirmDialog` 加输入件拼，不另做组件。
+- 修改标签颜色对话框：预览（标签小块）、一排预设色、自定义（色相环加明度条，自己画，不引第三方依赖）、`#RRGGBB` 输入框（格式错误的提示文字由调用方给）；提交中、失败；结果是 ARGB 整数（和上游存的一样）。
+
+**测试和合入**
+
+- R：每个端点的请求（方法、路径、查询、体）、响应解析、状态码到错误种类的映射（两种 401、`currentUser` 400、`personal` 404、409、2xx 带 `error`）、分页去重和停止条件、缓存的写入和删除（个人簿的名字、令牌不同时清空）；对两种服务器的集成测试 `#[ignore]`，地址和测试账号由环境变量给（07 §5.1）。假 HTTP 服务照 `api.rs` 现有的测试起。
+- core：A 的启动顺序（有没有本地用户 × `currentUser` 的几种结果）、登录、退出、`signedOutByServer` 复位、人员筛选和自己排第一；B 的权限判断、只读簿灰显项、标签筛选（并集和交集）、与最近会话同步的比对、`syncPeerHash`、退出后清空。都用 `FakeAccountApi`。
+- app：07 §5.1 列的每个页面状态一个行为测试。
+- 改写档登记来源（10.1）：`account.dart` 改写上游 `models/user_model.dart`，`group.dart` 改写 `models/group_model.dart`，`address_book.dart` 改写 `models/ab_model.dart`；照上游 `common/widgets/login.dart`、`my_group.dart`、`address_book.dart` 重写的页面在文件头注明出处。
+- 合入前：`git diff main -- flutter/` 为空；core 的 `flutter analyze --no-fatal-infos` 在 3.44.9 下不超出 92 条 info 的基线，app 0 条；复制件不跑格式化；改已有文件时不对整个文件跑 `dart format`，只格式化新文件。
+
+**整合时要做的**
+
+1. 合 R：重新生成块 2 的桥；`RustAccountApi` 的方法体换成 `lgBind` 调用加 `parseApiResult`；`core/test/fakes.dart` 的 `FakeLeapgate` 补上新导出（测试走 `FakeAccountApi`，补的可以直接抛错）。
+2. 换上 designer 的组件；`PeerCard`、`PeerTableRow` 在地址簿和同组设备里传 `note`，表头加备注列。
+3. 合 A、B：两个 ARB 文件的末尾合并；`peer_views.dart` 里 `peerMenu` 的调用参数以 B 为准。
+4. 整体审查，再按 07 §5 验收。
+
+**已知限制和与上游的不同**
+
+- `leapgate_ab_books` 任一步失败整个失败；上游 `settings`、`shared/profiles` 失败时照样显示个人簿。两种支持的服务器都实现了这两个端点，失败多半是网络，整体重试就行。
+- 缓存只存个人簿和最近拉过的共享簿（上游是"当前簿"，界面里两者相同）。
+- `currentUser` 回 400 和 401 一样处理（理由见上面"错误的形状"）。
+- API 地址不认程序文件名里带的配置（M4-8）。

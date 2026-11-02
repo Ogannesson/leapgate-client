@@ -13,6 +13,7 @@ import '../../widgets/lg_button.dart';
 import '../../widgets/lg_list_chrome.dart';
 import '../../widgets/lg_pressable.dart';
 import '../../widgets/lg_status.dart';
+import 'account/account.dart';
 import 'devices_page.dart';
 import 'home_dialogs.dart';
 import 'password_row.dart';
@@ -113,6 +114,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             onChangePassword: appCore.options.isInstalled
                 ? null
                 : () => showPermanentPasswordDialog(widget.overlays, l10n),
+            overlays: widget.overlays,
           ),
         ),
         Expanded(
@@ -178,12 +180,14 @@ class _SideColumn extends StatelessWidget {
     required this.section,
     required this.onSection,
     required this.onChangePassword,
+    required this.overlays,
   });
 
   final LocalStatusModel status;
   final HomeSection section;
   final ValueChanged<HomeSection> onSection;
   final VoidCallback? onChangePassword;
+  final TabOverlays overlays;
 
   @override
   Widget build(BuildContext context) {
@@ -318,6 +322,8 @@ class _SideColumn extends StatelessWidget {
                   onPressed: () => onSection(s),
                 ),
               ],
+              // 01 P1 block D (M4, coder A; `LEAPGATE.md` §10.11).
+              accountArea(context, overlays),
             ],
           ),
         ),

@@ -642,5 +642,7 @@
   "cmNoAudioInput": "No audio input device found",
   "homeIncomingSessions": "{count, plural, =1{1 incoming session in progress} other{{count} incoming sessions in progress}}",
   "@homeIncomingSessions": {"placeholders": {"count": {"type": "int"}}},
-  "homeShowCm": "View"
+  "homeShowCm": "View",
+  "abCategory": "Address book",
+  "groupCategory": "Team devices"
 }

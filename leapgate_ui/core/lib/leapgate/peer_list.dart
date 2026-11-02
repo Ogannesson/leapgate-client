@@ -61,6 +61,14 @@ enum PeerAction {
   clearPassword,
   delete,
   remove,
+  // The address book's (M4, coder B; `LEAPGATE.md` §10.11): [peerMenu] offers them once B fills
+  // in their conditions, the app builds them in `address_book.dart` `abPeerMenuItem`.
+  addToAb,
+  editTags,
+  editNote,
+  setSharedPassword,
+  showBooks,
+  deleteFromAb,
 }
 
 /// The "⋯" menu of a device in [category], by group: connection, device, manage, danger; a

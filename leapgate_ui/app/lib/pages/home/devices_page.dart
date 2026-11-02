@@ -16,7 +16,6 @@ import 'package:window_manager/window_manager.dart';
 
 import '../../icons/lg_icon.dart';
 import '../../l10n/app_localizations.dart';
-import '../../shell/navigation.dart';
 import '../../shell/tab_overlays.dart';
 import '../../theme/lg_tokens.dart';
 import '../../widgets/lg_button.dart';
@@ -27,6 +26,9 @@ import '../../widgets/lg_list_chrome.dart';
 import '../../widgets/lg_menu.dart';
 import '../../widgets/lg_menu_items.dart';
 import '../../widgets/lg_selection.dart';
+import 'account_category.dart';
+import 'address_book/address_book.dart';
+import 'group/group.dart';
 import 'home_dialogs.dart';
 import 'peer_views.dart';
 
@@ -172,7 +174,7 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
   /// The search results with where each device came from.
   ({ConnectBoxSearch search, Map<String, PeerCategory> sources})? get _search {
     if (_input.isEmpty) return null;
-    final sourced = searchablePeers(_searched);
+    final sourced = withAccountPeers(searchablePeers(_searched));
     return (
       search: ConnectBoxSearch(_input, [for (final s in sourced) s.peer]),
       sources: {for (final s in sourced) s.peer.id: s.source},
@@ -181,11 +183,29 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
 
   /// The selected category's devices: "Recent" in time order, the others sorted.
   List<Peer> _listed(PeerCategory category) {
-    final peers = categoryPeers(category).peers;
+    final peers = switch (category) {
+      PeerCategory.addressBook => appCore.addressBook.shownPeers,
+      PeerCategory.group => appCore.group.shownPeers,
+      _ => categoryPeers(category).peers,
+    };
     return category == PeerCategory.recent
         ? peers
         : sortPeers(peers, _tabs.sort);
   }
+
+  bool _loaded(PeerCategory category) => switch (category) {
+        PeerCategory.addressBook => appCore.addressBook.loaded,
+        PeerCategory.group => appCore.group.loaded,
+        _ => categoryPeers(category).loaded,
+      };
+
+  /// What the address book or the team devices put on the page (M4); null in the others.
+  AccountCategoryView? _accountView(PeerCategory category) => switch (category) {
+        PeerCategory.addressBook =>
+          addressBookCategory(context, widget.overlays),
+        PeerCategory.group => groupCategory(context, widget.overlays),
+        _ => null,
+      };
 
   List<Peer> _capped(List<Peer> peers) =>
       peers.length > kMaxShownPeers ? peers.sublist(0, kMaxShownPeers) : peers;
@@ -195,9 +215,8 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
     if (search != null) {
       return [_connectToRow, for (final p in _capped(search.matches)) p.id];
     }
-    final category = categoryPeers(_tabs.current);
     return [
-      if (category.loaded)
+      if (_loaded(_tabs.current))
         for (final p in _capped(_listed(_tabs.current))) p.id,
     ];
   }
@@ -208,20 +227,24 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
     return at >= 0 ? at : search?.defaultRow;
   }
 
-  void _connect(String id, {bool relay = false}) =>
-      mainNavigation.connect(id, forceRelay: relay);
+  /// [category] is where the device is listed (the address book connects with its shared
+  /// password); null for what was typed.
+  void _connect(String id, {bool relay = false, PeerCategory? category}) =>
+      connectPeer(id, category: category, relay: relay);
 
   /// Enter, "Connect" and its menu: the current row.
   void _runCurrent({bool relay = false}) {
-    final search = _search?.search;
+    final found = _search;
+    final search = found?.search;
     final row = _currentRow(search);
     if (row == null) return;
     if (search == null) {
-      _connect(_rowIds(null)[row], relay: relay);
+      _connect(_rowIds(null)[row], relay: relay, category: _tabs.current);
     } else if (row == 0) {
       _connect(_input, relay: relay);
     } else {
-      _connect(search.matches[row - 1].id, relay: relay);
+      final id = search.matches[row - 1].id;
+      _connect(id, relay: relay, category: found!.sources[id]);
     }
   }
 
@@ -275,6 +298,8 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
       switch (category) {
         PeerCategory.favorites => l10n.peersFavorites,
         PeerCategory.lan => l10n.peersLan,
+        PeerCategory.addressBook => l10n.abCategory,
+        PeerCategory.group => l10n.groupCategory,
         _ => l10n.recentCategory,
       };
 
@@ -288,11 +313,15 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
         _tabs,
         _selection,
         appCore.options.local.listenable(kOptionLeapgateUiMode),
+        appCore.account,
+        appCore.addressBook,
+        appCore.group,
       ]),
       builder: (context, _) {
         final found = _search;
         final search = found?.search;
         final current = _currentRow(search);
+        final account = _accountView(_tabs.current);
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -303,11 +332,13 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
             else if (_selection.active)
               _selectionBar(l10n)
             else
-              _toolbar(l10n),
+              _toolbar(l10n, account),
             const SizedBox(height: LgSpace.s2),
             Expanded(
               child: found == null
-                  ? _categoryList(l10n, current)
+                  ? account == null
+                      ? _categoryList(l10n, current)
+                      : _accountList(l10n, account, current)
                   : _results(l10n, found.search, found.sources, current!),
             ),
           ],
@@ -364,7 +395,7 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
   }
 
   /// The category bar and the list tools (01 P1 block F, `p1-menu-view`, `p1-menu-sort`).
-  Widget _toolbar(AppLocalizations l10n) {
+  Widget _toolbar(AppLocalizations l10n, AccountCategoryView? account) {
     final shown = _tabs.shown;
     final fixedText = l10n.peersFixed;
     final viewFixed = _tabs.isFixed(kOptionPeerCardUiType);
@@ -439,6 +470,7 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
           label: l10n.peersSelect,
           onPressed: _selection.start,
         ),
+        ...?account?.tools,
       ],
     );
   }
@@ -482,9 +514,13 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
       appCore.toasts.show(toast);
     }
 
+    // The address book and the team devices have only the address book's actions.
+    final accountCategory = category == PeerCategory.addressBook ||
+        category == PeerCategory.group;
     return LgSelectionBar(
       semanticLabel: l10n.peersSelect,
       actions: [
+        if (!accountCategory)
         LgSelectionAction(
           label: label,
           icon: icon,
@@ -512,6 +548,13 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
                     done('peersToastAddedFavorites');
                   },
           ),
+        ...abSelectionActions(
+          l10n,
+          category,
+          ids,
+          overlays: widget.overlays,
+          done: done,
+        ),
       ],
       countText: l10n.peersSelected(ids.length),
       selectAllLabel: l10n.peersSelectAll,
@@ -558,6 +601,39 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
     );
   }
 
+  /// The address book or the team devices: the category's [AccountCategoryView.state] or its
+  /// devices, under its header and beside its side list.
+  Widget _accountList(
+    AppLocalizations l10n,
+    AccountCategoryView view,
+    int? current,
+  ) {
+    final category = _tabs.current;
+    final listed = _listed(category);
+    final shown = _capped(listed);
+    final list = view.state ??
+        _devices(
+          l10n,
+          [for (final p in shown) _item(l10n, p, category, source: null)],
+          over: listed.length > shown.length,
+          isCurrent: (i) => i == current,
+        );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ?view.header,
+        Expanded(
+          child: view.side == null
+              ? list
+              : Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [view.side!, Expanded(child: list)],
+                ),
+        ),
+      ],
+    );
+  }
+
   Widget _results(
     AppLocalizations l10n,
     ConnectBoxSearch search,
@@ -565,7 +641,7 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
     int current,
   ) {
     final shown = _capped(search.matches);
-    final loading = _searched.any((c) => !c.loaded);
+    final loading = _searched.any((c) => !c.loaded) || accountPeersLoading();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -655,7 +731,7 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
       selecting: selecting,
       selected: selecting && _selection.contains(id),
       current: current,
-      onConnect: () => _connect(id),
+      onConnect: () => _connect(id, category: item.category),
       onTap: () {
         if (selecting) {
           _selection.tap(id, [for (final i in items) i.peer.id],
