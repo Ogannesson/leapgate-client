@@ -425,10 +425,15 @@ class LgDialogAction {
     this.kind = LgButtonKind.secondary,
     this.isDefault = false,
     this.semanticLabel,
+    this.busy = false,
   });
 
   final String label;
   final VoidCallback? onPressed;
+
+  /// The request this button started is on its way (see [LgButton.busy]); give
+  /// [label] the words for it ("正在添加…").
+  final bool busy;
 
   /// [LgButtonKind.primary] for the usual answer, [LgButtonKind.dangerSolid]
   /// for the one that cannot be taken back, secondary for the way out.
@@ -527,7 +532,7 @@ class LgConfirmDialog extends StatelessWidget {
     final t = LgTokens.of(context);
     final c = t.colors;
     final defaultAction = actions
-        .where((a) => a.isDefault && a.onPressed != null)
+        .where((a) => a.isDefault && a.onPressed != null && !a.busy)
         .firstOrNull;
     return Semantics(
       scopesRoute: true,
@@ -611,6 +616,7 @@ class LgConfirmDialog extends StatelessWidget {
                           label: a.label,
                           semanticLabel: a.semanticLabel,
                           kind: a.kind,
+                          busy: a.busy,
                           autofocus: a == defaultAction,
                           onPressed: a.onPressed,
                         ),

@@ -45,6 +45,7 @@ class LgDeviceCard extends StatefulWidget {
     required this.status,
     required this.statusLabel,
     this.userHost,
+    this.note,
     this.tags = const [],
     this.source,
     this.favorite = false,
@@ -75,6 +76,10 @@ class LgDeviceCard extends StatefulWidget {
   /// "在线", "离线", "正在查询…".
   final String statusLabel;
   final String? userHost;
+
+  /// The note of the device (address book and team devices): a line of its own
+  /// under [userHost]. Null or empty leaves the line out.
+  final String? note;
   final List<LgDeviceTag> tags;
 
   /// The category the device came from, in search results ("收藏").
@@ -163,6 +168,7 @@ class _LgDeviceCardState extends State<LgDeviceCard> {
       statusLabel: w.statusLabel,
       id: w.id,
       userHost: w.userHost,
+      note: w.note,
       source: w.source,
       tags: w.tags,
       favorite: w.favorite,
@@ -322,6 +328,8 @@ class _Body extends StatelessWidget {
             card.userHost!,
             style: t.textS.copyWith(color: c.text2),
           ),
+        if (card.note != null && card.note!.isNotEmpty)
+          LgEllipsisText(card.note!, style: t.textS.copyWith(color: c.text2)),
         SizedBox(
           height: 20,
           child: Row(

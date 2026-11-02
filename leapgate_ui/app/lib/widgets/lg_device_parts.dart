@@ -185,12 +185,13 @@ class LgPickBox extends StatelessWidget {
 }
 
 /// The words a screen reader gets for a device: name, state, ID, user and host,
-/// source, tags, marks.
+/// note, source, tags, marks.
 String lgDeviceLabel({
   required String name,
   required String statusLabel,
   required String id,
   String? userHost,
+  String? note,
   String? source,
   List<LgDeviceTag> tags = const [],
   bool favorite = false,
@@ -205,6 +206,7 @@ String lgDeviceLabel({
     statusLabel,
     id,
     ?userHost,
+    if (note != null && note.isNotEmpty) note,
     ?source,
     for (final tag in tags) tag.label,
   ].join(', ');

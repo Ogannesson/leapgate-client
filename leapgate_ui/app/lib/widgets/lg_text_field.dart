@@ -6,6 +6,22 @@ import '../icons/lg_icon.dart';
 import '../theme/lg_tokens.dart';
 import 'lg_pressable.dart';
 
+/// Tells the fields below it that they stand in a form dialog (`.sheet .field`
+/// in A-P1.html): while disabled they look flat, with no frame, the surface
+/// colour instead of the disabled grey and the text in the quiet colour, so a
+/// form whose request is on its way keeps its white ground; and the line under
+/// a field that is wrong is in regular weight, not bold. [LgFormDialog] sets it.
+class LgDialogFields extends InheritedWidget {
+  const LgDialogFields({super.key, required super.child});
+
+  static bool of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<LgDialogFields>() !=
+      null;
+
+  @override
+  bool updateShouldNotify(LgDialogFields old) => false;
+}
+
 /// Input field (`.field` in A-基础.html): `--lg-h-main` high, 1.5 px inset
 /// border; 2 px accent when focused, 2 px error with [errorText], which is
 /// shown under the field (password wrong, 01 §4.3).
@@ -111,17 +127,19 @@ class _LgTextFieldState extends State<LgTextField> {
       border = Border.all(color: c.borderStrong, width: 1.5);
     }
     final base = widget.dense ? t.textM : t.text;
+    final flat = !widget.enabled && LgDialogFields.of(context);
+    final ink = flat ? c.text2 : c.text;
     final textStyle = widget.obscureText
         // `.mask`: dots at the number size, spaced .14em.
-        ? t.textN.copyWith(color: c.text, letterSpacing: t.sizes.fsN * .14)
-        : base.copyWith(color: c.text);
+        ? t.textN.copyWith(color: ink, letterSpacing: t.sizes.fsN * .14)
+        : base.copyWith(color: ink);
     final field = Container(
       height: widget.dense ? t.sizes.button : t.sizes.main,
       padding: EdgeInsets.symmetric(
         horizontal: widget.dense ? LgSpace.s3 : LgSpace.s4,
       ),
       decoration: BoxDecoration(
-        color: widget.enabled ? c.surface : c.disabled,
+        color: widget.enabled || flat ? c.surface : c.disabled,
         borderRadius: radius,
       ),
       foregroundDecoration: border == null
@@ -204,7 +222,12 @@ class LgFieldError extends StatelessWidget {
     final t = LgTokens.of(context);
     final c = t.colors;
     return DefaultTextStyle(
-      style: t.textS.copyWith(color: c.error, fontWeight: FontWeight.w700),
+      style: t.textS.copyWith(
+        color: c.error,
+        fontWeight: LgDialogFields.of(context)
+            ? FontWeight.w400
+            : FontWeight.w700,
+      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

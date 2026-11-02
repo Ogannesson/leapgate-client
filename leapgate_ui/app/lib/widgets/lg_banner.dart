@@ -5,6 +5,9 @@ import 'package:flutter/material.dart';
 
 import '../icons/lg_icon.dart';
 import '../theme/lg_tokens.dart';
+import 'lg_button.dart';
+import 'lg_pressable.dart';
+import 'lg_tooltip.dart';
 
 /// What a message is about: information, success, a warning or an error.
 enum LgTone { info, success, warning, error }
@@ -26,8 +29,9 @@ LgIcons lgToneIcon(LgTone tone) => switch (tone) {
 };
 
 /// A message on a tinted ground: an icon, an optional bold [title] and the
-/// [text]. Used in the connection panel; the lists and the settings use it
-/// later.
+/// [text]. Used in the connection panel, the dialogs and above the device
+/// list; it may carry one text button ([actionLabel], "重试") and a close
+/// button ([onDismiss]).
 class LgBanner extends StatelessWidget {
   const LgBanner({
     super.key,
@@ -35,7 +39,15 @@ class LgBanner extends StatelessWidget {
     this.title,
     this.text,
     this.icon,
-  }) : assert(title != null || text != null);
+    this.slim = false,
+    this.actionLabel,
+    this.onAction,
+    this.actionIcon,
+    this.dismissLabel,
+    this.onDismiss,
+  }) : assert(title != null || text != null),
+       assert(actionLabel == null || onAction != null),
+       assert(onDismiss == null || dismissLabel != null);
 
   final LgTone tone;
 
@@ -49,6 +61,20 @@ class LgBanner extends StatelessWidget {
   /// connection).
   final LgIcons? icon;
 
+  /// The `.bnr` of the page and its dialogs: 12 px above and under, the icon
+  /// and the text centred on each other. Without it the banner is the roomy
+  /// `.bnr.big` of the connection panel (16 px, icon on the first line).
+  final bool slim;
+
+  /// The button at the end ("重试"); [actionIcon] goes before its label.
+  final String? actionLabel;
+  final VoidCallback? onAction;
+  final LgIcons? actionIcon;
+
+  /// The close button at the very end; [dismissLabel] names it ("关闭").
+  final String? dismissLabel;
+  final VoidCallback? onDismiss;
+
   @override
   Widget build(BuildContext context) {
     final t = LgTokens.of(context);
@@ -58,20 +84,29 @@ class LgBanner extends StatelessWidget {
       LgTone.error => c.errorBg,
       _ => c.surface2,
     };
+    final hasButtons = actionLabel != null || onDismiss != null;
     return Semantics(
       container: true,
+      explicitChildNodes: hasButtons,
       liveRegion: tone == LgTone.error || tone == LgTone.warning,
       child: Container(
-        padding: const EdgeInsets.all(LgSpace.s4),
+        padding: slim
+            ? const EdgeInsets.symmetric(
+                horizontal: LgSpace.s4,
+                vertical: LgSpace.s3,
+              )
+            : const EdgeInsets.all(LgSpace.s4),
         decoration: BoxDecoration(
           color: bg,
           borderRadius: BorderRadius.circular(LgRadius.r12),
         ),
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: slim
+              ? CrossAxisAlignment.center
+              : CrossAxisAlignment.start,
           children: [
             Padding(
-              padding: const EdgeInsets.only(top: 1),
+              padding: EdgeInsets.only(top: slim ? 0 : 1),
               child: LgIcon(
                 icon ?? lgToneIcon(tone),
                 size: 22,
@@ -96,7 +131,59 @@ class LgBanner extends StatelessWidget {
                 style: t.text.copyWith(color: c.text),
               ),
             ),
+            if (actionLabel != null) ...[
+              const SizedBox(width: LgSpace.s3),
+              LgButton(
+                label: actionLabel!,
+                icon: actionIcon,
+                kind: LgButtonKind.text,
+                horizontalPadding: LgSpace.s2,
+                onPressed: onAction,
+              ),
+            ],
+            if (onDismiss != null) ...[
+              SizedBox(width: actionLabel != null ? LgSpace.s1 : LgSpace.s3),
+              // `.xi`: 28 px, sitting 4 px into the banner's padding.
+              Transform.translate(
+                offset: const Offset(LgSpace.s1, 0),
+                child: _DismissButton(label: dismissLabel!, onPressed: onDismiss!),
+              ),
+            ],
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DismissButton extends StatelessWidget {
+  const _DismissButton({required this.label, required this.onPressed});
+
+  final String label;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = LgTokens.of(context).colors;
+    const radius = BorderRadius.all(Radius.circular(LgRadius.r6));
+    return LgTooltip(
+      message: label,
+      child: LgPressable(
+        onPressed: onPressed,
+        semanticLabel: label,
+        builder: (context, states) => LgFocusRing(
+          show: states.contains(WidgetState.focused),
+          radius: radius,
+          child: Container(
+            width: 28,
+            height: 28,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: lgStateOverlay(c, states),
+              borderRadius: radius,
+            ),
+            child: LgIcon(LgIcons.x, size: 20, color: c.text2),
+          ),
         ),
       ),
     );
