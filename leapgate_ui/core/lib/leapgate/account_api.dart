@@ -4,6 +4,7 @@ import 'dart:convert';
 
 import '../consts.dart';
 import '../models/peer_model.dart';
+import 'bridge.dart';
 
 /// The error kinds H1 reports (`LEAPGATE.md` §10.11 "错误的形状").
 enum ApiErrorKind {
@@ -320,77 +321,101 @@ abstract interface class AccountApi {
 /// Set by tests; the app keeps the default.
 AccountApi accountApi = const RustAccountApi();
 
-/// Block 2. Until H1 is merged every call answers "not supported" or nothing; the integration
-/// replaces each body with the `lgBind` call of §10.11 and [parseApiResult].
+/// Block 2: the exports of §10.11.
 class RustAccountApi implements AccountApi {
   const RustAccountApi();
 
-  static const _pending =
-      ApiResult<Never>.error(ApiError(ApiErrorKind.unsupported));
+  static ApiResult<AccountUser> _user(String json) => parseApiResult(
+      json, (m) => AccountUser.fromJson(m['user'] as Map<String, dynamic>));
+
+  static ApiResult<void> _done(String json) => parseApiResult(json, (_) {});
 
   @override
-  AccountUser? localUser() => null;
+  AccountUser? localUser() {
+    final user = jsonDecode(lgBind.leapgateAccountLocal())['user'];
+    return user is Map<String, dynamic> ? AccountUser.fromJson(user) : null;
+  }
 
   @override
-  Future<ApiResult<void>> loginOptions() async => _pending;
+  Future<ApiResult<void>> loginOptions() async =>
+      _done(await lgBind.leapgateAccountLoginOptions());
 
   @override
   Future<ApiResult<AccountUser>> login(
           String username, String password) async =>
-      _pending;
+      _user(await lgBind.leapgateAccountLogin(
+          username: username, password: password));
 
   @override
-  Future<ApiResult<AccountUser>> currentUser() async => _pending;
+  Future<ApiResult<AccountUser>> currentUser() async =>
+      _user(await lgBind.leapgateAccountCurrentUser());
 
   @override
-  Future<void> logout() async {}
+  Future<void> logout() => lgBind.leapgateAccountLogout();
 
   @override
-  Future<List<Map<String, dynamic>>> abCache() async => const [];
+  Future<List<Map<String, dynamic>>> abCache() async => [
+        for (final e
+            in jsonDecode(await lgBind.leapgateAbCache())['entries'] as List)
+          e as Map<String, dynamic>,
+      ];
 
   @override
-  Future<Map<String, dynamic>?> groupCache() async => null;
+  Future<Map<String, dynamic>?> groupCache() async {
+    final m = jsonDecode(await lgBind.leapgateGroupCache())
+        as Map<String, dynamic>;
+    return m.isEmpty ? null : m;
+  }
 
   @override
-  Future<ApiResult<AbBooks>> books() async => _pending;
+  Future<ApiResult<AbBooks>> books() async =>
+      parseApiResult(await lgBind.leapgateAbBooks(), AbBooks.fromJson);
 
   @override
   Future<ApiResult<AbBookData>> book(String guid,
           {required String name, required bool personal}) async =>
-      _pending;
+      parseApiResult(
+          await lgBind.leapgateAbBook(
+              guid: guid, name: name, personal: personal),
+          AbBookData.fromJson);
 
   @override
   Future<ApiResult<void>> addPeer(
           String guid, Map<String, dynamic> peer) async =>
-      _pending;
+      _done(await lgBind.leapgateAbAddPeer(guid: guid, peer: jsonEncode(peer)));
 
   @override
   Future<ApiResult<void>> updatePeer(
           String guid, String id, Map<String, dynamic> fields) async =>
-      _pending;
+      _done(await lgBind.leapgateAbUpdatePeer(
+          guid: guid, peer: jsonEncode({...fields, 'id': id})));
 
   @override
   Future<ApiResult<void>> deletePeers(String guid, List<String> ids) async =>
-      _pending;
+      _done(await lgBind.leapgateAbDeletePeers(guid: guid, ids: ids));
 
   @override
   Future<ApiResult<void>> addTag(String guid, String name, int color) async =>
-      _pending;
+      _done(
+          await lgBind.leapgateAbAddTag(guid: guid, name: name, color: color));
 
   @override
   Future<ApiResult<void>> renameTag(
           String guid, String oldName, String newName) async =>
-      _pending;
+      _done(await lgBind.leapgateAbRenameTag(
+          guid: guid, oldName: oldName, newName: newName));
 
   @override
   Future<ApiResult<void>> setTagColor(
           String guid, String name, int color) async =>
-      _pending;
+      _done(await lgBind.leapgateAbSetTagColor(
+          guid: guid, name: name, color: color));
 
   @override
   Future<ApiResult<void>> deleteTags(String guid, List<String> names) async =>
-      _pending;
+      _done(await lgBind.leapgateAbDeleteTags(guid: guid, names: names));
 
   @override
-  Future<ApiResult<GroupData>> group() async => _pending;
+  Future<ApiResult<GroupData>> group() async =>
+      parseApiResult(await lgBind.leapgateGroup(), GroupData.fromJson);
 }
