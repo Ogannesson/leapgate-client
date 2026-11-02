@@ -473,4 +473,6 @@ async fn pages(
 }
 
 #[cfg(test)]
+mod live_tests;
+#[cfg(test)]
 mod tests;

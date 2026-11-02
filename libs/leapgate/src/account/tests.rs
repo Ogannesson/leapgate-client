@@ -10,7 +10,7 @@ use hbb_common::{
 use std::sync::{Arc, Mutex};
 
 #[derive(Default)]
-struct Mem {
+pub(super) struct Mem {
     options: Mutex<HashMap<String, String>>,
     ab: Mutex<Option<Ab>>,
     group: Mutex<Option<Group>>,
