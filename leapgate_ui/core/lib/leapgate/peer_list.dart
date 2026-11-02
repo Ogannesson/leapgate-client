@@ -71,18 +71,49 @@ enum PeerAction {
   deleteFromAb,
 }
 
+/// What the device menu needs from the address book (`AddressBookModel.menuFlags`): whether
+/// there is a book to add the device to, whether the listed book is a shared one, and whether
+/// it has tags.
+typedef AbMenuFlags = ({bool addToAb, bool sharedBook, bool tags});
+
 /// The "⋯" menu of a device in [category], by group: connection, device, manage, danger; a
 /// group with nothing in it is left out. The conditions are upstream's
 /// (`common/widgets/peer_card.dart:958-1100`, `RecentPeerCard`, `FavoritePeerCard`,
 /// `DiscoveredPeerCard`) in 01's groups: the connection group has what M2b connects with,
-/// "Favorites" has no danger group (01: "移出收藏" in the manage group does it), and the address
-/// book items come with M4.
+/// "Favorites" has no danger group (01: "移出收藏" in the manage group does it), and every
+/// category offers "加入地址簿" when there is a book to add to (M4).
 List<List<PeerAction>> peerMenu(
   PeerCategory category, {
   required bool favorite,
   required bool hasPassword,
   required bool windows,
+  AbMenuFlags ab = (addToAb: false, sharedBook: false, tags: false),
 }) {
+  // The address book and the team devices (01 P1 block F; upstream `AddressBookPeerCard`,
+  // `MyGroupPeerCard`). A read-only book keeps its writing items, greyed by the app.
+  if (category == PeerCategory.group) {
+    return [
+      [PeerAction.remoteDesktop, PeerAction.viaRelay],
+      if (ab.addToAb) [PeerAction.addToAb],
+    ];
+  }
+  if (category == PeerCategory.addressBook) {
+    return [
+      [PeerAction.remoteDesktop, PeerAction.viaRelay],
+      [PeerAction.alwaysRelay, if (windows) PeerAction.createShortcut],
+      [
+        PeerAction.rename,
+        favorite ? PeerAction.removeFavorite : PeerAction.addFavorite,
+        if (ab.addToAb) PeerAction.addToAb,
+        if (ab.tags) PeerAction.editTags,
+        PeerAction.editNote,
+        if (ab.sharedBook) PeerAction.setSharedPassword,
+        if (hasPassword) PeerAction.clearPassword,
+        PeerAction.showBooks,
+      ],
+      [PeerAction.deleteFromAb],
+    ];
+  }
   final groups = [
     [PeerAction.remoteDesktop, PeerAction.viaRelay],
     [
@@ -93,6 +124,7 @@ List<List<PeerAction>> peerMenu(
     [
       if (category != PeerCategory.lan) PeerAction.rename,
       favorite ? PeerAction.removeFavorite : PeerAction.addFavorite,
+      if (ab.addToAb) PeerAction.addToAb,
       if (category != PeerCategory.lan && hasPassword) PeerAction.clearPassword,
     ],
     [

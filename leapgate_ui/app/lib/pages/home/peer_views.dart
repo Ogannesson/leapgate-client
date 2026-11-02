@@ -228,8 +228,11 @@ List<Widget> peerMenuItems(
   final groups = peerMenu(
     item.category,
     favorite: item.favorite,
-    hasPassword: hasPassword,
+    // In the personal book the hash it stores counts as well (`AddressBookPeerCard`).
+    hasPassword: hasPassword ||
+        (item.category == PeerCategory.addressBook && item.peer.hash.isNotEmpty),
     windows: Platform.isWindows,
+    ab: appCore.addressBook.menuFlags(item.category),
   );
   final titles = [
     l10n.connectBoxConnectionType,
