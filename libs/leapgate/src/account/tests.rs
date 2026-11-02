@@ -364,7 +364,8 @@ async fn books_pages_the_shared_profiles() {
         .all(|r| r.method == "POST" && r.auth.as_deref() == Some("Bearer t1")));
 }
 
-/// rustdesk-api answers every page with the same entries and a `total` above the page size.
+/// rustdesk-api answers every page with the same entries; `total` is far above them here, so
+/// only the page without new ids ends paging.
 #[tokio::test(crate = "hbb_common::tokio")]
 async fn book_paging_stops_at_a_page_without_new_ids_and_caches() {
     let (base, seen) = serve(|r| {
@@ -374,7 +375,7 @@ async fn book_paging_stops_at_a_page_without_new_ids_and_caches() {
         let data: Vec<Value> = (0..150)
             .map(|i| json!({"id": format!("{i}"), "hash": "aGFzaA==", "password": "pw", "alias": "x", "note": "n", "tags": ["work"]}))
             .collect();
-        (200, json!({"total": 150, "data": data}).to_string())
+        (200, json!({"total": 1000, "data": data}).to_string())
     })
     .await;
     let s = signed_in();
@@ -461,6 +462,108 @@ async fn book_401_signs_out() {
     assert!(signed_out(&s));
 }
 
+/// Signed out and in again while a request with the old token was out: its 401 keeps the new
+/// login.
+#[tokio::test(crate = "hbb_common::tokio")]
+async fn a_401_for_an_old_token_keeps_the_new_login() {
+    let s = Arc::new(signed_in());
+    let s2 = s.clone();
+    let (base, seen) = serve(move |_| {
+        s2.set_option(TOKEN, "t2".to_owned());
+        (401, String::new())
+    })
+    .await;
+    assert_eq!(
+        kind(&ab::book(&*s, &base, "p1", "", true).await),
+        Some(Kind::Unauthorized)
+    );
+    assert_eq!(s.option(TOKEN), "t2");
+    assert!(s.ab.lock().unwrap().is_some());
+    assert_eq!(seen.lock().unwrap()[0].auth.as_deref(), Some("Bearer t1"));
+}
+
+/// A logout lands while the devices are fetched: the removed caches stay removed.
+#[tokio::test(crate = "hbb_common::tokio")]
+async fn a_logout_during_a_pull_is_not_undone() {
+    let s = Arc::new(signed_in());
+    let s2 = s.clone();
+    let (base, _) = serve(move |r| {
+        if r.target.starts_with("/api/ab/tags/") {
+            return (200, "[]".to_owned());
+        }
+        if r.target.starts_with("/api/ab/peers") || r.target.starts_with("/api/peers") {
+            clear(&*s2);
+        }
+        (
+            200,
+            json!({"total": 1, "data": [{"id": "1", "name": "a", "hash": "aGFzaA=="}]}).to_string(),
+        )
+    })
+    .await;
+    ab::book(&*s, &base, "p1", "", true).await.unwrap();
+    assert!(s.ab.lock().unwrap().is_none());
+    s.set_option(TOKEN, "t1".to_owned());
+    group::pull(&*s, &base).await.unwrap();
+    assert!(s.group.lock().unwrap().is_none());
+}
+
+/// Reading a real `_ab` file takes a while.
+struct SlowAb(Mem);
+
+impl Store for SlowAb {
+    fn option(&self, key: &str) -> String {
+        self.0.option(key)
+    }
+    fn set_option(&self, key: &str, value: String) {
+        self.0.set_option(key, value)
+    }
+    fn ab(&self) -> Ab {
+        let ab = self.0.ab();
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        ab
+    }
+    fn set_ab(&self, ab: Option<&Ab>) {
+        self.0.set_ab(ab)
+    }
+    fn group(&self) -> Group {
+        self.0.group()
+    }
+    fn set_group(&self, group: Option<&Group>) {
+        self.0.set_group(group)
+    }
+}
+
+/// The personal book and a shared one saved at once (each export runs on its own thread): both
+/// entries stay.
+#[tokio::test(
+    flavor = "multi_thread",
+    worker_threads = 2,
+    crate = "hbb_common::tokio"
+)]
+async fn concurrent_saves_keep_both_entries() {
+    let (base, _) = serve(|r| {
+        if r.target.starts_with("/api/ab/tags/") {
+            return (200, "[]".to_owned());
+        }
+        (
+            200,
+            json!({"total": 1, "data": [{"id": "1", "hash": "aGFzaA=="}]}).to_string(),
+        )
+    })
+    .await;
+    let s = Arc::new(SlowAb(signed_in()));
+    s.set_option(TOKEN, "t2".to_owned());
+    let (a, b) = (s.clone(), s.clone());
+    let (base_a, base_b) = (base.clone(), base.clone());
+    let ha = tokio::spawn(async move { ab::book(&*a, &base_a, "p1", "", true).await.is_ok() });
+    let hb = tokio::spawn(async move { ab::book(&*b, &base_b, "s1", "Team", false).await.is_ok() });
+    assert!(ha.await.unwrap() && hb.await.unwrap());
+    let ab = s.0.ab();
+    assert_eq!(ab.ab_entries.len(), 2);
+    let personal = ab.ab_entries.iter().find(|e| e.personal()).unwrap();
+    assert_eq!(personal.peers[0].hash, "aGFzaA==");
+}
+
 #[tokio::test(crate = "hbb_common::tokio")]
 async fn writes() {
     let (base, seen) = serve(|r| match r.target.as_str() {
@@ -470,6 +573,7 @@ async fn writes() {
         "/api/ab/tag/rename/g" => (409, r#"{"error":"Tag exists"}"#.to_owned()),
         "/api/ab/peer/add/full" => (400, r#"{"error":"Address book is full"}"#.to_owned()),
         "/api/ab/peer/add/oops" => (200, r#"{"error":"Failed"}"#.to_owned()),
+        "/api/ab/peer/add/proxy" => (200, "<html>blocked</html>".to_owned()),
         "/api/ab/peer/add/gone" => (401, String::new()),
         _ => (200, String::new()),
     })
@@ -498,6 +602,10 @@ async fn writes() {
     assert_eq!(full.unwrap_err().text, "Address book is full");
     assert_eq!(
         kind(&w!(Method::POST, "/api/ab/peer/add/oops")),
+        Some(Kind::Server)
+    );
+    assert_eq!(
+        kind(&w!(Method::POST, "/api/ab/peer/add/proxy")),
         Some(Kind::Server)
     );
     assert!(!signed_out(&s));

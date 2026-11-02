@@ -21,7 +21,11 @@ use hbb_common::{
     throttled_log,
 };
 use reqwest::Method;
-use std::{collections::HashMap, time::Duration};
+use std::{
+    collections::HashMap,
+    sync::{Mutex, MutexGuard, PoisonError},
+    time::Duration,
+};
 
 /// The LocalConfig keys upstream uses; the rest of Rust reads them (session token, audits,
 /// the exit directory, the display name sent at login).
@@ -33,6 +37,14 @@ const LOGOUT_TIMEOUT: Duration = Duration::from_secs(2);
 const PAGE_SIZE: i64 = 100;
 const TEXT_MAX: usize = 200;
 const LOG_INTERVAL: Duration = Duration::from_secs(60);
+
+/// Each export runs on its own frb thread: the caches are read, changed and written back, and
+/// signing out removes them, each as one step under this lock. Never held across an `.await`.
+static CACHE: Mutex<()> = Mutex::new(());
+
+fn cache_lock() -> MutexGuard<'static, ()> {
+    CACHE.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 /// Where the token, `user_info` and the two caches are kept. Tests keep them in memory instead of
 /// the user's config.
@@ -241,7 +253,7 @@ async fn login(
             &error_text(status, &body),
         ));
     }
-    let v = answer(s, status, &body, Kind::Server)?;
+    let v = answer(s, "", status, &body, Kind::Server)?;
     if v.get("type").and_then(Value::as_str) != Some("access_token") {
         return Err(Error::new(Kind::VerificationRequired, ""));
     }
@@ -256,23 +268,26 @@ async fn login(
 
 async fn current_user(s: &impl Store, base: &str, device: &Device) -> Result<Value> {
     let body = json!({ "id": device.id, "uuid": device.uuid });
+    let token = s.option(TOKEN);
     let (status, body) = send(
         base,
         Method::POST,
         "/api/currentUser",
         &[],
-        &s.option(TOKEN),
+        &token,
         Some(bytes(body)),
         api::TIMEOUT,
     )
     .await?;
     // Upstream drops the token on a 400 too (models/user_model.dart).
     let status = if status == 400 { 401 } else { status };
-    let user = answer(s, status, &body, Kind::Server)?;
+    let user = answer(s, &token, status, &body, Kind::Server)?;
     if !user.is_object() {
         return Err(Error::shape(status));
     }
-    s.set_option(USER_INFO, user_info(&user));
+    if s.option(TOKEN) == token {
+        s.set_option(USER_INFO, user_info(&user));
+    }
     Ok(json!({ "user": user }))
 }
 
@@ -307,6 +322,20 @@ async fn logout(s: &impl Store, base: &str, device: &Device) {
 
 /// Signed out: the token, `user_info` and both caches go.
 fn clear(s: &impl Store) {
+    let _cache = cache_lock();
+    clear_locked(s);
+}
+
+/// A 401 for `used` signs out only while `used` is still the token: an answer to a request sent
+/// before a logout and a new login must not end the new login.
+fn clear_if(s: &impl Store, used: &str) {
+    let _cache = cache_lock();
+    if s.option(TOKEN) == used {
+        clear_locked(s);
+    }
+}
+
+fn clear_locked(s: &impl Store) {
     s.set_option(TOKEN, String::new());
     s.set_option(USER_INFO, String::new());
     s.set_ab(None);
@@ -371,15 +400,16 @@ fn bytes(v: Value) -> Vec<u8> {
 }
 
 /// The JSON of an answer (`Value::Null` when the body is empty or not JSON), or the error it
-/// means for every endpoint but login: a 401 signs out on this device.
-fn answer(s: &impl Store, status: u16, body: &[u8], on_404: Kind) -> Result<Value> {
+/// means for every endpoint but login: a 401 to a request with the token `used` signs out on
+/// this device.
+fn answer(s: &impl Store, used: &str, status: u16, body: &[u8], on_404: Kind) -> Result<Value> {
     let json = serde_json::from_slice::<Value>(body).unwrap_or(Value::Null);
     let server_error = json.get("error").filter(|e| !e.is_null());
     let kind = match status {
         200..=299 if server_error.is_none() => return Ok(json),
         200..=299 => Kind::Server,
         401 => {
-            clear(s);
+            clear_if(s, used);
             Kind::Unauthorized
         }
         404 => on_404,
@@ -409,12 +439,12 @@ fn error_text(status: u16, body: &[u8]) -> String {
 async fn pages(
     s: &impl Store,
     base: &str,
+    token: &str,
     method: Method,
     path: &str,
     extra: &[(&str, &str)],
     key: &str,
 ) -> Result<Vec<Value>> {
-    let token = s.option(TOKEN);
     let page_size = PAGE_SIZE.to_string();
     let mut items: Vec<Value> = Vec::new();
     let mut index: HashMap<String, usize> = HashMap::new();
@@ -432,12 +462,12 @@ async fn pages(
             method.clone(),
             path,
             &query,
-            &token,
+            token,
             None,
             api::TIMEOUT,
         )
         .await?;
-        let Value::Object(mut page) = answer(s, status, &body, Kind::Server)? else {
+        let Value::Object(mut page) = answer(s, token, status, &body, Kind::Server)? else {
             return Err(Error::shape(status));
         };
         let total = page

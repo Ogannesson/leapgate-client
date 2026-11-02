@@ -1,7 +1,9 @@
 //! The address book: upstream `models/ab_model.dart`'s requests (the current one only, no legacy
 //! `/api/ab`) and its `_ab` cache.
 
-use super::{answer, bytes, pages, render, send, Error, Kind, Local, Result, Store, TOKEN};
+use super::{
+    answer, bytes, cache_lock, pages, render, send, Error, Kind, Local, Result, Store, TOKEN,
+};
 use crate::{api, report};
 use hbb_common::{
     config::{Ab, AbEntry, AbPeer},
@@ -102,8 +104,11 @@ async fn write(method: Method, path: &str, body: Vec<u8>) -> String {
 }
 
 pub(super) fn cache(s: &impl Store) -> String {
+    let ab = {
+        let _cache = cache_lock();
+        s.ab()
+    };
     let token = s.option(TOKEN);
-    let ab = s.ab();
     if token.is_empty() || ab.access_token != token {
         return json!({ "entries": [] }).to_string();
     }
@@ -111,9 +116,10 @@ pub(super) fn cache(s: &impl Store) -> String {
 }
 
 pub(super) async fn books(s: &impl Store, base: &str) -> Result<Value> {
+    let token = s.option(TOKEN);
     // Only `personal` tells an old server without the address book apart (07 §4.4); asked first
     // so that its 404 is not hidden behind another endpoint's.
-    let personal = read(s, base, "/api/ab/personal", Kind::Unsupported).await?;
+    let personal = read(s, base, &token, "/api/ab/personal", Kind::Unsupported).await?;
     let Some(personal) = personal
         .get("guid")
         .and_then(Value::as_str)
@@ -121,7 +127,7 @@ pub(super) async fn books(s: &impl Store, base: &str) -> Result<Value> {
     else {
         return Err(Error::shape(200));
     };
-    let settings = read(s, base, "/api/ab/settings", Kind::Server).await?;
+    let settings = read(s, base, &token, "/api/ab/settings", Kind::Server).await?;
     let max_peers = settings
         .get("max_peer_one_ab")
         .and_then(Value::as_i64)
@@ -129,6 +135,7 @@ pub(super) async fn books(s: &impl Store, base: &str) -> Result<Value> {
     let shared = pages(
         s,
         base,
+        &token,
         Method::POST,
         "/api/ab/shared/profiles",
         &[],
@@ -149,42 +156,39 @@ pub(super) async fn book(
     let peers = pages(
         s,
         base,
+        &token,
         Method::POST,
         "/api/ab/peers",
         &[("ab", guid)],
         "id",
     )
     .await?;
-    let tags = match read(s, base, &format!("/api/ab/tags/{guid}"), Kind::Server).await? {
+    let tags = match read(
+        s,
+        base,
+        &token,
+        &format!("/api/ab/tags/{guid}"),
+        Kind::Server,
+    )
+    .await?
+    {
         Value::Array(tags) => tags,
         // rustdesk-api encodes a book without tags as `null`.
         Value::Null => Vec::new(),
         _ => return Err(Error::shape(200)),
     };
-    // A logout while this was in flight removed the cache; do not bring it back.
-    if s.option(TOKEN) == token {
-        save(s, &token, guid, name, personal, &peers, &tags);
-    }
+    save(s, &token, guid, name, personal, &peers, &tags);
     Ok(json!({ "peers": peers, "tags": tags }))
 }
 
 /// A POST without a body that answers JSON.
-async fn read(s: &impl Store, base: &str, path: &str, on_404: Kind) -> Result<Value> {
-    let (status, body) = send(
-        base,
-        Method::POST,
-        path,
-        &[],
-        &s.option(TOKEN),
-        None,
-        api::TIMEOUT,
-    )
-    .await?;
-    answer(s, status, &body, on_404)
+async fn read(s: &impl Store, base: &str, token: &str, path: &str, on_404: Kind) -> Result<Value> {
+    let (status, body) = send(base, Method::POST, path, &[], token, None, api::TIMEOUT).await?;
+    answer(s, token, status, &body, on_404)
 }
 
-/// Upstream `_jsonDecodeActionResp`: a 2xx without `error` is done; a 404 means the device or the
-/// tag is not in the book.
+/// Upstream `_jsonDecodeActionResp`: a 2xx with an empty body, or JSON without `error`, is done;
+/// a 404 means the device or the tag is not in the book.
 pub(super) async fn write_to(
     s: &impl Store,
     base: &str,
@@ -192,22 +196,18 @@ pub(super) async fn write_to(
     path: &str,
     body: Vec<u8>,
 ) -> Result<Value> {
-    let (status, body) = send(
-        base,
-        method,
-        path,
-        &[],
-        &s.option(TOKEN),
-        Some(body),
-        api::TIMEOUT,
-    )
-    .await?;
-    answer(s, status, &body, Kind::NotFound)?;
+    let token = s.option(TOKEN);
+    let (status, body) = send(base, method, path, &[], &token, Some(body), api::TIMEOUT).await?;
+    answer(s, &token, status, &body, Kind::NotFound)?;
+    if !body.is_empty() && serde_json::from_slice::<Value>(&body).is_err() {
+        return Err(Error::shape(status));
+    }
     Ok(json!({}))
 }
 
 /// Upstream keeps the personal book and the current one (`_serializeCache`): the personal entry
-/// or the shared entry is replaced, and a cache of another token is dropped first.
+/// or the shared entry is replaced, and a cache of another token is dropped first. Not written
+/// once `token` is no longer the token: a logout while the book was fetched removed the cache.
 fn save(
     s: &impl Store,
     token: &str,
@@ -217,6 +217,10 @@ fn save(
     peers: &[Value],
     tags: &[Value],
 ) {
+    let _cache = cache_lock();
+    if s.option(TOKEN) != token {
+        return;
+    }
     let mut ab = s.ab();
     if ab.access_token != token {
         ab = Ab {

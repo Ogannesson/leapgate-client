@@ -1,7 +1,7 @@
 //! The team devices: upstream `models/group_model.dart`'s users and peers (not the device groups,
 //! M4-6) and its `_group` cache.
 
-use super::{pages, render, Local, Result, Store, TOKEN};
+use super::{cache_lock, pages, render, Local, Result, Store, TOKEN};
 use crate::report;
 use hbb_common::{
     config::{Group, GroupPeer, GroupUser},
@@ -24,8 +24,11 @@ pub async fn group() -> String {
 }
 
 pub(super) fn cache(s: &impl Store) -> String {
+    let group = {
+        let _cache = cache_lock();
+        s.group()
+    };
     let token = s.option(TOKEN);
-    let group = s.group();
     if token.is_empty() || group.access_token != token {
         return "{}".to_owned();
     }
@@ -34,11 +37,15 @@ pub(super) fn cache(s: &impl Store) -> String {
 
 pub(super) async fn pull(s: &impl Store, base: &str) -> Result<Value> {
     let token = s.option(TOKEN);
-    let users = pages(s, base, Method::GET, "/api/users", &QUERY, "name").await?;
-    let peers = pages(s, base, Method::GET, "/api/peers", &QUERY, "id").await?;
-    // A logout while this was in flight removed the cache; do not bring it back.
-    if s.option(TOKEN) == token {
-        s.set_group(Some(&to_cache(token, &users, &peers)));
+    let users = pages(s, base, &token, Method::GET, "/api/users", &QUERY, "name").await?;
+    let peers = pages(s, base, &token, Method::GET, "/api/peers", &QUERY, "id").await?;
+    let group = to_cache(token, &users, &peers);
+    {
+        let _cache = cache_lock();
+        // A logout while this was in flight removed the cache; do not bring it back.
+        if s.option(TOKEN) == group.access_token {
+            s.set_group(Some(&group));
+        }
     }
     Ok(json!({ "users": users, "peers": peers }))
 }
