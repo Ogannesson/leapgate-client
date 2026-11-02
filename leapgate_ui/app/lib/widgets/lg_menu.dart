@@ -406,18 +406,24 @@ class LgMenuItem extends StatelessWidget {
         tall: description != null,
         indent: indent,
       ),
-      child: _ItemRow(
-        label: label,
-        description: description,
-        disabled: onPressed == null,
-        ownTip: !(onPressed == null && disabledNote != null),
-        lead: _lead(c, icon: icon, checked: checked),
-        trailing: _tail(
-          t,
-          hint: hint,
-          shortcut: shortcut,
-          badge: badge,
-          trailing: trailing,
+      // Material's menu rows are buttons only on the web; the Windows engine
+      // reads a row without the flag as plain text, with no Invoke for UI
+      // Automation or the screen reader. The flag merges into the row's node.
+      child: Semantics(
+        button: true,
+        child: _ItemRow(
+          label: label,
+          description: description,
+          disabled: onPressed == null,
+          ownTip: !(onPressed == null && disabledNote != null),
+          lead: _lead(c, icon: icon, checked: checked),
+          trailing: _tail(
+            t,
+            hint: hint,
+            shortcut: shortcut,
+            badge: badge,
+            trailing: trailing,
+          ),
         ),
       ),
     );
@@ -460,16 +466,20 @@ class LgSubmenu extends StatelessWidget {
       submenuIcon: const WidgetStatePropertyAll(SizedBox.shrink()),
       // No children disables the button, so it cannot open an empty panel.
       menuChildren: items.isEmpty ? const [] : [_panelBody(width, items)],
-      child: _ItemRow(
-        label: label,
-        disabled: items.isEmpty,
-        ownTip: !(items.isEmpty && disabledNote != null),
-        lead: _lead(c, icon: icon),
-        trailing: _tail(
-          t,
-          value: value,
-          badge: badge,
-          trailing: LgIcon(LgIcons.chevR, size: 20, color: c.text2),
+      // A button, as in LgMenuItem.
+      child: Semantics(
+        button: true,
+        child: _ItemRow(
+          label: label,
+          disabled: items.isEmpty,
+          ownTip: !(items.isEmpty && disabledNote != null),
+          lead: _lead(c, icon: icon),
+          trailing: _tail(
+            t,
+            value: value,
+            badge: badge,
+            trailing: LgIcon(LgIcons.chevR, size: 20, color: c.text2),
+          ),
         ),
       ),
     );
