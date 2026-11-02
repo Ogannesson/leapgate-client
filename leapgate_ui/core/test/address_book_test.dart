@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_hbb/consts.dart';
@@ -63,23 +64,41 @@ class _Bind implements RustdeskImpl {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
-/// Signed in as zhangsan; a sign-out by the server resets the address book, as the account
-/// model does.
+/// Signed in as zhangsan; a sign-out (by the server or with [switchTo]) resets the address
+/// book, as the account model does.
 class _Account extends AccountModel {
   _Account() : super(FakeAccountApi(), others: const []);
 
   var signedOut = 0;
+  AccountUser? _signedIn = const AccountUser(name: 'zhangsan');
 
   @override
-  AccountUser? get user => const AccountUser(name: 'zhangsan');
+  AccountUser? get user => _signedIn;
 
   @override
-  bool get loggedIn => true;
+  bool get loggedIn => _signedIn != null;
 
   @override
   void signedOutByServer() {
     signedOut++;
+    switchTo(null);
+  }
+
+  void switchTo(String? name) {
+    _signedIn = name == null ? null : AccountUser(name: name);
     appCore.addressBook.reset();
+  }
+}
+
+/// [books] answers when the test says so.
+class _SlowApi extends FakeAccountApi {
+  final pending = <Completer<ApiResult<AbBooks>>>[];
+
+  @override
+  Future<ApiResult<AbBooks>> books() {
+    final answer = Completer<ApiResult<AbBooks>>();
+    pending.add(answer);
+    return answer.future;
   }
 }
 
@@ -283,6 +302,44 @@ void main() {
     expect(ab.books, isEmpty);
     expect(ab.peers, isEmpty);
     expect(ab.loaded, isFalse);
+  });
+
+  group('an answer that comes back for someone no longer signed in is dropped',
+      () {
+    late _SlowApi slow;
+    const alices = ApiResult<AbBooks>.ok(
+        AbBooks(maxPeers: 0, personal: 'g-alice', shared: [_friends]));
+    setUp(() {
+      slow = _SlowApi();
+      accountApi = slow;
+      appCore = _Core();
+      slow.bookResults['g-alice'] = const ApiResult.ok(
+          AbBookData(peers: [], tags: [AbTag('alice', 0xFF000000)]));
+      slow.bookResults['g-bob'] =
+          const ApiResult.ok(AbBookData(peers: [], tags: []));
+    });
+
+    test('after signing out', () async {
+      final pulled = ab.pull();
+      (appCore.account as _Account).switchTo(null);
+      slow.pending.single.complete(alices);
+      await pulled;
+      expect(ab.books, isEmpty);
+      expect(ab.loaded, isFalse);
+    });
+
+    test('after another user signed in and pulled', () async {
+      final alicePull = ab.pull();
+      (appCore.account as _Account).switchTo('bob');
+      final bobPull = ab.pull();
+      slow.pending[1].complete(const ApiResult.ok(
+          AbBooks(maxPeers: 0, personal: 'g-bob', shared: [])));
+      await bobPull;
+      slow.pending[0].complete(alices);
+      await alicePull;
+      expect([for (final b in ab.books) b.guid], ['g-bob']);
+      expect(ab.tags, isEmpty);
+    });
   });
 
   test('a server without an address book says so', () async {

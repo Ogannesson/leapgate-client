@@ -212,11 +212,16 @@ class AddressBookModel extends ChangeNotifier implements AccountData {
 
   // ---- Pulling (upstream `pullAb`, `_pullAb`, `Ab.pullAbImpl`).
 
+  /// Who an answer was asked for: an answer that comes back after a sign-out, or after another
+  /// user signed in, is dropped (the model was reset meanwhile).
+  String? get _me => appCore.account.user?.name;
+
   @override
   Future<void> loadCache() async {
     if (_loaded || _pulling) return;
+    final me = _me;
     final entries = await _api.abCache();
-    if (_loaded || _pulling || entries.isEmpty) return;
+    if (_me != me || _loaded || _pulling || entries.isEmpty) return;
     _books = [];
     _data.clear();
     for (final e in entries) {
@@ -261,8 +266,9 @@ class AddressBookModel extends ChangeNotifier implements AccountData {
     _pulling = true;
     _pullError = null;
     notifyListeners();
+    final me = _me;
     final r = await _api.books();
-    if (!_pulling) return; // Reset meanwhile.
+    if (_me != me) return;
     if (r.ok) {
       final b = r.value;
       _unsupported = false;
@@ -277,19 +283,20 @@ class AddressBookModel extends ChangeNotifier implements AccountData {
       }
       final current_ = current!;
       await _pullBook(current_, quiet: false);
-      if (!isPersonal(current_) && _pulling) {
+      if (_me != me) return;
+      if (!isPersonal(current_)) {
         final personal = _books.first;
         if (!(_data[personal.guid]?.initialized ?? false)) {
           await _pullBook(personal, quiet: true);
+          if (_me != me) return;
         }
       }
-      if (_pulling) _startSync();
+      _startSync();
     } else if (r.error!.kind == ApiErrorKind.unsupported) {
       _unsupported = true;
     } else if (!_failed(r.error!)) {
       return;
     }
-    if (!_pulling) return;
     _pulling = false;
     _loaded = true;
     notifyListeners();
@@ -439,8 +446,10 @@ class AddressBookModel extends ChangeNotifier implements AccountData {
     void Function(_Book data, T item) local,
   ) async {
     var done = false;
+    final me = _me;
     for (final item in items) {
       final r = await call(item);
+      if (_me != me) return null;
       if (!r.ok) {
         if (r.error!.kind == ApiErrorKind.unauthorized) {
           appCore.account.signedOutByServer();
@@ -663,7 +672,7 @@ class AddressBookModel extends ChangeNotifier implements AccountData {
     }
     _syncing = true;
     try {
-      await _syncFrom(book, data, await _recentPeers());
+      await _syncFrom(_me, book, data, await _recentPeers());
     } finally {
       _syncing = false;
     }
@@ -688,14 +697,17 @@ class AddressBookModel extends ChangeNotifier implements AccountData {
     ];
   }
 
-  Future<void> _syncFrom(AbProfile book, _Book data, List<Peer> recents) async {
+  /// [me] is who the round started for; it stops once someone else is signed in.
+  Future<void> _syncFrom(
+      String? me, AbProfile book, _Book data, List<Peer> recents) async {
     var hashChanged = false;
     for (final p in [...data.peers]) {
       final r = recents.where((r) => r.id == p.id).firstOrNull;
       if (r == null) continue;
       final fields = abSyncFields(p, r, personal: isPersonal(book));
-      if (fields.isEmpty) continue;
+      if (fields.isEmpty || _me != me) continue;
       final result = await _api.updatePeer(book.guid, p.id, fields);
+      if (_me != me) return;
       if (!result.ok) {
         if (result.error!.kind == ApiErrorKind.unauthorized) {
           appCore.account.signedOutByServer();
