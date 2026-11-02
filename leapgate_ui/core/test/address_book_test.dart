@@ -74,6 +74,9 @@ class _Account extends AccountModel {
   AccountUser? get user => const AccountUser(name: 'zhangsan');
 
   @override
+  bool get loggedIn => true;
+
+  @override
   void signedOutByServer() {
     signedOut++;
     appCore.addressBook.reset();

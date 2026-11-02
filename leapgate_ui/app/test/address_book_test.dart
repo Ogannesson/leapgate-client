@@ -23,19 +23,6 @@ import 'home_fakes.dart';
 // The address book category's states and dialogs (01 P1 blocks F and G, 07 §5.1). The category
 // tab is A's (`PeerTabs.isEnabled`), so its view is pumped here on its own.
 
-class _Bind extends FakeBind {
-  @override
-  dynamic noSuchMethod(Invocation invocation) {
-    switch (invocation.memberName) {
-      case #isDisableAb:
-      case #isDisableGroupPanel:
-        calls.add(invocation);
-        return false;
-    }
-    return super.noSuchMethod(invocation);
-  }
-}
-
 class _Account extends AccountModel {
   _Account() : super(FakeAccountApi(), others: const []);
 
@@ -44,6 +31,9 @@ class _Account extends AccountModel {
 
   @override
   AccountUser? get user => signedIn;
+
+  @override
+  bool get loggedIn => signedIn != null;
 
   @override
   ApiError? get error => failed;
@@ -167,8 +157,40 @@ Future<void> _settle(WidgetTester tester) async {
 }
 
 void main() {
+  // The whole home page, signed in through the account model.
+  testWidgets('the connect box finds address book devices, by their note too', (
+    tester,
+  ) async {
+    installHomeFakes();
+    api = FakeAccountApi();
+    accountApi = api;
+    const me = AccountUser(name: 'zhangsan');
+    api.local = me;
+    api.currentUserResult = const ApiResult.ok(me);
+    api.groupResult = const ApiResult.ok(GroupData(users: [], peers: []));
+    _serve(
+      personal: [
+        Peer.fromJson({'id': '987654321', 'alias': '阳台电脑', 'note': '显卡驱动别升级'}),
+      ],
+    );
+    await appCore.account.start();
+    await pumpHome(tester, id: '135792468');
+    await loadRecent([]);
+    await loadCategory('load_fav_peers', []);
+    await loadCategory('load_lan_peers', []);
+    await tester.enterText(find.byType(EditableText), '显卡');
+    await tester.pump();
+    expect(find.text('阳台电脑'), findsOneWidget);
+    expect(find.text('正在加载其他分类…'), findsNothing);
+    await unmount(tester);
+  });
+
+  group('the category', _categoryTests);
+}
+
+void _categoryTests() {
   setUp(() {
-    final bind = _Bind();
+    final bind = FakeBind();
     platformFFI.setBindingForTesting(bind);
     setLgBindForTesting(FakeLeapgate());
     api = FakeAccountApi();
