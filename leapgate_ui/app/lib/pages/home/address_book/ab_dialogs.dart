@@ -4,14 +4,17 @@ import 'package:flutter_hbb/leapgate/address_book.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/models/peer_model.dart';
 
+import '../../../icons/lg_icon.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../shell/tab_overlays.dart';
-import '../../../theme/lg_tokens.dart';
+import '../../../widgets/lg_add_device_dialog.dart';
 import '../../../widgets/lg_banner.dart';
 import '../../../widgets/lg_button.dart';
-import '../../../widgets/lg_device_parts.dart';
 import '../../../widgets/lg_feedback.dart';
+import '../../../widgets/lg_form_dialog.dart';
 import '../../../widgets/lg_menu.dart';
+import '../../../widgets/lg_tag_chips.dart';
+import '../../../widgets/lg_tag_color_dialog.dart';
 import '../../../widgets/lg_text_field.dart';
 import 'ab_parts.dart';
 
@@ -20,8 +23,6 @@ import 'ab_parts.dart';
 // list banner's. Rewritten after upstream `common/widgets/address_book.dart` (`addIdToCurrentAb`,
 // `abAddTag`, `AddressBookTag._showMenu`) and `common/widgets/dialog.dart` (`editAbTagDialog`,
 // `editAbPeerNoteDialog`, `addPeersToAbDialog`, `setSharedAbPasswordDialog`).
-// The add device and tag colour dialogs are the designer's (`ui/m4-ds`); until then they are
-// drawn with `LgConfirmDialog` like the small ones.
 
 Future<T?> _show<T>(
   TabOverlays overlays,
@@ -32,48 +33,22 @@ Future<T?> _show<T>(
       LgDialogScrim(onEscape: () => close(null), child: dialog(close)),
 );
 
-/// A label over a field.
-Widget _labeled(
-  BuildContext context,
-  String label,
-  Widget field, {
-  String? note,
-}) {
-  final t = LgTokens.of(context);
-  return Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [
-      Text(label, style: t.textS.copyWith(color: t.colors.text2)),
-      const SizedBox(height: LgSpace.s1),
-      field,
-      if (note != null) ...[
-        const SizedBox(height: LgSpace.s1),
-        Text(note, style: t.textS.copyWith(color: t.colors.text2)),
-      ],
-    ],
-  );
-}
+/// The current book's tags as toggles, [on] the picked ones.
+List<LgTagToggleItem> _tagItems(Set<String> on) => [
+  for (final t in appCore.addressBook.tags)
+    LgTagToggleItem(
+      id: t.name,
+      label: t.name,
+      color: Color(t.color),
+      on: on.contains(t.name),
+    ),
+];
 
-/// The current book's tags to pick from, as in the filter bar.
-Widget _tagChoice(Set<String> selected, ValueChanged<String>? onToggle) {
-  final ab = appCore.addressBook;
-  return Wrap(
-    spacing: LgSpace.s2,
-    runSpacing: LgSpace.s2,
-    children: [
-      for (final t in ab.tags)
-        AbTagToggle(
-          label: t.name,
-          color: Color(t.color),
-          selected: selected.contains(t.name),
-          onPressed: onToggle == null ? null : () => onToggle(t.name),
-        ),
-    ],
-  );
-}
+void _flip(Set<String> tags, String tag) =>
+    tags.contains(tag) ? tags.remove(tag) : tags.add(tag);
 
-/// What every form dialog here shares: busy while submitting, the error banner under the title,
-/// "取消" and the main button.
+/// What every form dialog here shares: busy while submitting, the error under the title, and
+/// closing when the address book goes away.
 abstract class _FormState<T extends StatefulWidget> extends State<T> {
   bool busy = false;
   String? error;
@@ -122,32 +97,37 @@ abstract class _FormState<T extends StatefulWidget> extends State<T> {
     }
   }
 
+  Widget? get banner => error == null
+      ? null
+      : LgBanner(tone: LgTone.error, text: error, slim: true);
+
+  /// `LgFormDialog` with "取消" and [action].
   Widget form({
     required String title,
-    String? subtitle,
+    required LgIcons icon,
+    String? note,
     required List<Widget> children,
     required String action,
-    String? busyAction,
     required VoidCallback? onAction,
     required VoidCallback onCancel,
   }) {
     final l10n = AppLocalizations.of(context)!;
-    return LgConfirmDialog(
+    return LgFormDialog(
       title: title,
-      subtitle: subtitle,
+      icon: icon,
+      note: note,
+      banner: banner,
       actions: [
         LgDialogAction(label: l10n.homeCancel, onPressed: onCancel),
         LgDialogAction(
-          label: busy ? (busyAction ?? action) : action,
+          label: action,
           kind: LgButtonKind.primary,
           isDefault: true,
-          onPressed: busy ? null : onAction,
+          busy: busy,
+          onPressed: onAction,
         ),
       ],
-      children: [
-        if (error != null) LgBanner(tone: LgTone.error, text: error),
-        ...children,
-      ],
+      children: children,
     );
   }
 }
@@ -177,6 +157,12 @@ class _AddDeviceDialogState extends _FormState<_AddDeviceDialog> {
   String? _idError;
 
   @override
+  void initState() {
+    super.initState();
+    _id.addListener(_idChanged);
+  }
+
+  @override
   void dispose() {
     for (final c in [_id, _alias, _password, _note]) {
       c.dispose();
@@ -187,6 +173,9 @@ class _AddDeviceDialogState extends _FormState<_AddDeviceDialog> {
   @override
   void dismiss() => widget.close();
 
+  /// "添加" follows the ID field; typing clears what was wrong with it.
+  void _idChanged() => setState(() => _idError = null);
+
   /// The ID as typed, without the spaces of its groups.
   String get _cleanId => _id.text.replaceAll(RegExp(r'\s'), '');
 
@@ -194,7 +183,7 @@ class _AddDeviceDialogState extends _FormState<_AddDeviceDialog> {
     final l10n = AppLocalizations.of(context)!;
     final ab = appCore.addressBook;
     final book = ab.current;
-    if (book == null) return;
+    if (book == null || busy) return;
     if (ab.contains(book, _cleanId)) {
       setState(() => _idError = l10n.abIdExists);
       return;
@@ -225,72 +214,37 @@ class _AddDeviceDialogState extends _FormState<_AddDeviceDialog> {
     final book = ab.current;
     if (book == null) return const SizedBox.shrink();
     final shared = !ab.isPersonal(book);
-    return form(
-      title: l10n.abAddDevice,
-      subtitle: l10n.abAddTo(abBookName(l10n, book)),
-      action: l10n.abAdd,
-      busyAction: l10n.abAdding,
-      onAction: _cleanId.isEmpty ? null : _submit,
+    return LgAddDeviceDialog(
+      labels: LgAddDeviceLabels(
+        title: l10n.abAddDevice,
+        idLabel: l10n.abFieldId,
+        idPlaceholder: l10n.abIdPlaceholder,
+        aliasLabel: l10n.abFieldAlias,
+        aliasPlaceholder: l10n.abAliasPlaceholder,
+        passwordLabel: l10n.abFieldPassword,
+        passwordPlaceholder: l10n.abPasswordPlaceholder,
+        showPassword: l10n.connShowPassword,
+        hidePassword: l10n.connHidePassword,
+        noteLabel: l10n.abFieldNote,
+        notePlaceholder: l10n.abNoteLimit,
+        tagsLabel: l10n.abFieldTags,
+        cancel: l10n.homeCancel,
+        submit: l10n.abAdd,
+        busySubmit: l10n.abAdding,
+      ),
+      idController: _id,
+      aliasController: _alias,
+      noteController: _note,
+      passwordController: shared ? _password : null,
+      passwordHint: shared ? l10n.abVisibleToMembers : null,
+      target: l10n.abAddTo(abBookName(l10n, book)),
+      tags: _tagItems(_tags),
+      onToggleTag: busy ? null : (t) => setState(() => _flip(_tags, t)),
+      idError: _idError,
+      error: error,
+      busy: busy,
+      onSubmit: _cleanId.isEmpty ? null : _submit,
       onCancel: widget.close,
-      children: [
-        _labeled(
-          context,
-          l10n.abFieldId,
-          LgTextField(
-            controller: _id,
-            autofocus: true,
-            enabled: !busy,
-            semanticLabel: l10n.abFieldId,
-            errorText: _idError,
-            onChanged: (_) => setState(() => _idError = null),
-          ),
-        ),
-        _labeled(
-          context,
-          l10n.abFieldAlias,
-          LgTextField(
-            controller: _alias,
-            enabled: !busy,
-            semanticLabel: l10n.abFieldAlias,
-          ),
-        ),
-        if (shared)
-          _labeled(
-            context,
-            l10n.abFieldPassword,
-            LgTextField(
-              controller: _password,
-              enabled: !busy,
-              obscureText: true,
-              semanticLabel: l10n.abFieldPassword,
-            ),
-            note: l10n.abVisibleToMembers,
-          ),
-        _labeled(
-          context,
-          l10n.abFieldNote,
-          LgTextField(
-            controller: _note,
-            enabled: !busy,
-            maxLength: 300,
-            semanticLabel: l10n.abFieldNote,
-          ),
-          note: l10n.abNoteLimit,
-        ),
-        if (ab.tags.isNotEmpty)
-          _labeled(
-            context,
-            l10n.abFieldTags,
-            _tagChoice(
-              _tags,
-              busy
-                  ? null
-                  : (t) => setState(
-                      () => _tags.contains(t) ? _tags.remove(t) : _tags.add(t),
-                    ),
-            ),
-          ),
-      ],
     );
   }
 }
@@ -300,23 +254,29 @@ class _AddDeviceDialogState extends _FormState<_AddDeviceDialog> {
 class _TextDialog extends StatefulWidget {
   const _TextDialog({
     required this.title,
+    required this.icon,
     required this.label,
     required this.close,
     required this.submit,
     this.initial = '',
-    this.note,
+    this.hint,
     this.check,
     this.obscure = false,
-    this.maxLength,
+    this.area = false,
     this.allowEmpty = false,
   });
 
   final String title;
+  final LgIcons icon;
   final String label;
   final String initial;
-  final String? note;
+
+  /// Under the field.
+  final String? hint;
   final bool obscure;
-  final int? maxLength;
+
+  /// The note: several lines, at most 300 characters, counted at the label.
+  final bool area;
   final bool allowEmpty;
   final VoidCallback close;
 
@@ -331,6 +291,8 @@ class _TextDialog extends StatefulWidget {
 }
 
 class _TextDialogState extends _FormState<_TextDialog> {
+  static const _noteMax = 300;
+
   @override
   void dismiss() => widget.close();
 
@@ -348,6 +310,7 @@ class _TextDialogState extends _FormState<_TextDialog> {
   }
 
   void _submit() {
+    if (busy) return;
     final problem = widget.check?.call(_text.text);
     if (problem != null) {
       setState(() => _fieldError = problem);
@@ -356,29 +319,40 @@ class _TextDialogState extends _FormState<_TextDialog> {
     run(() => widget.submit(_text.text), widget.close);
   }
 
+  void _changed(String _) => setState(() => _fieldError = null);
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     return form(
       title: widget.title,
+      icon: widget.icon,
       action: l10n.homeOk,
       onAction: widget.allowEmpty || _text.text.isNotEmpty ? _submit : null,
       onCancel: widget.close,
       children: [
-        _labeled(
-          context,
-          widget.label,
-          LgTextField(
-            controller: _text,
-            autofocus: true,
-            enabled: !busy,
-            obscureText: widget.obscure,
-            maxLength: widget.maxLength,
-            semanticLabel: widget.label,
-            errorText: _fieldError,
-            onChanged: (_) => setState(() => _fieldError = null),
-          ),
-          note: widget.note,
+        LgFormField(
+          label: widget.label,
+          counter: widget.area ? '${_text.text.length} / $_noteMax' : null,
+          hint: widget.hint,
+          child: widget.area
+              ? LgTextArea(
+                  controller: _text,
+                  enabled: !busy,
+                  maxLength: _noteMax,
+                  semanticLabel: widget.label,
+                  onChanged: _changed,
+                )
+              : LgTextField(
+                  controller: _text,
+                  autofocus: true,
+                  enabled: !busy,
+                  obscureText: widget.obscure,
+                  semanticLabel: widget.label,
+                  errorText: _fieldError,
+                  onChanged: _changed,
+                  onSubmitted: (_) => _submit(),
+                ),
         ),
       ],
     );
@@ -388,24 +362,26 @@ class _TextDialogState extends _FormState<_TextDialog> {
 Future<void> _textDialog(
   TabOverlays overlays, {
   required String title,
+  required LgIcons icon,
   required String label,
   required Future<String?> Function(String text) submit,
   String initial = '',
-  String? note,
+  String? hint,
   String? Function(String text)? check,
   bool obscure = false,
-  int? maxLength,
+  bool area = false,
   bool allowEmpty = false,
 }) => _show<void>(
   overlays,
   (close) => _TextDialog(
     title: title,
+    icon: icon,
     label: label,
     initial: initial,
-    note: note,
+    hint: hint,
     check: check,
     obscure: obscure,
-    maxLength: maxLength,
+    area: area,
     allowEmpty: allowEmpty,
     close: () => close(null),
     submit: submit,
@@ -424,8 +400,9 @@ Future<void> showAbAddTagDialog(TabOverlays overlays, AppLocalizations l10n) {
   return _textDialog(
     overlays,
     title: l10n.abAddTag,
+    icon: LgIcons.tag,
     label: l10n.abFieldTags,
-    note: l10n.abAddTagNote,
+    hint: l10n.abAddTagNote,
     check: (text) {
       final tags = names(text);
       if (tags.isEmpty) return l10n.abTagEmpty;
@@ -457,6 +434,7 @@ Future<void> showAbRenameTagDialog(
   return _textDialog(
     overlays,
     title: l10n.abRenameTag,
+    icon: LgIcons.tag,
     label: l10n.abFieldTags,
     initial: tag,
     check: (text) {
@@ -491,10 +469,10 @@ Future<void> showAbEditNoteDialog(
   return _textDialog(
     overlays,
     title: l10n.abEditNote,
+    icon: LgIcons.note,
     label: l10n.abFieldNote,
     initial: peer.note,
-    note: l10n.abNoteLimit,
-    maxLength: 300,
+    area: true,
     allowEmpty: true,
     submit: (text) async {
       if (text == peer.note) return null;
@@ -513,8 +491,9 @@ Future<void> showAbSharedPasswordDialog(
   return _textDialog(
     overlays,
     title: l10n.abSetSharedPassword,
+    icon: LgIcons.key,
     label: l10n.abFieldPassword,
-    note: l10n.abVisibleToMembers,
+    hint: l10n.abVisibleToMembers,
     obscure: true,
     submit: (text) async {
       final e = await appCore.addressBook.setSharedPassword(peer.id, text);
@@ -566,6 +545,7 @@ class _EditTagsDialogState extends _FormState<_EditTagsDialog> {
     final ab = appCore.addressBook;
     return form(
       title: l10n.abEditTags,
+      icon: LgIcons.tag,
       action: l10n.homeOk,
       onAction: () => run(() async {
         final e = await ab.setTags(widget.ids, [
@@ -576,13 +556,10 @@ class _EditTagsDialogState extends _FormState<_EditTagsDialog> {
       }, widget.close),
       onCancel: widget.close,
       children: [
-        _tagChoice(
-          _tags,
-          busy
-              ? null
-              : (t) => setState(
-                  () => _tags.contains(t) ? _tags.remove(t) : _tags.add(t),
-                ),
+        LgTagChooser(
+          items: _tagItems(_tags),
+          semanticLabel: l10n.abFieldTags,
+          onToggle: busy ? null : (t) => setState(() => _flip(_tags, t)),
         ),
       ],
     );
@@ -590,28 +567,6 @@ class _EditTagsDialogState extends _FormState<_EditTagsDialog> {
 }
 
 // ---- Change tag colour (`p1-tagcolor-*`, 02 §3.6).
-
-/// A row of presets (upstream's Material colours of `str2color2`) and the `#RRGGBB` value; the
-/// designer's dialog adds the colour wheel.
-const _presets = [
-  0xFFF44336,
-  0xFFFF9800,
-  0xFFCDDC39,
-  0xFF4CAF50,
-  0xFF009688,
-  0xFF2196F3,
-  0xFF3F51B5,
-  0xFF9C27B0,
-];
-
-/// `#RRGGBB` (or without `#`) as an opaque ARGB value; null when it is not one.
-int? parseTagColor(String text) {
-  final m = RegExp(r'^#?([0-9a-fA-F]{6})$').firstMatch(text.trim());
-  return m == null ? null : 0xFF000000 | int.parse(m.group(1)!, radix: 16);
-}
-
-String _hex(int color) =>
-    '#${(color & 0xFFFFFF).toRadixString(16).padLeft(6, '0').toUpperCase()}';
 
 Future<void> showAbTagColorDialog(TabOverlays overlays, String tag) =>
     _show<void>(
@@ -633,93 +588,35 @@ class _TagColorDialogState extends _FormState<_TagColorDialog> {
   @override
   void dismiss() => widget.close();
 
-  late final int _old = abTagColor(widget.tag).toARGB32();
-  late int _color = _old;
-  late final _value = TextEditingController(text: _hex(_old));
-  bool _bad = false;
-
-  @override
-  void dispose() {
-    _value.dispose();
-    super.dispose();
-  }
-
-  void _pick(int color) => setState(() {
-    _color = color;
-    _bad = false;
-    _value.text = _hex(color);
-  });
-
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final c = LgTokens.of(context).colors;
-    return form(
-      title: l10n.abTagColorTitle,
-      action: l10n.abSave,
-      onAction: _bad || _color == _old
-          ? null
-          : () => run(() async {
-              final e = await appCore.addressBook.setTagColor(
-                widget.tag,
-                _color,
-              );
-              return e == null
-                  ? null
-                  : l10n.abTagColorFailed(abReason(l10n, e));
-            }, widget.close),
+    return LgTagColorDialog(
+      labels: LgTagColorDialogLabels(
+        title: l10n.abTagColorTitle,
+        colorLabel: l10n.abTagColor,
+        customLabel: l10n.abTagColorCustom,
+        valueLabel: l10n.abTagColorValue,
+        hexPlaceholder: '#RRGGBB',
+        hexError: l10n.abTagColorBad,
+        brightnessLabel: l10n.abTagColorBrightness,
+        wheelLabel: l10n.abTagColorWheel,
+        cancel: l10n.homeCancel,
+        save: l10n.abSave,
+        busySave: l10n.abSaving,
+      ),
+      tagName: widget.tag,
+      initialColor: abTagColor(widget.tag),
+      busy: busy,
+      error: error,
       onCancel: widget.close,
-      children: [
-        Align(
-          alignment: Alignment.centerLeft,
-          child: LgTagChip(LgDeviceTag(widget.tag, Color(_color))),
-        ),
-        _labeled(
-          context,
-          l10n.abTagColor,
-          Wrap(
-            spacing: LgSpace.s2,
-            children: [
-              for (final p in _presets)
-                Semantics(
-                  button: true,
-                  selected: p == _color,
-                  label: _hex(p),
-                  child: GestureDetector(
-                    onTap: busy ? null : () => _pick(p),
-                    child: Container(
-                      width: 28,
-                      height: 28,
-                      decoration: BoxDecoration(
-                        color: Color(p),
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: p == _color ? c.accent : Colors.transparent,
-                          width: 2,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ),
-        _labeled(
-          context,
-          l10n.abTagColorValue,
-          LgTextField(
-            controller: _value,
-            enabled: !busy,
-            semanticLabel: l10n.abTagColorValue,
-            errorText: _bad ? l10n.abTagColorBad : null,
-            onChanged: (text) => setState(() {
-              final v = parseTagColor(text);
-              _bad = v == null;
-              if (v != null) _color = v;
-            }),
-          ),
-        ),
-      ],
+      onSave: (color) {
+        if (busy) return;
+        run(() async {
+          final e = await appCore.addressBook.setTagColor(widget.tag, color);
+          return e == null ? null : l10n.abTagColorFailed(abReason(l10n, e));
+        }, widget.close);
+      },
     );
   }
 }
@@ -797,9 +694,10 @@ class _AddToDialogState extends _FormState<_AddToDialog> {
     final ab = appCore.addressBook;
     return form(
       title: l10n.abAddToAb,
+      icon: LgIcons.book,
       action: l10n.abAdd,
-      busyAction: l10n.abAdding,
       onAction: () {
+        if (busy) return;
         if (ab.isFull(_book)) {
           setState(() => error = l10n.abFull);
           return;
@@ -811,10 +709,10 @@ class _AddToDialogState extends _FormState<_AddToDialog> {
       },
       onCancel: () => widget.close(false),
       children: [
-        _labeled(
-          context,
-          l10n.abChooseBook,
-          Column(
+        // No component of its own yet: the books as checked menu rows.
+        LgFormField(
+          label: l10n.abChooseBook,
+          child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               for (final b in widget.targets)
@@ -845,9 +743,10 @@ Future<void> showAbBooksDialog(
   ];
   return _show<void>(
     overlays,
-    (close) => LgConfirmDialog(
+    (close) => LgFormDialog(
       title: l10n.abBooksTitle,
-      body: names.join('\n'),
+      icon: LgIcons.book,
+      note: l10n.abSharedNote,
       actions: [
         LgDialogAction(
           label: l10n.homeOk,
@@ -856,7 +755,7 @@ Future<void> showAbBooksDialog(
           onPressed: () => close(null),
         ),
       ],
-      children: [Text(l10n.abSharedNote)],
+      children: [for (final n in names) Text(n)],
     ),
   );
 }

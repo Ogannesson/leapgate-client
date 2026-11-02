@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/leapgate/account_api.dart';
+import 'package:flutter_hbb/leapgate/address_book.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/peer_list.dart';
 import 'package:flutter_hbb/leapgate/peer_tabs.dart';
@@ -10,11 +11,15 @@ import 'package:flutter_hbb/models/peer_model.dart';
 import '../../../icons/lg_icon.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../shell/tab_overlays.dart';
+import '../../../theme/lg_tokens.dart';
+import '../../../widgets/lg_banner.dart';
+import '../../../widgets/lg_book_switcher.dart';
 import '../../../widgets/lg_device.dart';
 import '../../../widgets/lg_device_parts.dart';
 import '../../../widgets/lg_list_chrome.dart';
 import '../../../widgets/lg_menu.dart';
 import '../../../widgets/lg_menu_items.dart';
+import '../../../widgets/lg_tag_chips.dart';
 import '../account/account.dart';
 import '../account_category.dart';
 import '../home_dialogs.dart';
@@ -36,22 +41,35 @@ AccountCategoryView addressBookCategory(
   final l10n = AppLocalizations.of(context)!;
   final account = appCore.account;
   final ab = appCore.addressBook;
+  // A list state of one sentence, with a button when there is something to do.
+  Widget state(
+    String text,
+    LgIcons icon, {
+    String? action,
+    LgIcons? actionIcon,
+    VoidCallback? onAction,
+  }) => SingleChildScrollView(
+    child: LgEmptyState(
+      text,
+      icon: icon,
+      actionLabel: action,
+      actionIcon: actionIcon,
+      onAction: onAction,
+    ),
+  );
   if (!account.loggedIn) {
     return AccountCategoryView(
-      state: AbStateWithAction(
-        text: l10n.abSignedOut,
-        icon: LgIcons.book,
+      state: state(
+        l10n.abSignedOut,
+        LgIcons.book,
         action: l10n.abSignIn,
-        onPressed: () => showLoginDialog(overlays),
+        actionIcon: LgIcons.login,
+        onAction: () => showLoginDialog(overlays),
       ),
     );
   }
   if (ab.unsupported) {
-    return AccountCategoryView(
-      state: SingleChildScrollView(
-        child: LgEmptyState(l10n.abUnsupported, icon: LgIcons.book),
-      ),
-    );
+    return AccountCategoryView(state: state(l10n.abUnsupported, LgIcons.book));
   }
   // A failed check of the sign-in leaves the address book as cached; retrying asks again.
   final accountError = account.error;
@@ -65,11 +83,12 @@ AccountCategoryView addressBookCategory(
   if (error?.kind == ApiErrorKind.network) {
     return AccountCategoryView(
       tools: [refresh],
-      state: AbStateWithAction(
-        text: l10n.abNetworkError,
-        icon: LgIcons.wifiOff,
+      state: state(
+        l10n.abNetworkError,
+        LgIcons.wifiOff,
         action: l10n.abRetry,
-        onPressed: retry,
+        actionIcon: LgIcons.refresh,
+        onAction: retry,
       ),
     );
   }
@@ -77,11 +96,12 @@ AccountCategoryView addressBookCategory(
   if (accountError != null) {
     return AccountCategoryView(
       tools: [refresh],
-      state: AbStateWithAction(
-        text: l10n.abLoadFailed(abReason(l10n, accountError)),
-        icon: LgIcons.err,
+      state: state(
+        l10n.abLoadFailed(abReason(l10n, accountError)),
+        LgIcons.err,
         action: l10n.abRetry,
-        onPressed: retry,
+        actionIcon: LgIcons.refresh,
+        onAction: retry,
       ),
     );
   }
@@ -119,15 +139,31 @@ AccountCategoryView addressBookCategory(
       builder: (context, _) => Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (ab.current != null) AbBookBar(more: _moreItems(l10n, overlays)),
-          if (ab.current != null && !tagsHidden())
-            AbTagBar(tagMenu: (tag) => _tagItems(l10n, overlays, tag)),
-          if (banner != null)
-            AbBanner(
+          if (ab.current != null) ...[
+            _bookSwitcher(l10n, overlays),
+            // The mockup's 12 and 20; the tag bar keeps 3 px of its own above and under it
+            // for the focus ring.
+            if (tagsHidden())
+              const SizedBox(height: LgSpace.s5)
+            else ...[
+              const SizedBox(height: LgSpace.s3 - 3),
+              _tagBar(context, l10n, overlays),
+              const SizedBox(height: LgSpace.s5 - 3),
+            ],
+          ],
+          if (banner != null) ...[
+            LgBanner(
+              tone: LgTone.error,
               text: banner.$1,
-              onRetry: banner.$2,
-              onClose: ab.dismissErrors,
+              slim: true,
+              actionLabel: l10n.abRetry,
+              actionIcon: LgIcons.refresh,
+              onAction: banner.$2,
+              dismissLabel: l10n.abDismiss,
+              onDismiss: ab.dismissErrors,
             ),
+            const SizedBox(height: LgSpace.s3),
+          ],
         ],
       ),
     ),
@@ -138,14 +174,75 @@ AccountCategoryView addressBookCategory(
         : ab.current == null
         ? const SizedBox.shrink()
         : ab.peers.isEmpty
-        ? SingleChildScrollView(
-            child: LgEmptyState(l10n.abEmpty, icon: LgIcons.book),
-          )
+        ? state(l10n.abEmpty, LgIcons.book)
         : ab.shownPeers.isEmpty
-        ? SingleChildScrollView(
-            child: LgEmptyState(l10n.abNoTagMatch, icon: LgIcons.tag),
+        ? state(l10n.abNoTagMatch, LgIcons.tag)
+        : null,
+  );
+}
+
+/// The book switcher with the "More" menu at the end of its row (`p1-ab-switch`).
+Widget _bookSwitcher(AppLocalizations l10n, TabOverlays overlays) {
+  final ab = appCore.addressBook;
+  return LgBookSwitcher(
+    books: [
+      for (final b in ab.books)
+        LgBook(
+          id: b.guid,
+          name: abBookName(l10n, b),
+          detail: abBookRights(l10n, b),
+        ),
+    ],
+    selectedId: ab.current!.guid,
+    onSelect: (guid) => ab.select(ab.books.firstWhere((b) => b.guid == guid)),
+    searchPlaceholder: l10n.abSearchBooks,
+    noMatchLabel: l10n.abNoBookMatch,
+    hint: l10n.abSharedNote,
+    semanticLabel: l10n.abSwitchBook,
+    trailing: LgListToolMenu(
+      icon: LgIcons.more,
+      label: l10n.abMore,
+      items: _moreItems(l10n, overlays),
+    ),
+  );
+}
+
+const _untagged = '';
+
+/// The tag filter bar (`p1-ab-tags`): "未标记" first (no menu, no colour), then the tags; a right
+/// click on a tag opens its menu when the book can be written. Real tags never have an empty name.
+Widget _tagBar(
+  BuildContext context,
+  AppLocalizations l10n,
+  TabOverlays overlays,
+) {
+  final ab = appCore.addressBook;
+  final selected = ab.selectedTags;
+  return LgTagFilterBar(
+    items: [
+      LgTagToggleItem(
+        id: _untagged,
+        label: l10n.abUntagged,
+        on: selected.contains(kAbUntagged),
+      ),
+      for (final t in ab.tags)
+        LgTagToggleItem(
+          id: t.name,
+          label: t.name,
+          color: Color(t.color),
+          on: selected.contains(t.name),
+        ),
+    ],
+    noMenu: const {_untagged},
+    onToggle: (id) => ab.toggleTag(id == _untagged ? kAbUntagged : id),
+    onContextMenu: ab.canWrite
+        ? (id, at) => showLgMenuAt(
+            context,
+            globalPosition: at,
+            items: _tagItems(l10n, overlays, id),
           )
         : null,
+    semanticLabel: l10n.abTagFilter,
   );
 }
 
@@ -241,6 +338,16 @@ bool accountPeersLoading() {
   return (!ab.disabled && !ab.loaded) ||
       (!group.disabled && !group.loaded && group.error == null);
 }
+
+/// Whether [category]'s list view has the note column (01 P1 block F: the address book and the
+/// team devices).
+bool abNoteColumn(PeerCategory category) =>
+    category == PeerCategory.addressBook || category == PeerCategory.group;
+
+/// The note a card or a list row shows: in the address book and the team devices, '' for none
+/// (the column is there); null elsewhere and in the search results, which have no such column.
+String? abPeerNote(PeerItem item) =>
+    item.source == null && abNoteColumn(item.category) ? item.peer.note : null;
 
 /// The tags a card or a list row shows: the address book's, in their colours; none elsewhere.
 List<LgDeviceTag> abPeerTags(PeerItem item) =>

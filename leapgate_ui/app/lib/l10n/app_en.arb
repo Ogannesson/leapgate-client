@@ -766,5 +766,13 @@
   "groupPeople": "People",
   "groupSearch": "Search",
   "groupMe": "Me",
-  "groupClearPerson": "Show everyone's devices"
+  "groupClearPerson": "Show everyone's devices",
+  "abIdPlaceholder": "Enter the device ID",
+  "abAliasPlaceholder": "Enter an alias",
+  "abPasswordPlaceholder": "Enter a password",
+  "abNoBookMatch": "No matching address book",
+  "abTagFilter": "Tag filter",
+  "abTagColorBrightness": "Brightness",
+  "abTagColorWheel": "Color wheel",
+  "abSaving": "Saving…"
 }

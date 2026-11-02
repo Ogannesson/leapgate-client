@@ -819,6 +819,8 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
                     LgTableColumn(
                         LgDeviceColumn.userHost, l10n.recentColumnUserHost,
                         sortable: sortable),
+                    if (!searching && abNoteColumn(_tabs.current))
+                      LgTableColumn(LgDeviceColumn.note, l10n.abFieldNote),
                     searching
                         ? LgTableColumn(
                             LgDeviceColumn.source, l10n.recentColumnSource)

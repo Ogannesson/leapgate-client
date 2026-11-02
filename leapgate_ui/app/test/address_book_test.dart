@@ -228,6 +228,13 @@ void main() {
     await tester.pump();
     expect(find.text('阳台电脑'), findsOneWidget);
     expect(find.text('正在加载其他分类…'), findsNothing);
+
+    // In the category the card has the note under the user and host.
+    await tester.enterText(find.byType(EditableText), '');
+    await tester.pump();
+    await tester.tap(find.text('地址簿'));
+    await tester.pump();
+    expect(find.text('显卡驱动别升级'), findsOneWidget);
     await unmount(tester);
   });
 
@@ -499,7 +506,7 @@ void _categoryTests() {
     api.writeResult = const ApiResult.error(
       ApiError(ApiErrorKind.unauthorized),
     );
-    await tester.enterText(find.bySemanticsLabel('ID').last, '246813579');
+    await tester.enterText(find.byType(EditableText).first, '246813579');
     await tester.pump();
     await tester.tap(find.text('添加').last);
     await _settle(tester);
@@ -536,7 +543,7 @@ void _categoryTests() {
     }
 
     Future<void> add(WidgetTester tester, String id) async {
-      await tester.enterText(find.bySemanticsLabel('ID').last, id);
+      await tester.enterText(find.byType(EditableText).first, id);
       await tester.pump();
       await tester.tap(find.text('添加').last);
       await tester.pump();
@@ -589,11 +596,14 @@ void _categoryTests() {
       await _settle(tester);
       await tester.tap(find.text('修改颜色'));
       await _settle(tester);
+      // The value field comes with the wheel.
+      await tester.tap(find.text('自定义'));
+      await _settle(tester);
     }
 
     testWidgets('a bad colour value can not be saved', (tester) async {
       await open(tester);
-      await tester.enterText(find.bySemanticsLabel('颜色值').last, '#C4527');
+      await tester.enterText(find.byType(EditableText).last, '#C4527');
       await tester.pump();
       expect(find.text('颜色值格式不正确'), findsOneWidget);
     });
@@ -605,7 +615,7 @@ void _categoryTests() {
       api.writeResult = const ApiResult.error(
         ApiError(ApiErrorKind.server, '服务暂时不可用'),
       );
-      await tester.enterText(find.bySemanticsLabel('颜色值').last, '#E0852B');
+      await tester.enterText(find.byType(EditableText).last, '#E0852B');
       await tester.pump();
       await tester.tap(find.text('保存'));
       await tester.pump();
