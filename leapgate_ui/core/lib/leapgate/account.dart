@@ -102,10 +102,11 @@ class AccountModel extends ChangeNotifier {
       _error = null;
       notifyListeners();
     }
+    final me = _user?.name;
     final result = await _api.currentUser();
     _checking = false;
-    // Signed out meanwhile.
-    if (!loggedIn) return;
+    // Signed out or another account meanwhile.
+    if (_user?.name != me) return;
     if (result.ok) {
       _user = result.value;
       notifyListeners();

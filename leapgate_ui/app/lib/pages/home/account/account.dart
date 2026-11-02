@@ -75,6 +75,8 @@ class _AccountAreaState extends State<_AccountArea> {
             return Text(l10n.accountSigningOut, style: small);
           }
           if (user == null) {
+            // Signed out by the server with the confirmation open.
+            _confirming = false;
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [

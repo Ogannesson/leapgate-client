@@ -227,6 +227,26 @@ void main() {
     });
   });
 
+  testWidgets(
+    'a confirmation open when the server signs out is gone next time',
+    (tester) async {
+      await pumpAccount(tester, signedIn: true, team: ApiResult.ok(_team()));
+      await tester.tap(find.text('张三'));
+      await settle(tester);
+      await tester.tap(find.text('退出登录'));
+      await settle(tester);
+      expect(find.text('退出登录？'), findsOneWidget);
+      appCore.account.signedOutByServer();
+      await settle(tester);
+      api.loginResult = const ApiResult.ok(_alice);
+      await appCore.account.login('alice', 'secret');
+      await settle(tester);
+      expect(find.text('退出登录？'), findsNothing);
+      expect(find.text('张三'), findsOneWidget);
+      await unmount(tester);
+    },
+  );
+
   testWidgets('signing out asks in the page first', (tester) async {
     await pumpAccount(tester, signedIn: true, team: ApiResult.ok(_team()));
     await tester.tap(find.text('张三'));
@@ -363,6 +383,28 @@ void main() {
       expect(find.text('LAPTOP-LI'), findsOneWidget);
       await unmount(tester);
     });
+
+    testWidgets(
+      "the account check refused by the server says why and retries it",
+      (tester) async {
+        api.currentUserResult = const ApiResult.error(
+          ApiError(ApiErrorKind.server, 'HTTP 502'),
+        );
+        api
+          ..local = _alice
+          ..groupResult = ApiResult.ok(_team());
+        await pumpHome(tester, overlays: TabOverlays());
+        appCore.account.start();
+        await settle(tester);
+        await openGroup(tester);
+        expect(find.text('无法加载同组设备。服务器返回：HTTP 502。'), findsOneWidget);
+        api.currentUserResult = const ApiResult.ok(_alice);
+        await tester.tap(_button('重试'));
+        await settle(tester);
+        expect(find.text('LAPTOP-LI'), findsOneWidget);
+        await unmount(tester);
+      },
+    );
 
     testWidgets("the server's error: a banner over what the list had", (
       tester,

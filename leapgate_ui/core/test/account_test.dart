@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_hbb/generated_bridge.dart';
 import 'package:flutter_hbb/leapgate/account.dart';
 import 'package:flutter_hbb/leapgate/account_api.dart';
@@ -260,4 +262,91 @@ void main() {
       expect(online, {'111': true, '222': false, '333': false});
     });
   });
+
+  group('answers that arrive after the sign-in changed', () {
+    late _SlowApi slow;
+    setUp(() {
+      slow = _SlowApi();
+      accountApi = slow;
+    });
+
+    test('a team pull answered after signing out is dropped', () async {
+      slow.loginResult = const ApiResult.ok(_alice);
+      await account().login('alice', 'x');
+      await settle();
+      await account().logout();
+      slow.groups.single.complete(ApiResult.ok(_team()));
+      await settle();
+      expect(appCore.group.peers, isEmpty);
+      expect(appCore.group.loaded, isFalse);
+    });
+
+    test("another account does not see the previous one's team devices",
+        () async {
+      slow.loginResult = const ApiResult.ok(_alice);
+      await account().login('alice', 'x');
+      await settle();
+      await account().logout();
+      slow.loginResult = const ApiResult.ok(_bob);
+      await account().login('bob', 'y');
+      await settle();
+      slow.groups.first.complete(ApiResult.ok(_team()));
+      await settle();
+      slow.groups.last.complete(
+          const ApiResult.error(ApiError(ApiErrorKind.server, 'HTTP 500')));
+      await settle();
+      expect(account().user!.name, 'bob');
+      expect(appCore.group.peers, isEmpty);
+      expect(appCore.group.error!.text, 'HTTP 500');
+    });
+
+    test('the startup check answered while signing out leaves nothing behind',
+        () async {
+      slow
+        ..local = _alice
+        ..currentUserGate = Completer()
+        ..logoutGate = Completer();
+      final started = account().start();
+      await settle();
+      final out = account().logout();
+      slow.currentUserGate!.complete();
+      await settle();
+      slow.logoutGate!.complete();
+      await out;
+      for (final c in slow.groups) {
+        c.complete(ApiResult.ok(_team()));
+      }
+      await started;
+      await settle();
+      expect(account().loggedIn, isFalse);
+      expect(appCore.group.peers, isEmpty);
+    });
+  });
+}
+
+/// The team pulls wait for the test; the user check and signing out too while gated.
+class _SlowApi extends FakeAccountApi {
+  final groups = <Completer<ApiResult<GroupData>>>[];
+  Completer<void>? currentUserGate;
+  Completer<void>? logoutGate;
+
+  @override
+  Future<ApiResult<GroupData>> group() {
+    calls.add(('group', const []));
+    final c = Completer<ApiResult<GroupData>>();
+    groups.add(c);
+    return c.future;
+  }
+
+  @override
+  Future<ApiResult<AccountUser>> currentUser() async {
+    await currentUserGate?.future;
+    return const ApiResult.ok(_alice);
+  }
+
+  @override
+  Future<void> logout() async {
+    await logoutGate?.future;
+    return super.logout();
+  }
 }

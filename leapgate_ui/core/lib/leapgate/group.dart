@@ -97,8 +97,9 @@ class GroupModel extends ChangeNotifier implements AccountData {
   @override
   Future<void> loadCache() async {
     if (disabled || _loaded) return;
+    final me = appCore.account.user?.name;
     final cache = await _api.groupCache();
-    if (cache == null || _loaded) return;
+    if (cache == null || _loaded || appCore.account.user?.name != me) return;
     _set(
       [
         for (final u in cache['users'] as List? ?? const [])
@@ -123,7 +124,10 @@ class GroupModel extends ChangeNotifier implements AccountData {
     _loading = true;
     _error = null;
     notifyListeners();
+    final me = appCore.account.user?.name;
     final result = await _api.group();
+    // Signed out or another account meanwhile: the answer is not this list's any more.
+    if (appCore.account.user?.name != me) return;
     _loading = false;
     if (result.ok) {
       _set(result.value.users, result.value.peers);
