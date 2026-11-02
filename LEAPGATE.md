@@ -1310,3 +1310,42 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 - `refresh()` 的 `currentUser` 还没回来就退出、又重新登录，旧请求回 401 会把新登录退掉（Dart 侧只按用户名丢弃账号变了以后的回答，令牌的比对由 Rust 侧处理）。
 - 正在登录时点"取消"或按 Esc 关掉对话框，请求仍会完成并登录上（上游相同）。
 - 启动时核对账号遇到网络错误，同组设备整个列表换成"无法连接服务器"，已显示的缓存被盖住（上游 `netWorkErrorWidget` 相同）。
+- 每个请求新建一个 reqwest 客户端，分页每一页都重新建连接和握手（同 `api.rs` 现有的请求，上游也是每次新建）。
+- 服务器上名叫 `My address book` 的共享簿会被当成个人簿（`AbEntry::personal()` 按名字认，上游用簿名做键，有同样的歧义）。Leapgate 服务端不许共享簿用这个名字，rustdesk-api 不拦。
+
+**H1 的实现结论**（2026-11-02，分支 `ui/rust-h1`）
+
+- 代码：`api.rs` 的 `bearer`（令牌为空时不带 `Authorization`，登录和登录选项用）；`libs/leapgate/src/account/` 的 `mod.rs`（账号四个端点、状态码映射、分页、令牌和 `user_info`）、`ab.rs`、`group.rs`；`src/leapgate_ffi.rs` 末尾 17 个导出。设备 ID、UUID、登录设备信息在导出里、进运行时之前取：桌面上 `get_id` 经 IPC 问服务，自己会起运行时，放进 `#[tokio::main]` 里就是嵌套运行时。令牌、`user_info`、两份缓存经一个小接口 `Store` 读写，正式实现就是 LocalConfig 和 `config::{Ab, Group}`，测试换成内存里的，免得单测写进本机的配置目录。
+- 和上面约定的出入（都不改界面的用法）：
+  - `leapgate_ab_books` 的 `shared`、`leapgate_ab_book` 的 `tags` 是服务器给的原样对象，会多出字段（rustdesk-api 的标签带 `id`、`user_id`、时间），界面按字段名取。
+  - 所有分页请求都同时带 `current` 和 `page`，不止 `users`、`peers`（Leapgate 服务端不认识的参数照常忽略）。每页 100 条，同上游。
+  - `leapgate_account_login_options` 不带令牌，非 2xx 一律报 `server`、不清登录。
+  - `leapgate_ab_book` 在 `personal` 为真时，缓存条目的名字固定写 `My address book`，不用传进来的 `name`；个人簿条目的 `guid` 写真实的（上游写空串，没有读者在意）。
+  - 每个导出在 frb 各自的线程上跑，两份缓存是"读出、改、写回"，所以加了一把进程内的锁（`account::CACHE`）：写 `_ab`（核对令牌加读改写）、写 `_group`（核对令牌加写）、退出和令牌失效时的清理、读缓存都在锁里做，都是同步的一小段，不跨 `.await`。不加锁时两本簿同时拉完会互相覆盖，个人簿条目连同 `hash` 丢掉，自动填密码静默失效。
+  - 一次操作（拉簿列表、拉一本簿、拉同组设备、一次写、当前用户）开头取一次令牌，所有请求都用它。回 401 时只有这个令牌仍是当前令牌才清登录：退出后马上重新登录时，旧操作迟到的 401 不会把新登录清掉。拉取过程中退出了登录：写缓存前在锁里核对令牌，变了就不写，免得把刚删掉的缓存写回来；`currentUser` 成功时同样在锁里核对令牌、没变才重写 `user_info`（登录消息的显示名和本机显示名不看令牌、直接读它）。
+  - 2xx 但内容不是这个端点该回的形状，报 `server`，文字 `HTTP 200`。写操作的 2xx 只认空体或不带 `error` 的 JSON，非 JSON 的内容（例如代理插进来的网页）报 `server`（上游 `_jsonDecodeActionResp` 同样算失败）。`ab/tags` 回 `null` 当没有标签（rustdesk-api 簿里没有标签时）。
+  - `_group` 缓存按 `config::Group` 的字段写（用户 `name`、`display_name`；设备 `id`、`username`、`hostname`、`platform`、`login_name`），没有备注和设备组名：上游缓存本来就不存备注，`Group::load` 也会丢掉设备组名。`leapgate_group_cache` 给的设备是这种缓存格式，不是 `/api/peers` 的原样。
+  - 日志：非 2xx 只记路径和状态码，连不上记路径和错误描述，两处各自每分钟最多一行（`throttled_log`）；登出失败另记一行。
+- 测试：`libs/leapgate` 单测 160 个（新增 19 个，测试里起最小的假 HTTP 服务，覆盖每类端点的请求、两种 401、旧令牌的 401 不清新登录、`currentUser` 400、`personal` 404、404/409、2xx 带 `error` 或非 JSON、两种分页停止（各自单独起作用）、缓存的写入、替换、令牌不同时清空、登出和 401 时删除、拉取中途退出不写回、两本簿同时保存都留下）；对真实服务器的集成测试 `account::live_tests::live_account_flow`（`#[ignore]`，环境变量见文件头）。core 的 `RustAccountApi` 用假绑定测了一条（184 个测试，analyze 92 条 info 不变）。
+- 对两种服务器的实测（2026-11-02，从开发机跑集成测试；两边都用命令行或管理接口新建的专用账号、三本各一种权限的共享簿、一个共享组）：
+
+| 项目 | Leapgate 服务端（验收服务 `7fbe55a`） | rustdesk-api v2.7（Docker `lejianwen/rustdesk-api:v2.7`，2025-09-28 发布，2026-11 时最新稳定版） |
+|---|---|---|
+| 登录选项 | 通过（`[]`） | 通过；回的是 `["common-oidc/[{\"name\":\"webauth\"}]","oidc/webauth"]`，不是读码推断的 `common-oidc/null`，只看 2xx，不受影响 |
+| 密码错 | 通过：401 → `wrong_credentials` | 回 400 `Username or password error.` → `server`，文字照原文显示 |
+| 登录、`user_info`、当前用户 | 通过 | 通过 |
+| 簿列表 | 通过：`max_peers` 5000，三本共享簿的 `rule` 1/2/3、`owner` 对 | 通过：`max_peers` 0（不限），`rule`、`owner` 对 |
+| 个人簿加设备、改设备（标签、备注）、加标签、改颜色、改名、删标签、删设备 | 通过；读回 `hash`，缓存个人簿条目名字和 `hash` 对 | 通过；不存设备的 `note`（读回 `null`），标签改名不级联到设备上的标签 |
+| 改名到已有的标签名 | `conflict` | 400 `Item already exists.` → `server` |
+| 改不存在的设备、标签 | `not_found` | 400 `Item not found.` → `server` |
+| 删除含不存在名字的标签 | 忽略不存在的 | 整个请求失败（400 `Item not found.`） |
+| 分页（个人簿 121 台） | 通过：按 `total` 取两页，121 台 | 通过：`ab/peers` 不看任何分页参数（`current`、`page` 换成 2 都回同样的全部条目，实测 120 条），第二页没有新 ID 就停，121 台 |
+| 只读簿写入 | 拒绝（403 `Read-only address book` → `server`） | 拒绝（400 `No access.` → `server`） |
+| 读写簿加、删设备 | 通过 | 加通过；删要完全控制，读写簿删除回 400 `No access.` |
+| 完全控制簿加、删设备 | 通过 | 通过 |
+| 共享簿读回 `password`、缓存里不带 `hash` | 通过 | 通过 |
+| 同组设备 | 通过：人员是自己和同组的人；设备列表为空 | 通过：同上；`users` 认 `page`、不认 `current`（`page=2&pageSize=1` 回第二个人，`current=2&pageSize=1` 回第一个人） |
+| 退出后旧令牌 | 通过：`currentUser` 回 401 → `unauthorized` | 通过：同左 |
+
+- 没验的：同组设备有设备时的转换（两边的测试账号名下都没有设备，`/api/peers` 只验了请求和空列表，转换由单测覆盖）；簿满；登录限流；个人簿自动填密码（要真实连接，归 07 §5.2 验收）；经 frb 的实际调用（桥已生成、根 crate 编译通过，Dart 侧只用假绑定测了）。
+- rustdesk-api 的几处行为（找不到、重名都回 400，读写簿不能删设备，不存备注，标签改名不级联）是它自己的，界面照 `server` 显示服务器原文，不另做适配。
