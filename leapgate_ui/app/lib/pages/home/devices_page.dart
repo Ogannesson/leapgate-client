@@ -202,21 +202,23 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
   /// What the address book or the team devices put on the page (M4); null in the others.
   AccountCategoryView? _accountView(PeerCategory category) => switch (category) {
         PeerCategory.addressBook =>
-          addressBookCategory(context, widget.overlays),
-        PeerCategory.group => groupCategory(context, widget.overlays),
+          addressBookCategory(context, widget.overlays, _tabs.view),
+        PeerCategory.group =>
+          groupCategory(context, widget.overlays, _tabs.view),
         _ => null,
       };
 
   List<Peer> _capped(List<Peer> peers) =>
       peers.length > kMaxShownPeers ? peers.sublist(0, kMaxShownPeers) : peers;
 
-  /// The rows in order: [_connectToRow] first while searching, then device IDs.
+  /// The rows in order: [_connectToRow] first while searching, then device IDs. None while the
+  /// address book or the team devices show a state in place of the list.
   List<String> _rowIds(ConnectBoxSearch? search) {
     if (search != null) {
       return [_connectToRow, for (final p in _capped(search.matches)) p.id];
     }
     return [
-      if (_loaded(_tabs.current))
+      if (_loaded(_tabs.current) && _accountView(_tabs.current)?.state == null)
         for (final p in _capped(_listed(_tabs.current))) p.id,
     ];
   }

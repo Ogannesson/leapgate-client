@@ -33,10 +33,12 @@ import 'ab_parts.dart';
 // `common/widgets/peer_card.dart` (`AddressBookPeerCard`, `_addToAb`) and
 // `common/widgets/peer_tab_page.dart` (the selection bar).
 
-/// The book switcher, the tag bar, the tools and the states of the address book category.
+/// The book switcher, the tag bar, the tools and the states of the address book category; the
+/// loading skeleton in [view].
 AccountCategoryView addressBookCategory(
   BuildContext context,
   TabOverlays overlays,
+  PeerView view,
 ) {
   final l10n = AppLocalizations.of(context)!;
   final account = appCore.account;
@@ -168,13 +170,14 @@ AccountCategoryView addressBookCategory(
       ),
     ),
     state: !ab.loaded || (ab.peers.isEmpty && ab.loading)
-        ? SingleChildScrollView(
-            child: LgDeviceSkeleton(semanticLabel: l10n.recentLoading),
-          )
+        ? AccountLoading(view: view, label: l10n.recentLoading)
         : ab.current == null
         ? const SizedBox.shrink()
         : ab.peers.isEmpty
-        ? state(l10n.abEmpty, LgIcons.book)
+        // Never answered: the banner says why, the list says nothing more.
+        ? (ab.currentInitialized
+              ? state(l10n.abEmpty, LgIcons.book)
+              : const SizedBox.shrink())
         : ab.shownPeers.isEmpty
         ? state(l10n.abNoTagMatch, LgIcons.tag)
         : null,
@@ -365,6 +368,22 @@ String? abPeerKeyLabel(AppLocalizations l10n, PeerItem item) =>
     ? l10n.abSavedPassword
     : null;
 
+/// Whether [item] is a device of the current book. The connect box lists the other loaded
+/// books' devices as the address book's too, but the book's actions write the current one.
+bool abInCurrentBook(PeerItem item) {
+  final ab = appCore.addressBook;
+  return item.category == PeerCategory.addressBook &&
+      ab.current != null &&
+      ab.contains(ab.current!, item.peer.id);
+}
+
+/// The category [item]'s device menu is built for: another book's device found in the connect
+/// box gets the menu of "收藏", which has the local items and "加入地址簿" only.
+PeerCategory abMenuCategory(PeerItem item) =>
+    item.category == PeerCategory.addressBook && !abInCurrentBook(item)
+    ? PeerCategory.favorites
+    : item.category;
+
 /// The device menu's item for [action] where the address book has its own: the six address book
 /// actions and "清除保存的密码" (the personal book's hash as well) everywhere, and in the address book
 /// category "重命名" (the book's alias). Null keeps the page's own item. The items
@@ -377,7 +396,7 @@ Widget? abPeerMenuItem(
 }) {
   final ab = appCore.addressBook;
   final peer = item.peer;
-  final inAb = item.category == PeerCategory.addressBook;
+  final inAb = abInCurrentBook(item);
   VoidCallback? unlessGreyed(VoidCallback run) =>
       inAb && ab.greyed(action) ? null : run;
   void toast(String key) => appCore.toasts.show(key);
@@ -387,7 +406,7 @@ Widget? abPeerMenuItem(
       onPressed: () async {
         if (await showAbAddToDialog(overlays, l10n, [
           peer,
-        ], ab.addTargets(item.category))) {
+        ], ab.addTargets(abMenuCategory(item)))) {
           toast('abToastAdded');
         }
       },
@@ -459,7 +478,7 @@ String? abMenuGroupNote(
   List<PeerAction> group,
   List<List<PeerAction>> groups,
 ) {
-  if (item.category != PeerCategory.addressBook) return null;
+  if (!abInCurrentBook(item)) return null;
   final ab = appCore.addressBook;
   final first = groups.where((g) => g.any(ab.greyed)).firstOrNull;
   return identical(first, group) ? l10n.abReadOnly : null;
@@ -479,9 +498,9 @@ List<Peer> _picked(PeerCategory category, Set<String> ids) {
 }
 
 /// The selection bar's address book actions in [category]: "加入地址簿" while signed in, and in
-/// the address book "编辑标签" and "从地址簿中删除". In the address book and the team devices
-/// they are the only actions; elsewhere they follow the page's own. [done] shows a toast by its
-/// ARB key and ends the selection.
+/// an address book that can be written "编辑标签" and "从地址簿中删除". In the address book and
+/// the team devices they are the only actions; elsewhere they follow the page's own. [done]
+/// shows a toast by its ARB key and ends the selection.
 List<LgSelectionAction> abSelectionActions(
   AppLocalizations l10n,
   PeerCategory category,
@@ -491,9 +510,9 @@ List<LgSelectionAction> abSelectionActions(
 }) {
   final ab = appCore.addressBook;
   final targets = ab.addTargets(category);
-  final inAb = category == PeerCategory.addressBook;
-  // Greyed in a read-only book, as the device menu (the bar has no place for the reason).
-  final writable = ids.isNotEmpty && ab.canWrite;
+  // A read-only book has neither (the bar has no place to say why they would be greyed).
+  final editable = category == PeerCategory.addressBook && ab.canWrite;
+  final writable = ids.isNotEmpty;
   return [
     if (_signedIn && targets.isNotEmpty)
       LgSelectionAction(
@@ -512,7 +531,7 @@ List<LgSelectionAction> abSelectionActions(
                 }
               },
       ),
-    if (inAb && ab.tags.isNotEmpty)
+    if (editable && ab.tags.isNotEmpty)
       LgSelectionAction(
         label: l10n.abEditTags,
         icon: LgIcons.tag,
@@ -520,7 +539,7 @@ List<LgSelectionAction> abSelectionActions(
             ? () => showAbEditTagsDialog(overlays, ids.toList(), const [])
             : null,
       ),
-    if (inAb)
+    if (editable)
       LgSelectionAction(
         label: l10n.abDeleteFromAb,
         icon: LgIcons.trash,

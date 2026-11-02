@@ -23,11 +23,14 @@ String abBookRights(AppLocalizations l10n, AbProfile book) {
   return book.owner.isEmpty ? rule : '$rule · ${l10n.abOwner(book.owner)}';
 }
 
-/// The second sentence of an error: what the server said, or that it could not be reached.
+/// The second sentence of an error: what the server said, or that it could not be reached;
+/// none when the server said nothing.
 String abReason(AppLocalizations l10n, ApiError error) =>
     error.kind == ApiErrorKind.network
     ? l10n.abNetworkReason
-    : l10n.abServerSaid(error.text.isEmpty ? error.kind.name : error.text);
+    : error.text.isEmpty
+    ? ''
+    : l10n.abServerSaid(error.text);
 
 /// A tag's colour in the current book; upstream's default when it has none.
 Color abTagColor(String tag) =>

@@ -65,6 +65,7 @@ class LgTextField extends StatefulWidget {
     this.semanticLabel,
     this.dense = false,
     this.maxLength,
+    this.inputFormatters = const [],
   });
 
   final TextEditingController? controller;
@@ -94,6 +95,9 @@ class LgTextField extends StatefulWidget {
 
   /// At most this many characters can be typed or pasted; no counter is shown.
   final int? maxLength;
+
+  /// Run on what is typed, before [maxLength] (an ID in groups of three, say).
+  final List<TextInputFormatter> inputFormatters;
 
   @override
   State<LgTextField> createState() => _LgTextFieldState();
@@ -184,7 +188,10 @@ class _LgTextFieldState extends State<LgTextField> {
             child: MergeSemantics(
               child: Semantics(
                 label: _name(form, error),
-                hint: named ? widget.placeholder : null,
+                // Not read twice when it says what the name says.
+                hint: named && widget.placeholder != _label(form)
+                    ? widget.placeholder
+                    : null,
                 isRequired: form?.isRequired == true ? true : null,
                 validationResult: error
                     ? SemanticsValidationResult.invalid
@@ -204,6 +211,7 @@ class _LgTextFieldState extends State<LgTextField> {
                   cursorWidth: 2,
                   maxLines: 1,
                   inputFormatters: [
+                    ...widget.inputFormatters,
                     if (widget.maxLength != null)
                       LengthLimitingTextInputFormatter(widget.maxLength),
                   ],
@@ -241,8 +249,11 @@ class _LgTextFieldState extends State<LgTextField> {
     return Semantics(container: true, explicitChildNodes: true, child: box);
   }
 
+  String? _label(LgFormFieldInfo? form) =>
+      widget.semanticLabel ?? form?.label ?? widget.placeholder;
+
   String? _name(LgFormFieldInfo? form, bool error) {
-    final label = widget.semanticLabel ?? form?.label ?? widget.placeholder;
+    final label = _label(form);
     if (!error) return label;
     return [if (label != null) label, widget.errorText!].join('\n');
   }

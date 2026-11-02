@@ -227,14 +227,15 @@ List<Widget> peerMenuItems(
   final name = peerDisplayName(item.peer);
   // The toast keys are ARB keys; the shell's `toastText` shows them.
   void done(String toast) => appCore.toasts.show(toast);
+  final category = abMenuCategory(item);
   final groups = peerMenu(
-    item.category,
+    category,
     favorite: item.favorite,
     // In the personal book the hash it stores counts as well (`AddressBookPeerCard`).
     hasPassword: hasPassword ||
         (item.category == PeerCategory.addressBook && item.peer.hash.isNotEmpty),
     windows: Platform.isWindows,
-    ab: appCore.addressBook.menuFlags(item.category),
+    ab: appCore.addressBook.menuFlags(category),
   );
   final titles = [
     l10n.connectBoxConnectionType,

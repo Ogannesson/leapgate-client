@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_hbb/leapgate/account_api.dart';
 import 'package:flutter_hbb/leapgate/address_book.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
+import 'package:flutter_hbb/leapgate/recent_peers.dart' show formatPeerId;
 import 'package:flutter_hbb/models/peer_model.dart';
 
 import '../../../icons/lg_icon.dart';
@@ -13,6 +15,7 @@ import '../../../widgets/lg_button.dart';
 import '../../../widgets/lg_feedback.dart';
 import '../../../widgets/lg_form_dialog.dart';
 import '../../../widgets/lg_menu.dart';
+import '../../../widgets/lg_panel_inputs.dart';
 import '../../../widgets/lg_tag_chips.dart';
 import '../../../widgets/lg_tag_color_dialog.dart';
 import '../../../widgets/lg_text_field.dart';
@@ -233,6 +236,7 @@ class _AddDeviceDialogState extends _FormState<_AddDeviceDialog> {
         busySubmit: l10n.abAdding,
       ),
       idController: _id,
+      idInputFormatters: [_IdGroups()],
       aliasController: _alias,
       noteController: _note,
       passwordController: shared ? _password : null,
@@ -249,6 +253,30 @@ class _AddDeviceDialogState extends _FormState<_AddDeviceDialog> {
   }
 }
 
+/// The ID in groups of three as it is typed (01 P1 block G, "246 813 579"), as [formatPeerId]
+/// shows IDs; the caret stays after the same digit.
+class _IdGroups extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    if (newValue.composing.isValid) return newValue;
+    final text = formatPeerId(newValue.text);
+    if (text == newValue.text) return newValue;
+    final end = newValue.selection.extentOffset.clamp(0, newValue.text.length);
+    final before = newValue.text.substring(0, end).replaceAll(' ', '').length;
+    var at = 0;
+    for (var n = 0; at < text.length && n < before; at++) {
+      if (text[at] != ' ') n++;
+    }
+    return TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: at),
+    );
+  }
+}
+
 // ---- One text field: add tag, rename tag, edit note, shared password.
 
 class _TextDialog extends StatefulWidget {
@@ -256,6 +284,7 @@ class _TextDialog extends StatefulWidget {
     required this.title,
     required this.icon,
     required this.label,
+    required this.action,
     required this.close,
     required this.submit,
     this.initial = '',
@@ -269,6 +298,9 @@ class _TextDialog extends StatefulWidget {
   final String title;
   final LgIcons icon;
   final String label;
+
+  /// The main button: what it does ("添加", "保存").
+  final String action;
   final String initial;
 
   /// Under the field.
@@ -327,13 +359,16 @@ class _TextDialogState extends _FormState<_TextDialog> {
     return form(
       title: widget.title,
       icon: widget.icon,
-      action: l10n.homeOk,
+      action: widget.action,
       onAction: widget.allowEmpty || _text.text.isNotEmpty ? _submit : null,
       onCancel: widget.close,
       children: [
         LgFormField(
           label: widget.label,
-          counter: widget.area ? '${_text.text.length} / $_noteMax' : null,
+          // In characters, as the limit counts them.
+          counter: widget.area
+              ? '${_text.text.characters.length} / $_noteMax'
+              : null,
           hint: widget.hint,
           child: widget.area
               ? LgTextArea(
@@ -343,11 +378,22 @@ class _TextDialogState extends _FormState<_TextDialog> {
                   semanticLabel: widget.label,
                   onChanged: _changed,
                 )
+              : widget.obscure
+              ? LgPasswordField(
+                  controller: _text,
+                  autofocus: true,
+                  enabled: !busy,
+                  semanticLabel: widget.label,
+                  showLabel: l10n.connShowPassword,
+                  hideLabel: l10n.connHidePassword,
+                  errorText: _fieldError,
+                  onChanged: _changed,
+                  onSubmitted: (_) => _submit(),
+                )
               : LgTextField(
                   controller: _text,
                   autofocus: true,
                   enabled: !busy,
-                  obscureText: widget.obscure,
                   semanticLabel: widget.label,
                   errorText: _fieldError,
                   onChanged: _changed,
@@ -364,6 +410,7 @@ Future<void> _textDialog(
   required String title,
   required LgIcons icon,
   required String label,
+  required String action,
   required Future<String?> Function(String text) submit,
   String initial = '',
   String? hint,
@@ -377,6 +424,7 @@ Future<void> _textDialog(
     title: title,
     icon: icon,
     label: label,
+    action: action,
     initial: initial,
     hint: hint,
     check: check,
@@ -402,6 +450,7 @@ Future<void> showAbAddTagDialog(TabOverlays overlays, AppLocalizations l10n) {
     title: l10n.abAddTag,
     icon: LgIcons.tag,
     label: l10n.abFieldTags,
+    action: l10n.abAdd,
     hint: l10n.abAddTagNote,
     check: (text) {
       final tags = names(text);
@@ -435,7 +484,8 @@ Future<void> showAbRenameTagDialog(
     overlays,
     title: l10n.abRenameTag,
     icon: LgIcons.tag,
-    label: l10n.abFieldTags,
+    label: l10n.abFieldName,
+    action: l10n.abSave,
     initial: tag,
     check: (text) {
       final name = text.trim();
@@ -471,6 +521,7 @@ Future<void> showAbEditNoteDialog(
     title: l10n.abEditNote,
     icon: LgIcons.note,
     label: l10n.abFieldNote,
+    action: l10n.abSave,
     initial: peer.note,
     area: true,
     allowEmpty: true,
@@ -482,7 +533,7 @@ Future<void> showAbEditNoteDialog(
   );
 }
 
-/// "设置共享密码" (upstream `setSharedAbPasswordDialog`): "确定" waits for a password.
+/// "设置共享密码" (upstream `setSharedAbPasswordDialog`): "保存" waits for a password.
 Future<void> showAbSharedPasswordDialog(
   TabOverlays overlays,
   AppLocalizations l10n,
@@ -493,6 +544,7 @@ Future<void> showAbSharedPasswordDialog(
     title: l10n.abSetSharedPassword,
     icon: LgIcons.key,
     label: l10n.abFieldPassword,
+    action: l10n.abSave,
     hint: l10n.abVisibleToMembers,
     obscure: true,
     submit: (text) async {
@@ -546,7 +598,7 @@ class _EditTagsDialogState extends _FormState<_EditTagsDialog> {
     return form(
       title: l10n.abEditTags,
       icon: LgIcons.tag,
-      action: l10n.homeOk,
+      action: l10n.abSave,
       onAction: () => run(() async {
         final e = await ab.setTags(widget.ids, [
           for (final t in ab.tags)

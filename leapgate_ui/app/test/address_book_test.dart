@@ -5,6 +5,7 @@ import 'package:flutter_hbb/leapgate/account.dart';
 import 'package:flutter_hbb/leapgate/account_api.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/bridge.dart';
+import 'package:flutter_hbb/leapgate/peer_tabs.dart';
 import 'package:flutter_hbb/leapgate/recent_peers.dart';
 import 'package:flutter_hbb/models/peer_model.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
@@ -169,7 +170,11 @@ Future<void> _pump(WidgetTester tester) async {
                   appCore.addressBook,
                 ]),
                 builder: (context, _) {
-                  final view = addressBookCategory(context, overlays);
+                  final view = addressBookCategory(
+                    context,
+                    overlays,
+                    PeerView.list,
+                  );
                   return Column(
                     children: [
                       Row(children: view.tools),
@@ -235,6 +240,41 @@ void main() {
     await tester.tap(find.text('地址簿'));
     await tester.pump();
     expect(find.text('显卡驱动别升级'), findsOneWidget);
+    await unmount(tester);
+  });
+
+  testWidgets('"全选" picks none of the devices a state page covers', (
+    tester,
+  ) async {
+    installHomeFakes();
+    api = FakeAccountApi();
+    accountApi = api;
+    api.local = const AccountUser(name: 'zhangsan');
+    api.currentUserResult = const ApiResult.error(
+      ApiError(ApiErrorKind.server, '服务暂时不可用'),
+    );
+    api.abCacheResult = [
+      {
+        'guid': 'g-me',
+        'name': 'My address book',
+        'peers': [
+          {'id': '123456789'},
+        ],
+        'tags': const [],
+        'tag_colors': '{}',
+      },
+    ];
+    await appCore.account.start();
+    await pumpHome(tester);
+    await loadRecent([]);
+    await tester.tap(find.text('地址簿'));
+    await tester.pump();
+    expect(find.text('无法加载地址簿。服务器返回：服务暂时不可用。'), findsOneWidget);
+    await tester.tap(find.bySemanticsLabel('多选'));
+    await tester.pump();
+    await tester.tap(find.text('全选'));
+    await tester.pump();
+    expect(find.text('已选择 0 台'), findsOneWidget);
     await unmount(tester);
   });
 
@@ -397,6 +437,30 @@ void _categoryTests() {
   );
 
   testWidgets(
+    'another book\'s device found in the connect box: no item that writes the current book',
+    (tester) async {
+      const team = AbProfile(guid: 'g-team', name: '团队', rule: 2);
+      _serve(
+        personal: [_peer('987654321', alias: '阳台电脑')],
+        shared: [
+          (team, [_peer('345678912')]),
+        ],
+      );
+      await appCore.addressBook.pull();
+      await appCore.addressBook.select(appCore.addressBook.books[1]);
+      await _pumpMenu(
+        tester,
+        _item(_peer('987654321', alias: '阳台电脑'), PeerCategory.addressBook),
+      );
+      for (final absent in ['编辑标签', '编辑备注', '设置共享密码', '从地址簿中删除']) {
+        expect(find.text(absent), findsNothing, reason: absent);
+      }
+      expect(find.text('加入地址簿'), findsOneWidget);
+      expect(find.text('重命名'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
     'the server refusing the sign-in check: the whole list says so, "重试" checks again',
     (tester) async {
       // What the cache showed before the check failed is not listed under a banner.
@@ -549,6 +613,14 @@ void _categoryTests() {
       await tester.pump();
       await tester.pump();
     }
+
+    testWidgets('the ID is grouped in threes as it is typed', (tester) async {
+      _serve();
+      await open(tester);
+      await tester.enterText(find.byType(EditableText).first, '246813579');
+      await tester.pump();
+      expect(find.text('246 813 579'), findsOneWidget);
+    });
 
     testWidgets('an ID already in the book', (tester) async {
       _serve(personal: [_peer('123456789')]);

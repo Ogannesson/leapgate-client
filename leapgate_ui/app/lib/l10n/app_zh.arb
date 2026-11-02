@@ -590,7 +590,7 @@
   "abNetworkError": "无法连接服务器",
   "abRetry": "重试",
   "abEmpty": "此地址簿中暂无设备",
-  "abNoTagMatch": "没有带所选标签的设备",
+  "abNoTagMatch": "未找到带所选标签的设备",
   "abLoadFailed": "无法加载地址簿。{reason}",
   "abSaveFailed": "无法保存地址簿的更改。{reason}",
   "abServerSaid": "服务器返回：{text}。",
@@ -688,5 +688,8 @@
   "abTagPresetPurple": "紫",
   "abTagPresetGray": "灰",
   "loginUsernamePlaceholder": "输入用户名",
-  "loginPasswordPlaceholder": "输入密码"
+  "loginPasswordPlaceholder": "输入密码",
+  "abFieldName": "名称",
+  "groupNoMatch": "未找到匹配的设备",
+  "groupUserWithName": "{name}（@{user}）"
 }

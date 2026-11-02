@@ -315,10 +315,12 @@ class _LgTextAreaState extends State<LgTextArea> {
         ? Border.all(color: c.accent, width: 2)
         : Border.all(color: c.borderStrong, width: 1.5);
     final form = LgFormFieldInfo.maybeOf(context);
+    final name = widget.semanticLabel ?? form?.label;
     return MergeSemantics(
       child: Semantics(
-        label: widget.semanticLabel ?? form?.label ?? widget.placeholder,
-        hint: (widget.semanticLabel != null || form != null)
+        label: name ?? widget.placeholder,
+        // Not read twice when it says what the name says.
+        hint: name != null && name != widget.placeholder
             ? widget.placeholder
             : null,
         isRequired: form?.isRequired == true ? true : null,

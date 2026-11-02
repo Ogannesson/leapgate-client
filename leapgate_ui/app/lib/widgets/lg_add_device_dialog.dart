@@ -9,6 +9,7 @@
 // `LgDialogScrim` over the home page.
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../icons/lg_icon.dart';
 import 'lg_banner.dart';
@@ -82,6 +83,7 @@ class LgAddDeviceDialog extends StatelessWidget {
     this.error,
     this.busy = false,
     this.idFocus,
+    this.idInputFormatters = const [],
     this.noteMax = 300,
     this.width = 480,
   }) : assert(passwordController == null || passwordHint != null);
@@ -118,6 +120,9 @@ class LgAddDeviceDialog extends StatelessWidget {
   final VoidCallback? onSubmit;
   final VoidCallback onCancel;
   final FocusNode? idFocus;
+
+  /// Run on the ID as it is typed: the caller's grouping of its digits.
+  final List<TextInputFormatter> idInputFormatters;
 
   /// The most the note can have; shown as "0 / 300" at its label.
   final int noteMax;
@@ -156,6 +161,7 @@ class LgAddDeviceDialog extends StatelessWidget {
             errorText: idError,
             enabled: on,
             autofocus: true,
+            inputFormatters: idInputFormatters,
           ),
         ),
         LgFormField(

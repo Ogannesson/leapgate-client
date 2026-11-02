@@ -10,7 +10,6 @@ import '../../../shell/tab_overlays.dart';
 import '../../../theme/lg_tokens.dart';
 import '../../../widgets/lg_banner.dart';
 import '../../../widgets/lg_device.dart';
-import '../../../widgets/lg_device_card.dart';
 import '../../../widgets/lg_list_chrome.dart';
 import '../../../widgets/lg_people_list.dart';
 import '../account/account.dart';
@@ -19,8 +18,13 @@ import '../account_category.dart';
 // The team devices category (01 P1 blocks F and H, M4; `LEAPGATE.md` §10.11), after upstream's
 // `common/widgets/my_group.dart`, without the device groups.
 
-/// The people list, the tools and the states of the team devices category.
-AccountCategoryView groupCategory(BuildContext context, TabOverlays overlays) {
+/// The people list, the tools and the states of the team devices category; the loading
+/// skeleton in [view].
+AccountCategoryView groupCategory(
+  BuildContext context,
+  TabOverlays overlays,
+  PeerView view,
+) {
   final l10n = AppLocalizations.of(context)!;
   final account = appCore.account;
   final group = appCore.group;
@@ -57,7 +61,10 @@ AccountCategoryView groupCategory(BuildContext context, TabOverlays overlays) {
           error.kind == ApiErrorKind.network
               ? l10n.groupNetworkError
               : l10n.groupLoadFailed(error.text),
-          icon: LgIcons.wifiOff,
+          // A refusal of the server as the address book shows it.
+          icon: error.kind == ApiErrorKind.network
+              ? LgIcons.wifiOff
+              : LgIcons.err,
           iconColor: LgTokens.of(context).colors.error,
           actionLabel: l10n.groupRetry,
           actionIcon: LgIcons.refresh,
@@ -85,33 +92,18 @@ AccountCategoryView groupCategory(BuildContext context, TabOverlays overlays) {
           ),
     side: group.users.isEmpty ? null : _People(group: group),
     state: !group.loaded || group.loading && group.peers.isEmpty
-        ? _Loading(label: l10n.recentLoading)
+        ? AccountLoading(view: view, label: l10n.recentLoading)
+        // Never answered: the banner says why, the list says nothing more.
+        : error != null && group.users.isEmpty && group.peers.isEmpty
+        ? const SizedBox.shrink()
         : group.shownPeers.isEmpty
         ? SingleChildScrollView(
-            child: LgEmptyState(l10n.groupEmpty, icon: LgIcons.users),
+            child: LgEmptyState(
+              group.peers.isEmpty ? l10n.groupEmpty : l10n.groupNoMatch,
+              icon: LgIcons.users,
+            ),
           )
         : null,
-  );
-}
-
-/// The loading skeleton in the current view, as the other categories.
-class _Loading extends StatelessWidget {
-  const _Loading({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) => SingleChildScrollView(
-    child: PeerTabs(appCore.options).view == PeerView.cards
-        ? LgDeviceCardGrid(
-            semanticLabel: label,
-            children: const [
-              LgDeviceCardSkeleton(),
-              LgDeviceCardSkeleton(),
-              LgDeviceCardSkeleton(),
-            ],
-          )
-        : LgDeviceSkeleton(semanticLabel: label),
   );
 }
 
@@ -149,7 +141,7 @@ class _PeopleState extends State<_People> {
     String nameOf(AccountUser u) =>
         (counts[u.displayNameOrName] ?? 0) > 1 &&
             u.displayName.trim().isNotEmpty
-        ? '${u.displayName} (@${u.name})'
+        ? l10n.groupUserWithName(u.displayName, u.name)
         : u.displayNameOrName;
     return Padding(
       padding: const EdgeInsets.only(right: LgSpace.s4),

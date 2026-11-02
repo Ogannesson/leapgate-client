@@ -1,4 +1,8 @@
 import 'package:flutter/widgets.dart';
+import 'package:flutter_hbb/leapgate/peer_tabs.dart';
+
+import '../../widgets/lg_device.dart';
+import '../../widgets/lg_device_card.dart';
 
 /// What the address book or the team devices category puts on the devices page (M4,
 /// `LEAPGATE.md` §10.11). The devices come from the core model's `shownPeers`; the page lists
@@ -23,4 +27,26 @@ class AccountCategoryView {
   /// In place of the list: signed out, loading, no address book on the server, network error,
   /// empty. Null lists the devices.
   final Widget? state;
+}
+
+/// The loading skeleton in the page's [view], as the other categories'.
+class AccountLoading extends StatelessWidget {
+  const AccountLoading({super.key, required this.view, required this.label});
+
+  final PeerView view;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => SingleChildScrollView(
+    child: view == PeerView.cards
+        ? LgDeviceCardGrid(
+            semanticLabel: label,
+            children: const [
+              LgDeviceCardSkeleton(),
+              LgDeviceCardSkeleton(),
+              LgDeviceCardSkeleton(),
+            ],
+          )
+        : LgDeviceSkeleton(semanticLabel: label),
+  );
 }
