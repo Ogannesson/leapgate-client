@@ -63,6 +63,11 @@ class FakeBind implements RustdeskImpl {
         return false;
       case #isSupportMultiUiSession:
         return true;
+      // The built-in options of the account, address book and team devices (M4).
+      case #isDisableAccount:
+      case #isDisableAb:
+      case #isDisableGroupPanel:
+        return false;
       case #peerGetSessionsCount:
       case #versionToNumber:
         return 1;

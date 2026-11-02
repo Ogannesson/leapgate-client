@@ -72,13 +72,17 @@ class PeerTabs extends ChangeNotifier {
     }
   }
 
-  /// Whether this build has [category] at all. The address book and team devices come with M4;
-  /// LAN unless the built-in option hides it (upstream `PeerTabModel.isEnabled`).
+  /// Whether this build has [category] at all: unless a built-in option hides it (upstream
+  /// `PeerTabModel.isEnabled`). Signed out, the address book and team devices still show, with a
+  /// sign-in button in them.
   bool isEnabled(PeerCategory category) => switch (category) {
         PeerCategory.recent || PeerCategory.favorites => true,
         PeerCategory.lan =>
           _options.local.get(_kOptionDisableDiscoveryPanel) != 'Y',
-        _ => false,
+        PeerCategory.addressBook =>
+          !(bind.isDisableAb() || bind.isDisableAccount()),
+        PeerCategory.group =>
+          !(bind.isDisableGroupPanel() || bind.isDisableAccount()),
       };
 
   /// The enabled categories in the user's order, shown or not: the list under "Adjust the
