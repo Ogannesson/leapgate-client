@@ -1315,11 +1315,11 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
   - `leapgate_account_login_options` 不带令牌，非 2xx 一律报 `server`、不清登录。
   - `leapgate_ab_book` 在 `personal` 为真时，缓存条目的名字固定写 `My address book`，不用传进来的 `name`；个人簿条目的 `guid` 写真实的（上游写空串，没有读者在意）。
   - 每个导出在 frb 各自的线程上跑，两份缓存是"读出、改、写回"，所以加了一把进程内的锁（`account::CACHE`）：写 `_ab`（核对令牌加读改写）、写 `_group`（核对令牌加写）、退出和令牌失效时的清理、读缓存都在锁里做，都是同步的一小段，不跨 `.await`。不加锁时两本簿同时拉完会互相覆盖，个人簿条目连同 `hash` 丢掉，自动填密码静默失效。
-  - 一次操作（拉簿列表、拉一本簿、拉同组设备、一次写、当前用户）开头取一次令牌，所有请求都用它。回 401 时只有这个令牌仍是当前令牌才清登录：退出后马上重新登录时，旧操作迟到的 401 不会把新登录清掉。拉取过程中退出了登录：写缓存前在锁里核对令牌，变了就不写，免得把刚删掉的缓存写回来；`currentUser` 成功时同样只在令牌没变时重写 `user_info`。
+  - 一次操作（拉簿列表、拉一本簿、拉同组设备、一次写、当前用户）开头取一次令牌，所有请求都用它。回 401 时只有这个令牌仍是当前令牌才清登录：退出后马上重新登录时，旧操作迟到的 401 不会把新登录清掉。拉取过程中退出了登录：写缓存前在锁里核对令牌，变了就不写，免得把刚删掉的缓存写回来；`currentUser` 成功时同样在锁里核对令牌、没变才重写 `user_info`（登录消息的显示名和本机显示名不看令牌、直接读它）。
   - 2xx 但内容不是这个端点该回的形状，报 `server`，文字 `HTTP 200`。写操作的 2xx 只认空体或不带 `error` 的 JSON，非 JSON 的内容（例如代理插进来的网页）报 `server`（上游 `_jsonDecodeActionResp` 同样算失败）。`ab/tags` 回 `null` 当没有标签（rustdesk-api 簿里没有标签时）。
   - `_group` 缓存按 `config::Group` 的字段写（用户 `name`、`display_name`；设备 `id`、`username`、`hostname`、`platform`、`login_name`），没有备注和设备组名：上游缓存本来就不存备注，`Group::load` 也会丢掉设备组名。`leapgate_group_cache` 给的设备是这种缓存格式，不是 `/api/peers` 的原样。
   - 日志：非 2xx 只记路径和状态码，连不上记路径和错误描述，两处各自每分钟最多一行（`throttled_log`）；登出失败另记一行。
-- 测试：`libs/leapgate` 单测 159 个（新增 18 个，测试里起最小的假 HTTP 服务，覆盖每类端点的请求、两种 401、旧令牌的 401 不清新登录、`currentUser` 400、`personal` 404、404/409、2xx 带 `error` 或非 JSON、两种分页停止（各自单独起作用）、缓存的写入、替换、令牌不同时清空、登出和 401 时删除、拉取中途退出不写回、两本簿同时保存都留下）；对真实服务器的集成测试 `account::live_tests::live_account_flow`（`#[ignore]`，环境变量见文件头）。core 的 `RustAccountApi` 用假绑定测了一条（184 个测试，analyze 92 条 info 不变）。
+- 测试：`libs/leapgate` 单测 160 个（新增 19 个，测试里起最小的假 HTTP 服务，覆盖每类端点的请求、两种 401、旧令牌的 401 不清新登录、`currentUser` 400、`personal` 404、404/409、2xx 带 `error` 或非 JSON、两种分页停止（各自单独起作用）、缓存的写入、替换、令牌不同时清空、登出和 401 时删除、拉取中途退出不写回、两本簿同时保存都留下）；对真实服务器的集成测试 `account::live_tests::live_account_flow`（`#[ignore]`，环境变量见文件头）。core 的 `RustAccountApi` 用假绑定测了一条（184 个测试，analyze 92 条 info 不变）。
 - 对两种服务器的实测（2026-11-02，从开发机跑集成测试；两边都用命令行或管理接口新建的专用账号、三本各一种权限的共享簿、一个共享组）：
 
 | 项目 | Leapgate 服务端（验收服务 `7fbe55a`） | rustdesk-api v2.7（Docker `lejianwen/rustdesk-api:v2.7`，2025-09-28 发布，2026-11 时最新稳定版） |

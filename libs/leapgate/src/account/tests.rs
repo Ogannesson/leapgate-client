@@ -507,6 +507,23 @@ async fn a_logout_during_a_pull_is_not_undone() {
     assert!(s.group.lock().unwrap().is_none());
 }
 
+/// A logout lands while `currentUser` is out: `user_info` is not written back.
+#[tokio::test(crate = "hbb_common::tokio")]
+async fn a_logout_during_current_user_keeps_user_info_removed() {
+    let s = Arc::new(signed_in());
+    let s2 = s.clone();
+    let (base, _) = serve(move |_| {
+        clear(&*s2);
+        (
+            200,
+            r#"{"name":"alice","display_name":"A","status":1}"#.to_owned(),
+        )
+    })
+    .await;
+    current_user(&*s, &base, &device()).await.unwrap();
+    assert!(s.option(USER_INFO).is_empty());
+}
+
 /// Reading a real `_ab` file takes a while.
 struct SlowAb(Mem);
 

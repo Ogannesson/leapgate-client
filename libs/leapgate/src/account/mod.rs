@@ -285,8 +285,13 @@ async fn current_user(s: &impl Store, base: &str, device: &Device) -> Result<Val
     if !user.is_object() {
         return Err(Error::shape(status));
     }
-    if s.option(TOKEN) == token {
-        s.set_option(USER_INFO, user_info(&user));
+    {
+        // `user_info` is read without the token (login display name), so a logout landing here
+        // must not have it written back.
+        let _cache = cache_lock();
+        if s.option(TOKEN) == token {
+            s.set_option(USER_INFO, user_info(&user));
+        }
     }
     Ok(json!({ "user": user }))
 }
