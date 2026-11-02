@@ -776,6 +776,14 @@
   "abTagColorWheel": "Color wheel",
   "abSaving": "Saving…",
   "accountInfo": "Account info",
+  "abTagPresetRose": "Rose",
+  "abTagPresetTerracotta": "Terracotta",
+  "abTagPresetOchre": "Ochre",
+  "abTagPresetMoss": "Moss",
+  "abTagPresetTeal": "Teal",
+  "abTagPresetBlue": "Blue",
+  "abTagPresetPurple": "Purple",
+  "abTagPresetGray": "Gray",
   "loginUsernamePlaceholder": "Enter username",
   "loginPasswordPlaceholder": "Enter password"
 }

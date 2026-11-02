@@ -679,6 +679,14 @@
   "abTagColorWheel": "色轮",
   "abSaving": "正在保存…",
   "accountInfo": "账号信息",
+  "abTagPresetRose": "玫红",
+  "abTagPresetTerracotta": "陶橙",
+  "abTagPresetOchre": "赭黄",
+  "abTagPresetMoss": "苔绿",
+  "abTagPresetTeal": "湖青",
+  "abTagPresetBlue": "蓝",
+  "abTagPresetPurple": "紫",
+  "abTagPresetGray": "灰",
   "loginUsernamePlaceholder": "输入用户名",
   "loginPasswordPlaceholder": "输入密码"
 }
