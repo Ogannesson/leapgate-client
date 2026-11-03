@@ -271,7 +271,9 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
       peer = search.matches[row - 1];
       category = found!.sources[peer.id];
     }
-    if (peer.platform.isNotEmpty && peer.platform != kPeerPlatformWindows) {
+    // A device of the list may be one connected to by IP.
+    if (!isExitId(peer.id) ||
+        peer.platform.isNotEmpty && peer.platform != kPeerPlatformWindows) {
       return null;
     }
     return (id: peer.id, category: category);

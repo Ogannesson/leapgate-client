@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/consts.dart' show kPeerPlatformWindows;
 import 'package:flutter_hbb/leapgate/app_core.dart';
+import 'package:flutter_hbb/leapgate/exit_nodes.dart' show isExitId;
 import 'package:flutter_hbb/leapgate/peer_list.dart';
 import 'package:flutter_hbb/leapgate/peer_tabs.dart';
 import 'package:flutter_hbb/leapgate/recent_peers.dart';
@@ -237,7 +238,9 @@ List<Widget> peerMenuItems(
         (item.category == PeerCategory.addressBook && item.peer.hash.isNotEmpty),
     windows: Platform.isWindows,
     ab: appCore.addressBook.menuFlags(category),
-    peerWindows: item.peer.platform == kPeerPlatformWindows,
+    // A device connected to by IP is no exit (08 M5-12).
+    peerWindows: item.peer.platform == kPeerPlatformWindows &&
+        isExitId(item.peer.id),
   );
   final titles = [
     l10n.connectBoxConnectionType,

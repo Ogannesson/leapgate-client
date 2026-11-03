@@ -835,7 +835,7 @@
   "exitReasonNotSupported": "The remote device's version can't be used as an exit node",
   "exitReasonNeedEncryption": "This connection isn't encrypted and can't be used as an exit node",
   "exitReasonTooManyAttempts": "Too many failed attempts. Try again in 1 minute",
-  "exitReasonAlready": "This computer already has an exit node or TCP tunnel to this device",
+  "exitReasonAlready": "An exit node or TCP tunnel to this device is already running",
   "exitPortBusy": "Local port {port} is used by another app",
   "@exitPortBusy": {"placeholders": {"port": {"type": "int"}}},
   "exitNoticeBlocked": "The remote device blocked an access: the target is on its local network, is the device itself, or its network's DNS returned a virtual address. To reach that device's local network, its owner must allow the network in the exit node settings.",

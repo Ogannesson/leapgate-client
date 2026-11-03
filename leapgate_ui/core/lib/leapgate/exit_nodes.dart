@@ -25,14 +25,17 @@ enum ExitPortError {
 final _idChars = RegExp(r'^[A-Za-z0-9_-]+$');
 
 /// What "Use as exit node" takes (08 M5-12): a device ID or `ID@server`, the ID of letters,
-/// digits, `_` and `-`, spaces ignored; not an IP address, a `domain:port` or `/r`.
+/// digits, `_` and `-`, spaces ignored; not an IP address, a `domain:port` or `/r`. The server
+/// takes no `?` or `/`: Rust rewrites `?key=…` and a trailing `/r` when it logs in, and the card
+/// would not match its ID.
 bool isExitId(String input) {
   final s = input.replaceAll(' ', '');
   final at = s.indexOf('@');
   if (at < 0) return _idChars.hasMatch(s);
+  final server = s.substring(at + 1);
   return _idChars.hasMatch(s.substring(0, at)) &&
-      at + 1 < s.length &&
-      !s.substring(at + 1).contains('@');
+      server.isNotEmpty &&
+      !server.contains(RegExp(r'[@?/]'));
 }
 
 class ExitNodesModel extends ChangeNotifier {

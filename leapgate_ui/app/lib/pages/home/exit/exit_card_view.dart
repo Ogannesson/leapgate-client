@@ -36,6 +36,7 @@ import '../password_row.dart' show copyWithToast;
     'exit_need_encryption' => (l10n.exitReasonNeedEncryption, false),
     'too_many_attempts' => (l10n.exitReasonTooManyAttempts, true),
     'exit_already' => (l10n.exitReasonAlready, true),
+    'exit_invalid_id' => (l10n.exitBadId, false),
     // After "已停止：" only its first sentence, without the full stop (01 §7.6).
     _ => (
       RegExp(

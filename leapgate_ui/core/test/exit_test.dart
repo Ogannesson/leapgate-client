@@ -193,6 +193,18 @@ void main() {
     expect(appCore.exitNodes.use(_a).port, 21190);
   });
 
+  test(
+      'a new port after "port in use": the next login\'s prompt counts at once',
+      () async {
+    final card = appCore.exitNodes.use(_a);
+    await e2(_a, 'port_in_use', {'port': 21180});
+    expect(card.changePort(21190), isNull);
+    expect(card.state, ExitCardState.connecting);
+    // Rust logs in on the new port; its prompt comes before E2's `connecting`.
+    await session(card, exitMsgbox('input-password', 'Password Required', ''));
+    expect(card.state, ExitCardState.password);
+  });
+
   test('stop closes the session; Rust closing removes the card', () async {
     final a = appCore.exitNodes.use(_a);
     appCore.exitNodes.use(_b);
@@ -243,6 +255,8 @@ void main() {
     expect(isExitId('example.com:21118'), false);
     expect(isExitId('100200300/r'), false);
     expect(isExitId('100200300/r@example.com'), false);
+    expect(isExitId('100200300@example.com/r'), false);
+    expect(isExitId('100200300@example.com?key=abc'), false);
     expect(isExitId('书房'), false);
   });
 

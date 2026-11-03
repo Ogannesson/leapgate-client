@@ -151,8 +151,15 @@ class ExitCard extends ChangeNotifier {
         isSharedPassword: _sharedPassword != null);
     if (error != null) {
       _rust = _Rust.stopped;
-      _stopReason = _Reason(error.code == 'already' ? 'exit_already' : 'other',
-          const {}, error.text);
+      _stopReason = _Reason(
+          switch (error.code) {
+            'already' => 'exit_already',
+            // Rust would log in to another ID than the card's (`?key=…`, `/r`).
+            'invalid_id' => 'exit_invalid_id',
+            _ => 'other',
+          },
+          const {},
+          error.text);
       notifyListeners();
       return;
     }
@@ -335,6 +342,8 @@ class ExitCard extends ChangeNotifier {
     if (port == _port) return null;
     _port = port;
     _nodes.savePort(id, port);
+    // Rust listens and logs in at once; as after "Retry", the prompts of that login count.
+    if (_rust == _Rust.portBusy) _rust = _Rust.connecting;
     _api.setPort(id, port);
     notifyListeners();
     return null;
