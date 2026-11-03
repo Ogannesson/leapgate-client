@@ -6,7 +6,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/connect_box.dart';
-import 'package:flutter_hbb/leapgate/exit_nodes.dart' show isExitId;
+import 'package:flutter_hbb/leapgate/exit_nodes.dart'
+    show isExitId, offersExit;
 import 'package:flutter_hbb/leapgate/local_status.dart';
 import 'package:flutter_hbb/leapgate/peer_list.dart';
 import 'package:flutter_hbb/leapgate/peer_tabs.dart';
@@ -271,12 +272,9 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
       peer = search.matches[row - 1];
       category = found!.sources[peer.id];
     }
-    // A device of the list may be one connected to by IP.
-    if (!isExitId(peer.id) ||
-        peer.platform.isNotEmpty && peer.platform != kPeerPlatformWindows) {
-      return null;
-    }
-    return (id: peer.id, category: category);
+    return offersExit(peer.id, peer.platform)
+        ? (id: peer.id, category: category)
+        : null;
   }
 
   void _move(int by) {

@@ -22,12 +22,13 @@ enum ExitPortError {
   taken,
 }
 
-final _idChars = RegExp(r'^[A-Za-z0-9_-]+$');
+// Upstream's range for a custom ID; numeric IDs fall in it as well.
+final _idChars = RegExp(r'^[A-Za-z0-9_-]{6,16}$');
 
-/// What "Use as exit node" takes (08 M5-12): a device ID or `ID@server`, the ID of letters,
-/// digits, `_` and `-`, spaces ignored; not an IP address, a `domain:port` or `/r`. The server
-/// takes no `?` or `/`: Rust rewrites `?key=…` and a trailing `/r` when it logs in, and the card
-/// would not match its ID.
+/// What "Use as exit node" takes (08 M5-12, 01 P1 block I): a device ID or `ID@server`, the ID
+/// 6~16 letters, digits, `_` or `-`, spaces ignored; not an IP address, a `domain:port` or `/r`.
+/// The server takes no `@`, `?` or `/`: Rust rewrites `?key=…` and a trailing `/r` when it logs
+/// in, and the card would not match its ID.
 bool isExitId(String input) {
   final s = input.replaceAll(' ', '');
   final at = s.indexOf('@');
@@ -37,6 +38,11 @@ bool isExitId(String input) {
       server.isNotEmpty &&
       !server.contains(RegExp(r'[@?/]'));
 }
+
+/// Whether a listed device is offered "Use as exit node" (01 P1 block I): its ID passes
+/// [isExitId], and its platform is Windows or not known.
+bool offersExit(String id, String platform) =>
+    isExitId(id) && (platform.isEmpty || platform == kPeerPlatformWindows);
 
 class ExitNodesModel extends ChangeNotifier {
   ExitNodesModel(this._api);
@@ -134,7 +140,9 @@ class ExitNodesModel extends ChangeNotifier {
           as Map;
       return {
         for (final e in m.entries)
-          if (e.value is int) '${e.key}': e.value as int
+          // A port out of range counts as none kept.
+          if (e.value is int && e.value >= 1 && e.value <= 65535)
+            '${e.key}': e.value as int
       };
     } on FormatException {
       return {};

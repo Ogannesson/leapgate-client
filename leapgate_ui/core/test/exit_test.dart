@@ -170,7 +170,9 @@ void main() {
   });
 
   test('ports: kept per device, never another card\'s', () async {
-    fakes.bind.local[kOptionLeapgateExitPorts] = jsonEncode({_b: 21181});
+    // A kept port out of range counts as none.
+    fakes.bind.local[kOptionLeapgateExitPorts] =
+        jsonEncode({_a: 70000, _b: 21181});
     final a = appCore.exitNodes.use(_a);
     expect(a.port, 21180);
     expect(appCore.exitNodes.use('700800900').port, 21182);
@@ -203,6 +205,36 @@ void main() {
     // Rust logs in on the new port; its prompt comes before E2's `connecting`.
     await session(card, exitMsgbox('input-password', 'Password Required', ''));
     expect(card.state, ExitCardState.password);
+
+    // Taken again: the same port is tried again (another program may have let it go); in use,
+    // the same port asks nothing.
+    await e2(_a, 'port_in_use', {'port': 21190});
+    expect(card.changePort(21190), isNull);
+    expect(card.state, ExitCardState.connecting);
+    await e2(_a, 'in_use', {'transport': 'direct'});
+    expect(card.changePort(21190), isNull);
+    expect(fakes.api.callsTo('setPort'), [
+      [_a, 21190],
+      [_a, 21190],
+    ]);
+
+    // Rust no longer has the card: it goes.
+    fakes.api.hasCard = false;
+    await e2(_a, 'interrupted', {'cause': 'tunnel_ended'});
+    card.retry();
+    expect(appCore.exitNodes.cards, isEmpty);
+  });
+
+  test('interrupted by a failed login: the session says why', () async {
+    fakes.lg.reasons['Remote desktop is offline'] = 'peer_offline';
+    final card = appCore.exitNodes.use(_a);
+    await e2(_a, 'interrupted', {'cause': 'login_failed'});
+    await session(card,
+        exitMsgbox('error', 'Connection Error', 'Remote desktop is offline'));
+    expect(card.interruptReason!.code, 'peer_offline');
+    await e2(_a, 'connecting');
+    await e2(_a, 'interrupted', {'cause': 'tunnel_ended'});
+    expect(card.interruptReason, isNull);
   });
 
   test('stop closes the session; Rust closing removes the card', () async {
@@ -250,7 +282,17 @@ void main() {
   test('an exit takes a device ID or ID@server', () {
     expect(isExitId('100 200 300'), true);
     expect(isExitId('study-pc'), true);
-    expect(isExitId('abc_1@example.com'), true);
+    expect(isExitId('abc_12@example.com'), true);
+    expect(isExitId('abc_1@example.com'), false);
+    expect(isExitId('12345'), false);
+    expect(isExitId('123456'), true);
+    expect(isExitId('a234567890123456'), true);
+    expect(isExitId('a2345678901234567'), false);
+    expect(isExitId('100200300@a@b'), false);
+    expect(offersExit('100200300', ''), true);
+    expect(offersExit('100200300', 'Windows'), true);
+    expect(offersExit('100200300', 'Linux'), false);
+    expect(offersExit('192.168.1.2', 'Windows'), false);
     expect(isExitId('192.168.1.2'), false);
     expect(isExitId('example.com:21118'), false);
     expect(isExitId('100200300/r'), false);

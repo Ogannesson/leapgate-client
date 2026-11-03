@@ -137,6 +137,11 @@ class _ExitCardViewState extends State<ExitCardView> {
       }.contains(state)) {
         _promptFocus.remove(_card.id);
       }
+      // The port edit belongs to "in use" and "port in use".
+      if (state != ExitCardState.inUse && state != ExitCardState.portBusy) {
+        _editingPort = false;
+        _portError = null;
+      }
       _state = state;
       _syncTicker();
     }
@@ -318,7 +323,12 @@ class _ExitCardViewState extends State<ExitCardView> {
         ];
         actions = [stop];
       case ExitCardState.interrupted:
-        status = LgExitStatus(LgExitStatusKind.warning, l10n.exitInterrupted);
+        // A failed login says why under it, so a mistyped ID shows (01 P1 block I).
+        status = LgExitStatus(
+          LgExitStatusKind.warning,
+          l10n.exitInterrupted,
+          note: exitStoppedView(l10n, card.interruptReason, card.id).reason,
+        );
         // The listener stays open, so the addresses still work (M5-10).
         addresses = true;
         actions = [
@@ -357,9 +367,7 @@ class _ExitCardViewState extends State<ExitCardView> {
         actions = [changePort(LgButtonKind.primary), remove];
     }
 
-    final editingPort =
-        _editingPort &&
-        (state == ExitCardState.inUse || state == ExitCardState.portBusy);
+    final editingPort = _editingPort;
     return LgExitCard(
       name: name,
       id: formatPeerId(card.id),

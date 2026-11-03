@@ -5,7 +5,6 @@ import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/generated_bridge.dart';
 import 'package:flutter_hbb/leapgate/exit_api.dart';
 import 'package:flutter_hbb/leapgate/exit_card.dart';
-import 'package:flutter_hbb/leapgate/session_route.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 
 import 'fakes.dart';
@@ -51,16 +50,19 @@ class FakeExitApi implements ExitApi {
   @override
   Stream<Map<String, dynamic>> events() => _events.stream;
 
+  /// What [retry] and [setPort] answer: false when Rust has no such card.
+  var hasCard = true;
+
   @override
   bool retry(String id) {
     calls.add(('retry', [id]));
-    return true;
+    return hasCard;
   }
 
   @override
   bool setPort(String id, int port) {
     calls.add(('setPort', [id, port]));
-    return true;
+    return hasCard;
   }
 
   @override
@@ -72,9 +74,6 @@ class FakeExitApi implements ExitApi {
     calls.add(('directory', const []));
     return directoryAnswer;
   }
-
-  @override
-  SessionRoute connection(SessionID sessionId) => const SessionRoute();
 }
 
 /// Block 1 with LocalConfig kept as Rust does, for the exit port table.

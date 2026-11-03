@@ -1481,7 +1481,7 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 | `leapgate_exit_set_port` | `id: String`、`port: i32` | `SyncReturn<bool>`：关旧监听、在新端口监听，隧道保留（M5-5）；新端口被占时推 `port_in_use` |
 | 停止、取消 | 第一块现成的 `bind.sessionClose(sessionId)` | 卡片模式收到关闭后关监听、关隧道（登录中也能取消，见下），推 `closed` |
 | 目录 | 第一块现成的 `bind.mainGetCommon(key: 'leapgate-exits')` | `{"state":"ok","exits":[{"id","hostname","owner","own"}]}` / `unsupported` / `not_logged_in` / `error`，不改 |
-| 路径和中继名 | 现成的 `leapgate_session_connection(session_id)` | 收到会话流的 `connection_ready` 后调 |
+| 路径和中继名 | 现成的 `leapgate_session_connection(session_id)` | 出口卡片不用（2026-11-04 按 M5 整体审查删掉了界面里的调用） |
 
 `state` 的取值：
 - `connecting`：首次登录或懒重连正在进行。输密码、2FA、等对方接受这几步看会话事件流，E2 只说"正在连接"。
@@ -1526,7 +1526,9 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 - 会话流里 `relay-hint` 这类提示卡片不处理：出口没有"改用中继"，这种失败只进"暂时断开"。
 - 目录回"没登录"而账号确认碰上网络错误时，目录显示"登录后可查看出口目录"加登录按钮，账号区仍是已登录。
 - 两条流先后颠倒：已停止时点"重试"当场清掉原因、进"正在连接"；E2 的 `connecting` 只在从"暂时断开"进来时清原因；已停止或端口被占用时收到的输入提示丢掉。这只缩小空当，新旧两轮登录要彻底分开得靠 Rust 在事件里带轮次序号。
-- ID 也收字母以后，连接框里输入 `study` 这类名字，"连接到 ‹输入›"行的"⋯"里也会出"用作出口"，点了会去连一个可能不存在的 ID，卡片进"已停止"（取舍，不改）。
+- ID 也收字母以后，连接框里输入 `study-pc` 这类 6~16 个字符的名字，"连接到 ‹输入›"行的"⋯"里也会出"用作出口"，点了会去连一个可能不存在的 ID，卡片进"已停止"（取舍，不改）。
+- 起会话后几毫秒内就关：Rust 的会话主循环还没设好发送端，关闭消息会被上游静默丢掉，会话照常起监听和登录，界面上看不到（上游所有会话都有这个空当）。
+- 停止要等关会话的异步调用回来才移卡片，这几毫秒里再"使用"同一台设备会拿到正在移除的旧卡片，那次点击落空。
 
 **Rust 实现说明**（2026-11-03，分支 `ui/rust-exit`）
 

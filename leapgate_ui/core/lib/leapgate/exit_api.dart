@@ -6,7 +6,6 @@ import 'dart:convert';
 import '../common.dart';
 import '../models/platform_model.dart';
 import 'bridge.dart';
-import 'session_route.dart';
 
 /// Why `leapgate_exit_session_add` did not add the session: `already` (the device has an exit or
 /// a port forward session), `invalid_port`, or `other` with Rust's [text].
@@ -94,9 +93,6 @@ abstract interface class ExitApi {
   Future<void> close(SessionID sessionId);
 
   Future<ExitDirectoryAnswer> directory();
-
-  /// Q3's export, after `connection_ready`.
-  SessionRoute connection(SessionID sessionId);
 }
 
 /// Set by tests; the app keeps the default.
@@ -147,8 +143,4 @@ class RustExitApi implements ExitApi {
   @override
   Future<ExitDirectoryAnswer> directory() async =>
       parseExitDirectory(await bind.mainGetCommon(key: 'leapgate-exits'));
-
-  @override
-  SessionRoute connection(SessionID sessionId) => SessionRoute.parse(
-      lgBind.leapgateSessionConnection(sessionId: sessionId));
 }

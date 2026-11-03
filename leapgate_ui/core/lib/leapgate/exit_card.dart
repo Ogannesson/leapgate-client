@@ -77,6 +77,7 @@ class ExitCard extends ChangeNotifier {
   var _rust = _Rust.connecting;
   var _direct = false;
   int? _busyPort;
+  var _loginFailed = false;
   ConnReason? _stopReason;
 
   var _input = ConnInput.none;
@@ -126,6 +127,11 @@ class ExitCard extends ChangeNotifier {
   /// has come yet.
   ConnReason? get stopReason => _stopReason ?? _lastError;
 
+  /// [ExitCardState.interrupted] because logging in failed (the first login too: no such ID,
+  /// offline, timeout): the session's failure, shown under the state (01 P1 block I). Null when
+  /// the tunnel ended or the reason has not come yet.
+  ConnReason? get interruptReason => _loginFailed ? _lastError : null;
+
   /// The password or the 2FA code asked again because the last one was wrong.
   bool get wrongInput => _wrongInput;
 
@@ -168,7 +174,8 @@ class ExitCard extends ChangeNotifier {
       if (m is EventToUI_Event && m.field0 != 'close') {
         _onEvent(jsonDecode(m.field0) as Map<String, dynamic>);
       }
-    });
+      // The session may be closed already; its stream then ends with an error.
+    }, onError: (_) {});
   }
 
   void _clearInput() {
@@ -212,8 +219,9 @@ class ExitCard extends ChangeNotifier {
             : null;
       case _Rust.portBusy:
         _busyPort = evt['port'] as int?;
-      case _Rust.connecting:
       case _Rust.interrupted:
+        _loginFailed = evt['cause'] == 'login_failed';
+      case _Rust.connecting:
         break;
     }
     _rust = rust;
@@ -328,23 +336,31 @@ class ExitCard extends ChangeNotifier {
       _rust = _Rust.connecting;
       notifyListeners();
     }
-    if (_added) {
-      _api.retry(id);
-    } else {
-      start();
-    }
+    if (!_added) return start();
+    if (!_api.retry(id)) _gone();
+  }
+
+  /// Rust has no such card any more: it ended without a word, so the card goes.
+  void _gone() {
+    ended();
+    _nodes.drop(this);
   }
 
   /// Another listener port, keeping the tunnel (M5-5); null when Rust was asked, else why not.
   ExitPortError? changePort(int port) {
     final error = _nodes.portError(port, this);
     if (error != null) return error;
-    if (port == _port) return null;
+    // In use, the same port changes nothing; when it was taken, another program may have let
+    // it go, so it is tried again (01 P1 block I).
+    if (port == _port && _rust != _Rust.portBusy) return null;
     _port = port;
     _nodes.savePort(id, port);
     // Rust listens and logs in at once; as after "Retry", the prompts of that login count.
     if (_rust == _Rust.portBusy) _rust = _Rust.connecting;
-    _api.setPort(id, port);
+    if (!_api.setPort(id, port)) {
+      _gone();
+      return null;
+    }
     notifyListeners();
     return null;
   }
