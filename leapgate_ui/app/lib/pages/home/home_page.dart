@@ -158,7 +158,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                   ),
                 ],
                 if (_section == HomeSection.exitNodes) ...[
-                  const SizedBox(height: LgSpace.s3),
+                  // Right under the title (`LgExitPage`).
+                  const SizedBox(height: LgSpace.s1),
                   Expanded(child: ExitPage(overlays: widget.overlays)),
                 ],
               ],
@@ -524,11 +525,7 @@ class _NavItem extends StatelessWidget {
                     ),
                   ),
                 ),
-                if (attention) LgIcon(LgIcons.warn, size: 16, color: c.warning),
-                if (count > 0) ...[
-                  const SizedBox(width: LgSpace.s1),
-                  LgBadge(count),
-                ],
+                if (count > 0) LgCountMark(count, alert: attention),
               ],
             ),
             ),

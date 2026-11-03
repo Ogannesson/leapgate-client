@@ -284,6 +284,7 @@ class _MainWindowState extends State<MainWindow>
         _syncTitle(_selected == null
             ? l10n.appName
             : l10n.sessionWindowTitle(deviceName(_viewOf(_selected!))));
+        final exits = appCore.exitNodes.runningCount;
         return LgTitleBar(
           labels: LgTitleBarLabels(
             home: l10n.home,
@@ -297,9 +298,14 @@ class _MainWindowState extends State<MainWindow>
           ),
           sessions: [for (final s in views) _tabOf(s, l10n)],
           selected: selectedIndex,
-          // The exit nodes running (M5-8). TODO(M5 整合): designer's mark for
-          // `appCore.exitNodes.needsAttention` on the home tab.
-          homeBadge: appCore.exitNodes.runningCount,
+          // The exit nodes running and whether one waits for the user (M5-8).
+          homeBadge: exits,
+          homeAlert: exits > 0 && appCore.exitNodes.needsAttention,
+          homeSemanticLabel: exits == 0
+              ? null
+              : appCore.exitNodes.needsAttention
+              ? l10n.exitHomeLabelAttention(exits)
+              : l10n.exitHomeLabel(exits),
           onSelect: (i) => _select(i == 0 ? null : devices[i - 1]),
           onCloseTab: (i) => appCore.sessions.closeDevice(devices[i - 1]),
           onNewTab: () => showHome(focusConnectBox: true),

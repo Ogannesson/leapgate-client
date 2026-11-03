@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_hbb/generated_bridge.dart';
 import 'package:flutter_hbb/leapgate/account_api.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
@@ -8,6 +9,7 @@ import 'package:flutter_hbb/leapgate/exit_api.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:leapgate_ui/pages/home/exit/exit_card_view.dart';
+import 'package:leapgate_ui/widgets/lg_button.dart';
 import 'package:leapgate_ui/widgets/lg_title_bar.dart';
 
 import '../../core/test/account_fakes.dart';
@@ -104,9 +106,15 @@ void main() {
       );
       expect(find.bySemanticsLabel('出口，1 个正在使用'), findsOneWidget);
       expect(tester.widget<LgTitleBar>(find.byType(LgTitleBar)).homeBadge, 1);
+      expect(find.bySemanticsLabel('主页，1 个出口正在使用'), findsOneWidget);
 
+      // Asked for after the user's "Use": the password field takes the keyboard.
       await session(tester, msgbox('input-password', 'Password Required', ''));
-      expect(find.text('输入密码'), findsOneWidget);
+      expect(find.textContaining('输入密码', findRichText: true), findsOneWidget);
+      expect(
+        tester.widget<EditableText>(_cardField()).focusNode.hasFocus,
+        isTrue,
+      );
       await tester.enterText(_cardField(), 'pw');
       await tester.pump();
       await tester.tap(find.text('连接'));
@@ -129,7 +137,8 @@ void main() {
       await tester.pump();
       expect(
         find.text(
-          '• Chrome、Edge：使用代理扩展，或添加启动参数 --proxy-server=socks5://127.0.0.1:21180。',
+          'Chrome、Edge：使用代理扩展，或添加启动参数 --proxy-server=socks5://127.0.0.1:21180。',
+          findRichText: true,
         ),
         findsOneWidget,
       );
@@ -155,8 +164,18 @@ void main() {
       await tester.pump();
       expect(find.text('此端口已被另一个出口使用'), findsOneWidget);
       expect(api.callsTo('setPort'), isEmpty);
-      await tester.tap(find.text('取消').first);
+      // Esc closes the edit and gives the focus back to "Change port".
       await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await _settle(tester);
+      expect(find.text('此端口已被另一个出口使用'), findsNothing);
+      expect(
+        tester
+            .widget<LgButton>(find.widgetWithText(LgButton, '修改端口'))
+            .focusNode!
+            .hasFocus,
+        isTrue,
+      );
       await appCore.exitNodes.remove('400500600');
       await _settle(tester);
 
@@ -181,9 +200,10 @@ void main() {
     await _settle(tester);
     expect(find.bySemanticsLabel('出口，1 个正在使用'), findsOneWidget);
     expect(
-      find.textContaining('正在等待对方接受…（已等待 0:0', findRichText: true),
+      find.textContaining('正在等待对方接受…', findRichText: true),
       findsOneWidget,
     );
+    expect(find.textContaining('（已等待 0:0', findRichText: true), findsOneWidget);
   });
 
   testMainWindow('stopped: the reason, and Retry only where it can help', (
@@ -251,7 +271,7 @@ void main() {
       appCore.exitNodes.use(_id);
       await _settle(tester);
       await session(tester, msgbox('input-2fa', '2FA Required', ''));
-      expect(find.text('输入验证码'), findsOneWidget);
+      expect(find.textContaining('输入验证码', findRichText: true), findsOneWidget);
       expect(find.bySemanticsLabel('验证码'), findsOneWidget);
       expect(find.text('信任本机'), findsNothing);
 

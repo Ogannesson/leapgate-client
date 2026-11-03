@@ -111,6 +111,7 @@ class LgExitAction {
     this.icon,
     this.expanded,
     this.semanticLabel,
+    this.focusNode,
   });
 
   final String label;
@@ -119,6 +120,9 @@ class LgExitAction {
   final LgIcons? icon;
   final bool? expanded;
   final String? semanticLabel;
+
+  /// For giving the focus back to "修改端口" after the port edit closes.
+  final FocusNode? focusNode;
 }
 
 /// The card asks for a password: the password field with the show button, the
@@ -660,6 +664,7 @@ class _ActionRow extends StatelessWidget {
           : (a.expanded! ? LgIcons.chevU : LgIcons.chevD),
       expanded: a.expanded,
       horizontalPadding: leading ? LgSpace.s2 : null,
+      focusNode: a.focusNode,
       onPressed: a.onPressed,
     );
   }

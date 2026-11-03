@@ -1,34 +1,30 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_hbb/leapgate/connection.dart' show ConnReason;
 import 'package:flutter_hbb/leapgate/exit_card.dart';
 import 'package:flutter_hbb/leapgate/exit_nodes.dart';
 import 'package:flutter_hbb/leapgate/recent_peers.dart' show formatPeerId;
 
+import '../../../icons/lg_icon.dart';
 import '../../../l10n/app_localizations.dart';
-import '../../../theme/lg_tokens.dart';
-import '../../../widgets/lg_banner.dart';
 import '../../../widgets/lg_button.dart';
-import '../../../widgets/lg_panel_inputs.dart';
-import '../../../widgets/lg_selection.dart';
-import '../../../widgets/lg_status.dart';
-import '../../../widgets/lg_text_field.dart';
+import '../../../widgets/lg_device.dart';
+import '../../../widgets/lg_exit_card.dart';
 import '../../session/reasons.dart';
 import '../password_row.dart' show copyWithToast;
 
-// An exit card (01 P1 block I card table) over [ExitCard]. Placeholder layout until designer's
-// card component (`LEAPGATE.md` §10.12 "组件"); the texts and the buttons are final.
+// An exit card (01 P1 block I card table) over [ExitCard], drawn by [LgExitCard] (`LEAPGATE.md`
+// §10.12 "组件接口").
 
-/// "已停止：…" and whether "Retry" can help (01 P1 block I): not for an old version or an
-/// unencrypted connection.
-({String text, bool retry}) exitStoppedView(
+/// The reason after "已停止：", and whether "Retry" can help (01 P1 block I): not for an old
+/// version, an unencrypted connection or an ID Rust would change. Null without a reason.
+({String? reason, bool retry}) exitStoppedView(
   AppLocalizations l10n,
   ConnReason? reason,
   String id,
 ) {
-  if (reason == null) return (text: l10n.exitStoppedPlain, retry: true);
+  if (reason == null) return (reason: null, retry: true);
   final (text, retry) = switch (reason.code) {
     'exit_not_enabled' => (l10n.exitReasonNotEnabled, true),
     'exit_not_supported' ||
@@ -37,7 +33,7 @@ import '../password_row.dart' show copyWithToast;
     'too_many_attempts' => (l10n.exitReasonTooManyAttempts, true),
     'exit_already' => (l10n.exitReasonAlready, true),
     'exit_invalid_id' => (l10n.exitBadId, false),
-    // After "已停止：" only its first sentence, without the full stop (01 §7.6).
+    // Only its first sentence, without the full stop (01 §7.6).
     _ => (
       RegExp(
             r'^[^。]*?(?=。|\.(?:\s|$)|$)',
@@ -46,22 +42,23 @@ import '../password_row.dart' show copyWithToast;
       true,
     ),
   };
-  return (
-    text: text.isEmpty ? l10n.exitStoppedPlain : l10n.exitStopped(text),
-    retry: retry,
-  );
+  return (reason: text.isEmpty ? null : text, retry: retry);
 }
 
 /// The card's name: given with "Use", else the remote host name, else the ID.
 String exitCardName(ExitCard card) => card.name ?? formatPeerId(card.id);
 
+final _promptFocus = <String>{};
+
+/// The user asked [id] to log in ("使用", "用作出口", "重试", "重新连接"): its next password or
+/// code prompt takes the keyboard. A prompt that comes by itself on a reconnect does not
+/// (`LEAPGATE.md` §10.12 "整合时要注意的").
+void focusExitPromptOf(String id) => _promptFocus.add(id);
+
 class ExitCardView extends StatefulWidget {
-  const ExitCardView({super.key, required this.card, this.highlighted = false});
+  const ExitCardView({super.key, required this.card});
 
   final ExitCard card;
-
-  /// Shortly after the page scrolled to it.
-  final bool highlighted;
 
   @override
   State<ExitCardView> createState() => _ExitCardViewState();
@@ -71,6 +68,10 @@ class _ExitCardViewState extends State<ExitCardView> {
   final _password = TextEditingController();
   final _code = TextEditingController();
   final _port = TextEditingController();
+  final _passwordFocus = FocusNode();
+  final _codeFocus = FocusNode();
+  final _portFocus = FocusNode();
+  final _changePortFocus = FocusNode();
   var _remember = false;
   var _trust = false;
   var _editingPort = false;
@@ -98,10 +99,21 @@ class _ExitCardViewState extends State<ExitCardView> {
     _password.dispose();
     _code.dispose();
     _port.dispose();
+    _passwordFocus.dispose();
+    _codeFocus.dispose();
+    _portFocus.dispose();
+    _changePortFocus.dispose();
     super.dispose();
   }
 
   void _rebuild() => setState(() {});
+
+  /// Once the field is built. A node that is not on the card then (a port change that went on
+  /// to connecting) is left alone: it would take the focus whenever it next appears.
+  void _focusLater(FocusNode node) =>
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && node.context != null) node.requestFocus();
+      });
 
   void _onCard() {
     final state = _card.state;
@@ -109,13 +121,29 @@ class _ExitCardViewState extends State<ExitCardView> {
       if (_state == ExitCardState.password) _password.clear();
       if (state == ExitCardState.password) _remember = _card.rememberPassword;
       if (state == ExitCardState.twoFactor) _code.clear();
+      final prompt =
+          state == ExitCardState.password || state == ExitCardState.twoFactor;
+      if (prompt) {
+        // Asked by the user, or asked again after a wrong entry (Enter took the focus away).
+        if (_promptFocus.remove(_card.id) || _card.wrongInput) {
+          _focusLater(
+            state == ExitCardState.password ? _passwordFocus : _codeFocus,
+          );
+        }
+      } else if (!const {
+        ExitCardState.connecting,
+        ExitCardState.verifying,
+        ExitCardState.waitAccept,
+      }.contains(state)) {
+        _promptFocus.remove(_card.id);
+      }
       _state = state;
       _syncTicker();
     }
     setState(() {});
   }
 
-  /// "已等待 0:12" goes with the seconds.
+  /// "（已等待 0:12）" goes with the seconds.
   void _syncTicker() {
     if (_card.state == ExitCardState.waitAccept) {
       _ticker ??= Timer.periodic(const Duration(seconds: 1), (_) => _rebuild());
@@ -125,19 +153,32 @@ class _ExitCardViewState extends State<ExitCardView> {
     }
   }
 
-  void _editPort() => setState(() {
-    _editingPort = true;
-    _portError = null;
-    _port.text = '${_card.port}';
-  });
+  void _editPort() {
+    setState(() {
+      _editingPort = true;
+      _portError = null;
+      _port.text = '${_card.port}';
+    });
+    _focusLater(_portFocus);
+  }
+
+  void _closePort() {
+    setState(() => _editingPort = false);
+    _focusLater(_changePortFocus);
+  }
 
   void _confirmPort() {
     final port = int.tryParse(_port.text.trim());
     final error = port == null ? ExitPortError.invalid : _card.changePort(port);
-    setState(() {
-      _portError = error;
-      _editingPort = error != null;
-    });
+    if (error == null) return _closePort();
+    setState(() => _portError = error);
+    // Enter took the focus out of the field.
+    _focusLater(_portFocus);
+  }
+
+  void _retry() {
+    focusExitPromptOf(_card.id);
+    _card.retry();
   }
 
   String _waited() {
@@ -149,252 +190,241 @@ class _ExitCardViewState extends State<ExitCardView> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final t = LgTokens.of(context);
-    final c = t.colors;
     final card = _card;
     final name = exitCardName(card);
-    final body = <Widget>[];
-    final actions = <Widget>[];
-    var addresses = false;
+    final state = card.state;
 
-    LgButton button(
+    // With several cards on the page, a screen reader tells their buttons apart by the name.
+    LgExitAction action(
       String label,
       VoidCallback? onPressed, {
       LgButtonKind kind = LgButtonKind.secondary,
-    }) => LgButton(label: label, onPressed: onPressed, kind: kind);
-    final cancel = button(l10n.connCancel, card.cancel);
-    final stop = button(l10n.exitStop, card.stop);
-    final remove = button(l10n.exitRemove, card.stop);
-    final changePort = button(
-      l10n.exitChangePort,
-      _editPort,
-      kind: LgButtonKind.text,
+      LgIcons? icon,
+      bool named = false,
+    }) => LgExitAction(
+      label: label,
+      onPressed: onPressed,
+      kind: kind,
+      icon: icon,
+      semanticLabel: named ? l10n.exitActionFor(label, name) : null,
+    );
+    final cancel = action(l10n.connCancel, card.cancel, named: true);
+    final stop = action(
+      l10n.exitStop,
+      card.stop,
+      icon: LgIcons.square,
+      named: true,
+    );
+    final remove = action(
+      l10n.exitRemove,
+      card.stop,
+      icon: LgIcons.trash,
+      named: true,
+    );
+    LgExitAction changePort(LgButtonKind kind) => LgExitAction(
+      label: l10n.exitChangePort,
+      onPressed: _editPort,
+      kind: kind,
+      icon: LgIcons.edit,
+      focusNode: _changePortFocus,
     );
 
-    switch (card.state) {
+    LgExitStatus status;
+    LgExitPasswordArea? password;
+    LgExitCodeArea? code;
+    var addresses = false;
+    var leading = <LgExitAction>[];
+    var actions = <LgExitAction>[];
+    switch (state) {
       case ExitCardState.connecting:
-        body.add(
-          LgStatusText(LgStatus.connecting, l10n.connConnectingTo(name)),
+        status = LgExitStatus(
+          LgExitStatusKind.busy,
+          l10n.connConnectingTo(name),
         );
-        actions.add(cancel);
+        actions = [cancel];
       case ExitCardState.password:
         // The connection panel's words and button (01 P1 block I).
         void login() =>
             card.submitPassword(_password.text, remember: _remember);
-        body
-          ..add(Text(l10n.connEnterPassword))
-          ..add(
-            LgPasswordField(
-              controller: _password,
-              showLabel: l10n.connShowPassword,
-              hideLabel: l10n.connHidePassword,
-              placeholder: l10n.connPassword,
-              semanticLabel: l10n.connPassword,
-              autofocus: true,
-              errorText: card.wrongInput ? l10n.connWrongPassword : null,
-              onSubmitted: (_) => login(),
-            ),
-          )
-          ..add(
-            LgCheckbox(
-              value: _remember,
-              label: l10n.connRememberPassword,
-              onChanged: (v) => setState(() => _remember = v),
-            ),
-          );
-        actions
-          ..add(cancel)
-          ..add(
-            button(
-              l10n.connConnect,
-              _password.text.trim().isEmpty ? null : login,
-              kind: LgButtonKind.primary,
-            ),
-          );
+        status = LgExitStatus(
+          LgExitStatusKind.password,
+          l10n.connEnterPassword,
+        );
+        password = LgExitPasswordArea(
+          controller: _password,
+          focusNode: _passwordFocus,
+          semanticLabel: l10n.connPassword,
+          placeholder: l10n.connPassword,
+          showLabel: l10n.connShowPassword,
+          hideLabel: l10n.connHidePassword,
+          rememberLabel: l10n.connRememberPassword,
+          remember: _remember,
+          onRememberChanged: (v) => setState(() => _remember = v),
+          onSubmitted: (_) => login(),
+          errorText: card.wrongInput ? l10n.connWrongPassword : null,
+        );
+        actions = [
+          action(
+            l10n.connConnect,
+            _password.text.trim().isEmpty ? null : login,
+            kind: LgButtonKind.primary,
+          ),
+          cancel,
+        ];
       case ExitCardState.twoFactor:
         void verify() => card.submit2fa(_code.text, trust: _trust);
-        body
-          ..add(Text(l10n.exitEnterCode))
-          ..add(
-            LgCodeField(
-              controller: _code,
-              semanticLabel: l10n.connCode,
-              autofocus: true,
-              errorText: card.wrongInput ? l10n.connWrong2fa : null,
-              onCompleted: (_) => verify(),
-            ),
-          );
-        if (card.trustedDevicesEnabled) {
-          body.add(
-            LgCheckbox(
-              value: _trust,
-              label: l10n.connTrustThisDevice,
-              onChanged: (v) => setState(() => _trust = v),
-            ),
-          );
-        }
-        actions
-          ..add(cancel)
-          ..add(button(l10n.connVerify, verify, kind: LgButtonKind.primary));
+        final trusted = card.trustedDevicesEnabled;
+        status = LgExitStatus(LgExitStatusKind.code, l10n.exitEnterCode);
+        code = LgExitCodeArea(
+          controller: _code,
+          focusNode: _codeFocus,
+          semanticLabel: l10n.connCode,
+          trustLabel: trusted ? l10n.connTrustThisDevice : null,
+          trust: trusted ? _trust : null,
+          onTrustChanged: (v) => setState(() => _trust = v),
+          errorText: card.wrongInput ? l10n.connWrong2fa : null,
+          onCompleted: (_) => verify(),
+        );
+        actions = [
+          action(l10n.connVerify, verify, kind: LgButtonKind.primary),
+          cancel,
+        ];
       case ExitCardState.verifying:
-        body.add(LgStatusText(LgStatus.connecting, l10n.connVerifying));
-        actions.add(cancel);
+        status = LgExitStatus(LgExitStatusKind.busy, l10n.connVerifying);
+        actions = [cancel];
       case ExitCardState.waitAccept:
-        body.add(
-          LgStatusText(LgStatus.connecting, l10n.exitWaiting(_waited())),
+        status = LgExitStatus(
+          LgExitStatusKind.busy,
+          l10n.connWaitingAccept,
+          elapsed: l10n.exitWaited(_waited()),
         );
-        actions.add(cancel);
+        actions = [cancel];
       case ExitCardState.inUse:
-        body.add(
-          LgStatusText(
-            LgStatus.online,
-            card.direct ? l10n.exitInUseDirect : l10n.exitInUseRelay,
-          ),
-        );
-        if (!card.direct) {
-          body.add(
-            Text(l10n.exitRelayNote, style: t.textS.copyWith(color: c.text2)),
-          );
-        }
+        status = card.direct
+            ? LgExitStatus(LgExitStatusKind.direct, l10n.exitInUseDirect)
+            : LgExitStatus(
+                LgExitStatusKind.relay,
+                l10n.exitInUseRelay,
+                note: l10n.exitRelayNote,
+              );
         addresses = true;
-        if (!_editingPort) {
-          actions.addAll([
-            changePort,
-            button(
-              l10n.exitBrowserSetup,
-              () => setState(() => _helpOpen = !_helpOpen),
-              kind: LgButtonKind.text,
-            ),
-            stop,
-          ]);
-        }
+        leading = [
+          changePort(LgButtonKind.text),
+          LgExitAction(
+            label: l10n.exitBrowserSetup,
+            onPressed: () => setState(() => _helpOpen = !_helpOpen),
+            expanded: _helpOpen,
+          ),
+        ];
+        actions = [stop];
       case ExitCardState.interrupted:
-        body.add(LgStatusText(LgStatus.warning, l10n.exitInterrupted));
+        status = LgExitStatus(LgExitStatusKind.warning, l10n.exitInterrupted);
         // The listener stays open, so the addresses still work (M5-10).
         addresses = true;
-        actions.addAll([button(l10n.connReconnect, card.retry), stop]);
+        actions = [
+          action(
+            l10n.connReconnect,
+            _retry,
+            kind: LgButtonKind.primary,
+            icon: LgIcons.restart,
+            named: true,
+          ),
+          stop,
+        ];
       case ExitCardState.stopped:
         final view = exitStoppedView(l10n, card.stopReason, card.id);
-        body.add(LgStatusText(LgStatus.warning, view.text));
-        actions.addAll([
-          if (view.retry) button(l10n.connRetry, card.retry),
+        status = LgExitStatus(
+          LgExitStatusKind.error,
+          view.reason == null ? l10n.exitStoppedPlain : l10n.exitStoppedPrefix,
+          reason: view.reason,
+        );
+        actions = [
+          if (view.retry)
+            action(
+              l10n.connRetry,
+              _retry,
+              kind: LgButtonKind.primary,
+              icon: LgIcons.refresh,
+              named: true,
+            ),
           remove,
-        ]);
+        ];
       case ExitCardState.portBusy:
-        body.add(
-          LgStatusText(LgStatus.warning, l10n.exitPortBusy(card.busyPort)),
+        status = LgExitStatus(
+          LgExitStatusKind.error,
+          l10n.exitPortBusy(card.busyPort),
         );
-        if (!_editingPort) actions.addAll([changePort, remove]);
+        actions = [changePort(LgButtonKind.primary), remove];
     }
 
-    if (addresses) {
-      for (final (address, label) in [
-        (card.socksAddress, l10n.exitCopySocks),
-        (card.httpAddress, l10n.exitCopyHttp),
-      ]) {
-        body.add(
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  address,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: t.textS,
+    final editingPort =
+        _editingPort &&
+        (state == ExitCardState.inUse || state == ExitCardState.portBusy);
+    return LgExitCard(
+      name: name,
+      id: formatPeerId(card.id),
+      // Only Windows serves as an exit node (`libs/leapgate/src/exit/mod.rs`).
+      platform: LgPlatform.windows,
+      status: status,
+      password: password,
+      code: code,
+      addresses: [
+        if (addresses)
+          for (final (address, label) in [
+            (card.socksAddress, l10n.exitCopySocks),
+            (card.httpAddress, l10n.exitCopyHttp),
+          ])
+            LgExitAddress(
+              address: address,
+              copyLabel: label,
+              onCopy: () => copyWithToast(address),
+            ),
+      ],
+      notices: [
+        for (final notice in card.notices)
+          LgExitNotice(
+            id: notice,
+            text: notice == 'exit_blocked'
+                ? l10n.exitNoticeBlocked
+                : l10n.exitNoticeFakeIp,
+            dismissLabel: l10n.sessionNoticeDismiss,
+            onDismiss: () => card.dismissNotice(notice),
+          ),
+      ],
+      portEdit: editingPort
+          ? LgExitPortEdit(
+              controller: _port,
+              focusNode: _portFocus,
+              semanticLabel: l10n.exitPort,
+              confirmLabel: l10n.homeOk,
+              cancelLabel: l10n.homeCancel,
+              onConfirm: _confirmPort,
+              onCancel: _closePort,
+              hint: state == ExitCardState.inUse ? l10n.exitPortHint : null,
+              errorText: switch (_portError) {
+                ExitPortError.invalid => l10n.exitPortInvalid,
+                ExitPortError.taken => l10n.exitPortTaken,
+                null => null,
+              },
+            )
+          : null,
+      leadingActions: editingPort ? const [] : leading,
+      actions: editingPort ? const [] : actions,
+      help: _helpOpen && state == ExitCardState.inUse
+          ? LgExitHelp(
+              title: l10n.exitBrowserSetup,
+              items: [
+                LgExitHelpItem(l10n.exitHelpTcp),
+                LgExitHelpItem(l10n.exitHelpApps),
+                LgExitHelpItem(l10n.exitHelpFirefox),
+                LgExitHelpItem(
+                  l10n.exitHelpChrome,
+                  code: '--proxy-server=socks5://127.0.0.1:${card.port}',
+                  after: l10n.exitHelpChromeAfter,
                 ),
-              ),
-              button(
-                label,
-                () => copyWithToast(address),
-                kind: LgButtonKind.text,
-              ),
-            ],
-          ),
-        );
-      }
-    }
-    if (_editingPort) {
-      body.add(
-        Row(
-          children: [
-            Expanded(
-              child: LgTextField(
-                controller: _port,
-                semanticLabel: l10n.exitPort,
-                autofocus: true,
-                maxLength: 5,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                errorText: switch (_portError) {
-                  ExitPortError.invalid => l10n.exitPortInvalid,
-                  ExitPortError.taken => l10n.exitPortTaken,
-                  null => null,
-                },
-                onSubmitted: (_) => _confirmPort(),
-              ),
-            ),
-            button(l10n.homeOk, _confirmPort, kind: LgButtonKind.primary),
-            button(l10n.homeCancel, () => setState(() => _editingPort = false)),
-          ],
-        ),
-      );
-      if (card.state != ExitCardState.portBusy) {
-        body.add(
-          Text(l10n.exitPortHint, style: t.textS.copyWith(color: c.text2)),
-        );
-      }
-    }
-    if (_helpOpen && card.state == ExitCardState.inUse) {
-      for (final line in [
-        l10n.exitHelpTcp,
-        l10n.exitHelpApps,
-        l10n.exitHelpFirefox,
-        l10n.exitHelpChrome('--proxy-server=socks5://127.0.0.1:${card.port}'),
-      ]) {
-        body.add(SelectableText('• $line', style: t.textS));
-      }
-    }
-    for (final code in card.notices) {
-      body.add(
-        LgBanner(
-          tone: LgTone.info,
-          text: code == 'exit_blocked'
-              ? l10n.exitNoticeBlocked
-              : l10n.exitNoticeFakeIp,
-          dismissLabel: l10n.sessionNoticeDismiss,
-          onDismiss: () => card.dismissNotice(code),
-        ),
-      );
-    }
-
-    return Container(
-      padding: const EdgeInsets.all(LgSpace.s4),
-      decoration: BoxDecoration(
-        color: c.surface,
-        borderRadius: BorderRadius.circular(LgRadius.r12),
-        border: Border.all(
-          color: widget.highlighted ? c.accent : c.border,
-          width: widget.highlighted ? 2 : 1,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(name, style: t.text.copyWith(fontWeight: FontWeight.w700)),
-          Text(formatPeerId(card.id), style: t.textS.copyWith(color: c.text2)),
-          const SizedBox(height: LgSpace.s2),
-          for (final w in body)
-            Padding(
-              padding: const EdgeInsets.only(bottom: LgSpace.s2),
-              child: w,
-            ),
-          Wrap(
-            alignment: WrapAlignment.end,
-            spacing: LgSpace.s2,
-            runSpacing: LgSpace.s2,
-            children: actions,
-          ),
-        ],
-      ),
+              ],
+            )
+          : null,
     );
   }
 }
