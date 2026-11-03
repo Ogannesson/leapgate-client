@@ -106,27 +106,39 @@ ExitApi exitApi = const RustExitApi();
 class RustExitApi implements ExitApi {
   const RustExitApi();
 
-  // TODO(M5 整合): `lgBind.leapgateExitSessionAdd(sessionId:, id:, port:, password:,
-  // isSharedPassword:, connToken: null, forceRelay: false)`, parsed: `{}` is null, else
-  // `ExitAddError(m['error'], m['text'] ?? '')`.
+  /// `{}` is null; otherwise the error code and Rust's text.
   @override
   ExitAddError? sessionAdd(SessionID sessionId, String id, int port,
           {String password = '', bool isSharedPassword = false}) =>
-      throw UnimplementedError('leapgate_exit_session_add');
+      _addError(lgBind.leapgateExitSessionAdd(
+        sessionId: sessionId,
+        id: id,
+        port: port,
+        password: password,
+        isSharedPassword: isSharedPassword,
+        connToken: null,
+        forceRelay: false,
+      ));
 
-  // TODO(M5 整合): `lgBind.leapgateExitEvents().map((e) => jsonDecode(e) as Map<String, dynamic>)`.
+  static ExitAddError? _addError(String json) {
+    final m = jsonDecode(json) as Map<String, dynamic>;
+    final code = m['error'];
+    return code == null
+        ? null
+        : ExitAddError(code as String, (m['text'] as String?) ?? '');
+  }
+
   @override
-  Stream<Map<String, dynamic>> events() =>
-      throw UnimplementedError('leapgate_exit_events');
+  Stream<Map<String, dynamic>> events() => lgBind
+      .leapgateExitEvents()
+      .map((e) => jsonDecode(e) as Map<String, dynamic>);
 
-  // TODO(M5 整合): `lgBind.leapgateExitRetry(id: id)`.
   @override
-  bool retry(String id) => throw UnimplementedError('leapgate_exit_retry');
+  bool retry(String id) => lgBind.leapgateExitRetry(id: id);
 
-  // TODO(M5 整合): `lgBind.leapgateExitSetPort(id: id, port: port)`.
   @override
   bool setPort(String id, int port) =>
-      throw UnimplementedError('leapgate_exit_set_port');
+      lgBind.leapgateExitSetPort(id: id, port: port);
 
   @override
   Future<void> close(SessionID sessionId) =>
