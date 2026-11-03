@@ -29,7 +29,11 @@ LgAccountArea _signedIn(
   semanticLabel: '账号：$name @zhangsan',
   menuItems: [
     const LgAccountMenuInfo(label: '账号信息', handle: '@zhangsan'),
-    LgMenuItem(label: '退出登录', onPressed: () => calls.add('out')),
+    LgMenuItem(
+      label: '退出登录',
+      icon: LgIcons.logout,
+      onPressed: () => calls.add('out'),
+    ),
   ],
 );
 
@@ -97,6 +101,82 @@ void main() {
         isSemantics(isButton: true, hasExpandedState: true, isExpanded: true),
       );
       handle.dispose();
+    });
+
+    testWidgets('while the menu is open the row is tinted and the avatar is '
+        'white on it, else grey on the panel (`.acct.sel .av`)', (
+      tester,
+    ) async {
+      await pumpLg(tester, _atBottom(_signedIn([])));
+      Color? avatar() {
+        final circle = find.descendant(
+          of: find.byType(LgPersonAvatar),
+          matching: find.byType(Container),
+        );
+        return (tester.widget<Container>(circle).decoration as BoxDecoration?)
+            ?.color;
+      }
+
+      Color? row() => tester
+          .widgetList<Container>(
+            find.ancestor(
+              of: find.byType(LgPersonAvatar),
+              matching: find.byType(Container),
+            ),
+          )
+          .map((c) => c.decoration)
+          .whereType<BoxDecoration>()
+          .map((d) => d.color)
+          .nonNulls
+          .firstOrNull;
+      const colors = LgColors.light;
+      expect(avatar(), colors.border);
+      await tester.tap(find.text('张三'));
+      await tester.pumpAndSettle();
+      expect(avatar(), colors.surface);
+      expect(row(), colors.surface2);
+      // Closed again: back to the grey one.
+      await tester.tapAt(const Offset(2, 2));
+      await tester.pumpAndSettle();
+      expect(avatar(), colors.border);
+
+      // The same with a mouse that stays on the row: the hover does not take
+      // the tint away.
+      final mouse = await hover(tester, find.text('张三'));
+      await mouse.down(tester.getCenter(find.text('张三')));
+      await mouse.up();
+      await tester.pumpAndSettle();
+      expect(find.text('退出登录'), findsOneWidget);
+      expect(avatar(), colors.surface);
+      expect(row(), colors.surface2);
+    });
+
+    testWidgets('the icons of the account menu are in the accent colour, those '
+        'of other menus are not', (tester) async {
+      const colors = LgColors.light;
+      Color? iconColor(LgIcons icon) => tester
+          .widget<LgIcon>(
+            find.byWidgetPredicate((w) => w is LgIcon && w.icon == icon),
+          )
+          .color;
+      await pumpLg(tester, _atBottom(_signedIn([])));
+      await tester.tap(find.text('张三'));
+      await tester.pumpAndSettle();
+      expect(iconColor(LgIcons.user), colors.accent);
+      expect(iconColor(LgIcons.logout), colors.accent);
+
+      // A menu of the page, outside the account area, keeps its grey icons.
+      await tester.tapAt(const Offset(2, 2));
+      await tester.pumpAndSettle();
+      await pumpLg(
+        tester,
+        LgMenuPanel(
+          items: [
+            LgMenuItem(label: '退出登录', icon: LgIcons.logout, onPressed: () {}),
+          ],
+        ),
+      );
+      expect(iconColor(LgIcons.logout), colors.text2);
     });
 
     testWidgets('the menu opens above the row at the bottom and runs an item', (

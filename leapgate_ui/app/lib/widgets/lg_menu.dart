@@ -219,10 +219,30 @@ WidgetStatesController? _forced(BuildContext context) {
   return states.isEmpty ? null : WidgetStatesController(states);
 }
 
+/// Inside it the icons of menu rows are in the accent colour, as in the
+/// account menu of A-P1 (`.mr .ck`); everywhere else they are `text2`
+/// (A-P2 `.ck.ico`).
+class LgMenuAccentIcons extends InheritedWidget {
+  const LgMenuAccentIcons({super.key, required super.child});
+
+  static bool of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<LgMenuAccentIcons>() != null;
+
+  @override
+  bool updateShouldNotify(LgMenuAccentIcons old) => false;
+}
+
 /// The 20 px column in front of a label: a check mark or an icon (`.mr .ck`).
-Widget? _lead(LgColors c, {LgIcons? icon, bool? checked}) {
+Widget? _lead(
+  LgColors c, {
+  LgIcons? icon,
+  bool? checked,
+  bool accentIcon = false,
+}) {
   if (checked == true) return LgIcon(LgIcons.check, size: 20, color: c.accent);
-  if (icon != null) return LgIcon(icon, size: 20, color: c.text2);
+  if (icon != null) {
+    return LgIcon(icon, size: 20, color: accentIcon ? c.accent : c.text2);
+  }
   if (checked == false) return const SizedBox(width: 20);
   return null;
 }
@@ -425,7 +445,12 @@ class LgMenuItem extends StatelessWidget {
           description: description,
           disabled: onPressed == null,
           ownTip: !(onPressed == null && disabledNote != null),
-          lead: _lead(c, icon: icon, checked: checked),
+          lead: _lead(
+            c,
+            icon: icon,
+            checked: checked,
+            accentIcon: LgMenuAccentIcons.of(context),
+          ),
           trailing: _tail(
             t,
             hint: hint,
@@ -482,7 +507,7 @@ class LgSubmenu extends StatelessWidget {
           label: label,
           disabled: items.isEmpty,
           ownTip: !(items.isEmpty && disabledNote != null),
-          lead: _lead(c, icon: icon),
+          lead: _lead(c, icon: icon, accentIcon: LgMenuAccentIcons.of(context)),
           trailing: _tail(
             t,
             value: value,

@@ -378,7 +378,9 @@ List<Specimen> _m4Specimens() {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            LgMenuPanel(width: 192, items: _m4AccountMenu()),
+            LgMenuAccentIcons(
+              child: LgMenuPanel(width: 192, items: _m4AccountMenu()),
+            ),
             const SizedBox(height: LgSpace.s2),
             LgStateOverride(
               states: const {WidgetState.selected},

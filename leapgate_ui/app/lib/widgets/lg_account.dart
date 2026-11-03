@@ -110,7 +110,10 @@ class LgAccountArea extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return loginLabel != null ? _signedOut(context) : _signedIn(context);
+    // The icons in the account menu are in the accent colour (`.mr .ck`).
+    return loginLabel != null
+        ? _signedOut(context)
+        : LgMenuAccentIcons(child: _signedIn(context));
   }
 
   Widget _signedOut(BuildContext context) {
@@ -250,7 +253,7 @@ class LgAccountMenuInfo extends StatelessWidget {
                   padding: EdgeInsets.only(
                     top: math.max(0, (t.sizes.lh - 20) / 2),
                   ),
-                  child: LgIcon(LgIcons.user, size: 20, color: c.text2),
+                  child: LgIcon(LgIcons.user, size: 20, color: c.accent),
                 ),
                 const SizedBox(width: LgSpace.s3),
                 Expanded(
