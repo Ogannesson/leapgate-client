@@ -1454,3 +1454,70 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 
 - 没验的：同组设备有设备时的转换（两边的测试账号名下都没有设备，`/api/peers` 只验了请求和空列表，转换由单测覆盖）；簿满；登录限流；个人簿自动填密码（要真实连接，归 07 §5.2 验收）；经 frb 的实际调用（桥已生成、根 crate 编译通过，Dart 侧只用假绑定测了）。
 - rustdesk-api 的几处行为（找不到、重名都回 400，读写簿不能删设备，不存备注，标签改名不级联）是它自己的，界面照 `server` 显示服务器原文，不另做适配。
+
+### 10.12 M5 的分工约定
+
+依据：总仓库 `docs/新界面/08-M5拆法.md`（下称"08"；维护者 2026-11-03 把 M5-1~M5-13 全部按推荐定）。界面行为以 01 §3.1 区块 I（出口页）、区块 C（导航）、区块 E、F（"用作出口"入口）、§2.1（窗口关闭）为准；样稿 `A-P1.html` 的 `p1-exit-*`、`p1-ex-*`、`p1-xc-*`、`p1-close-exit`、`p1-cb-menu`、`p1-menu-more-top`。出口本身的实现说明在 §9。
+
+**分支和文件边界**（都从 `ui/m5` 切，做完合回 `ui/m5`；整合 worktree 是 `.wt/ui-m4`，块 2 的桥和 pub 缓存在它里面）
+
+| 分支 | 谁 | 只改这些 |
+|---|---|---|
+| `ui/rust-exit` | coder R（E1~E3） | `src/leapgate_hooks/exit.rs`、`src/leapgate_ffi.rs`（末尾追加 M5 一段）、`libs/leapgate/src/exit/`（状态类型和 JSON，新文件或追加）、`src/port_forward_mux.rs`（只加 `Tunnel::ended()`，带 `// leapgate:` 注释）、本节的 Rust 部分 |
+| `ui/m5-ds` | designer | `app/lib/widgets/`（新组件；`LgTitleBar` 加提醒标记的参数）、`app/lib/gallery_*.dart`、组件的测试 |
+| `ui/m5-exit` | coder E（core 和出口页） | core `leapgate/exit_api.dart`、`exit_directory.dart`、`exit_nodes.dart`、`exit_card.dart`（都是新文件）、`app_core.dart`（加出口 model 一处）、`peer_list.dart`（加 `PeerAction.useAsExit` 和条件）、`consts.dart`（只追加选项键）；app `pages/home/exit/`（新目录）、`home_page.dart`（出口页分支、导航数字）、`main_window.dart`（主页标签的数字和提醒）、`shell/window_close.dart`（出口那句和 M5-11 的退出确认）、`shell/navigation.dart`（打开出口页并使用某台设备）、`peer_views.dart`、`devices_page.dart`（两处下拉加"用作出口"）；ARB；测试 |
+
+- ARB 键以 `exit` 开头，加在两个 ARB 文件末尾，中英文同时加，文案照 01：区块 I 里写好的句子逐字照抄，英文照 §7.5 新加的两行；新写的句子列进提交说明。
+- coder E 先用 M0~M4 的组件和简单的占位控件把逻辑写通，整合时换成 designer 的组件。占位不求好看，但行为测试要能按文字和语义标签找到它们。
+- 块 2 的新导出在 R 合入、重新生成桥之前不存在：`RustExitApi` 先写成调用约定里的名字，用 `// TODO(M5 整合)` 标出、方法体抛 `UnimplementedError`，整合时由主会话换成真实调用；测试一律用 `FakeExitApi`（放 `core/test/exit_fakes.dart`）。
+
+**Rust 导出（块 2）**
+
+| 导出 | 参数 | 返回 / 事件 |
+|---|---|---|
+| `leapgate_exit_session_add` | `session_id: SessionID`、`id: String`、`port: i32`、`password: String`、`is_shared_password: bool`、`conn_token: Option<String>`、`force_relay: bool` | `SyncReturn<String>`：成功 `{}`；失败 `{"error":"already"}`（这台设备已有出口或端口转发会话）、`{"error":"invalid_port"}`（不在 1~65535）、`{"error":"other","text":…}`。成功后界面照常调第一块的 `bind.sessionStart(sessionId, id)` 拿这个会话的事件流 |
+| `leapgate_exit_events` | `sink: StreamSink<String>` | 新订阅替换旧的；订阅时先把每张卡片的当前状态各推一次。每条 `{"id":设备ID,"port":端口,"state":…}`，`state` 见下 |
+| `leapgate_exit_retry` | `id: String` | `SyncReturn<bool>`（没有这张卡片为假）：清冷却、马上登录。"重试"（已停止）和"重新连接"（暂时断开）共用（M5-7） |
+| `leapgate_exit_set_port` | `id: String`、`port: i32` | `SyncReturn<bool>`：关旧监听、在新端口监听，隧道保留（M5-5）；新端口被占时推 `port_in_use` |
+| 停止、取消 | 第一块现成的 `bind.sessionClose(sessionId)` | 卡片模式收到关闭后关监听、关隧道（登录中也能取消，见下），推 `closed` |
+| 目录 | 第一块现成的 `bind.mainGetCommon(key: 'leapgate-exits')` | `{"state":"ok","exits":[{"id","hostname","owner","own"}]}` / `unsupported` / `not_logged_in` / `error`，不改 |
+| 路径和中继名 | 现成的 `leapgate_session_connection(session_id)` | 收到会话流的 `connection_ready` 后调 |
+
+`state` 的取值：
+- `connecting`：首次登录或懒重连正在进行。输密码、2FA、等对方接受这几步看会话事件流，E2 只说"正在连接"。
+- `in_use`：带 `"transport":"direct"|"relay"`。
+- `interrupted`：带 `"cause":"tunnel_ended"|"login_failed"`；`login_failed` 时带 `"retry_after_ms"`（冷却剩余，界面不显示）。
+- `stopped`：监听已关、运行实例在等重试或关闭。Rust 知道原因时带 `"reason"`（C3 的 `Reason` JSON）：`exit_not_supported`、不安全提示被拒后的 `exit_need_encryption`；被控端拒绝登录时不带，界面取会话流里最后一条的原因码。
+- `port_in_use`：带 `"port"`。
+- `closed`：卡片模式结束。
+
+**Rust 的做法和约束**（08 §1.2、§2.4、§4）
+- `leapgate_exit_session_add` 照 `session_add`（`src/flutter.rs:1301-1380`）抄，固定 `ConnType::PORT_FORWARD`，`args = [端口, 出口哨兵地址, "65536"]`，走 `io_loop` 现成的三参数分支（`src/ui_session_interface.rs:2050-2069`），不碰设备配置里的 `port_forwards`；去掉 `LocalConfig::set_remote_id`；先查 `get_session_by_peer_id(id, PORT_FORWARD)`，有了就回 `already`；登记进 `exit.rs` 的卡片登记表（键是设备 ID）。
+- `exit.rs` 的 `run` 开头按卡片登记表分流：查到就进卡片模式 `run_card`，查不到走原来的懒登录。原来的 `run`、`serve` 一行不动。
+- `run_card`：起监听 → 失败推 `port_in_use`，等改端口或关闭（不登录）→ 成功就立刻登录。第一次登录的占位连接（M5-4）三条约束：监听起来后**先**接受自己连自己的那条占位连接，**再**开始接真实客户端；占位连接不交给 SOCKS / HTTP 握手；登录函数返回后两头一起丢，不开通道。代码注释写清原因。
+- 取消：`run_card` 自己持有会话的接收端，登录和关闭信号放进同一个 `select!`；收到 `Close` 就丢掉登录、关监听、推 `closed`；其余 `Data`（`Login`、`Message`、`ContinueInsecureConnection` / `RejectInsecureConnection`）转给登录。中途丢掉登录时走 KCP 的话被控端要等 20 秒静默关闭，写进已知限制。
+- 登录结局照 `serve` 的三种处理守卫（K0）：可用 → `set_muxed`，推 `in_use`；被拒 → 先丢 stream 再 `release_kcp`（`exit.rs:165-169`），关监听，推 `stopped`，运行实例不退出、原地等重试或关闭（M5-7）；临时失败 → 推 `interrupted`（`login_failed`），记冷却。
+- 隧道结束：`Tunnel::ended()`（`self.state.subscribe()` 后等到不再是 `Muxed`），推 `interrupted`（`tunnel_ended`）；之后照 C9 由下一条本地连接触发懒重连（推 `connecting`）。
+- 事件推送照 M3 的 `leapgate_cm_events`：块 2 一个全局 `StreamSink<String>`，不经会话事件流、不经 `libs/leapgate` 的广播。
+- 状态类型和 JSON 放 `libs/leapgate`，带单测。
+
+**会话事件流里卡片要看的**（第一块 `sessionStart` 的流，msgbox 的 `type`）：`input-password`、`re-input-password`（密码错）、`input-2fa`、`wait-remote-accept-nook`、`insecure-connection*`（卡片直接回 `RejectInsecureConnection`，显示"已停止：此连接未加密，无法用作出口"）；错误框的 C3 原因码里 `exit_blocked`、`exit_fake_ip_literal` 是**卡片通知**（同一原因只提示一次、可关），不是失败；`exit_not_enabled`、`exit_not_supported`、`exit_need_encryption`、`too_many_attempts`、`peer_too_old` 是"已停止"的原因；`local_port_in_use` 以 E2 的 `port_in_use` 为准。两条流没有先后保证，卡片状态以 E2 为准，会话流只补"要输入什么"和失败原因。
+
+**core（coder E）**
+- `exit_api.dart`：`abstract interface class ExitApi`（`sessionAdd`、`events`、`retry`、`setPort`、`close`、`directory`、`connection`），`RustExitApi`（见上"整合时换"），全局 `exitApi`（测试里换成 `FakeExitApi`），照 M4 的 `account_api.dart`。
+- `exit_directory.dart`：`ExitDirectoryModel`，状态 `loading / ok / empty / unsupported / notLoggedIn / error`；没登录时不发请求；打开出口页时取一次、"刷新"再取，不轮询；实现 M4 的 `AccountData`（退出登录清空）。目录回 `not_logged_in` 而账号区仍是已登录时，调 `appCore.account` 的当前用户确认一次（服务端回了 401 时按 M4 的令牌失效走）。
+- `exit_nodes.dart`：`ExitNodesModel`，进 `AppCore`：卡片列表（按添加顺序）、`use(id, {String? name})`（已有就返回那张）、`remove(id)`、`runningCount`（本地监听开着的卡片：正在连接、要密码、要验证码、正在验证、等对方接受、在用、暂时断开）、`needsAttention`（任一卡片在要密码、要验证码、等对方接受）、端口：本机配置一张表，键 `leapgate-exit-ports`（LocalConfig，JSON `{设备ID: 端口}`），建议值从 21180 起，跳过别的卡片在用的和表里别的设备记过的；改端口撞上另一张卡片时不调 Rust，直接报"此端口已被另一个出口使用"。卡片只在内存里，重启不恢复。退出登录不动卡片。
+- `exit_card.dart`：`ExitCard`，一张卡片一个出口会话（`SessionID` 由卡片生成）：订阅这个会话的事件流和 E2（按设备 ID 过滤），状态 `connecting / password / twoFactor / verifying / waitAccept / inUse(direct|relay) / interrupted / stopped(reason) / portBusy`；动作 `submitPassword(password, remember)`、`submit2fa(code, trust)`、`cancel()`、`stop()`（停止和移除都是它：`sessionClose` 后从列表移走）、`retry()`、`changePort(port)`；通知集合按原因去重、可关。"要输入什么"的判断照 `ConnectionModel`（`connection.dart:225-262`）抄一份，不改 `ConnectionModel`。
+- **出口会话不登记进 `appCore.sessions`，不建 `FFI`，不用 `ConnectionModel`**：注册表里的会话关主窗口时会被一起关掉（`window_close.dart:83-87`），`ConnectionModel` 的自动重试会让 Rust 再起一个运行实例抢端口（08 §4.2）。
+
+**app（coder E）**
+- `pages/home/exit/exit_page.dart`（页面、三块、滚到卡片和高亮、按 ID 指定：只收设备 ID 去空格和 `ID@服务器`，M5-12）、`exit_card_view.dart`（`ExitCard` 到卡片组件的映射、文案；"已停止"的原因文字用 `pages/session/reasons.dart` 的 `reasonView`）、`exit_directory_view.dart`。
+- "用作出口"：`PeerAction.useAsExit`，在连接方式组，**对端**平台是 Windows 时才列（菜单现有的 `windows:` 参数是本机平台，另加一个参数），手输 ID 的"连接到 ‹输入›"行照常列；点了等于目录里点"使用"（M5-9）：切到主页标签的出口页、`use(id)`、滚过去。
+- 导航"出口"和主页标签：数字 `runningCount`，提醒 `needsAttention`；出口页正显示时导航上不画提醒；读屏名"出口，‹N› 个正在使用"，有提醒时加"，需要处理"（M5-8）。
+- 关窗（M5-11）：有出口在跑时，动作是"在后台运行"或安装版关窗才加"‹N› 个出口将在后台继续运行。"；便携版动作是"退出 Leapgate"（包括记住了"退出"、没有会话不再问的情况）时仍确认：标题"退出 Leapgate？"，正文"‹N› 个出口将停止。"，按钮"退出""取消"。
+
+**组件（designer）**：规则同 10.8"组件约定"（只管画、文字由调用方传、带语义标签、两套主题和两套尺寸、画廊里每种状态一项、有行为测试），加 10.8 新加的"合并语义的容器里不放带浮层的组件"。要做的和画框见 08 §2.2：出口页版式、出口卡片（含验证码态、端口被占用加"移除"、暂时断开加地址行，这三张样稿没画，照现有画框推）、卡片里原地改端口、浏览器设置说明展开块、目录行、线性不定进度条、按 ID 指定行、导航项的数字和提醒标记、`LgTitleBar` 主页标签的提醒标记、滚到卡片后的短暂高亮。
+
+**测试**
+- R：状态类型的 JSON；`run_card` 的三种登录结局和守卫交还；中途取消；改端口；`already`；旧的 `run` / `serve` 测试照常过。
+- coder E：卡片状态在两条流下的走向（含先后颠倒）；目标被拦按原因去重；`runningCount`、`needsAttention`；端口建议值和撞端口；退出登录只清目录；页面三块的各态；"用作出口"只在对端是 Windows 时出现；关窗两种文案。
