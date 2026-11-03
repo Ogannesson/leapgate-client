@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/local_status.dart';
+import 'package:flutter_hbb/leapgate/recent_peers.dart' show formatPeerId;
 import 'package:flutter_hbb/leapgate/remote_block.dart';
 
 import '../../icons/lg_icon.dart';
@@ -345,10 +346,8 @@ class _IdGroups extends StatelessWidget {
 
   final String id;
 
-  static List<String> _groups(String id) => [
-    for (var i = 0; i < id.length; i += 3)
-      id.substring(i, i + 3 > id.length ? id.length : i + 3),
-  ];
+  /// From the right, as everywhere else: a 10-digit ID is "1 078 877 965".
+  static List<String> _groups(String id) => formatPeerId(id).split(' ');
 
   @override
   Widget build(BuildContext context) {
@@ -361,28 +360,34 @@ class _IdGroups extends StatelessWidget {
     return Semantics(
       label: _groups(id).join(' '),
       excludeSemantics: true,
-      child: Wrap(
-        spacing: 10,
-        runSpacing: LgSpace.s1,
-        children: [
-          for (final group in _groups(id))
-            IntrinsicWidth(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(group, style: style),
-                  const SizedBox(height: 2),
-                  Container(
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: c.bar,
-                      borderRadius: BorderRadius.circular(2),
+      // One line, smaller if a 10-digit ID does not fit the column.
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: AlignmentDirectional.centerStart,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final (i, group) in _groups(id).indexed) ...[
+              if (i > 0) const SizedBox(width: 10),
+              IntrinsicWidth(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(group, style: style),
+                    const SizedBox(height: 2),
+                    Container(
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: c.bar,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-        ],
+            ],
+          ],
+        ),
       ),
     );
   }

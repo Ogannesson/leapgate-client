@@ -608,10 +608,14 @@ class _EditTagsDialogState extends _FormState<_EditTagsDialog> {
       }, widget.close),
       onCancel: widget.close,
       children: [
-        LgTagChooser(
-          items: _tagItems(_tags),
-          semanticLabel: l10n.abFieldTags,
-          onToggle: busy ? null : (t) => setState(() => _flip(_tags, t)),
+        // A field like the add-device dialog's tag row, which also spaces it from the title.
+        LgFormField(
+          label: l10n.abFieldTags,
+          child: LgTagChooser(
+            items: _tagItems(_tags),
+            semanticLabel: l10n.abFieldTags,
+            onToggle: busy ? null : (t) => setState(() => _flip(_tags, t)),
+          ),
         ),
       ],
     );
