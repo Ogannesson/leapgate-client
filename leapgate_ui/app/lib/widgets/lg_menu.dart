@@ -219,10 +219,30 @@ WidgetStatesController? _forced(BuildContext context) {
   return states.isEmpty ? null : WidgetStatesController(states);
 }
 
+/// Inside it the icons of menu rows are in the accent colour, as in the
+/// account menu of A-P1 (`.mr .ck`); everywhere else they are `text2`
+/// (A-P2 `.ck.ico`).
+class LgMenuAccentIcons extends InheritedWidget {
+  const LgMenuAccentIcons({super.key, required super.child});
+
+  static bool of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<LgMenuAccentIcons>() != null;
+
+  @override
+  bool updateShouldNotify(LgMenuAccentIcons old) => false;
+}
+
 /// The 20 px column in front of a label: a check mark or an icon (`.mr .ck`).
-Widget? _lead(LgColors c, {LgIcons? icon, bool? checked}) {
+Widget? _lead(
+  LgColors c, {
+  LgIcons? icon,
+  bool? checked,
+  bool accentIcon = false,
+}) {
   if (checked == true) return LgIcon(LgIcons.check, size: 20, color: c.accent);
-  if (icon != null) return LgIcon(icon, size: 20, color: c.text2);
+  if (icon != null) {
+    return LgIcon(icon, size: 20, color: accentIcon ? c.accent : c.text2);
+  }
   if (checked == false) return const SizedBox(width: 20);
   return null;
 }
@@ -371,6 +391,7 @@ class LgMenuItem extends StatelessWidget {
     this.danger = false,
     this.indent = false,
     this.keepOpen = false,
+    this.requestFocusOnHover = true,
   });
 
   final String label;
@@ -389,6 +410,11 @@ class LgMenuItem extends StatelessWidget {
   final bool indent;
   final bool keepOpen;
 
+  /// The pointer moving over the row gives it the keyboard, as in any menu.
+  /// A list with a text field above its rows turns it off: the keyboard stays
+  /// in the field, and typing is not cut off by the mouse passing over a row.
+  final bool requestFocusOnHover;
+
   @override
   Widget build(BuildContext context) {
     final t = LgTokens.of(context);
@@ -396,28 +422,42 @@ class LgMenuItem extends StatelessWidget {
     final item = MenuItemButton(
       onPressed: onPressed,
       closeOnActivate: !keepOpen,
+      requestFocusOnHover: requestFocusOnHover,
       statesController: _forced(context),
       // Inside a menu MenuAnchor already uses this; it matters for LgMenuPanel.
       overflowAxis: Axis.vertical,
       style: _itemStyle(
         t,
         danger: danger,
-        bold: danger || checked == true,
+        // A destructive row that cannot be used (a read-only book) is grey and
+        // plain like any other greyed row.
+        bold: (danger && onPressed != null) || checked == true,
         tall: description != null,
         indent: indent,
       ),
-      child: _ItemRow(
-        label: label,
-        description: description,
-        disabled: onPressed == null,
-        ownTip: !(onPressed == null && disabledNote != null),
-        lead: _lead(c, icon: icon, checked: checked),
-        trailing: _tail(
-          t,
-          hint: hint,
-          shortcut: shortcut,
-          badge: badge,
-          trailing: trailing,
+      // Material's menu rows are buttons only on the web; the Windows engine
+      // reads a row without the flag as plain text, with no Invoke for UI
+      // Automation or the screen reader. The flag merges into the row's node.
+      child: Semantics(
+        button: true,
+        child: _ItemRow(
+          label: label,
+          description: description,
+          disabled: onPressed == null,
+          ownTip: !(onPressed == null && disabledNote != null),
+          lead: _lead(
+            c,
+            icon: icon,
+            checked: checked,
+            accentIcon: LgMenuAccentIcons.of(context),
+          ),
+          trailing: _tail(
+            t,
+            hint: hint,
+            shortcut: shortcut,
+            badge: badge,
+            trailing: trailing,
+          ),
         ),
       ),
     );
@@ -460,16 +500,20 @@ class LgSubmenu extends StatelessWidget {
       submenuIcon: const WidgetStatePropertyAll(SizedBox.shrink()),
       // No children disables the button, so it cannot open an empty panel.
       menuChildren: items.isEmpty ? const [] : [_panelBody(width, items)],
-      child: _ItemRow(
-        label: label,
-        disabled: items.isEmpty,
-        ownTip: !(items.isEmpty && disabledNote != null),
-        lead: _lead(c, icon: icon),
-        trailing: _tail(
-          t,
-          value: value,
-          badge: badge,
-          trailing: LgIcon(LgIcons.chevR, size: 20, color: c.text2),
+      // A button, as in LgMenuItem.
+      child: Semantics(
+        button: true,
+        child: _ItemRow(
+          label: label,
+          disabled: items.isEmpty,
+          ownTip: !(items.isEmpty && disabledNote != null),
+          lead: _lead(c, icon: icon, accentIcon: LgMenuAccentIcons.of(context)),
+          trailing: _tail(
+            t,
+            value: value,
+            badge: badge,
+            trailing: LgIcon(LgIcons.chevR, size: 20, color: c.text2),
+          ),
         ),
       ),
     );
@@ -502,28 +546,36 @@ class LgMenuGroup extends StatelessWidget {
       ),
       child: Semantics(
         header: true,
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: style,
-              ),
-            ),
-            if (note != null) ...[
-              const SizedBox(width: LgSpace.s3),
-              Flexible(
+        // The note is the last thing in the row, at its right edge (`.mg.why`):
+        // as wide as it is, up to two thirds of the row, the title has the rest.
+        child: LayoutBuilder(
+          builder: (context, constraints) => Row(
+            children: [
+              Expanded(
                 child: Text(
-                  note!,
+                  title,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: style.copyWith(fontWeight: FontWeight.w400),
+                  style: style,
                 ),
               ),
+              if (note != null) ...[
+                const SizedBox(width: LgSpace.s3),
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: constraints.maxWidth * 2 / 3,
+                  ),
+                  child: Text(
+                    note!,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.end,
+                    style: style.copyWith(fontWeight: FontWeight.w400),
+                  ),
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );

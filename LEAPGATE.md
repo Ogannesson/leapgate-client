@@ -770,7 +770,7 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 **发现的问题**（都不挡试用）：
 1. 隐私模式点开后的失败通知只有"失败"两个字，没有原因（01 P2 区块 E 要求写原因）。被控端有 `WindowInjection.dll` 时是否仍这样没查。已修（`0ab9b3ef0`）：缺这个 dll 时被控端回 `PrvOnFailed` 不带原因，Rust 的通知正文是 "Failed"；现在显示"无法开启隐私模式"，"Failed to turn off" 显示"无法退出隐私模式"，被控端给了原因时显示"无法切换隐私模式（原因）"（原因里看不出是开还是关）。
 2. 工具栏菜单打开后，按 Esc 不关闭（投递的 Esc 和真实的 `SendKeys` 都试过；真实按键可能被会话抓去发给远程设备，没分清）；点菜单外面能关。试用时用真实键盘确认。已修（`b84f68d36`、`873d088aa`）：菜单打开时键盘焦点还在画面上，Rust 的键盘钩子照样把按键截走发给远程设备，投递的 Esc 也被画面的按键处理吃掉；现在工具栏菜单按钮打开菜单时拿走焦点（同上游 SubmenuButton），画面随之 `enterOrLeave(false)` 关掉钩子，Esc 由菜单处理；菜单开着时鼠标经过画面、窗口切出再切回都不再把焦点拿回去，点画面才拿；菜单关闭时（Esc、选了一项）鼠标如果在画面上，画面当场拿回焦点（这时不会再有"鼠标进入画面"）。
-3. 语义树：菜单行只是 `Text`，没有 Invoke 模式，辅助技术不能激活；会话处在连接失败、要密码等整页面板时，顶部的标签栏不在语义树里（这时 stderr 有 "dropped semantics nodes unreachable from root 0"）。0003 的收尾项，不挡试用。
+3. 语义树：菜单行只是 `Text`，没有 Invoke 模式，辅助技术不能激活；会话处在连接失败、要密码等整页面板时，顶部的标签栏不在语义树里（这时 stderr 有 "dropped semantics nodes unreachable from root 0"）。0003 的收尾项，不挡试用。更正（2026-11-02 排查，文档 §10）：菜单行只是 `Text` 和 0003 无关，是上游 `MenuItemButton` 只在 web 上给 `button` 标志；已在组件里补上，随 M4 合入（`ui/menu-semantics` `1a434c56d`），M4 验收时真机核 Invoke。
 4. 删除最近记录时没有同时清掉收藏里的这个 ID（配置里 `fav` 留着已不存在的 ID）。上游行为，不改：上游单台删除（`peer_card.dart` `_removeAction`）和多选删除（`peer_tab_page.dart` `deleteSelection`）在"最近"里都只调 `mainRemovePeer`（删对端配置文件），不动收藏；"收藏"分类按对端配置列出，所以这台设备从"收藏"里也看不到了，以后再连接它、配置重建后又会出现在"收藏"里。
 5. 验收过程中窗口在两次操作之间多次被最小化或换位置（同时控制端前台是别的程序），没查清是不是应用自己做的，试用时留意。
 
@@ -827,6 +827,103 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 5. 被控端的聊天输入框用 UI Automation 的 `Type`（`SendKeys`）能输入；控制端那边台式机的中文输入法会吃掉空格，聊天里的空格丢失，是环境问题。
 
 **试用清单**：真实麦克风的语音通话（接听、选麦克风、挂断、没有麦克风的提示）；多显示器时小条在主显示器；拖动小条的手感；在完整小窗里移动鼠标取消自动收起；小条上"断开"的远程点击保护；权限开关全部八项和只读态（内置选项禁止改权限）；摄像头、终端会话的小窗（造不出）；互换后的"撤销交换"；多个来访标签和未读数；语音来电；旧界面小窗的权限开关和聊天；"接受并提升权限"的系统确认框；`待调.md` 里 CM 相关几条是否满意。
+
+#### M4 账号、地址簿、同组设备（2026-11-03，`2537c849b`）
+
+黑盒验收，无人值守。控制端 A（新界面，登录和地址簿都在它上面；旧界面做五项冒烟），被控端 B（旧界面，带固定密码，被控端有出口开关）。依据 07 §5。两个界面都按 `2537c849b` 编（新界面 `bridge,build -ForceBridge`，旧界面 `patch,bridge,build`），引擎是带补丁 0003 的 `flutter_windows.dll`（`8667024A…`）。A 上有人在用（空闲时间一直是 0），所以没有注入真实键盘鼠标：输入用投递的窗口消息（右键用 `WM_RBUTTONDOWN/UP`），按钮和菜单用 UI Automation 的 `Invoke`；测试服务上的账号密码从服务器直接进环境变量再投递，没有进过输出和文件。
+
+**07 §5.1 自动测试**：本轮没有重跑（开发期的结果在 §10.11 "H1 的实现结论"和各块汇报里：Rust 单测 160 个，core 184 个，app 661 个；这次最新 stable 检查里在 3.47.9 下跑了 core 219 个、app 664 个，全部通过，见下）。07 §5.4 只能用假服务的项（旧版服务端 `personal` 回 404、推送失败的横幅）：自动测试覆盖，没有在真机上验。
+
+**07 §5.2 对 Leapgate 服务端的测试服务**（验收服务，账号、三本共享簿、共享组由 H1 建好，`h1it-a` 是读者，`h1it-b` 是三本簿的主人）
+
+| 项 | 结果 |
+|---|---|
+| 登录：用户名为空 / 密码为空 / 密码错 | 通过。"请输入用户名""请输入密码"；密码错显示"用户名或密码错误"（红框，错误在密码框下，对话框不关）；用户名预填上次登录的名字 |
+| 登录限流 | 通过。同一用户名连续 4 次密码错之后，第 5 次起显示"无法登录。服务器返回：Too many failed attempts, try again later。"（服务器原文，是英文），之后（15 分钟内）连正确密码也被拒；过了窗口后用正确密码登录成功 |
+| 登录成功、重启后仍是登录状态 | 通过。账号区显示头像、显示名和 `@用户名`；退出程序再启动仍是已登录（令牌由 Rust 保存） |
+| 账号菜单 | 通过。"账号信息 @用户名"（文字）和"退出登录"（`Button`，能 `Invoke`） |
+| 退出 | 通过。"退出登录"先出页内确认（"退出登录？"，"退出后，地址簿、同组设备和出口目录将不可用。"，"取消""退出登录"）；取消后仍登录；确认后账号区回到"登录"，地址簿页显示"登录后可查看地址簿"；服务端 `token` 表里该账号的行 1 → 0 |
+| 个人簿：添加设备 | 通过。ID 输入时自动每 3 位空一格（输入 9 位显示 `555 666 777`）；别名、备注（计数 `n / 300`）；添加后卡片出现，服务端读回 id、别名、备注一致 |
+| 个人簿：编辑备注、重命名、编辑标签 | 通过。卡片上的备注、名字、标签随即更新，服务端读回一致 |
+| 个人簿：标签添加、改名、改颜色、删除 | 通过。"添加标签"支持空格分隔多个；右键标签出"重命名""修改颜色""删除"（`Button`，能 `Invoke`）；改名后设备上的标签跟着变；颜色对话框有 8 个预设加"自定义"，选"紫"保存后服务端读回颜色值变了；删除后标签条里消失，服务端读回空 |
+| 个人簿：删除设备 | 通过（个人簿全部清空后服务端读回空）。共享读写簿里删除设备要页内确认（"从地址簿中删除“…”？"），确认后提示"已从地址簿中删除" |
+| 共享簿：只读 | 通过。簿名旁写"只读 · 所有者：‹主人›"；"更多"菜单里只剩"取消选择所有标签""匹配全部所选标签"（写操作整个隐藏，包括"添加设备""添加标签""与最近会话同步"）；设备菜单里"重命名""编辑标签""编辑备注""设置共享密码""从地址簿中删除"灰显，分组标题旁有"此地址簿为只读"；多选条里只有"加入地址簿"，没有"编辑标签""从地址簿中删除" |
+| 共享簿：可编辑（读写） | 通过。写作"可编辑 · 所有者：‹主人›"；"更多"菜单四项都在；添加设备对话框多出"密码"，下方"这些内容对此地址簿的其他成员可见"；添加、删除都成功 |
+| 共享簿：完全控制 | 部分通过。簿切换里写"完全控制 · 所有者：‹主人›"；没有再单独做添加、改标签、删除（界面上权限判断和"可编辑"同一路，H1 实测里服务端对完全控制放行） |
+| 簿切换下拉 | 通过。"我的地址簿"排第一，共享簿按名字排；每项两行（名字、权限和所有者）；顶部"搜索地址簿"；底部"共享地址簿的成员和权限由管理员设置" |
+| 同组设备 | 通过。人员列表自己排第一带"（我）"；搜索人员；点另一个人只显示他的设备，没有设备时"未找到匹配的设备"，选中行的 × 取消筛选后恢复；A 自己登录后的设备出现在自己名下（在线） |
+| 从地址簿连接（共享密码） | 通过。读写共享簿里存了 B 的密码的卡片（读屏名带"此地址簿中保存了密码"），点"连接"直接连上（直连），没有出密码框 |
+| 个人簿自动填密码（07 §4.2） | 通过。把 B 加进个人簿（不带密码）→ 点连接出现密码框，勾"记住密码"输入并连上 → 服务端个人簿里该设备带上 `hash` → 清掉本机保存的密码（还原那台设备的本机记录）、重启 → 再从个人簿连接，没有出密码框，直接连上 |
+| 令牌中途失效 | 通过。服务端命令行 `user passwd`（同一密码，登出 1 个）后，在地址簿页点"刷新"，账号区立即回到"登录"，页面回到"登录后可查看地址簿" |
+| 连接框搜索结果里别的簿的设备 | 通过。别的共享簿的设备先要那本簿加载过（先切到那本簿看一眼）才进搜索结果（结果里标"地址簿"分类）；它的设备菜单只有连接方式、"始终经中继连接""创建桌面快捷方式"、"重命名""加入收藏""加入地址簿"，没有编辑标签、备注、删除 |
+| 簿满 | 未验证。服务端上限 5000 台，没有现成办法触发 |
+
+**07 §5.3 对 rustdesk-api 测试实例**（测试服务器上拉 `lejianwen/rustdesk-api:v2.7` 镜像，容器只绑本机回环，经 SSH 端口转发，A 的 `api-server` 选项临时指过去；一个账号、三本各一种权限的共享簿、一个设备组；验完删了容器、数据卷和镜像）
+
+| 项 | 结果 |
+|---|---|
+| 登录、簿列表、共享簿权限 | 通过。簿列表三本共享簿权限和所有者对（"完全控制 / 只读 / 可编辑 · 所有者：‹主人›"）；个人簿加设备成功 |
+| 共享簿：可编辑 | 通过。添加设备成功；删除设备被服务器拒绝，页内横幅"无法保存地址簿的更改。服务器返回：无权限。。"（rustdesk-api 读写簿不能删设备，同 H1 的表） |
+| 共享簿：只读 | 通过。"更多"菜单里只剩两项 |
+| 同组设备，服务器上有设备组数据时 | 通过。新界面只显示人员（自己带"（我）"）和他们的设备，不显示设备组 |
+| 密码错 | 小问题。rustdesk-api 回的是本地化文字"用户名或密码错误。"，界面显示"无法登录。服务器返回：用户名或密码错误。。"（两个句号，见下） |
+| 其余端点行为 | 引用 §10.11 的 H1 表，没有重测 |
+
+**07 §5.5 和样稿对照**（`A-P1.html`，浅色）：账号区（没登录、已登录、菜单）、登录对话框（默认、密码错）、簿切换下拉、地址簿"更多"菜单、添加设备对话框、标签颜色对话框、标签条、同组设备列表、只读簿的设备菜单，版面层级、文案、状态都对得上。差异（小项，没有必修）：①账号菜单里的图标样稿是主色，实际是灰色；②已登录头像样稿是白底圆里一个字，实际是灰底圆；③地址簿工具行实际多一个"标签"开关按钮（样稿的行里没有）；④样稿的添加设备对话框画了"标签"一行，实际只有该簿里已有标签时才出现。深色：未验证。A 上一直有人在用（空闲时间为 0），没有切系统主题；B 上没做登录。
+
+**07 §5.5 最新 stable 检查**：Flutter 官方 releases（`storage.googleapis.com/flutter_infra_release/releases/releases_windows.json`，2026-11-03 查）最新 stable 仍是 3.47.9（2026-10-29 发布）。
+1. 编：通过。`-ForceBridge`，`leapgate.exe` `C96985E8…`、`libleapgate.dll` `E3CE3A0F…`、`app.so` `1EA79D65…`、官方引擎 `30494FB0…`；`bridge` 步的 build_runner 没有卡住（`6ea135d92` 的 `build.yaml` 修法生效）。
+2. 组件画廊：通过。3.44.9 和 3.47.9 各导出 1956 张，1288 张逐像素相同，没有一张差异像素超过 1%（最大 0.02%，抗锯齿级别）。
+3. 4K 上屏：通过。B（4K）旧界面当被控端，A 用 3.47.9 构建只用 `--connect`，约 5 分钟，画面每分钟截一次、内容都不同，句柄稳定在约 1500，没有崩溃事件，stderr 只有 "Using the Impeller rendering backend (OpenGLESSDF)"。
+4. analyze 和测试：app 没有问题；core 97 条（92 条 info 加复制件的 5 条 warning，基线不变）；core 219 个、app 664 个通过（跳过 2 个）。
+构建 worktree 已用 3.44.9 和自编引擎编回 `2537c849b`：`app.so` 和验收构建逐字节相同（`01ADFF50…`），`leapgate.exe` 重新链接（先删 `leapgate.exe` 和 `main.obj` 再编，不然 §10.5 M3 记的"没重新链接"会重现）后哈希是 `67F726CD…`（和验收构建只差链接时间戳），`libleapgate.dll` 重新链接哈希变了。
+
+**读屏结构**（`leapgate-uia.ps1`，原生 COM UIA）
+- 账号菜单、地址簿"更多"菜单、标签右键菜单、颜色对话框的预设色：菜单行都是 `Button`，`Invoke` 有效（菜单语义修复生效）；账号菜单里"账号信息"是 `Text`。
+- 连接框现在是三个节点：`Edit` "输入 ID 或搜索设备"、`Button` "清除"（有内容时出现）、`Button` "帮助"，符合预期。**输入框 `SetValue` 仍然失败**（`COMException: SetValue failed`），连接框、登录对话框的用户名和密码框、添加设备的 ID、备注等所有 `Edit` 都一样，和 M2b 起一直是这样；要往输入框里写东西，要先在输入框上投递一次点击（光标进框），再投递文字；只用 `Focus`（`SetFocus`）有时文字落不进去。
+- 登录对话框：用户名框读屏名"用户名"，密码框"密码"，"显示密码"是单独的 `Button`（点后名字变"隐藏密码"）；输入框的错误文字并进名字（"密码 / 用户名或密码错误"）。密码框的 `ValuePattern` 是掩码，读出长度对、内容不是明文。
+- 按钮名字里有叠加的重复（"显示密码. 显示密码""清除. 清除""新建连接. 新建连接""其他连接方式. 其他连接方式"），读屏会念两遍，和 M2b 起一样，没改。
+
+**07 §5.6 旧界面五项冒烟**（`2537c849b` 的旧界面，A、B 都是）：连接（ICE 胜出，登录成功）、`--relay`（日志 `Relay connection`，没有 ICE 行）、TCP 端口转发（HTTP 200）、出口（socks5h 和 HTTP CONNECT 都 200，`tunnel up (relayed)`，这一步是在 `--relay` 之后做的）通过；文件传输未验证（这条路径 M4 没碰）。ID 加盐：空配置目录起一次，`Generated id` 是 9 位、≥ 268435456，测完放回原配置。
+
+**发现的问题**（只记录，没有改代码）
+1. 服务器错误文字自带句号时界面显示两个句号（"…服务器返回：用户名或密码错误。。""…服务器返回：无权限。。"）：两句式文案的"服务器返回：‹原因›。"在原因末尾再加了句号，rustdesk-api 回本地化中文时就会重复；Leapgate 服务端的英文原文没有句号，不受影响。小项。
+2. 输入框 `SetValue` 失败（见上，07 §5 的读屏要求"输入框能 SetValue"不满足）；`LgTextField` 的语义改过以后仍然如此，和 M2b 起一样，不是新退化。
+3. 用 `Invoke` 打开账号菜单后，再点地址簿页上的别的控件或打开对话框，菜单不跟着关（截图里菜单盖在对话框的遮罩上面）；`Invoke` 不走"点外面关闭"的路径，真实鼠标是不是一样没测。
+4. 第一次连接 B 时左栏状态一度从"已就绪"变成"正在连接服务器…"（一次，之后没复现），没查原因。
+5. 搜索结果里别的簿的设备要那本簿加载过才搜得到（已知：启动后各簿按需拉取）；没切过的簿里的设备搜不到，用户看不出缘由。小项。
+
+**试用清单**（会话里没有真实键盘和不同主题的环境）：登录对话框里用中文输入法输入用户名；真实右键标签和设备菜单的手感；深色主题下账号区、登录对话框、簿切换下拉、标签条、颜色对话框；簿满（已达到上限）的提示；"完全控制"簿的写操作；账号菜单打开时点别处是否关闭。
+
+#### 最终外观检查（`af398fed7`，2026-11-03）
+
+合入 main 前对这个提交做的外观检查（流程：功能验收和验收后修复做完以后再看外观，浅色深色都看，重点是对齐、间距、竖直居中、字重、颜色）。做法：新界面重新编（`-ForceBridge`，`leapgate.exe` `67F726CD…`、`app.so` `9671BE24…`），画廊导出 1956 张（浅色、深色 × 简洁、详细）；样稿用 Playwright 逐画框渲染后和画廊对应画框并排比；真机在 B（未登录的主页、登录对话框、各页签、菜单，浅色和深色）和 A（登录 `h1it-a` 后的主页、账号菜单、地址簿的各状态、同组设备、对话框，只看浅色）上用 PrintWindow 截图。
+
+**必须改**（1 条）
+1. 本机 ID 是 10 位时，左栏"本机"卡片里的 ID 折成两行，第 4 组孤零零一个数字"5"带一根下划线，下面的"复制"按钮被推下去（B 的 ID 1078877965，约 1290×806 逻辑像素的窗口，左栏 224 宽；9 位 ID 三组刚好一行，所以画廊、样稿和 A 上都看不出来）。证据：`b-home-light-0.png`、`b-login-dark-0.png`（`evidence\m4-visual-1103\b\`）。10 位 ID 是真实存在的，要么按 10 位排版（四组缩小字号或改成两行均分），要么不拆组下划线。
+
+**小项**
+1. 画廊 `toolbar-m2b_english-narrow`（浅色、深色，简洁）：英文工具栏出现两个"Display"（"Remote desktop, Display, Display, Input, Actions"），第一个应是显示器选择（`session-toolbar_english-minimum-window` 里叫"Monitor"），英文名不一致。
+2. 画廊 `menu-rows_input-menu`（浅色、深色）：没有样稿 `A-P2` m-input 里的"交换鼠标左右键"一行，"相对鼠标模式"的开关态也和样稿不同；如果那一项是故意没做，这条可以忽略。
+3. 真机"修改标签颜色"对话框：当地址簿里没有设备带这个标签时，预览行左边是空白（`a-tag-color-light-0.png`；样稿预览行左边是设备名"书房台式机"）。
+4. 真机"编辑标签"对话框：标题行和下面标签芯片之间的间距比别的对话框小很多，芯片几乎贴着标题（`a-edit-tags-picked-light-0.png`；对比"添加设备""修改标签颜色"的标题到首个控件）。
+5. 深色画廊里不可用的菜单行（`address-book-menu_device-read-only_dark-compact`："重命名""编辑标签"等）的灰字对比度偏低，目测约 3:1；不可用项不受 WCAG 对比度限制，只作提示。
+6. 真机窗口的 PrintWindow 截图右、下边缘各有约 8 像素黑边，是 DWM 边框的截图伪影，窗口本身没有，不算问题。
+
+**对照范围的结论**
+- 会话工具栏（画廊 `session-toolbar_*` 和 `toolbar-m2b_*`，浅色深色 × 简洁详细）：横排默认、带分组把手、显示器扁平、窄窗口折进"···"带未读角标、全屏、连接方式展开、未加密、通话中、等待接听、收起态：菜单按钮的文字竖直居中（逐像素量：文字墨迹中心 38.0，工具栏胶囊中心 37.5，同一行所有按钮同一基线，"经中继"标签低 0.5 像素），`d048b6ff3` 的修复在浅色和深色都生效；没有发现错位、颜色错、文字被截。贴边竖排（`dock-left` 等）只看了画廊的缩略，没逐项比。
+- 菜单（画廊 `menu-rows_*`、`account-area_menu-open`，和样稿 m-action、m-input 比）：行高、分组标题、勾选列、开关、滑块、分隔线、快捷键文字对齐一致；账号菜单图标已是主色，和 A-P1 的 `p1-acct-menu` 一致。
+- 输入框和密码框、登录对话框、添加设备对话框（共享簿）、标签颜色对话框：和样稿 `p1-dlg-login`、`p1-dlg-add`、`p1-tagcolor-init` 并排比，间距、字重、颜色一致；浅色深色都没发现差异（登录对话框在画廊里密码框带焦点，样稿没有，不算）。
+- 账号区、地址簿页、标签条、簿切换下拉、人员列表：浅色深色一致；标签条的选中项加粗带对勾和样稿一致。
+- 真机 B（未登录，浅色和深色）：主页、登录对话框、地址簿和同组设备的"登录后可…"空态、连接方式下拉、视图菜单：对齐、字重、颜色和画廊一致；设置、出口页还是占位标题（M5、M6，不在 M4 范围）。
+- 真机 A（登录后，只有浅色）：主页卡片、账号菜单打开、地址簿（空簿、有设备、标签条、"更多"菜单、设备菜单、簿切换下拉、添加设备和编辑标签和修改标签颜色和删除确认对话框）、同组设备（选人）：没有对齐、间距、字重、颜色问题（上面小项 3、4 除外）。
+- 没做的：①**会话窗口真机截图没做**：A 上的 `GetLastInputInfo` 空闲时间在整个检查期间（至少 100 秒的连续采样）一直是 0，维护者在用，不满足"超过 2 分钟"的条件；B 没有别的被控端可连（vm110 没开），所以会话工具栏只有画廊的对照，没有真机截图。②**真机深色只做了 B 的未登录页面**：B 上没有测试服务器的 SSH 凭据，`h1it-a` 的密码送不进 B，登录后的页面（地址簿、同组设备、账号菜单、各对话框）的深色只看了画廊；A 在用，不能切系统主题。③没有逐张比 1956 张画廊，挑了上面范围里的画框；其余画框和 M4 功能验收时的 3.44.9 画廊（`2537c849b`）没有再做像素差对比。
+
+**复查（`2cccf61ae`，2026-11-03）**：只看三处改动，重新编新界面（`app.so` `6A7570DD…`），画廊重新导出 1956 张。
+1. 左栏本机 ID：通过。B 的 10 位 ID 浅色、深色都显示成"1 078 877 965"一行，每组下划线完整，"复制"紧跟在下面（`recheck-b-rail.png`）；A 的 9 位 ID 照常一行（`02-a-rail-9digit.png`）。10 位时字号略缩小，ID 到"复制"的间距比 9 位时少约 4 逻辑像素，目测一致，不算问题。
+2. "编辑标签"对话框：通过。多了"标签"字段标题，字段标题到标签芯片的间距和添加设备对话框（有标签的簿）一致（都约 18~19 像素）（`03-edit-vs-add.png`，原图 `a-edit-tags-0.png`、`a-add-dlg-tags-typed-0.png`）。
+3. 英文工具栏：通过。`toolbar-m2b_english-narrow` 浅色、深色都是"Remote desktop、Monitor、Display、Input、Actions"，只有一个 Display（`04-english-narrow.png`）。
+证据在 `evidence\m4-visual-1103echeck\`；A 上加的设备和标签已删，个人簿回到空。
 
 ### 10.6 core 的结构（M1）
 
@@ -951,6 +1048,7 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 
 - 组件只管画：输入是普通的值和回调，不引用 core 的 model、会话对象和 `bind`（身份色这类纯函数可以用）；文字全部由调用方传进来（照 M0 `LgTitleBarLabels` 的做法），组件里不写死文案、不读 `AppLocalizations`。
 - 每个可操作的地方带语义标签：`Semantics` 的 label 用它显示的文字，只有图标的用它的名字。讲述人和端到端的 UI Automation 脚本都靠它找控件（04 §6.3）。
+- 合并语义的容器（`MergeSemantics`，以及自己包了一层的 `MenuItemButton` 这类上游控件）里不放带浮层的组件（悬停提示、弹层的锚点）：锚点被合并后照样发给引擎，成了从根走不到的孤儿，补丁 0003 会丢掉它（2026-11-02 菜单读屏排查，`docs/新界面/无障碍语义树为空排查.md` §10）。非放不可时在外面包 `Semantics(label: …, excludeSemantics: true)`，照 `LgEllipsisText`。可以点的行要有 `button` 标志，上游 `MenuItemButton` 只在 web 上给，没有标志的叶子节点在 Windows 上只当静态文字、没有 Invoke。
 - 浅色、深色和简洁、详细两套尺寸都对；尺寸、颜色、间距、圆角只用令牌。
 - 每个组件的每种状态在画廊（`buildSpecimens`）里有一项，能用 `LG_GALLERY_EXPORT` 导出和样稿对照；`app/test/` 里写行为测试（回调被调、禁用时不响应、焦点能到），不比像素。
 - 要做的组件（名字是建议，可以按 M0 的命名习惯改，接口的意思不变）：
@@ -1156,3 +1254,203 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 - 收成小条时侧栏正开着某个连接的文件记录，这期间该连接的新记录不计未读。
 - 麦克风列表只在通话那一行出现时读一次（上游每次点都重读）；读回来之前点选择框，会短暂提示"未找到音频输入设备"。
 - 文件日志每来一块就让整个 CM 页面重建一次（Flutter 按帧合并），上游只重建文件记录那一页。
+
+### 10.11 M4 的分工约定
+
+依据：总仓库 `docs/新界面/07-M4拆法.md`（下称"07"；维护者 2026-11-02 把 M4-1~M4-9 全部按推荐定）。界面行为以 01 §3.1 区块 D、E、F、G、H、K 为准，账号的文案看 02 §1.5.3，标签颜色看 02 §3.6；样稿 `A-P1.html`，画框名见 07 §2.2；令牌和图标以 `A-基础.html` 为准。07 §6 列的不做。
+
+**分支和文件边界**（都从 `ui/m4` 切，做完合回 `ui/m4`；`ui/m4` 上已有下面"挂载点"的骨架）
+
+| 分支 | 谁 | 只改这些 |
+|---|---|---|
+| `ui/rust-h1` | coder R（H1） | `libs/leapgate/src/api.rs`（加一个带 Bearer 的通用请求函数）、`libs/leapgate/src/account/`（新）、`libs/leapgate/src/lib.rs`（声明模块一行）、`src/leapgate_ffi.rs`（末尾追加 M4 一段）；测试。不改 Dart，不生成桥 |
+| `ui/m4-ds` | designer | `app/lib/widgets/`（新组件；`LgDeviceCard`、`LgDeviceRow`、`LgDeviceTable` 加备注）、`app/lib/gallery_main.dart`、组件的测试 |
+| `ui/m4-account` | coder A（账号、登录、同组设备） | core `leapgate/account.dart`、`leapgate/group.dart`、`leapgate/peer_tabs.dart`（只改 `isEnabled`）；app `pages/home/account/`、`pages/home/group/`、`pages/home/home_page.dart` 的 `_SideColumn`（账号区摆在哪、间距）、`main.dart`（启动时调 `appCore.account.start()` 那几行）；它们的测试 |
+| `ui/m4-ab` | coder B（地址簿） | core `leapgate/address_book.dart`、`leapgate/peer_list.dart` 的 `peerMenu`（条件和参数）、`consts.dart`（只追加地址簿的选项键）；app `pages/home/address_book/`、`peer_views.dart` 里 `peerMenuItems` 调 `peerMenu` 那几行（跟着参数改）；它们的测试 |
+
+- 共用文件只往挂载点里填，挂载点以外的行不改：`devices_page.dart`、`peer_views.dart`、`account_category.dart`，core 的 `account_api.dart`、`app_core.dart`，`core/test/account_fakes.dart`。挂载点的签名不够用、或者要改共用文件的别处时，写进汇报，由主会话改。
+- ARB：A 的键以 `account`、`login`、`group` 开头，B 以 `ab` 开头，加在两个 ARB 文件末尾，中英文同时加，文案照 01 §7.6：01 里写好的句子逐字照抄，新写的句子列进提交说明。分类名 `abCategory`、`groupCategory` 骨架里已经加了。
+- 两个 coder 先用 M0~M3 的组件和简单的占位控件把逻辑写通，整合时换成 designer 的组件。占位不求好看，但行为测试要能按文字和语义标签找到它们。
+- 测试里换掉导出：设 `accountApi = FakeAccountApi()`（`core/test/account_fakes.dart`；app 的测试照 `home_fakes.dart` 引 `FakeLeapgate` 的办法用相对路径引它）。三个 model 第一次用到时才建，`accountApi` 要在第一次用 `appCore.account`、`addressBook`、`group` 之前设好。
+
+**H1 的块 2 导出**（coder R；R 合进 `ui/m4` 之前，A、B 只经 `account_api.dart`，测试用 `FakeAccountApi`）
+
+都放在 `src/leapgate_ffi.rs` 末尾新的 "Account (M4)" 一段，逻辑在 `libs/leapgate/src/account/`，`src/` 只做薄壳。除 `leapgate_account_local` 外在 Dart 侧都是异步：Rust 函数照 `leapgate_incoming_counts` 的写法同步返回 `String`，请求放在用 `#[tokio::main(flavor = "current_thread")]` 包的函数里跑（frb 在工作线程上调，不在运行时里，符合 AGENTS.md 的 Tokio 规则）。返回值都是 JSON 字符串，出错时是下面"错误的形状"。
+
+| 导出 | 参数 | 成功时返回 | 做什么 |
+|---|---|---|---|
+| `leapgate_account_local()`，同步 | | 有令牌时 `{"user":<user_info>}`，没有时 `{}` | 不发请求：读 LocalConfig 的 `access_token`（只看是否非空）和 `user_info` |
+| `leapgate_account_login_options()` | | `{}` | `GET /api/login-options`，2xx 就算成功，内容不解析（M4-4；rustdesk-api 回 `common-oidc/null` 也照样成功） |
+| `leapgate_account_login(username, password)` | 原样，trim 由界面做 | `{"user":<用户对象>}` | `POST /api/login`，体 `{username, password, id, uuid, autoLogin: true, type: "account", deviceInfo}`（上游 `common/hbbs/hbbs.dart` `LoginRequest`，不带验证码字段）；`id`、`uuid`、`deviceInfo` 由导出在 `src/` 取（`ui_interface::get_id()`、`get_uuid()`、`get_login_device_info()`）再传进 `libs/leapgate`。成功后写 `access_token`、`user_info` |
+| `leapgate_account_current_user()` | | `{"user":<用户对象>}` | `POST /api/currentUser`，体 `{id, uuid}`；成功后重写 `user_info` |
+| `leapgate_account_logout()` | | 总是 `{}` | `POST /api/logout`，体 `{id, uuid}`，2 秒超时；不管结果如何都删 `access_token`、`user_info`、两份缓存（M4-9） |
+| `leapgate_ab_cache()` | | `{"entries":[…]}` | 不发请求：`_ab` 缓存里的令牌和当前令牌相同时，原样给它的 `ab_entries`（每条 `guid`、`name`、`peers`、`tags`、`tag_colors`），否则空数组 |
+| `leapgate_group_cache()` | | `{"users":[…],"peers":[…]}` 或 `{}` | 不发请求：`_group` 缓存的令牌相同时给它的 `users`、`peers`（上游 `toGroupCacheJson` 的格式），否则 `{}` |
+| `leapgate_ab_books()` | | `{"max_peers":n,"personal":"<guid>","shared":[{"guid","name","owner","note","rule"}…]}` | `POST /api/ab/personal`、`/api/ab/settings`、`/api/ab/shared/profiles`（分页）。任一个失败整个失败；`personal` 回 404 是 `unsupported`（07 §4.4）；`max_peers` 是 0 表示不限 |
+| `leapgate_ab_book(guid, name, personal)` | 簿的 guid；`name`、`personal` 只用来写缓存 | `{"peers":[…],"tags":[{"name","color"}…]}` | `POST /api/ab/peers?current&pageSize&ab=<guid>`（分页，按 ID 去重，某一页没有新 ID 就停，07 §4.3）、`POST /api/ab/tags/<guid>`。`peers` 是服务器给的设备对象原样（个人簿带 `hash`、共享簿带 `password`，M4-3）。成功后写 `_ab` 缓存（见下面"缓存"） |
+| `leapgate_ab_add_peer(guid, peer)` | `peer`：设备对象的 JSON 字符串 | `{}` | `POST /api/ab/peer/add/<guid>`，体原样（个人簿去掉 `password`、共享簿去掉 `hash` 由界面做，上游 `addPeers`） |
+| `leapgate_ab_update_peer(guid, peer)` | `peer`：`id` 加要改的字段的 JSON 字符串 | `{}` | `PUT /api/ab/peer/update/<guid>`，体原样。上游 5 处都走它：标签、别名、备注、`hash` 或 `password`、与最近会话同步 |
+| `leapgate_ab_delete_peers(guid, ids)` | `ids: Vec<String>` | `{}` | `DELETE /api/ab/peer/<guid>`，体是 ID 数组 |
+| `leapgate_ab_add_tag(guid, name, color)` | `color: i64`（ARGB，同 Flutter `Color.value`） | `{}` | `POST /api/ab/tag/add/<guid>`，体 `{name, color}` |
+| `leapgate_ab_rename_tag(guid, old_name, new_name)` | | `{}` | `PUT /api/ab/tag/rename/<guid>`，体 `{old, new}` |
+| `leapgate_ab_set_tag_color(guid, name, color)` | `color: i64` | `{}` | `PUT /api/ab/tag/update/<guid>`，体 `{name, color}` |
+| `leapgate_ab_delete_tags(guid, names)` | `names: Vec<String>` | `{}` | `DELETE /api/ab/tag/<guid>`，体是标签名数组 |
+| `leapgate_group()` | | `{"users":[<用户对象>…],"peers":[<设备对象>…]}` | `GET /api/users`、`GET /api/peers`（都带 `accessible`、`status=1`，分页，`current` 和 `page` 都带，07 §4.3）；两个都成功才算成功，成功后整份重写 `_group` 缓存。不调 `/api/device-group/accessible`（M4-6） |
+
+- 共 17 个导出，覆盖 07 的 18 个端点。写操作按端点各一个、不合成"操作种类 + 参数"的一个：各端点的体和 404、409 的含义都不同，合成一个要在 JSON 里再编一层，界面调用反而不清楚。参数名避开 Dart 的保留字（`new`），所以叫 `old_name`、`new_name`。一次加一台设备、一个标签（上游 `addPeers`、`addTags` 也是逐个发），多选"加入地址簿"由界面循环，遇到第一个错误就停（上游同样）。
+- 用户对象、设备对象都是服务器给的原样（用户对象有 `name`、`display_name`、`avatar`、`email`、`note`、`status`、`is_admin`），界面按 `account_api.dart` 的数据类解析。
+- 写 `user_info` 照上游 `UserPayload.toJson`：`{"name","display_name","avatar","status"}`，`status` 照它的换算（0 停用、-1 未验证、其余 1）。Rust 别处在读它：登录消息的显示名（`src/client.rs`）、本机显示名导出。
+- 写操作 2xx 且体为空或体里没有 `error` 时算成功（上游 `_jsonDecodeActionResp`）。
+
+**错误的形状**：`{"error":"<种类>","text":"<原文>"}`。`text` 取服务器 JSON 的 `error` 字段，没有时 `HTTP <状态码>`；`network` 时是错误描述。`text` 截到 200 个字符，不含令牌。
+
+| 种类 | 什么时候 | Rust 顺带做的 |
+|---|---|---|
+| `unauthorized` | 登录以外的接口回 401；`currentUser` 回 400 | 删 `access_token`、`user_info`、`_ab`、`_group` |
+| `wrong_credentials` | 登录回 401：Leapgate 服务端用它表示用户名或密码错误（07 §4.1） | 不动令牌 |
+| `verification_required` | 登录 2xx 但 `type` 不是 `access_token`（要验证码或 2FA，M4-1） | 不写令牌；界面显示"此服务器要求验证码登录，Leapgate 暂不支持" |
+| `not_found` | 写操作回 404（设备、标签不在这本簿里） | |
+| `conflict` | 409（新标签名已存在） | |
+| `unsupported` | `ab/personal` 回 404 | |
+| `network` | 连不上、TLS 失败、超时（单次 12 秒，登出 2 秒） | |
+| `server` | 其余：别的 4xx（含限流 429、只读簿写入的 403、簿满的 400）和 5xx，2xx 里带 `error`（`currentUser` 的内部错误），回的不是预期的 JSON；`settings`、`shared/profiles` 的 404 也在这里（07 §4.4） | |
+
+- `currentUser` 的 400 照上游（`models/user_model.dart:85-88`）也清令牌。上游 400 只清令牌、不当场复位地址簿和组，但紧接着 finally 里的拉取因为没有令牌也会复位它们，结果和 401 相同，所以这里两者一样处理。
+- 界面不认识的种类当 `server`（`parseApiResult`）。
+
+**缓存**（M4-2、M4-9）
+
+- `_ab`：格式照 `hbb_common::config::Ab`（`access_token` 加 `ab_entries`）。个人簿那条的 `name` 必须是 `My address book`：`AbEntry::personal()` 按名字认，`src/client.rs` 的 `try_get_password_from_personal_ab` 靠它找个人簿里存的密码（07 §4.2）。`leapgate_ab_book` 成功后改写：最多两条，个人簿一条、最近拉过的共享簿一条（上游存"个人簿 + 当前簿"，界面拉的共享簿就是当前簿）；`personal` 为真时换个人簿那条，否则换共享簿那条；文件里的令牌和当前令牌不同时先清空再写。条目的 `peers` 照 `AbPeer` 只留 `id`、`username`、`hostname`、`platform`、`alias`、`tags`，个人簿另带 `hash`（上游 `toCustomJson(includingHash:)`）；`tag_colors` 是 `{"名字": 颜色}` 的 JSON 字符串。
+- `_group`：照 `config::Group`，`leapgate_group` 成功后整份重写。
+- 退出、`unauthorized` 时两份都删。登录成功时不删（令牌不同的缓存不会被读到）。
+
+**令牌和请求**（M4-3、M4-8、IQ7）：`access_token` 只在 Rust 里读写，Dart 不读不写它，也不写 `user_info`。API 地址用 `report::api_root()`（已知限制：不认程序文件名里带的配置，M4-8）。请求用 `api.rs` 的严格客户端（系统根证书加 webpki、不跟随重定向、证书失败不回退、按上游规则走代理），带 `Authorization: Bearer <令牌>`。日志不记令牌、密码、`hash`、共享密码，失败只记端点路径和状态码。
+
+**Dart 侧的调用层**：`core/lib/leapgate/account_api.dart`（骨架，共用）
+
+- 数据类：`AccountUser`（`displayNameOrName`）、`ShareRule`（上游同名枚举去掉文字）、`AbProfile`、`AbBooks`、`AbTag`、`AbBookData`（设备用 core 的 `Peer.fromJson`）、`GroupData`（设备经 `groupPeer`，照抄上游 `PeerPayload.toPeer`，`loginName` 是主人的用户名）。
+- `ApiErrorKind`（上表八种）、`ApiError(kind, text)`、`ApiResult<T>`（`ok`、`value`、`error`）、`parseApiResult(json, ok)`。
+- 接口 `AccountApi`，方法和导出一一对应：`localUser`、`loginOptions`、`login`、`currentUser`、`logout`、`abCache`（返回 `entries` 的列表）、`groupCache`、`books`、`book(guid, name:, personal:)`、`addPeer(guid, peer)`、`updatePeer(guid, id, fields)`（`id` 由它并进体里）、`deletePeers`、`addTag`、`renameTag`、`setTagColor`、`deleteTags`、`group`。全局 `accountApi` 默认是 `RustAccountApi`，测试换成 `FakeAccountApi`。
+- `RustAccountApi` 现在是占位：`localUser` 回 null，两份缓存回空，`logout` 什么也不做，其余回 `unsupported`。整合时每个方法体换成一行 `lgBind.leapgate…` 加 `parseApiResult`。
+
+**core 的三个 model**（`ChangeNotifier`，同 M1 的做法，不用 Get、Rx；挂在 `appCore` 上，`late final`，第一次用时建）
+
+| model | 文件 | 谁 | 别的路要用的成员 |
+|---|---|---|---|
+| `AccountModel` | `leapgate/account.dart` | A | `user`（null 是没登录）、`loggedIn`、`error`（最近一次和服务器核对失败的原因，仍算登录着）、`disabled`、`start()`、`checkLoginOptions()`、`login(username, password)`、`logout()`、`refresh()`、`signedOutByServer()` |
+| `AddressBookModel` | `leapgate/address_book.dart` | B | `disabled`、`loaded`、`loading`、`unsupported`、`pullError`、`books`（个人簿第一、共享簿按名字）、`current`、`isPersonal(book)`、`peers`、`shownPeers`（经标签筛选）、`allPeers`（已加载的各簿，连接框用）、`canWrite`、`writableBooks`（"加入地址簿"列的簿）、`sharedPasswordOf(id)`、`syncPeerHash(id, hash)` |
+| `GroupModel` | `leapgate/group.dart` | A | `disabled`、`loaded`、`loading`、`error`、`users`（自己第一）、`peers`、`selectedUser`、`selectUser(name)`、`shownPeers` |
+
+- 地址簿和组都实现 `AccountData`（`loadCache()`、`pull()`、`reset()`，定义在 `account.dart`）。`AccountModel` 构造时拿到 `[addressBook, group]`（M5 的出口目录以后也加进来），由它按下面的顺序调这三个方法；页面上的"刷新""重试"直接调各自 model 的 `pull()`。其余成员各路自定，不进约定。
+- 顺序（A 实现，照上游 `refreshCurrentUser`、`updateOtherModels`）：`start()` 先读 `localUser()`，有就当已登录、调各 `loadCache()` 先显示；再 `currentUser()`：成功就更新用户、并行调各 `pull()`；`network`、`server` 记进 `error`、保持登录、不拉（上游 `pullAb`、`group.pull` 在有网络错误时直接返回），"重试"调 `refresh()` 再走一遍；`unauthorized` 走 `signedOutByServer()`。`login` 成功后更新用户、并行拉。`logout()` 调导出后清用户、`reset()` 各个。`signedOutByServer()` 清用户和 `error`、`reset()` 各个（令牌 Rust 已经删了）。
+- 地址簿和组的请求回 `unauthorized` 时，调 `appCore.account.signedOutByServer()`，不自己复位别人。
+- 在线状态：地址簿和同组设备的 `Peer.online` 由各自的 model 更新：照 `CategoryPeers` 用 `platformFFI.registerEventHandler('callback_query_onlines', <自己的 handler 名>, …)`，只改自己列表里的设备，变了就通知。页面判断"有没有回答"沿用 `categoryPeers(...).hasOnlineState`（每个 `CategoryPeers` 都收下全部 ID，不用改）。
+- 内置选项：`disabled` 分别读 `bind.isDisableAccount()`、`isDisableAb()`、`isDisableGroupPanel()`。`PeerTabs.isEnabled` 对地址簿是"账号、地址簿都没禁用"，对同组设备是"账号、组面板都没禁用"（上游 `models/peer_tab_model.dart` 的 `isEnabled`）；没登录时分类照常显示，内容是"登录后可查看…"。
+- 本地选项：上游的 `current-ab-name`（Flutter 选项）、`sync-ab-with-recent-sessions`、`sync-ab-tags`、`filter-ab-by-intersection`（LocalConfig）照上游的键和值，归 B，键追加进 core 的 `consts.dart`（10.7 接入办法第 2 条）。登录框"预填上次的用户名"：上游读 `user_info` 的 `name`，退出后就空了；要做到 01 的"上次的"，A 加一个 Leapgate 自己的 LocalConfig 键在登录成功时记下（键放 `account.dart`）。
+- 全局事件 `sync_peer_hash_password_to_personal_ab`（`src/client.rs` 登录后推）已在 `AppCore` 构造函数里登记，转给 `addressBook.syncPeerHash`（B 填；上游 `changePersonalHashPassword`：这台设备在个人簿里才写）。
+
+**挂载点**（`ui/m4` 上的骨架提交，行为和 M3 相同）
+
+| 文件 | 现在的内容 | 谁填 |
+|---|---|---|
+| `pages/home/account/account.dart` | `accountArea(context, overlays)`：左栏最下面的账号区，现在是空；`showLoginDialog(overlays)`：登录对话框，返回是否登录成功，地址簿和同组设备"没登录"状态的登录按钮也调它 | A |
+| `pages/home/group/group.dart` | `groupCategory(context, overlays)`，返回 `AccountCategoryView` | A |
+| `pages/home/address_book/address_book.dart` | `addressBookCategory(context, overlays)`；连接框的 `withAccountPeers(sourced)`（在最近、收藏、局域网之后接地址簿和同组设备里还没出现的设备）、`accountPeersLoading()`；卡片和列表的 `abPeerTags(item)`、`abPeerKeyLabel(l10n, item)`（共享簿存了密码时的钥匙说明，null 不显示）；设备菜单的 `abPeerMenuItem(l10n, item, action, overlays:)`（返回 null 时用页面自己的项）、`abMenuGroupNote(l10n, item, group, groups)`；多选条的 `abSelectionActions(l10n, category, ids, overlays:, done:)` | B |
+| `pages/home/account_category.dart` | `AccountCategoryView`：`tools`（接在"多选"后面：刷新、标签筛选开关）、`header`（列表上方：簿切换、标签条、报错横幅）、`side`（列表左边：人员列表）、`state`（代替列表：没登录、加载中、不提供地址簿、网络错误、空；null 时列出设备） | 共用 |
+| `pages/home/devices_page.dart` | 地址簿、同组设备两类走 `_accountList`：设备是 model 的 `shownPeers`，照当前视图和排序、1000 台上限照旧；上面 `header`、左边 `side`，有 `state` 时显示它；工具条接 `tools`；搜索结果经 `withAccountPeers`，"正在加载其他分类…"加上 `accountPeersLoading()`；多选条在这两类里只有 `abSelectionActions`，在其他分类里接在原有动作后面；单击"连接"、回车、搜索结果都经 `connectPeer` 并带上设备所在的分类 | 共用 |
+| `pages/home/peer_views.dart` | `connectPeer(id, category:, relay:)`：地址簿分类带上 `sharedPasswordOf(id)` 的共享密码（`isSharedPassword`，上游 `connectInPeerTab`）；卡片和行的标签、钥匙接上面两个函数；菜单项先问 `abPeerMenuItem`，组标题旁的说明问 `abMenuGroupNote`；`PeerAction` 新加的六个只由 `abPeerMenuItem` 画，`deleteFromAb` 归危险组 | 共用（B 改 `peerMenu` 的调用参数） |
+| `pages/home/home_page.dart` | `_SideColumn` 多了 `overlays`，导航之后是 `accountArea(...)` | A（摆放和间距） |
+| core `leapgate/peer_list.dart` | `PeerAction` 加了 `addToAb`、`editTags`、`editNote`、`setSharedPassword`、`showBooks`、`deleteFromAb`；`peerMenu` 还不出它们 | B |
+| core `leapgate/peer_tabs.dart` | `isEnabled` 对两类仍是 false | A |
+| core `leapgate/app_core.dart` | `addressBook`、`group`、`account` 三个 `late final`；上面那个全局事件的登记 | 共用 |
+
+- `peerMenu` 照 01 区块 F 的菜单表：管理组补"加入地址簿"（已登录，各分类）、"编辑标签""编辑备注""设置共享密码"（地址簿；共享密码只在共享簿）、"查看所在地址簿"；危险组在地址簿里是"从地址簿中删除"；同组设备只有连接方式和"加入地址簿"；只读簿的写操作灰显（`LgMenuItem.disabledNote`），说明只在第一个出现灰显项的组标题旁写一次。地址簿分类里的"重命名"改的是簿里的别名（上游 `common/widgets/peer_card.dart` 的 `AddressBookPeerCard`），由 `abPeerMenuItem` 接管；"清除保存的密码"在所有分类都由 `abPeerMenuItem` 接管：设备在个人簿里时连簿里的 `hash` 一起清，再清本机保存的密码（上游 `_unrememberPasswordAction`，否则 Rust 下次连接仍会从 `_ab` 缓存自动填）。
+- 骨架里多选条的写法（`if (!accountCategory)` 下面那段没有重新缩进）是为了不动原有的行，整合时可以格式化这一段。
+
+**组件（designer）**：规则同 10.8"组件约定"（只管画、文字由调用方传、带语义标签、两套主题和两套尺寸、画廊里每种状态一项、有行为测试）。要做的和样稿画框见 07 §2.2。接口要点：
+
+- 账号区：没登录（"登录"按钮、下面一行说明，`onLogin`）；已登录（头像字、显示名，点开菜单向上展开：`@用户名` 那一行、"退出登录"，菜单项由调用方给）；退出的页内确认条（问句、正文、两个按钮）。头像字由调用方算好传入（01 区块 D 的规则归 A）。
+- 登录对话框：用户名、密码两个输入框（控制器由调用方给）、"登录"按钮（忙时转圈，输入框不可改）；错误文字三处：用户名框下、密码框下（服务器返回的错误也在这）、整块的"无法获取登录选项"加"重试"（`onRetry`）；回车提交。
+- 簿切换下拉：当前簿名，旁边的权限文字和所有者（调用方拼好）；展开后有搜索框、簿的列表（簿名、权限文字、所有者、选中态）、底部一行说明；`onSelect`。
+- 标签筛选条：第一项"未标记"（文字由调用方给），其余每项是 `LgDeviceTag` 加选中态（描边加勾，不用标签色铺满）；`onToggle`、`onContextMenu(tag, globalPosition)`（标签右键）；放不下时横向滚动。
+- 地址簿"更多"菜单、只读簿的设备菜单：用现成的菜单项拼，designer 只核对 `p1-ab-more`、`p1-ab-readonly`、`p1-ab-readonly-card`。
+- 其余小对话框（添加标签、重命名、编辑标签、编辑备注、设置共享密码、加入地址簿、查看所在地址簿）统一用 designer 另做的表单外壳 `LgFormDialog` + `LgFormField` + `LgTextArea` 拼（2026-11-02 改：原写"用 `LgConfirmDialog` 加输入件拼，不另做组件"）。忙态时正在操作的控件一禁用焦点就会掉，失败后由调用方把焦点放回出错的输入框（例如登录失败放回密码框）。
+- 人员列表：搜索框；每行头像字、显示名、"我"标记；选中行带 ×（`onClear`）；`onSelect`。
+- 卡片和列表视图的备注：`LgDeviceCard`、`LgDeviceRow` 加 `note`（null 不显示那一行或那一格），`LgDeviceColumn` 加 `note`，有没有这一列由调用方的表头决定（地址簿和同组设备有）。
+- 列表状态：没登录（一句话加"登录"按钮）、网络错误（一句话加"重试"）、报错横幅（现有 `lg_banner.dart` 加"重试"按钮、可关闭，两句文字由调用方拼）、两类空、加载中骨架（现成的）。"服务器不提供地址簿"用空状态的样式。
+- 添加设备对话框：ID、别名、密码（只在共享簿，下面一行提示）、备注（300 字上限）、标签选择（浅底小块，可多选）；提交中、ID 重复、簿满、服务器报错四种状态的文字由调用方给。其余小对话框（添加标签、重命名标签、编辑标签、编辑备注、设置共享密码、加入地址簿、查看所在地址簿）照它的样式用 `LgConfirmDialog` 加输入件拼，不另做组件。
+- 修改标签颜色对话框：预览（标签小块）、一排预设色、自定义（色相环加明度条，自己画，不引第三方依赖）、`#RRGGBB` 输入框（格式错误的提示文字由调用方给）；提交中、失败；结果是 ARGB 整数（和上游存的一样）。
+
+**测试和合入**
+
+- R：每个端点的请求（方法、路径、查询、体）、响应解析、状态码到错误种类的映射（两种 401、`currentUser` 400、`personal` 404、409、2xx 带 `error`）、分页去重和停止条件、缓存的写入和删除（个人簿的名字、令牌不同时清空）；对两种服务器的集成测试 `#[ignore]`，地址和测试账号由环境变量给（07 §5.1）。假 HTTP 服务照 `api.rs` 现有的测试起。
+- core：A 的启动顺序（有没有本地用户 × `currentUser` 的几种结果）、登录、退出、`signedOutByServer` 复位、人员筛选和自己排第一；B 的权限判断、只读簿灰显项、标签筛选（并集和交集）、与最近会话同步的比对、`syncPeerHash`、退出后清空。都用 `FakeAccountApi`。
+- app：07 §5.1 列的每个页面状态一个行为测试。
+- 改写档登记来源（10.1）：`account.dart` 改写上游 `models/user_model.dart`，`group.dart` 改写 `models/group_model.dart`，`address_book.dart` 改写 `models/ab_model.dart`；照上游 `common/widgets/login.dart`、`my_group.dart`、`address_book.dart` 重写的页面在文件头注明出处。
+- 合入前：`git diff main -- flutter/` 为空；core 的 `flutter analyze --no-fatal-infos` 在 3.44.9 下不超出 92 条 info 的基线，app 0 条；复制件不跑格式化；改已有文件时不对整个文件跑 `dart format`，只格式化新文件。
+
+**整合时要做的**
+
+1. 合 R：重新生成块 2 的桥；`RustAccountApi` 的方法体换成 `lgBind` 调用加 `parseApiResult`；`core/test/fakes.dart` 的 `FakeLeapgate` 补上新导出（测试走 `FakeAccountApi`，补的可以直接抛错）。
+2. 换上 designer 的组件；`PeerCard`、`PeerTableRow` 在地址簿和同组设备里传 `note`，表头加备注列。
+3. 合 A、B：两个 ARB 文件的末尾合并；`peer_views.dart` 里 `peerMenu` 的调用参数以 B 为准。
+4. `shell/toast_view.dart` 的 `toastText` 补 B 的两个轻提示 `abToastAdded`、`abToastDeleted`（不补会显示键名）。
+5. 整体审查时看一眼 B 的 `pull()` 用 `_pulling` 判断"中途被复位"：退出后马上重新登录会把 `_pulling` 重新置真，旧那轮拉取的后半段会接着跑（H1 审查交回的提示）。
+6. 整体审查，再按 07 §5 验收。
+
+2026-11-02 主会话定的（B 交回的问题）：共享簿的默认共享密码（上游设备自己没存密码时退回用簿资料里的默认密码）不做，Leapgate 服务端的簿资料 `info` 恒为空，写进已知限制；从地址簿连接时把地址簿别名抄到本机记录（上游行为）不做，写进已知限制；网络错误时整块显示"无法连接服务器"盖住缓存，照 01 和上游；同组设备菜单照 01 没有"始终经中继连接""创建桌面快捷方式"，地址簿分类菜单照 01 有收藏项，删除标签照上游不确认。
+
+**已知限制和与上游的不同**
+
+- `leapgate_ab_books` 任一步失败整个失败；上游 `settings`、`shared/profiles` 失败时照样显示个人簿。两种支持的服务器都实现了这两个端点，失败多半是网络，整体重试就行。
+- 缓存只存个人簿和最近拉过的共享簿（上游是"当前簿"，界面里两者相同）。
+- `currentUser` 回 400 和 401 一样处理（理由见上面"错误的形状"）。
+- API 地址不认程序文件名里带的配置（M4-8）。
+- 地址簿正在拉取时，写操作之后的静默重新拉取被跳过，那次拉取的结果可能盖掉刚做的本地改动，直到下一次拉取（上游 `abPulling` 同样）。
+- 从连接框搜到别的共享簿里的设备，连接时不带那本簿的共享密码，只看当前簿（上游 `connectInPeerTab` 同样）。
+- 退出后马上用同一账号登回来，旧那轮拉取在簿列表回来之前分不清两次登录，可能接着写完（数据是同一账号的）；簿列表回来之后的部分已挡住（地址簿按"拉取开始时的用户名"和"簿列表是否被换掉"核对）。彻底分清要代次计数，不做。
+- 退出后马上用同一账号登回来，旧令牌的请求（`refresh()` 的 `currentUser`，地址簿和同组设备在途的拉取、写入，所有导出都一样）12 秒内回 401 时，Rust 那边因为令牌已换、不清新登录，Dart 这边却调了 `signedOutByServer()`：界面显示没登录，下次启动又显示已登录（Dart 侧只按用户名丢弃账号变了以后的回答，令牌的比对只在 Rust 侧）。
+- 菜单的语义（2026-11-03 合入 `ui/menu-semantics`，排查文档 §10）：菜单行文字的提示锚点不再成孤儿，菜单行带 `button` 标志。还剩两种孤儿，0003 丢掉它们不少信息：菜单行尾部带提示的按钮（目前只有"输入系统密码"那行的编辑按钮）、悬停放不下的文字时提示浮层自带的空节点。`LgTextField` 尾部的按钮（显示 / 隐藏、清除）是同一类缺 `button` 标志的问题，没修。
+- 在最近、收藏、局域网里点"清除保存的密码"：本机密码先清掉，再清个人簿里的 `hash`；后一步失败（例如网络错误）时本机已清，错误只显示在地址簿的横幅里（上游同样）。
+- 启动时先显示缓存、服务器回答之前，共享簿一律按只读显示（簿切换写"只读"、写操作灰显），时间很短。
+- 正在登录时点"取消"或按 Esc 关掉对话框，请求仍会完成并登录上（上游相同）。
+- 启动时核对账号遇到网络错误，同组设备整个列表换成"无法连接服务器"，已显示的缓存被盖住（上游 `netWorkErrorWidget` 相同）。
+- 每个请求新建一个 reqwest 客户端，分页每一页都重新建连接和握手（同 `api.rs` 现有的请求，上游也是每次新建）。
+- 服务器上名叫 `My address book` 的共享簿会被当成个人簿（`AbEntry::personal()` 按名字认，上游用簿名做键，有同样的歧义）。Leapgate 服务端不许共享簿用这个名字，rustdesk-api 不拦。
+
+**H1 的实现结论**（2026-11-02，分支 `ui/rust-h1`）
+
+- 代码：`api.rs` 的 `bearer`（令牌为空时不带 `Authorization`，登录和登录选项用）；`libs/leapgate/src/account/` 的 `mod.rs`（账号四个端点、状态码映射、分页、令牌和 `user_info`）、`ab.rs`、`group.rs`；`src/leapgate_ffi.rs` 末尾 17 个导出。设备 ID、UUID、登录设备信息在导出里、进运行时之前取：桌面上 `get_id` 经 IPC 问服务，自己会起运行时，放进 `#[tokio::main]` 里就是嵌套运行时。令牌、`user_info`、两份缓存经一个小接口 `Store` 读写，正式实现就是 LocalConfig 和 `config::{Ab, Group}`，测试换成内存里的，免得单测写进本机的配置目录。
+- 和上面约定的出入（都不改界面的用法）：
+  - `leapgate_ab_books` 的 `shared`、`leapgate_ab_book` 的 `tags` 是服务器给的原样对象，会多出字段（rustdesk-api 的标签带 `id`、`user_id`、时间），界面按字段名取。
+  - 所有分页请求都同时带 `current` 和 `page`，不止 `users`、`peers`（Leapgate 服务端不认识的参数照常忽略）。每页 100 条，同上游。
+  - `leapgate_account_login_options` 不带令牌，非 2xx 一律报 `server`、不清登录。
+  - `leapgate_ab_book` 在 `personal` 为真时，缓存条目的名字固定写 `My address book`，不用传进来的 `name`；个人簿条目的 `guid` 写真实的（上游写空串，没有读者在意）。
+  - 每个导出在 frb 各自的线程上跑，两份缓存是"读出、改、写回"，所以加了一把进程内的锁（`account::CACHE`）：写 `_ab`（核对令牌加读改写）、写 `_group`（核对令牌加写）、退出和令牌失效时的清理、读缓存都在锁里做，都是同步的一小段，不跨 `.await`。不加锁时两本簿同时拉完会互相覆盖，个人簿条目连同 `hash` 丢掉，自动填密码静默失效。
+  - 一次操作（拉簿列表、拉一本簿、拉同组设备、一次写、当前用户）开头取一次令牌，所有请求都用它。回 401 时只有这个令牌仍是当前令牌才清登录：退出后马上重新登录时，旧操作迟到的 401 不会把新登录清掉。拉取过程中退出了登录：写缓存前在锁里核对令牌，变了就不写，免得把刚删掉的缓存写回来；`currentUser` 成功时同样在锁里核对令牌、没变才重写 `user_info`（登录消息的显示名和本机显示名不看令牌、直接读它）。
+  - 2xx 但内容不是这个端点该回的形状，报 `server`，文字 `HTTP 200`。写操作的 2xx 只认空体或不带 `error` 的 JSON，非 JSON 的内容（例如代理插进来的网页）报 `server`（上游 `_jsonDecodeActionResp` 同样算失败）。`ab/tags` 回 `null` 当没有标签（rustdesk-api 簿里没有标签时）。
+  - `_group` 缓存按 `config::Group` 的字段写（用户 `name`、`display_name`；设备 `id`、`username`、`hostname`、`platform`、`login_name`），没有备注和设备组名：上游缓存本来就不存备注，`Group::load` 也会丢掉设备组名。`leapgate_group_cache` 给的设备是这种缓存格式，不是 `/api/peers` 的原样。
+  - 日志：非 2xx 只记路径和状态码，连不上记路径和错误描述，两处各自每分钟最多一行（`throttled_log`）；登出失败另记一行。
+- 测试：`libs/leapgate` 单测 160 个（新增 19 个，测试里起最小的假 HTTP 服务，覆盖每类端点的请求、两种 401、旧令牌的 401 不清新登录、`currentUser` 400、`personal` 404、404/409、2xx 带 `error` 或非 JSON、两种分页停止（各自单独起作用）、缓存的写入、替换、令牌不同时清空、登出和 401 时删除、拉取中途退出不写回、两本簿同时保存都留下）；对真实服务器的集成测试 `account::live_tests::live_account_flow`（`#[ignore]`，环境变量见文件头）。core 的 `RustAccountApi` 用假绑定测了一条（184 个测试，analyze 92 条 info 不变）。
+- 对两种服务器的实测（2026-11-02，从开发机跑集成测试；两边都用命令行或管理接口新建的专用账号、三本各一种权限的共享簿、一个共享组）：
+
+| 项目 | Leapgate 服务端（验收服务 `7fbe55a`） | rustdesk-api v2.7（Docker `lejianwen/rustdesk-api:v2.7`，2025-09-28 发布，2026-11 时最新稳定版） |
+|---|---|---|
+| 登录选项 | 通过（`[]`） | 通过；回的是 `["common-oidc/[{\"name\":\"webauth\"}]","oidc/webauth"]`，不是读码推断的 `common-oidc/null`，只看 2xx，不受影响 |
+| 密码错 | 通过：401 → `wrong_credentials` | 回 400 `Username or password error.` → `server`，文字照原文显示 |
+| 登录、`user_info`、当前用户 | 通过 | 通过 |
+| 簿列表 | 通过：`max_peers` 5000，三本共享簿的 `rule` 1/2/3、`owner` 对 | 通过：`max_peers` 0（不限），`rule`、`owner` 对 |
+| 个人簿加设备、改设备（标签、备注）、加标签、改颜色、改名、删标签、删设备 | 通过；读回 `hash`，缓存个人簿条目名字和 `hash` 对 | 通过；不存设备的 `note`（读回 `null`），标签改名不级联到设备上的标签 |
+| 改名到已有的标签名 | `conflict` | 400 `Item already exists.` → `server` |
+| 改不存在的设备、标签 | `not_found` | 400 `Item not found.` → `server` |
+| 删除含不存在名字的标签 | 忽略不存在的 | 整个请求失败（400 `Item not found.`） |
+| 分页（个人簿 121 台） | 通过：按 `total` 取两页，121 台 | 通过：`ab/peers` 不看任何分页参数（`current`、`page` 换成 2 都回同样的全部条目，实测 120 条），第二页没有新 ID 就停，121 台 |
+| 只读簿写入 | 拒绝（403 `Read-only address book` → `server`） | 拒绝（400 `No access.` → `server`） |
+| 读写簿加、删设备 | 通过 | 加通过；删要完全控制，读写簿删除回 400 `No access.` |
+| 完全控制簿加、删设备 | 通过 | 通过 |
+| 共享簿读回 `password`、缓存里不带 `hash` | 通过 | 通过 |
+| 同组设备 | 通过：人员是自己和同组的人；设备列表为空 | 通过：同上；`users` 认 `page`、不认 `current`（`page=2&pageSize=1` 回第二个人，`current=2&pageSize=1` 回第一个人） |
+| 退出后旧令牌 | 通过：`currentUser` 回 401 → `unauthorized` | 通过：同左 |
+
+- 没验的：同组设备有设备时的转换（两边的测试账号名下都没有设备，`/api/peers` 只验了请求和空列表，转换由单测覆盖）；簿满；登录限流；个人簿自动填密码（要真实连接，归 07 §5.2 验收）；经 frb 的实际调用（桥已生成、根 crate 编译通过，Dart 侧只用假绑定测了）。
+- rustdesk-api 的几处行为（找不到、重名都回 400，读写簿不能删设备，不存备注，标签改名不级联）是它自己的，界面照 `server` 显示服务器原文，不另做适配。

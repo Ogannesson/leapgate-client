@@ -111,3 +111,96 @@ pub fn leapgate_cm_events(sink: StreamSink<String>) -> ResultType<()> {
     crate::leapgate_hooks::ipc::set_cm_events(sink);
     Ok(())
 }
+
+// ---- Account (M4) ----
+// H1 (`LEAPGATE.md` §10.11): JSON results, or `{"error":…,"text":…}`. The token stays in Rust.
+
+/// The signed-in user as stored, `{"user":…}`, or `{}`; asks nothing.
+pub fn leapgate_account_local() -> SyncReturn<String> {
+    SyncReturn(leapgate::account::account_local())
+}
+
+pub fn leapgate_account_login_options() -> String {
+    account_run(leapgate::account::account_login_options())
+}
+
+pub fn leapgate_account_login(username: String, password: String) -> String {
+    let device = account_device();
+    let info = hbb_common::serde_json::to_value(crate::ui_interface::get_login_device_info())
+        .unwrap_or_default();
+    account_run(leapgate::account::account_login(
+        &username, &password, &device, info,
+    ))
+}
+
+pub fn leapgate_account_current_user() -> String {
+    let device = account_device();
+    account_run(leapgate::account::account_current_user(&device))
+}
+
+pub fn leapgate_account_logout() -> String {
+    let device = account_device();
+    account_run(leapgate::account::account_logout(&device))
+}
+
+pub fn leapgate_ab_cache() -> String {
+    leapgate::account::ab_cache()
+}
+
+pub fn leapgate_group_cache() -> String {
+    leapgate::account::group_cache()
+}
+
+pub fn leapgate_ab_books() -> String {
+    account_run(leapgate::account::ab_books())
+}
+
+pub fn leapgate_ab_book(guid: String, name: String, personal: bool) -> String {
+    account_run(leapgate::account::ab_book(&guid, &name, personal))
+}
+
+pub fn leapgate_ab_add_peer(guid: String, peer: String) -> String {
+    account_run(leapgate::account::ab_add_peer(&guid, peer))
+}
+
+pub fn leapgate_ab_update_peer(guid: String, peer: String) -> String {
+    account_run(leapgate::account::ab_update_peer(&guid, peer))
+}
+
+pub fn leapgate_ab_delete_peers(guid: String, ids: Vec<String>) -> String {
+    account_run(leapgate::account::ab_delete_peers(&guid, &ids))
+}
+
+pub fn leapgate_ab_add_tag(guid: String, name: String, color: i64) -> String {
+    account_run(leapgate::account::ab_add_tag(&guid, &name, color))
+}
+
+pub fn leapgate_ab_rename_tag(guid: String, old_name: String, new_name: String) -> String {
+    account_run(leapgate::account::ab_rename_tag(&guid, &old_name, &new_name))
+}
+
+pub fn leapgate_ab_set_tag_color(guid: String, name: String, color: i64) -> String {
+    account_run(leapgate::account::ab_set_tag_color(&guid, &name, color))
+}
+
+pub fn leapgate_ab_delete_tags(guid: String, names: Vec<String>) -> String {
+    account_run(leapgate::account::ab_delete_tags(&guid, &names))
+}
+
+pub fn leapgate_group() -> String {
+    account_run(leapgate::account::group())
+}
+
+/// Read before the runtime starts: `get_id` asks the service over IPC in a runtime of its own.
+fn account_device() -> leapgate::account::Device {
+    leapgate::account::Device {
+        id: crate::ui_interface::get_id(),
+        uuid: crate::ui_interface::get_uuid(),
+    }
+}
+
+/// frb calls the exports on its own worker thread, outside any runtime.
+#[hbb_common::tokio::main(flavor = "current_thread", crate = "hbb_common::tokio")]
+async fn account_run(request: impl std::future::Future<Output = String>) -> String {
+    request.await
+}

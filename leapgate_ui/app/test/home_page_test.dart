@@ -56,6 +56,17 @@ void main() {
     },
   );
 
+  testWidgets('a 10-digit ID stays on one line, grouped from the right', (
+    tester,
+  ) async {
+    await pumpHome(tester, id: '1078877965');
+    await tester.pump();
+    expect(find.bySemanticsLabel('1 078 877 965'), findsOneWidget);
+    final first = tester.getTopLeft(find.text('1')).dy;
+    expect(tester.getTopLeft(find.text('965')).dy, first);
+    await unmount(tester);
+  });
+
   testWidgets('service status line follows the status', (tester) async {
     final model = await pumpHome(
       tester,

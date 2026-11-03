@@ -1,6 +1,7 @@
 //! Leapgate's own logic. Upstream files only call into this crate through one-line hooks,
 //! so merging upstream releases conflicts on those lines and nowhere else.
 
+pub mod account;
 pub mod api;
 pub mod brand;
 pub(crate) mod dns;

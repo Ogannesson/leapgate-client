@@ -27,6 +27,8 @@ String? toastText(AppLocalizations l10n, String? key) => switch (key) {
       'peerMenuToastRenamed' => l10n.peerMenuToastRenamed,
       'peerMenuToastPasswordCleared' => l10n.peerMenuToastPasswordCleared,
       'peerMenuToastShortcutCreated' => l10n.peerMenuToastShortcutCreated,
+      'abToastAdded' => l10n.abToastAdded,
+      'abToastDeleted' => l10n.abToastDeleted,
       // The session toolbar's.
       'menuToastWaylandReset' => l10n.menuToastWaylandReset,
       'menuToastWaylandResetFailed' => l10n.menuToastWaylandResetFailed,

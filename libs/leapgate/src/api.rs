@@ -10,11 +10,11 @@ use hbb_common::{
     proxy::{Proxy, ProxyScheme},
     throttled_log, ResultType,
 };
-use reqwest::{redirect, Client, ClientBuilder};
+use reqwest::{redirect, Client, ClientBuilder, Method};
 use std::time::Duration;
 
 /// Per attempt, connect and TLS handshake included; same as upstream's API requests.
-const TIMEOUT: Duration = Duration::from_secs(12);
+pub(crate) const TIMEOUT: Duration = Duration::from_secs(12);
 const LOG_INTERVAL: Duration = Duration::from_secs(60);
 
 pub(crate) struct Resp {
@@ -65,6 +65,32 @@ pub(crate) async fn get_user(base: &str, path: &str, token: &str) -> ResultType<
         .timeout(TIMEOUT)
         .send()
         .await?;
+    let status = resp.status().as_u16();
+    Ok((status, resp.bytes().await?.to_vec()))
+}
+
+/// `{base}{path}?{query}` with the JSON `body`, as the user `token` belongs to; without
+/// `Authorization` when `token` is empty (login). Returns the status and the body.
+pub(crate) async fn bearer(
+    method: Method,
+    base: &str,
+    path: &str,
+    query: &[(&str, &str)],
+    token: &str,
+    body: Option<Vec<u8>>,
+    timeout: Duration,
+) -> ResultType<(u16, Vec<u8>)> {
+    let mut req = client()?
+        .request(method, format!("{base}{path}"))
+        .query(query)
+        .timeout(timeout);
+    if !token.is_empty() {
+        req = req.bearer_auth(token);
+    }
+    if let Some(body) = body {
+        req = req.header("Content-Type", "application/json").body(body);
+    }
+    let resp = req.send().await?;
     let status = resp.status().as_u16();
     Ok((status, resp.bytes().await?.to_vec()))
 }

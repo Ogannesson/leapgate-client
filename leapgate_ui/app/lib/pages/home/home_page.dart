@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/local_status.dart';
+import 'package:flutter_hbb/leapgate/recent_peers.dart' show formatPeerId;
 import 'package:flutter_hbb/leapgate/remote_block.dart';
 
 import '../../icons/lg_icon.dart';
@@ -13,6 +14,7 @@ import '../../widgets/lg_button.dart';
 import '../../widgets/lg_list_chrome.dart';
 import '../../widgets/lg_pressable.dart';
 import '../../widgets/lg_status.dart';
+import 'account/account.dart';
 import 'devices_page.dart';
 import 'home_dialogs.dart';
 import 'password_row.dart';
@@ -113,6 +115,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             onChangePassword: appCore.options.isInstalled
                 ? null
                 : () => showPermanentPasswordDialog(widget.overlays, l10n),
+            overlays: widget.overlays,
           ),
         ),
         Expanded(
@@ -178,12 +181,14 @@ class _SideColumn extends StatelessWidget {
     required this.section,
     required this.onSection,
     required this.onChangePassword,
+    required this.overlays,
   });
 
   final LocalStatusModel status;
   final HomeSection section;
   final ValueChanged<HomeSection> onSection;
   final VoidCallback? onChangePassword;
+  final TabOverlays overlays;
 
   @override
   Widget build(BuildContext context) {
@@ -200,8 +205,12 @@ class _SideColumn extends StatelessWidget {
           borderRadius: BorderRadius.circular(LgRadius.r20),
         ),
         clipBehavior: Clip.antiAlias,
-        // The whole column scrolls when the window is shorter than its content.
-        child: SingleChildScrollView(
+        // The account area sits at the bottom (01 P1 block D); the rest of the column scrolls
+        // when the window is shorter than its content. Not re-indented, to keep the lines above.
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+        Expanded(child: SingleChildScrollView(
           padding: const EdgeInsets.all(LgSpace.s4),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -320,6 +329,10 @@ class _SideColumn extends StatelessWidget {
               ],
             ],
           ),
+        )),
+        // 01 P1 block D (M4, coder A; `LEAPGATE.md` §10.11).
+        accountArea(context, overlays),
+          ],
         ),
       ),
     );
@@ -333,10 +346,8 @@ class _IdGroups extends StatelessWidget {
 
   final String id;
 
-  static List<String> _groups(String id) => [
-    for (var i = 0; i < id.length; i += 3)
-      id.substring(i, i + 3 > id.length ? id.length : i + 3),
-  ];
+  /// From the right, as everywhere else: a 10-digit ID is "1 078 877 965".
+  static List<String> _groups(String id) => formatPeerId(id).split(' ');
 
   @override
   Widget build(BuildContext context) {
@@ -349,28 +360,34 @@ class _IdGroups extends StatelessWidget {
     return Semantics(
       label: _groups(id).join(' '),
       excludeSemantics: true,
-      child: Wrap(
-        spacing: 10,
-        runSpacing: LgSpace.s1,
-        children: [
-          for (final group in _groups(id))
-            IntrinsicWidth(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(group, style: style),
-                  const SizedBox(height: 2),
-                  Container(
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: c.bar,
-                      borderRadius: BorderRadius.circular(2),
+      // One line, smaller if a 10-digit ID does not fit the column.
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: AlignmentDirectional.centerStart,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final (i, group) in _groups(id).indexed) ...[
+              if (i > 0) const SizedBox(width: 10),
+              IntrinsicWidth(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(group, style: style),
+                    const SizedBox(height: 2),
+                    Container(
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: c.bar,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-        ],
+            ],
+          ],
+        ),
       ),
     );
   }

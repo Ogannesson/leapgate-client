@@ -1,5 +1,9 @@
 import '../models/platform_model.dart';
+import 'account.dart';
+import 'account_api.dart';
+import 'address_book.dart';
 import 'app_window.dart';
+import 'group.dart';
 import 'notices.dart';
 import 'options.dart';
 import 'prompts.dart';
@@ -17,6 +21,14 @@ class AppCore {
       : sessions = SessionRegistry(singleSession: singleSession) {
     // What `PlatformFFI.tryHandle` does not take (`models/native_model.dart:274-277`).
     platformFFI.setEventCallback(events.dispatch);
+    // After a login with a typed password (`src/client.rs`), upstream `models/model.dart:433-441`.
+    events.on('sync_peer_hash_password_to_personal_ab', (evt) {
+      final id = evt['id'];
+      final hash = evt['hash'];
+      if (id != null && hash != null) {
+        return addressBook.syncPeerHash(id.toString(), hash.toString());
+      }
+    });
   }
 
   final AppWindow window;
@@ -28,6 +40,13 @@ class AppCore {
   final recentPeers = CategoryPeers.recent();
   final favPeers = CategoryPeers.favorites();
   final lanPeers = CategoryPeers.lan();
+
+  /// The account, the address book and the team devices (M4, `LEAPGATE.md` §10.11). Built on
+  /// first use; nothing reaches Rust until `account.start()`.
+  late final addressBook = AddressBookModel(accountApi);
+  late final group = GroupModel(accountApi);
+  late final account =
+      AccountModel(accountApi, others: [addressBook, group]);
 
   /// The global event stream's table. The connection manager (M3) and the address book (M4)
   /// register their events here, not on a session's.

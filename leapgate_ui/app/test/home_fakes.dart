@@ -41,6 +41,9 @@ class FakeBind implements RustdeskImpl {
   String accessMode = 'full';
   DateTime lastRemoteInput = DateTime(2000);
 
+  /// `#isDisableAccount`, `#isDisableAb`, `#isDisableGroupPanel` that answer true.
+  final disabledOptions = <Symbol>{};
+
   List<Invocation> callsTo(Symbol name) =>
       calls.where((c) => c.memberName == name).toList();
 
@@ -99,6 +102,11 @@ class FakeBind implements RustdeskImpl {
                 : '');
       case #mainHasValid2FaSync:
         return false;
+      // The built-in options of the account, address book and team devices (M4).
+      case #isDisableAccount:
+      case #isDisableAb:
+      case #isDisableGroupPanel:
+        return disabledOptions.contains(invocation.memberName);
       case #mainMaxEncryptLen:
         return 128;
       case #mainSetPermanentPasswordWithResult:

@@ -489,7 +489,7 @@ Widget _toolbar2({
         ),
         if (display && !displayFlat)
           LgToolbarMenuButton(
-            label: l('显示器', 'Display'),
+            label: l('显示器', 'Monitor'),
             icon: LgIcons.displays,
             items: _displayMenu(),
           ),
