@@ -204,3 +204,69 @@ fn account_device() -> leapgate::account::Device {
 async fn account_run(request: impl std::future::Future<Output = String>) -> String {
     request.await
 }
+
+// ---- Exit cards (M5) ----
+// E1~E3 (`LEAPGATE.md` §10.12), desktop only. Stopping or cancelling a card is the first block's
+// `session_close`; its path and relay are `leapgate_session_connection`.
+
+/// E3: a session with the exit mapping alone, registered as a card; then `session_start` as
+/// usual. `{}`, or `{"error":"already"}` (the device has a port forward session),
+/// `{"error":"invalid_port"}`, `{"error":"other","text":…}`.
+pub fn leapgate_exit_session_add(
+    session_id: SessionID,
+    id: String,
+    port: i32,
+    password: String,
+    is_shared_password: bool,
+    conn_token: Option<String>,
+    force_relay: bool,
+) -> SyncReturn<String> {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    return SyncReturn(crate::leapgate_hooks::exit::cards::session_add(
+        &session_id,
+        &id,
+        port,
+        password,
+        is_shared_password,
+        conn_token,
+        force_relay,
+    ));
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        let _ = (session_id, id, port, password, is_shared_password, conn_token, force_relay);
+        SyncReturn(r#"{"error":"other","text":"not supported"}"#.to_owned())
+    }
+}
+
+/// E2: `{"id":…,"session_id":…,"port":…,"state":…}` per change, each card's current state
+/// first. A new subscription replaces the previous one.
+pub fn leapgate_exit_events(sink: StreamSink<String>) -> ResultType<()> {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    crate::leapgate_hooks::exit::cards::set_events(sink);
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    let _ = sink;
+    Ok(())
+}
+
+/// Logs in now, past the cooldown (M5-7); `false` without such a card.
+pub fn leapgate_exit_retry(id: String) -> SyncReturn<bool> {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    return SyncReturn(crate::leapgate_hooks::exit::cards::retry(&id));
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        let _ = id;
+        SyncReturn(false)
+    }
+}
+
+/// Listens on `port` instead, keeping the tunnel (M5-5); `false` without such a card or for a
+/// port outside 1~65535.
+pub fn leapgate_exit_set_port(id: String, port: i32) -> SyncReturn<bool> {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    return SyncReturn(crate::leapgate_hooks::exit::cards::set_port(&id, port));
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        let _ = (id, port);
+        SyncReturn(false)
+    }
+}
