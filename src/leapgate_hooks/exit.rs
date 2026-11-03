@@ -247,14 +247,12 @@ pub(crate) mod cards {
     use flutter_rust_bridge::StreamSink;
     use hbb_common::{tokio::net::TcpListener, ResultType};
     use leapgate::exit::card::{self, Cause, State, Transport};
-    use std::{
-        collections::BTreeMap,
-        sync::{
-            atomic::{AtomicU64, Ordering},
-            Mutex,
-        },
-    };
+    #[cfg(any(feature = "flutter", test))]
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::{collections::BTreeMap, sync::Mutex};
 
+    // Sent only by the new UI's exports.
+    #[cfg_attr(not(any(feature = "flutter", test)), allow(dead_code))]
     pub(crate) enum Ctl {
         Retry,
         SetPort(i32),
@@ -268,12 +266,14 @@ pub(crate) mod cards {
         session_id: String,
         /// The last event, sent again to a new subscriber.
         last: Option<String>,
+        #[cfg(any(feature = "flutter", test))]
         ctl: mpsc::UnboundedSender<Ctl>,
         /// Taken by the card's `run`.
         ctl_rx: Option<mpsc::UnboundedReceiver<Ctl>>,
     }
 
     static CARDS: Mutex<BTreeMap<String, Card>> = Mutex::new(BTreeMap::new());
+    #[cfg(any(feature = "flutter", test))]
     static NEXT_GEN: AtomicU64 = AtomicU64::new(0);
     #[cfg(feature = "flutter")]
     static EVENTS: Mutex<Option<StreamSink<String>>> = Mutex::new(None);
@@ -330,12 +330,18 @@ pub(crate) mod cards {
             shared_password,
             conn_token,
         );
+        // The card is keyed on the ID the UI passed and found again by the session's ID, which
+        // `initialize` rewrites for `ID@server?key=…` and a trailing `/r`.
+        if session.get_id() != id {
+            return json!({ "error": "invalid_id" }).to_string();
+        }
         register(id, session_id.to_string());
         sessions::insert_session(*session_id, ConnType::PORT_FORWARD, Arc::new(session));
         "{}".to_owned()
     }
 
     /// Replaces a card left by a session that never started.
+    #[cfg(any(feature = "flutter", test))]
     pub(crate) fn register(id: &str, session_id: String) {
         let (ctl, ctl_rx) = mpsc::unbounded_channel();
         let card = Card {
@@ -355,14 +361,17 @@ pub(crate) mod cards {
     }
 
     /// `false` when there is no such card.
+    #[cfg(any(feature = "flutter", test))]
     pub(crate) fn retry(id: &str) -> bool {
         send(id, Ctl::Retry)
     }
 
+    #[cfg(any(feature = "flutter", test))]
     pub(crate) fn set_port(id: &str, port: i32) -> bool {
         (1..=65535).contains(&port) && send(id, Ctl::SetPort(port))
     }
 
+    #[cfg(any(feature = "flutter", test))]
     fn send(id: &str, ctl: Ctl) -> bool {
         CARDS
             .lock()
@@ -466,7 +475,7 @@ pub(crate) mod cards {
         // E1: log in as soon as the listener is up; a taken port waits for another.
         let mut login_now = listener.is_some();
         if !login_now {
-            report(port,State::PortInUse);
+            report(port, State::PortInUse);
         }
         loop {
             // The local connection a lazy login is for (C9); none when the card logs in itself.
@@ -495,7 +504,12 @@ pub(crate) mod cards {
                     },
                     _ = tunnel.ended(), if up.is_some() => {
                         up = None;
-                        report(port,State::Interrupted { cause: Cause::TunnelEnded, retry_after_ms: None });
+                        // No listener: a port change failed while the tunnel was up.
+                        if listener.is_none() {
+                            report(port, State::PortInUse);
+                        } else {
+                            report(port, State::Interrupted { cause: Cause::TunnelEnded, retry_after_ms: None });
+                        }
                         continue;
                     }
                     Some(c) = ctl.recv() => {
@@ -508,12 +522,12 @@ pub(crate) mod cards {
                         if listener.is_none() {
                             listener = listen(port).await;
                             if listener.is_none() {
-                                report(port,State::PortInUse);
+                                report(port, State::PortInUse);
                                 continue;
                             }
                         }
                         if let Some(direct) = up {
-                            report(port,in_use(direct));
+                            report(port, in_use(direct));
                             continue;
                         }
                         // M5-7: retry, or a listener without a tunnel, logs in now.
@@ -525,8 +539,10 @@ pub(crate) mod cards {
                 }
             }
             login_now = false;
+            // A lazy login can start before `ended` has been seen for the last tunnel.
+            up = None;
             cooldown = None;
-            report(port,State::Connecting);
+            report(port, State::Connecting);
             // M5-4: the login pre-reads from a local socket and the card's own login has none. It
             // gets one end of a loopback pair of its own, not a connection to the card's port: a
             // program already pointed at the port could be accepted in its place, and the
@@ -539,7 +555,7 @@ pub(crate) mod cards {
                     Err(err) => {
                         log::warn!("leapgate exit: no loopback socket for the login: {}", err);
                         cooldown = Some(Instant::now() + exit::RETRY_COOLDOWN);
-                        report(port,login_failed());
+                        report(port, login_failed());
                         continue;
                     }
                 },
@@ -570,7 +586,7 @@ pub(crate) mod cards {
                     );
                     let handle = tunnel.set_muxed(o.stream, session.clone(), o.kcp);
                     up = Some(direct);
-                    report(port,in_use(direct));
+                    report(port, in_use(direct));
                     if let Some(req) = req.filter(|_| !o.local_eof) {
                         let (mut socket, prebuf) =
                             take_socket(forward, [req.leftover, o.prebuf].concat());
@@ -599,7 +615,7 @@ pub(crate) mod cards {
                         session.on_error(msg);
                     }
                     log::info!("leapgate exit: card tunnel refused, listener closed");
-                    report(port,card::stopped(msg, insecure_refused));
+                    report(port, card::stopped(msg, insecure_refused));
                 }
                 Next::Cooldown => {
                     refuse_all(forward.get_mut(), req.as_ref(), &mut ready).await;
@@ -612,14 +628,14 @@ pub(crate) mod cards {
                         err
                     );
                     session.on_establish_connection_error(err);
-                    report(port,login_failed());
+                    report(port, login_failed());
                 }
             }
         }
         drop(listener);
         drop(tunnel);
         log::info!("leapgate exit: card closed");
-        report(port,State::Closed);
+        report(port, State::Closed);
     }
 
     /// The login, raced against the session's close: upstream's login loop drops `Close`. `None`
