@@ -3,6 +3,9 @@ import 'account.dart';
 import 'account_api.dart';
 import 'address_book.dart';
 import 'app_window.dart';
+import 'exit_api.dart';
+import 'exit_directory.dart';
+import 'exit_nodes.dart';
 import 'group.dart';
 import 'notices.dart';
 import 'options.dart';
@@ -45,8 +48,13 @@ class AppCore {
   /// first use; nothing reaches Rust until `account.start()`.
   late final addressBook = AddressBookModel(accountApi);
   late final group = GroupModel(accountApi);
-  late final account =
-      AccountModel(accountApi, others: [addressBook, group]);
+  late final account = AccountModel(accountApi,
+      others: [addressBook, group, exitDirectory]);
+
+  /// The exit node page (M5, `LEAPGATE.md` §10.12). Nothing reaches Rust until the page opens
+  /// or a device is used as an exit node.
+  late final exitDirectory = ExitDirectoryModel(exitApi);
+  late final exitNodes = ExitNodesModel(exitApi);
 
   /// The global event stream's table. The connection manager (M3) and the address book (M4)
   /// register their events here, not on a session's.

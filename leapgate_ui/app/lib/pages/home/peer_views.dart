@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_hbb/consts.dart' show kPeerPlatformWindows;
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/peer_list.dart';
 import 'package:flutter_hbb/leapgate/peer_tabs.dart';
@@ -236,6 +237,7 @@ List<Widget> peerMenuItems(
         (item.category == PeerCategory.addressBook && item.peer.hash.isNotEmpty),
     windows: Platform.isWindows,
     ab: appCore.addressBook.menuFlags(category),
+    peerWindows: item.peer.platform == kPeerPlatformWindows,
   );
   final titles = [
     l10n.connectBoxConnectionType,
@@ -257,6 +259,10 @@ List<Widget> peerMenuItems(
     PeerAction.remoteDesktop => LgMenuItem(
       label: l10n.connectBoxRemoteDesktop,
       onPressed: () => connectPeer(id, category: item.category),
+    ),
+    PeerAction.useAsExit => LgMenuItem(
+      label: l10n.exitUseAsExit,
+      onPressed: () => useAsExit(id, name: name),
     ),
     PeerAction.viaRelay => LgMenuItem(
       label: l10n.connectBoxViaRelay,

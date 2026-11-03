@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter_hbb/leapgate/app_core.dart';
 
 /// How the home page and links open sessions and switch tabs (M2a, `LEAPGATE.md` §10.8). The
 /// session block implements it in the main window; the home block only calls it.
@@ -35,3 +36,35 @@ class ConnectBoxFocusRequests extends ChangeNotifier {
 }
 
 final connectBoxFocusRequests = ConnectBoxFocusRequests();
+
+/// Requests to show the exit page scrolled to a card. The home page switches to the exit page;
+/// the exit page takes [id] once it is built.
+class ExitPageRequests extends ChangeNotifier {
+  ({String id, bool highlight})? _request;
+
+  /// The card to scroll to, and whether to mark it, once; null when there is none.
+  ({String id, bool highlight})? take() {
+    final request = _request;
+    _request = null;
+    return request;
+  }
+
+  void request(String id, {bool highlight = false}) {
+    _request = (id: id, highlight: highlight);
+    notifyListeners();
+  }
+}
+
+final exitPageRequests = ExitPageRequests();
+
+/// "Use as exit node" in a device menu or the connect box (08 M5-9): as "Use" in the
+/// directory, the card is made and logs in at once; a device with a card already is only
+/// shown, marked.
+void useAsExit(String id, {String? name}) {
+  id = id.replaceAll(' ', '');
+  if (id.isEmpty) return;
+  final had = appCore.exitNodes.cardOf(id) != null;
+  appCore.exitNodes.use(id, name: name);
+  mainNavigation.showHome();
+  exitPageRequests.request(id, highlight: had);
+}

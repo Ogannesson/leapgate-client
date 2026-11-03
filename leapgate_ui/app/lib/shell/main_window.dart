@@ -278,6 +278,7 @@ class _MainWindowState extends State<MainWindow>
     final titleBar = ListenableBuilder(
       listenable: Listenable.merge([
         for (final s in views) ...[s.connection, s.ffiModel, s.chatModel],
+        appCore.exitNodes,
       ]),
       builder: (context, _) {
         _syncTitle(_selected == null
@@ -296,6 +297,9 @@ class _MainWindowState extends State<MainWindow>
           ),
           sessions: [for (final s in views) _tabOf(s, l10n)],
           selected: selectedIndex,
+          // The exit nodes running (M5-8). TODO(M5 整合): designer's mark for
+          // `appCore.exitNodes.needsAttention` on the home tab.
+          homeBadge: appCore.exitNodes.runningCount,
           onSelect: (i) => _select(i == 0 ? null : devices[i - 1]),
           onCloseTab: (i) => appCore.sessions.closeDevice(devices[i - 1]),
           onNewTab: () => showHome(focusConnectBox: true),

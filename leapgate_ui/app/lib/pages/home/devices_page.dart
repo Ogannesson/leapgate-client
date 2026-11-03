@@ -16,6 +16,7 @@ import 'package:window_manager/window_manager.dart';
 
 import '../../icons/lg_icon.dart';
 import '../../l10n/app_localizations.dart';
+import '../../shell/navigation.dart' show useAsExit;
 import '../../shell/tab_overlays.dart';
 import '../../theme/lg_tokens.dart';
 import '../../widgets/lg_button.dart';
@@ -250,6 +251,18 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
     }
   }
 
+  /// "Use as exit node" in the "Connect" menu: the current row, as [_runCurrent] (08 M5-9).
+  void _useCurrentAsExit() {
+    final search = _search?.search;
+    final row = _currentRow(search);
+    if (row == null) return;
+    useAsExit(search == null
+        ? _rowIds(null)[row]
+        : row == 0
+            ? _input
+            : search.matches[row - 1].id);
+  }
+
   void _move(int by) {
     final search = _search?.search;
     final ids = _rowIds(search);
@@ -367,6 +380,11 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
             checked: true,
             hint: l10n.connectBoxDefault,
             onPressed: _runCurrent,
+          ),
+          LgMenuItem(
+            label: l10n.exitUseAsExit,
+            checked: false,
+            onPressed: _useCurrentAsExit,
           ),
           LgMenuItem(
             label: l10n.connectBoxViaRelay,
@@ -665,6 +683,10 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
                 LgMenuItem(
                   label: l10n.connectBoxRemoteDesktop,
                   onPressed: () => _connect(_input),
+                ),
+                LgMenuItem(
+                  label: l10n.exitUseAsExit,
+                  onPressed: () => useAsExit(_input),
                 ),
                 LgMenuItem(
                   label: l10n.connectBoxViaRelay,
