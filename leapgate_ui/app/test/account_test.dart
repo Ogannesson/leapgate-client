@@ -167,6 +167,8 @@ void main() {
           const ApiError(ApiErrorKind.server, 'Too many requests'),
           '无法登录。服务器返回：Too many requests。',
         ),
+        // rustdesk-api answers in Chinese with its own full stop.
+        (const ApiError(ApiErrorKind.server, '无权限。'), '无法登录。服务器返回：无权限。'),
       ]) {
         api.loginResult = ApiResult.error(error);
         await fillLogin(tester, 'alice', 'secret');

@@ -23,6 +23,10 @@ String accountLetter(String name) {
   return trimmed.isEmpty ? '?' : trimmed.characters.first.toUpperCase();
 }
 
+/// What the server said, put into a sentence that ends in its own full stop: rustdesk-api
+/// answers in Chinese with "。" already.
+String serverText(String text) => text.replaceFirst(RegExp(r'[。．.\s]+$'), '');
+
 /// The account area at the bottom of the home page's left column.
 Widget accountArea(BuildContext context, TabOverlays overlays) =>
     _AccountArea(overlays: overlays);
@@ -192,7 +196,7 @@ class _LoginDialogState extends State<_LoginDialog> {
         ApiErrorKind.wrongCredentials => l10n.loginWrongCredentials,
         ApiErrorKind.verificationRequired => l10n.loginVerificationRequired,
         ApiErrorKind.network => l10n.loginNetworkError,
-        _ => l10n.loginServerError(error.text),
+        _ => l10n.loginServerError(serverText(error.text)),
       };
     });
   }

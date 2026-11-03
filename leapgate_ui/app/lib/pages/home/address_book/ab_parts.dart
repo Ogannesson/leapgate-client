@@ -4,6 +4,7 @@ import 'package:flutter_hbb/leapgate/address_book.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
 
 import '../../../l10n/app_localizations.dart';
+import '../account/account.dart';
 
 // What the address book's texts and colours are made of (01 P1 block G, §7.6).
 
@@ -30,7 +31,7 @@ String abReason(AppLocalizations l10n, ApiError error) =>
     ? l10n.abNetworkReason
     : error.text.isEmpty
     ? ''
-    : l10n.abServerSaid(error.text);
+    : l10n.abServerSaid(serverText(error.text));
 
 /// A tag's colour in the current book; upstream's default when it has none.
 Color abTagColor(String tag) =>

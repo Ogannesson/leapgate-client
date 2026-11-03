@@ -60,7 +60,7 @@ AccountCategoryView groupCategory(
         child: LgEmptyState(
           error.kind == ApiErrorKind.network
               ? l10n.groupNetworkError
-              : l10n.groupLoadFailed(error.text),
+              : l10n.groupLoadFailed(serverText(error.text)),
           // A refusal of the server as the address book shows it.
           icon: error.kind == ApiErrorKind.network
               ? LgIcons.wifiOff
@@ -82,7 +82,7 @@ AccountCategoryView groupCategory(
             child: LgBanner(
               tone: LgTone.error,
               slim: true,
-              text: l10n.groupLoadFailed(error.text),
+              text: l10n.groupLoadFailed(serverText(error.text)),
               actionLabel: l10n.groupRetry,
               actionIcon: LgIcons.refresh,
               onAction: group.pull,
