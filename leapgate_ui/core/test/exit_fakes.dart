@@ -28,13 +28,23 @@ class FakeExitApi implements ExitApi {
 
   final _events = StreamController<Map<String, dynamic>>.broadcast();
 
-  /// An E2 event: `{"id","port","state",…}`.
-  void push(String id, String state, [Map<String, dynamic> extra = const {}]) =>
-      _events.add({'id': id, 'state': state, ...extra});
+  /// An E2 event: `{"id","session_id","port","state",…}`, with the session last added for [id],
+  /// as Rust sends it; [extra] can name another.
+  void push(String id, String state, [Map<String, dynamic> extra = const {}]) {
+    final added = callsTo('sessionAdd').where((c) => c[1] == id).lastOrNull;
+    _events.add({
+      'id': id,
+      if (added != null) 'session_id': '${added[0]}',
+      'state': state,
+      ...extra,
+    });
+  }
 
   @override
-  ExitAddError? sessionAdd(SessionID sessionId, String id, int port) {
-    calls.add(('sessionAdd', [sessionId, id, port]));
+  ExitAddError? sessionAdd(SessionID sessionId, String id, int port,
+      {String password = '', bool isSharedPassword = false}) {
+    calls
+        .add(('sessionAdd', [sessionId, id, port, password, isSharedPassword]));
     return addError;
   }
 

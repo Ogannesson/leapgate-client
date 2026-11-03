@@ -262,7 +262,10 @@ List<Widget> peerMenuItems(
     ),
     PeerAction.useAsExit => LgMenuItem(
       label: l10n.exitUseAsExit,
-      onPressed: () => useAsExit(id, name: name),
+      // A name that is only the ID gives way to the host name after logging in.
+      onPressed: () => useAsExit(id,
+          name: name == formatPeerId(id) ? null : name,
+          category: item.category),
     ),
     PeerAction.viaRelay => LgMenuItem(
       label: l10n.connectBoxViaRelay,

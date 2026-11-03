@@ -40,7 +40,7 @@ void main() {
   test('use logs in at once; the password, then in use', () async {
     final card = appCore.exitNodes.use(_a, name: 'Study');
     expect(fakes.api.callsTo('sessionAdd'), [
-      [card.sessionId, _a, kExitFirstPort]
+      [card.sessionId, _a, kExitFirstPort, '', false]
     ]);
     expect(card.state, ExitCardState.connecting);
     // The same device again: the same card.
@@ -68,6 +68,26 @@ void main() {
     expect(appCore.exitNodes.needsAttention, false);
   });
 
+  test('2FA: the code, a wrong one, then verifying', () async {
+    // From the address book: with its shared password.
+    final card = appCore.exitNodes.use(_a, sharedPassword: 'abc');
+    expect(fakes.api.callsTo('sessionAdd').single.sublist(3), ['abc', true]);
+    await session(card, exitMsgbox('input-2fa', '2FA Required', ''));
+    expect(card.state, ExitCardState.twoFactor);
+    expect(card.wrongInput, false);
+    expect(appCore.exitNodes.needsAttention, true);
+
+    card.submit2fa(' 123456 ', trust: true);
+    expect(card.state, ExitCardState.verifying);
+    final sent = fakes.bind.callsTo(#sessionSend2Fa).single.namedArguments;
+    expect(sent[#code], '123456');
+    expect(sent[#trustThisDevice], true);
+
+    await session(card, exitMsgbox('input-2fa', 'Wrong 2FA Code', ''));
+    expect(card.state, ExitCardState.twoFactor);
+    expect(card.wrongInput, true);
+  });
+
   test('a refusal stops the card whichever stream says it first', () async {
     fakes.lg.reasons['Exit not enabled'] = 'exit_not_enabled';
     final first = appCore.exitNodes.use(_a);
@@ -85,16 +105,18 @@ void main() {
     await e2(_b, 'stopped');
     expect(second.stopReason!.code, 'exit_not_enabled');
 
-    // E2's own reason wins; "Retry" asks Rust and a new attempt drops the old reason.
+    // E2's own reason wins. A prompt of the stopped attempt is dropped; "Retry" connects from
+    // the click on, without the old reason, and the new attempt's prompts count again.
     await e2(_b, 'stopped', {
       'reason': {'code': 'exit_not_supported'}
     });
     expect(second.stopReason!.code, 'exit_not_supported');
+    await session(second, exitMsgbox('wait-remote-accept-nook', '', ''));
     second.retry();
     expect(fakes.api.callsTo('retry'), [
       [_b]
     ]);
-    await e2(_b, 'connecting');
+    expect(second.state, ExitCardState.connecting);
     await e2(_b, 'stopped');
     expect(second.stopReason, isNull);
   });
@@ -180,6 +202,13 @@ void main() {
     ]);
     await e2(_b, 'closed');
     expect(appCore.exitNodes.cards, isEmpty);
+
+    // Used again at once: the old session's last events are not the new card's.
+    final again = appCore.exitNodes.use(_a);
+    await e2(_a, 'closed', {'session_id': '${a.sessionId}'});
+    await e2(_a, 'stopped', {'session_id': '${a.sessionId}'});
+    expect(appCore.exitNodes.cards, [again]);
+    expect(again.state, ExitCardState.connecting);
   });
 
   test('a session Rust does not add stops; Retry adds it again', () async {
@@ -206,13 +235,15 @@ void main() {
     expect(connect(false), [PeerAction.remoteDesktop, PeerAction.viaRelay]);
   });
 
-  test('by ID takes a device ID or ID@server', () {
+  test('an exit takes a device ID or ID@server', () {
     expect(isExitId('100 200 300'), true);
+    expect(isExitId('study-pc'), true);
     expect(isExitId('abc_1@example.com'), true);
     expect(isExitId('192.168.1.2'), false);
     expect(isExitId('example.com:21118'), false);
     expect(isExitId('100200300/r'), false);
-    expect(isExitId('study'), false);
+    expect(isExitId('100200300/r@example.com'), false);
+    expect(isExitId('书房'), false);
   });
 
   group('directory', () {

@@ -733,7 +733,7 @@
   "exitReasonNotSupported": "远程设备的版本不支持用作出口",
   "exitReasonNeedEncryption": "此连接未加密，无法用作出口",
   "exitReasonTooManyAttempts": "验证失败次数过多，请 1 分钟后重试",
-  "exitReasonAlready": "此设备已有正在运行的出口或 TCP 隧道",
+  "exitReasonAlready": "本机已有连接此设备的出口或 TCP 隧道",
   "exitPortBusy": "本机端口 {port} 已被其他应用占用",
   "exitNoticeBlocked": "远程设备已阻止一次访问：目标位于其局域网内、是该设备本身，或其网络的 DNS 返回了虚拟地址。若要访问该设备的局域网，需由其所有者在出口设置中放行相应网段。",
   "exitNoticeFakeIp": "目标是本机代理应用分配的虚拟地址。请在应用的代理设置中改用远程 DNS 解析（socks5h）。",

@@ -22,16 +22,15 @@ enum ExitPortError {
   taken,
 }
 
-final _digits = RegExp(r'^\d+$');
-final _idBeforeServer = RegExp(r'^[A-Za-z0-9_-]+$');
+final _idChars = RegExp(r'^[A-Za-z0-9_-]+$');
 
-/// What "Use an exit node by ID" takes (08 M5-12): a device ID or `ID@server`, spaces ignored;
-/// not an IP address, a `domain:port` or `/r`.
+/// What "Use as exit node" takes (08 M5-12): a device ID or `ID@server`, the ID of letters,
+/// digits, `_` and `-`, spaces ignored; not an IP address, a `domain:port` or `/r`.
 bool isExitId(String input) {
   final s = input.replaceAll(' ', '');
   final at = s.indexOf('@');
-  if (at < 0) return _digits.hasMatch(s);
-  return _idBeforeServer.hasMatch(s.substring(0, at)) &&
+  if (at < 0) return _idChars.hasMatch(s);
+  return _idChars.hasMatch(s.substring(0, at)) &&
       at + 1 < s.length &&
       !s.substring(at + 1).contains('@');
 }
@@ -59,12 +58,13 @@ class ExitNodesModel extends ChangeNotifier {
       }.contains(c.state));
 
   /// "Use" (01 P1 block I, Q10): the card listens and logs in at once; the device's card when
-  /// it has one.
-  ExitCard use(String id, {String? name}) {
+  /// it has one. [sharedPassword] is the address book's for the device.
+  ExitCard use(String id, {String? name, String? sharedPassword}) {
     final existing = cardOf(id);
     if (existing != null) return existing;
     _events ??= _api.events().listen(_onEvent);
-    final card = ExitCard(this, id, _portFor(id), name: name);
+    final card = ExitCard(this, _api, id, _portFor(id),
+        name: name, sharedPassword: sharedPassword);
     _cards.add(card);
     card.addListener(notifyListeners);
     card.start();
@@ -80,8 +80,13 @@ class ExitNodesModel extends ChangeNotifier {
     if (_cards.remove(card)) notifyListeners();
   }
 
+  /// By the session when E2 names it, so a card stopped and used again does not take the old
+  /// session's events.
   void _onEvent(Map<String, dynamic> evt) {
-    final card = cardOf('${evt['id']}');
+    final session = evt['session_id'];
+    final card = session == null
+        ? cardOf('${evt['id']}')
+        : _cards.where((c) => '${c.sessionId}' == '$session').firstOrNull;
     if (card == null) return;
     if (evt['state'] == 'closed') {
       card.ended();

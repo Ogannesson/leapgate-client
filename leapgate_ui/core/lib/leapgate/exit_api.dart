@@ -75,11 +75,13 @@ ExitDirectoryAnswer parseExitDirectory(String json) {
 /// The exports of §10.12 as the exit models use them.
 abstract interface class ExitApi {
   /// `leapgate_exit_session_add`: a session that only runs the exit mapping on [port]; null when
-  /// it was added. Its events then come from block 1's `sessionStart`.
-  ExitAddError? sessionAdd(SessionID sessionId, String id, int port);
+  /// it was added. Its events then come from block 1's `sessionStart`. [password] is the address
+  /// book's shared password, with [isSharedPassword].
+  ExitAddError? sessionAdd(SessionID sessionId, String id, int port,
+      {String password = '', bool isSharedPassword = false});
 
-  /// `leapgate_exit_events`: each card's state as `{"id","port","state",…}`. Subscribing again
-  /// replaces the old subscription; each card's current state comes first.
+  /// `leapgate_exit_events`: each card's state as `{"id","session_id","port","state",…}`.
+  /// Subscribing again replaces the old subscription; each card's current state comes first.
   Stream<Map<String, dynamic>> events();
 
   /// `leapgate_exit_retry`: logs in now, skipping the cool-down; false without such a card.
@@ -104,11 +106,12 @@ ExitApi exitApi = const RustExitApi();
 class RustExitApi implements ExitApi {
   const RustExitApi();
 
-  // TODO(M5 整合): `lgBind.leapgateExitSessionAdd(sessionId:, id:, port:, password: '',
-  // isSharedPassword: false, connToken: null, forceRelay: false)`, parsed: `{}` is null, else
+  // TODO(M5 整合): `lgBind.leapgateExitSessionAdd(sessionId:, id:, port:, password:,
+  // isSharedPassword:, connToken: null, forceRelay: false)`, parsed: `{}` is null, else
   // `ExitAddError(m['error'], m['text'] ?? '')`.
   @override
-  ExitAddError? sessionAdd(SessionID sessionId, String id, int port) =>
+  ExitAddError? sessionAdd(SessionID sessionId, String id, int port,
+          {String password = '', bool isSharedPassword = false}) =>
       throw UnimplementedError('leapgate_exit_session_add');
 
   // TODO(M5 整合): `lgBind.leapgateExitEvents().map((e) => jsonDecode(e) as Map<String, dynamic>)`.

@@ -16,7 +16,6 @@ import 'bridge.dart';
 import 'connection.dart' show ConnInput, ConnReason;
 import 'exit_api.dart';
 import 'exit_nodes.dart';
-import 'session_route.dart';
 
 /// The card states of 01 P1 block I.
 enum ExitCardState {
@@ -55,13 +54,19 @@ class _Reason implements ConnReason {
 }
 
 class ExitCard extends ChangeNotifier {
-  ExitCard(this._nodes, this.id, this._port, {String? name})
+  ExitCard(this._nodes, this._api, this.id, this._port,
+      {String? name, String? sharedPassword})
       : _name = name,
+        _sharedPassword = sharedPassword,
         sessionId = const Uuid().v4obj();
 
   final ExitNodesModel _nodes;
+  final ExitApi _api;
   final String id;
   final SessionID sessionId;
+
+  /// The address book's password for the device, used as when connecting from the book.
+  final String? _sharedPassword;
 
   String? _name;
   int _port;
@@ -85,7 +90,6 @@ class ExitCard extends ChangeNotifier {
 
   final _notices = <String>[];
   final _noticed = <String>{};
-  SessionRoute? _route;
 
   /// The name given with "Use" (the directory's host name, the device list's name), else the
   /// remote host name once logged in; null until then.
@@ -137,15 +141,14 @@ class ExitCard extends ChangeNotifier {
   /// The notices shown, as C3 codes ([kExitNoticeCodes]), in the order they came.
   List<String> get notices => List.unmodifiable(_notices);
 
-  /// Q3's path and relay, read at `connection_ready`.
-  SessionRoute? get route => _route;
-
   String get socksAddress => 'socks5h://127.0.0.1:$_port';
   String get httpAddress => 'http://127.0.0.1:$_port';
 
   /// Adds the exit session and subscribes to its events; on a refusal the card stops with it.
   void start() {
-    final error = exitApi.sessionAdd(sessionId, id, _port);
+    final error = _api.sessionAdd(sessionId, id, _port,
+        password: _sharedPassword ?? '',
+        isSharedPassword: _sharedPassword != null);
     if (error != null) {
       _rust = _Rust.stopped;
       _stopReason = _Reason(error.code == 'already' ? 'exit_already' : 'other',
@@ -181,8 +184,9 @@ class ExitCard extends ChangeNotifier {
     };
     if (rust == null) return;
     if (rust == _Rust.connecting) {
-      // A new attempt: the reasons of the last one go.
-      if (_rust != _Rust.connecting) {
+      // A reconnect after the tunnel ended: the reasons of the last attempt go. "Retry" on a
+      // stopped card has dropped them already; a failure the session reports first stays.
+      if (_rust == _Rust.interrupted) {
         _stopReason = null;
         _lastError = null;
       }
@@ -214,9 +218,6 @@ class ExitCard extends ChangeNotifier {
     switch (evt['name']) {
       case 'msgbox':
         _onMsgBox('${evt['type']}', '${evt['title']}', '${evt['text']}');
-      case 'connection_ready':
-        _route = exitApi.connection(sessionId);
-        notifyListeners();
       case 'peer_info':
         final host = evt['hostname'];
         if (_name == null && host is String && host.isNotEmpty) {
@@ -261,6 +262,8 @@ class ExitCard extends ChangeNotifier {
   }
 
   void _ask(ConnInput input, {bool wrong = false}) {
+    // A prompt of the attempt that stopped; after "Retry" the card is connecting again.
+    if (_rust == _Rust.stopped || _rust == _Rust.portBusy) return;
     _input = input;
     _verifying = false;
     _wrongInput = wrong;
@@ -302,7 +305,7 @@ class ExitCard extends ChangeNotifier {
   Future<void> stop() async {
     ended();
     try {
-      if (_added) await exitApi.close(sessionId);
+      if (_added) await _api.close(sessionId);
     } finally {
       _nodes.drop(this);
     }
@@ -311,12 +314,16 @@ class ExitCard extends ChangeNotifier {
   /// "Retry" (stopped) and "Reconnect" (interrupted), M5-7: logs in now. A card Rust refused to
   /// add tries to add it again.
   void retry() {
-    if (_added) {
-      exitApi.retry(id);
-    } else {
+    if (_rust == _Rust.stopped) {
+      // Connecting from the click on, without the old reason.
       _stopReason = null;
+      _lastError = null;
       _rust = _Rust.connecting;
       notifyListeners();
+    }
+    if (_added) {
+      _api.retry(id);
+    } else {
       start();
     }
   }
@@ -328,7 +335,7 @@ class ExitCard extends ChangeNotifier {
     if (port == _port) return null;
     _port = port;
     _nodes.savePort(id, port);
-    exitApi.setPort(id, port);
+    _api.setPort(id, port);
     notifyListeners();
     return null;
   }

@@ -175,6 +175,26 @@ void main() {
       expect(find.text('1 个出口将在后台继续运行。'), findsOneWidget);
     });
 
+    testMainWindow('installed with a session: they go on in the background',
+        (tester) async {
+      fakes.bind.installed = true;
+      await pumpMainWindow(tester);
+      await _withSession(tester);
+      await _closeWindow(tester);
+      expect(find.text('断开全部 1 个会话并关闭窗口？'), findsOneWidget);
+      expect(find.text('1 个出口将在后台继续运行。'), findsOneWidget);
+    });
+
+    testMainWindow('a session and a remembered "Quit": the dialog says they stop',
+        (tester) async {
+      fakes.bind.localOptions[kOptionLeapgateCloseAction] = 'exit';
+      await pumpMainWindow(tester);
+      await _withSession(tester);
+      await _closeWindow(tester);
+      expect(find.text('断开全部 1 个会话并关闭窗口？'), findsOneWidget);
+      expect(find.text('1 个出口将停止。'), findsOneWidget);
+    });
+
     testMainWindow('a remembered "Quit" still asks, and Cancel keeps the window',
         (tester) async {
       fakes.bind.localOptions[kOptionLeapgateCloseAction] = 'exit';

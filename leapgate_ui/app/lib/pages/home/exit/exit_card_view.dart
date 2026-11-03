@@ -36,7 +36,14 @@ import '../password_row.dart' show copyWithToast;
     'exit_need_encryption' => (l10n.exitReasonNeedEncryption, false),
     'too_many_attempts' => (l10n.exitReasonTooManyAttempts, true),
     'exit_already' => (l10n.exitReasonAlready, true),
-    _ => (reasonView(l10n, reason, id).text, true),
+    // After "已停止：" only its first sentence, without the full stop (01 §7.6).
+    _ => (
+      RegExp(
+            r'^[^。]*?(?=。|\.(?:\s|$)|$)',
+          ).firstMatch(reasonView(l10n, reason, id).text)?.group(0) ??
+          '',
+      true,
+    ),
   };
   return (
     text: text.isEmpty ? l10n.exitStoppedPlain : l10n.exitStopped(text),
@@ -98,6 +105,7 @@ class _ExitCardViewState extends State<ExitCardView> {
   void _onCard() {
     final state = _card.state;
     if (state != _state) {
+      if (_state == ExitCardState.password) _password.clear();
       if (state == ExitCardState.password) _remember = _card.rememberPassword;
       if (state == ExitCardState.twoFactor) _code.clear();
       _state = state;
@@ -226,7 +234,7 @@ class _ExitCardViewState extends State<ExitCardView> {
         }
         actions
           ..add(cancel)
-          ..add(button(l10n.connConnect, verify, kind: LgButtonKind.primary));
+          ..add(button(l10n.connVerify, verify, kind: LgButtonKind.primary));
       case ExitCardState.verifying:
         body.add(LgStatusText(LgStatus.connecting, l10n.connVerifying));
         actions.add(cancel);

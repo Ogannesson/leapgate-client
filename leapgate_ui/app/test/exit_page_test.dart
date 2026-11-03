@@ -5,6 +5,7 @@ import 'package:flutter_hbb/generated_bridge.dart';
 import 'package:flutter_hbb/leapgate/account_api.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/exit_api.dart';
+import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:leapgate_ui/pages/home/exit/exit_card_view.dart';
 import 'package:leapgate_ui/widgets/lg_title_bar.dart';
@@ -35,6 +36,17 @@ Finder _cardField() => find.descendant(
   matching: find.byType(EditableText),
 );
 
+/// Offers "Trust this device" with the 2FA code once [trusted].
+class _TrustingBind extends AppFakeBind {
+  var trusted = false;
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) =>
+      invocation.memberName == #sessionGetEnableTrustedDevices
+      ? trusted
+      : super.noSuchMethod(invocation);
+}
+
 void main() {
   late AppFakes fakes;
   late FakeExitApi api;
@@ -55,8 +67,10 @@ void main() {
   }
 
   Future<void> session(WidgetTester tester, Map<String, dynamic> evt) async {
-    final card = appCore.exitNodes.cards.single;
-    fakes.bind.streams[card.sessionId]!.add(EventToUI.event(jsonEncode(evt)));
+    final card = appCore.exitNodes.cardOf(_id)!;
+    (bind as FakeBind).streams[card.sessionId]!.add(
+      EventToUI.event(jsonEncode(evt)),
+    );
     await _settle(tester);
   }
 
@@ -120,9 +134,35 @@ void main() {
         findsOneWidget,
       );
 
+      // A blocked target: the notice, closed by the user.
+      fakes.lg.reasons['blocked'] = 'exit_blocked';
+      await session(tester, msgbox('error', 'Error', 'blocked'));
+      const blocked =
+          '远程设备已阻止一次访问：目标位于其局域网内、是该设备本身，或其网络的 DNS 返回了虚拟地址。若要访问该设备的局域网，需由其所有者在出口设置中放行相应网段。';
+      expect(find.textContaining(blocked, findRichText: true), findsOneWidget);
+      await tester.tap(find.bySemanticsLabel('关闭通知'));
+      await _settle(tester);
+      expect(find.textContaining(blocked, findRichText: true), findsNothing);
+
+      // Another card holds 21181: changing to it is refused here.
+      appCore.exitNodes.use('400500600');
+      await _settle(tester);
+      await tester.tap(find.text('修改端口').first);
+      await tester.pump();
+      expect(find.text('代理地址将改为新端口，需同步修改应用中的代理设置。'), findsOneWidget);
+      await tester.enterText(_cardField().first, '21181');
+      await tester.tap(find.text('确定'));
+      await tester.pump();
+      expect(find.text('此端口已被另一个出口使用'), findsOneWidget);
+      expect(api.callsTo('setPort'), isEmpty);
+      await tester.tap(find.text('取消').first);
+      await tester.pump();
+      await appCore.exitNodes.remove('400500600');
+      await _settle(tester);
+
       await tester.tap(find.text('停止'));
       await _settle(tester);
-      expect(api.callsTo('close'), hasLength(1));
+      expect(api.callsTo('close'), hasLength(2));
       expect(find.text('暂无正在使用的出口'), findsOneWidget);
       expect(find.bySemanticsLabel('出口，1 个正在使用'), findsNothing);
     },
@@ -153,6 +193,21 @@ void main() {
     await _openExitPage(tester);
     appCore.exitNodes.use(_id);
     await _settle(tester);
+    // Interrupted: the addresses stay, "Reconnect" logs in now.
+    await e2(tester, 'interrupted', {'cause': 'tunnel_ended'});
+    expect(
+      find.textContaining('连接已中断，下次有应用使用此代理时将自动重新连接', findRichText: true),
+      findsOneWidget,
+    );
+    expect(find.text('socks5h://127.0.0.1:21180'), findsOneWidget);
+    expect(find.text('http://127.0.0.1:21180'), findsOneWidget);
+    await tester.tap(find.text('重新连接'));
+    await _settle(tester);
+    expect(api.callsTo('retry'), [
+      [_id],
+    ]);
+
+    await e2(tester, 'connecting');
     await session(tester, msgbox('error', 'Login Error', 'Exit not enabled'));
     await e2(tester, 'stopped');
     expect(
@@ -186,6 +241,36 @@ void main() {
       [_id, 21190],
     ]);
   });
+
+  testMainWindow(
+    '2FA: the code field, a wrong code, "Trust this device" when offered',
+    (tester) async {
+      final trusting = _TrustingBind();
+      platformFFI.setBindingForTesting(trusting);
+      await _openExitPage(tester);
+      appCore.exitNodes.use(_id);
+      await _settle(tester);
+      await session(tester, msgbox('input-2fa', '2FA Required', ''));
+      expect(find.text('输入验证码'), findsOneWidget);
+      expect(find.bySemanticsLabel('验证码'), findsOneWidget);
+      expect(find.text('信任本机'), findsNothing);
+
+      trusting.trusted = true;
+      await session(tester, msgbox('input-2fa', 'Wrong 2FA Code', ''));
+      expect(find.text('验证码错误或已过期'), findsOneWidget);
+      expect(find.text('信任本机'), findsOneWidget);
+      expect(find.text('验证'), findsOneWidget);
+      await tester.tap(find.text('信任本机'));
+      await tester.pump();
+      // Six digits go by themselves, as on the connection panel.
+      await tester.enterText(_cardField(), '123456');
+      await _settle(tester);
+      final sent = trusting.callsTo(#sessionSend2Fa).last.namedArguments;
+      expect(sent[#code], '123456');
+      expect(sent[#trustThisDevice], true);
+      expect(find.textContaining('正在验证…', findRichText: true), findsOneWidget);
+    },
+  );
 
   testMainWindow('the directory: "Use" makes the card, the row says "In use"', (
     tester,
