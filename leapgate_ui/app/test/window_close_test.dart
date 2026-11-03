@@ -1,10 +1,12 @@
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
+import 'package:flutter_hbb/leapgate/exit_api.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:leapgate_ui/icons/lg_icon.dart';
 import 'package:leapgate_ui/shell/navigation.dart';
 import 'package:leapgate_ui/shell/window_close.dart';
 
+import '../../core/test/exit_fakes.dart' show FakeExitApi;
 import 'session_fakes.dart';
 
 // Closing the main window (01 §2.1 "窗口关闭", §8.1 Q6): sessions or not × portable or
@@ -156,5 +158,59 @@ void main() {
     await _closeWindow(tester);
     expect(find.text('关闭窗口？'), findsNothing);
     expect(fakes.window, contains('hide'));
+  });
+
+  group('exit nodes running (01 §2.1, M5-11)', () {
+    setUp(() {
+      exitApi = FakeExitApi();
+      appCore.exitNodes.use('100200300');
+    });
+
+    testMainWindow('run in background says they go on', (tester) async {
+      await pumpMainWindow(tester);
+      await _closeWindow(tester);
+      expect(find.text('1 个出口将在后台继续运行。'), findsNothing);
+      await tester.tap(find.text('在后台运行'));
+      await tester.pump();
+      expect(find.text('1 个出口将在后台继续运行。'), findsOneWidget);
+    });
+
+    testMainWindow('installed with a session: they go on in the background',
+        (tester) async {
+      fakes.bind.installed = true;
+      await pumpMainWindow(tester);
+      await _withSession(tester);
+      await _closeWindow(tester);
+      expect(find.text('断开全部 1 个会话并关闭窗口？'), findsOneWidget);
+      expect(find.text('1 个出口将在后台继续运行。'), findsOneWidget);
+    });
+
+    testMainWindow('a session and a remembered "Quit": the dialog says they stop',
+        (tester) async {
+      fakes.bind.localOptions[kOptionLeapgateCloseAction] = 'exit';
+      await pumpMainWindow(tester);
+      await _withSession(tester);
+      await _closeWindow(tester);
+      expect(find.text('断开全部 1 个会话并关闭窗口？'), findsOneWidget);
+      expect(find.text('1 个出口将停止。'), findsOneWidget);
+    });
+
+    testMainWindow('a remembered "Quit" still asks, and Cancel keeps the window',
+        (tester) async {
+      fakes.bind.localOptions[kOptionLeapgateCloseAction] = 'exit';
+      await pumpMainWindow(tester);
+
+      await _closeWindow(tester);
+      expect(find.text('退出 Leapgate？'), findsOneWidget);
+      expect(find.text('1 个出口将停止。'), findsOneWidget);
+      await tester.tap(find.text('取消'));
+      await _settle(tester);
+      expect(fakes.window, isNot(contains('close')));
+
+      await _closeWindow(tester);
+      await tester.tap(find.text('退出'));
+      await _settle(tester);
+      expect(fakes.window, contains('close'));
+    });
   });
 }

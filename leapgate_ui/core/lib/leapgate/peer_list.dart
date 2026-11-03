@@ -51,6 +51,8 @@ List<SourcedPeer> searchablePeers(List<CategoryPeers> categories) {
 /// What the "⋯" menu of a device offers (01 P1 block F).
 enum PeerAction {
   remoteDesktop,
+  // M5: only when the remote device is on Windows (`libs/leapgate/src/exit/mod.rs`).
+  useAsExit,
   viaRelay,
   alwaysRelay,
   wakeOnLan,
@@ -88,18 +90,25 @@ List<List<PeerAction>> peerMenu(
   required bool hasPassword,
   required bool windows,
   AbMenuFlags ab = (addToAb: false, sharedBook: false, tags: false),
+  bool peerWindows = false,
 }) {
+  // [windows] is this device's platform (the shortcut); the exit is the remote device's.
+  final connect = [
+    PeerAction.remoteDesktop,
+    if (peerWindows) PeerAction.useAsExit,
+    PeerAction.viaRelay,
+  ];
   // The address book and the team devices (01 P1 block F; upstream `AddressBookPeerCard`,
   // `MyGroupPeerCard`). A read-only book keeps its writing items, greyed by the app.
   if (category == PeerCategory.group) {
     return [
-      [PeerAction.remoteDesktop, PeerAction.viaRelay],
+      connect,
       if (ab.addToAb) [PeerAction.addToAb],
     ];
   }
   if (category == PeerCategory.addressBook) {
     return [
-      [PeerAction.remoteDesktop, PeerAction.viaRelay],
+      connect,
       [PeerAction.alwaysRelay, if (windows) PeerAction.createShortcut],
       [
         PeerAction.rename,
@@ -115,7 +124,7 @@ List<List<PeerAction>> peerMenu(
     ];
   }
   final groups = [
-    [PeerAction.remoteDesktop, PeerAction.viaRelay],
+    connect,
     [
       PeerAction.alwaysRelay,
       if (category == PeerCategory.lan) PeerAction.wakeOnLan,
