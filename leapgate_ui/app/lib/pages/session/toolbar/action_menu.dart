@@ -217,8 +217,8 @@ Future<List<TbEntry>> actionMenuEntries(ToolbarEnv env) async {
     );
   }
   if (isDefault && !bind.isDisableAccount()) {
-    // Upstream signs in first; signing in comes with the account page (M4).
-    final signedIn = appCore.options.local.get('access_token').isNotEmpty;
+    // Upstream signs in first. The token stays in Rust (M4-3): ask the account, not the option.
+    final signedIn = appCore.account.loggedIn;
     entries.add(
       TbItem(
         label: l10n.menuAddNote,
