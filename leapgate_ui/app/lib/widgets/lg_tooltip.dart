@@ -39,10 +39,12 @@ class LgTooltip extends StatelessWidget {
       positionDelegate: _position,
       tooltipBuilder: (context, animation) {
         if (_when != null && !_when()) return const SizedBox.shrink();
-        return FadeTransition(
+        final box = FadeTransition(
           opacity: animation,
           child: LgTooltipBox(child: content ?? Text(message!)),
         );
+        // The full text of a cut label is what the label already reads.
+        return _when == null ? box : ExcludeSemantics(child: box);
       },
       child: child,
     );
@@ -201,16 +203,23 @@ class _LgEllipsisTextState extends State<LgEllipsisText> {
 
   @override
   Widget build(BuildContext context) {
-    return LgTooltip._conditional(
-      message: widget.text,
-      when: _overflows,
-      child: Text(
-        widget.text,
-        key: _key,
-        style: widget.style,
-        maxLines: 1,
-        softWrap: false,
-        overflow: TextOverflow.ellipsis,
+    // The tooltip's overlay anchor is a semantics node of its own; inside a
+    // merged row (a menu item) Flutter 3.44 still sends it, cut off from the
+    // tree (docs/新界面/无障碍语义树为空排查.md §2.1). The text is read from here.
+    return Semantics(
+      label: widget.text,
+      excludeSemantics: true,
+      child: LgTooltip._conditional(
+        message: widget.text,
+        when: _overflows,
+        child: Text(
+          widget.text,
+          key: _key,
+          style: widget.style,
+          maxLines: 1,
+          softWrap: false,
+          overflow: TextOverflow.ellipsis,
+        ),
       ),
     );
   }
