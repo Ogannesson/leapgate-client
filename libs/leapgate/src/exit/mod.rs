@@ -2,6 +2,7 @@
 //! local SOCKS5 / HTTP CONNECT proxy, over a multiplexed port forward tunnel. The shared
 //! interface is phase 4 contract README §2.
 
+pub mod card;
 pub mod dial;
 pub mod directory;
 mod policy;

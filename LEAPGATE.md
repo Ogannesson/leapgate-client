@@ -1476,7 +1476,7 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 | 导出 | 参数 | 返回 / 事件 |
 |---|---|---|
 | `leapgate_exit_session_add` | `session_id: SessionID`、`id: String`、`port: i32`、`password: String`、`is_shared_password: bool`、`conn_token: Option<String>`、`force_relay: bool` | `SyncReturn<String>`：成功 `{}`；失败 `{"error":"already"}`（这台设备已有出口或端口转发会话）、`{"error":"invalid_port"}`（不在 1~65535）、`{"error":"other","text":…}`。成功后界面照常调第一块的 `bind.sessionStart(sessionId, id)` 拿这个会话的事件流 |
-| `leapgate_exit_events` | `sink: StreamSink<String>` | 新订阅替换旧的；订阅时先把每张卡片的当前状态各推一次。每条 `{"id":设备ID,"port":端口,"state":…}`，`state` 见下 |
+| `leapgate_exit_events` | `sink: StreamSink<String>` | 新订阅替换旧的；订阅时先把每张卡片的当前状态各推一次。每条 `{"id":设备ID,"session_id":会话ID,"port":端口,"state":…}`，`state` 见下；`session_id` 是这张卡片的出口会话的 SessionID 字符串（和 `leapgate_exit_session_add` 收到的同一个），界面停止一张卡片后马上对同一台设备再"使用"时，按它丢掉旧会话迟到的事件（补推的当前状态也带） |
 | `leapgate_exit_retry` | `id: String` | `SyncReturn<bool>`（没有这张卡片为假）：清冷却、马上登录。"重试"（已停止）和"重新连接"（暂时断开）共用（M5-7） |
 | `leapgate_exit_set_port` | `id: String`、`port: i32` | `SyncReturn<bool>`：关旧监听、在新端口监听，隧道保留（M5-5）；新端口被占时推 `port_in_use` |
 | 停止、取消 | 第一块现成的 `bind.sessionClose(sessionId)` | 卡片模式收到关闭后关监听、关隧道（登录中也能取消，见下），推 `closed` |
@@ -1521,3 +1521,27 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 **测试**
 - R：状态类型的 JSON；`run_card` 的三种登录结局和守卫交还；中途取消；改端口；`already`；旧的 `run` / `serve` 测试照常过。
 - coder E：卡片状态在两条流下的走向（含先后颠倒）；目标被拦按原因去重；`runningCount`、`needsAttention`；端口建议值和撞端口；退出登录只清目录；页面三块的各态；"用作出口"只在对端是 Windows 时出现；关窗两种文案。
+
+**Rust 实现说明**（2026-11-03，分支 `ui/rust-exit`）
+
+- 代码：
+  - `libs/leapgate/src/exit/card.rs`：卡片状态 `State`（带 `Transport`、`Cause`）、事件 JSON `event(id, session_id, port, &State)`、`stopped(msg, insecure_refused)`（Rust 知道的两种原因）。
+  - `src/leapgate_hooks/exit.rs` 末尾的 `cards` 模块：卡片登记表（键是设备 ID，值是代号 `gen`、最后一条事件、控制通道）、`session_add`（E3）、`run_card`、`retry`、`set_port`、`set_events`。`run` 开头加了 4 行分流（`cards::take` 拿到就进 `run_card`），`run` 的其余部分和 `serve` 一行没动。
+  - `src/port_forward_mux.rs`：`Tunnel::ended()`，6 行。
+  - `src/leapgate_ffi.rs` 末尾四个导出：`leapgate_exit_session_add(session_id: SessionID, id: String, port: i32, password: String, is_shared_password: bool, conn_token: Option<String>, force_relay: bool) -> SyncReturn<String>`、`leapgate_exit_events(sink: StreamSink<String>) -> ResultType<()>`、`leapgate_exit_retry(id: String) -> SyncReturn<bool>`、`leapgate_exit_set_port(id: String, port: i32) -> SyncReturn<bool>`。Android、iOS 上是空实现：`session_add` 回 `other`，`retry`、`set_port` 回假。
+- 和约定不同的地方：
+  - 占位连接（M5-4）不连卡片自己的端口，而是另开一个只用一次的回环监听（`127.0.0.1:0`）连成一对，登录用其中一头。约定的三条约束因此都自然成立：浏览器早就指着卡片端口时，它的连接照常进握手、排队等登录结束，不会被当成占位连接；占位连接不经过卡片的监听，进不了 SOCKS / HTTP 握手；登录返回后两头一起丢，不开通道。连自己端口的写法还得按地址认出哪条是自己的，多一段判断，结果一样。
+  - `port_in_use` 不另带 `port` 字段：事件顶层的 `port` 就是被占的端口（每条事件的 `port` 都是卡片当时在用或刚试过的端口，改端口后是新端口）。
+  - 改端口先关旧监听再开新的，所以改成原来的端口也行。新端口被占时旧监听已经关了，卡片进 `port_in_use`，隧道仍保留；再改一个能用的端口就回到 `in_use`，不重新登录。新端口开好时如果没有隧道（一开始就被占、暂时断开、已停止），马上登录，和"重试"一样。`set_port` 的端口不在 1~65535 时直接回假，不推事件。
+  - 登录结局照 `serve` 仍各调一次上游的提示：版本不支持时 `on_error`，临时失败时 `on_establish_connection_error`。会话事件流里因此有原来的错误框，界面取失败原因用它；卡片状态以 E2 为准。
+  - `stopped` 的 `reason` 是 C3 `Reason` 的 JSON 对象，例如 `{"code":"exit_not_supported"}`、`{"code":"exit_need_encryption"}`。
+  - 新订阅补发的是每张卡片最后一条事件的原文，`interrupted` 里的 `retry_after_ms` 是推出时的值（10000），不扣掉已经过去的时间（界面不显示它）。
+  - 为了不接真实对端也能测，`run_card` 对会话的要求收成一个小接口 `CardSession`（登录、隧道建立后发连接就绪事件两个方法），正式实现就是 `Session<T>`，测试换成假的。
+- 已知限制：
+  - 登录中途取消（`session_close`）时，登录连同 KCP 守卫一起丢掉，KCP 端点当场中止、发不出 FIN，被控端要等 20 秒静默关闭才关（`c0858dd2d`）；TCP 和中继当场关。
+  - 旧界面懒登录中途关隧道窗口时，`Close` 仍被上游登录循环吞掉，监听一直留着（M5-13，不修）。
+  - 登录进行中收到的"重试""改端口"排队，等这次登录结束再处理。
+  - 刚 `session_close` 一张卡片、它的运行实例还没关掉监听时，马上为同一台设备再 `session_add`，新卡片可能先报 `port_in_use`（端口还被旧的占着），再"重试"一次就好。登记表按代号区分新旧卡片：新卡片登记以后，旧卡片的事件不再推出、清理也不会删掉新卡片的登记；新卡片登记之前已经推出的旧事件，界面按 `session_id` 丢掉。
+  - 加了会话却一直没调 `session_start` 的卡片会留在登记表里（只是一条记录，不占端口），下次为同一台设备 `session_add` 时被替换；它还没有事件，订阅时不补发。
+- 测试：`libs/leapgate` 新增 2 个（每种状态的事件 JSON、`stopped` 的原因）；根 crate `leapgate_hooks::exit::cards` 7 个，用假会话和本机回环连接：登录成功后第一个通道是本地程序的（占位连接没开通道）、对端断开后进 `interrupted`（`tunnel_ended`）；版本不支持时进 `stopped`（`exit_not_supported`）、监听关掉、KCP 守卫交给 `release_kcp` 后对端收到关闭（把守卫改成直接丢掉，这个测试会失败），"重试"后不安全连接被拒进 `stopped`（`exit_need_encryption`），再"重试"进 `in_use`；临时失败进 `interrupted`（`login_failed`，`retry_after_ms` 10000）、监听留着，"重试"马上登录；登录中途关闭，1 秒内卡片关掉、端口不再接受连接并能被别的程序占用；改端口后旧端口关掉、新端口的连接走原来的隧道（没有第二次登录）；端口被占时不登录，改端口后登录；`retry`、`set_port` 只对登记过的卡片和合法端口生效。端口关没关用连接去试（3 秒内不再接受连接即可）：整套测试一起跑时，丢掉的监听在 Windows 上还会接受连接约 1 秒，单独跑时当场关。根 crate `cargo test --lib` 215 个通过，失败的 1 个是 `installer_handoff::directory::tests::protected_directory_enforces_creator_permissions`（删测试目录时拒绝访问，单独跑也失败，和本改动无关）。
+- 没在单测里做、留给验收的：`already`（要上游的会话表；单测里建会话会在本机配置目录写一份设备配置，并经 IPC 把会话数报给正在运行的服务，所以不做）；经 frb 的实际调用；真实对端下的密码、2FA、等对方接受、不安全连接提示（卡片回拒绝之后带 `exit_need_encryption` 那一步用假登录结果验了）；`connection_ready` 之后 `leapgate_session_connection` 给出的路径；中途取消走 KCP 时被控端 20 秒才关；登录被拒时被控端 CM 当场消失（03 §8.5 第 9 项）。
