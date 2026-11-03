@@ -123,6 +123,15 @@ void main() {
       expect(find.text('适应窗口'), findsNothing);
     });
 
+    testWidgets('a menu button name sits in the middle of the bar', (
+      tester,
+    ) async {
+      await pumpLg(tester, _bar(_Calls()));
+      final name = tester.getCenter(find.text('画面')).dy;
+      final button = tester.getCenter(find.byType(LgToolbarMenuButton)).dy;
+      expect(name, moreOrLessEquals(button, epsilon: 1));
+    });
+
     testWidgets('a disabled menu button opens nothing', (tester) async {
       await pumpLg(tester, _bar(_Calls(), menuEnabled: false));
       await tester.tap(find.byType(LgToolbarMenuButton));

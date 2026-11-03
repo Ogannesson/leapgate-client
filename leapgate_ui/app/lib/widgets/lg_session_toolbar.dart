@@ -367,6 +367,7 @@ class LgToolbarMenuButton extends StatelessWidget {
                 ),
                 child: ExcludeSemantics(
                   child: Stack(
+                    alignment: AlignmentDirectional.centerStart,
                     clipBehavior: Clip.none,
                     children: [
                       Row(
