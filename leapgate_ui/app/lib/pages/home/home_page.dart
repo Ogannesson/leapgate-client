@@ -16,6 +16,7 @@ import '../../widgets/lg_pressable.dart';
 import '../../widgets/lg_status.dart';
 import 'account/account.dart';
 import 'devices_page.dart';
+import 'exit/exit_page.dart';
 import 'home_dialogs.dart';
 import 'password_row.dart';
 
@@ -58,12 +59,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     connectBoxFocusRequests.addListener(_onFocusRequest);
+    exitPageRequests.addListener(_onExitRequest);
     WidgetsBinding.instance.addObserver(this);
   }
 
   @override
   void dispose() {
     connectBoxFocusRequests.removeListener(_onFocusRequest);
+    exitPageRequests.removeListener(_onExitRequest);
     WidgetsBinding.instance.removeObserver(this);
     _connectBox.dispose();
     _connectBoxFocus.dispose();
@@ -92,6 +95,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       (_) => _connectBoxFocus.requestFocus(),
     );
   }
+
+  /// "Use as exit node" ([useAsExit]): the exit page scrolls to the card itself.
+  void _onExitRequest() => setState(() => _section = HomeSection.exitNodes);
 
   @override
   Widget build(BuildContext context) {
@@ -150,6 +156,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                       overlays: widget.overlays,
                     ),
                   ),
+                ],
+                if (_section == HomeSection.exitNodes) ...[
+                  // Right under the title (`LgExitPage`).
+                  const SizedBox(height: LgSpace.s1),
+                  Expanded(child: ExitPage(overlays: widget.overlays)),
                 ],
               ],
             ),
@@ -312,6 +323,32 @@ class _SideColumn extends StatelessWidget {
               SizedBox(height: short ? LgSpace.s2 : LgSpace.s5),
               for (final (i, s) in HomeSection.values.indexed) ...[
                 if (i > 0) const SizedBox(height: 2),
+                if (s == HomeSection.exitNodes)
+                  // The exit nodes running and whether one waits for the user (M5-8); no
+                  // mark while the exit page shows.
+                  ListenableBuilder(
+                    listenable: appCore.exitNodes,
+                    builder: (context, _) {
+                      final exits = appCore.exitNodes;
+                      final count = exits.runningCount;
+                      final attention =
+                          exits.needsAttention && s != section;
+                      return _NavItem(
+                        icon: LgIcons.exit,
+                        label: l10n.navExitNodes,
+                        selected: s == section,
+                        onPressed: () => onSection(s),
+                        count: count,
+                        attention: attention,
+                        semanticLabel: count == 0
+                            ? null
+                            : attention
+                                ? l10n.exitNavLabelAttention(count)
+                                : l10n.exitNavLabel(count),
+                      );
+                    },
+                  )
+                else
                 _NavItem(
                   icon: switch (s) {
                     HomeSection.devices => LgIcons.monitor,
@@ -430,12 +467,20 @@ class _NavItem extends StatelessWidget {
     required this.label,
     required this.selected,
     required this.onPressed,
+    this.count = 0,
+    this.attention = false,
+    this.semanticLabel,
   });
 
   final LgIcons icon;
   final String label;
   final bool selected;
   final VoidCallback onPressed;
+
+  // The exit nodes' number and mark (M5-8); placeholders until designer's nav item.
+  final int count;
+  final bool attention;
+  final String? semanticLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -445,7 +490,7 @@ class _NavItem extends StatelessWidget {
     return LgPressable(
       onPressed: onPressed,
       selected: selected,
-      semanticLabel: label,
+      semanticLabel: semanticLabel ?? label,
       builder: (context, states) {
         final overlay = lgStateOverlay(c, states);
         final bg = selected ? c.nav : null;
@@ -462,7 +507,10 @@ class _NavItem extends StatelessWidget {
                   : Color.alphaBlend(overlay, bg ?? Colors.transparent),
               borderRadius: radius,
             ),
-            child: Row(
+            // With a number, [semanticLabel] says it all.
+            child: ExcludeSemantics(
+              excluding: semanticLabel != null,
+              child: Row(
               children: [
                 LgIcon(icon, size: 24, color: fg),
                 const SizedBox(width: LgSpace.s3),
@@ -477,7 +525,9 @@ class _NavItem extends StatelessWidget {
                     ),
                   ),
                 ),
+                if (count > 0) LgCountMark(count, alert: attention),
               ],
+            ),
             ),
           ),
         );

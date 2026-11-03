@@ -488,3 +488,7 @@ const String kOptionCurrentAbName = "current-ab-name";
 const String syncAbOption = 'sync-ab-with-recent-sessions';
 const String sortAbTagsOption = 'sync-ab-tags';
 const String filterAbTagOption = 'filter-ab-by-intersection';
+
+/// LocalConfig: the exit nodes' local proxy ports as JSON `{device ID: port}` (M5-6), Leapgate's
+/// own; the old UI kept its exit port in the device's port forwards.
+const String kOptionLeapgateExitPorts = 'leapgate-exit-ports';

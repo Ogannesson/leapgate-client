@@ -515,6 +515,12 @@ mod tunnel {
         pub fn set_failed(&self) {
             self.state.send_replace(TunnelState::Failed);
         }
+
+        // leapgate: the exit card shows a tunnel's end as it happens (LEAPGATE.md §10.12).
+        pub async fn ended(&self) {
+            let mut state = self.state.subscribe();
+            let _ = state.wait_for(|s| !matches!(s, TunnelState::Muxed(_))).await;
+        }
     }
 
     struct ChannelEntry {

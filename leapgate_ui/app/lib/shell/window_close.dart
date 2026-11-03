@@ -64,13 +64,17 @@ Future<void> closeMainWindow(TabOverlays overlays) async {
     remembered: rememberedCloseAction(local),
   );
   var action = plan.action;
+  final exits = appCore.exitNodes.runningCount;
   if (plan.askSessions || plan.askAction) {
     final answer = await overlays.show<CloseAnswer>(
         kWindowScope,
         (context, close) => LgDialogScrim(
             onEscape: () => close(null),
             child: CloseDialog(
-                plan: plan, sessions: devices.length, onClose: close)));
+                plan: plan,
+                sessions: devices.length,
+                exits: exits,
+                onClose: close)));
     if (answer == null) return;
     if (plan.askAction) action = answer.action;
     if (answer.dontShowAgain) {
@@ -79,6 +83,14 @@ Future<void> closeMainWindow(TabOverlays overlays) async {
     if (answer.remember) {
       await local.set(kOptionLeapgateCloseAction, answer.action.name);
     }
+  } else if (exits > 0 && action == CloseAction.exit) {
+    // Quitting stops the exit nodes: asked even when "Quit" is remembered (M5-11).
+    final quit = await overlays.show<bool>(
+        kWindowScope,
+        (context, close) => LgDialogScrim(
+            onEscape: () => close(null),
+            child: _QuitWithExitsDialog(exits: exits, onClose: close)));
+    if (quit != true) return;
   }
   try {
     // A remote session does not go on in a window nobody sees (01 §2.1).
@@ -106,10 +118,14 @@ class CloseDialog extends StatefulWidget {
       {super.key,
       required this.plan,
       required this.sessions,
+      this.exits = 0,
       required this.onClose});
 
   final ClosePlan plan;
   final int sessions;
+
+  /// Exit nodes running: they go on in the background, or stop with a remembered "Quit".
+  final int exits;
   final void Function(CloseAnswer? answer) onClose;
 
   @override
@@ -171,6 +187,39 @@ class _CloseDialogState extends State<CloseDialog> {
             label: l10n.closingDontShowAgain,
             onChanged: (v) => setState(() => _dontShowAgain = v),
           ),
+        if (widget.exits > 0)
+          if ((plan.askAction ? _action : plan.action) ==
+              CloseAction.background)
+            Text(l10n.exitCloseBackground(widget.exits))
+          // The "Quit" choice says so itself.
+          else if (!plan.askAction)
+            Text(l10n.exitCloseQuitBody(widget.exits)),
+      ],
+    );
+  }
+}
+
+/// Quitting the portable version with exit nodes running (01 §2.1, M5-11).
+class _QuitWithExitsDialog extends StatelessWidget {
+  const _QuitWithExitsDialog({required this.exits, required this.onClose});
+
+  final int exits;
+  final void Function(bool? quit) onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    return LgConfirmDialog(
+      title: l10n.exitCloseQuitTitle,
+      body: l10n.exitCloseQuitBody(exits),
+      actions: [
+        LgDialogAction(label: l10n.connCancel, onPressed: () => onClose(null)),
+        LgDialogAction(
+          label: l10n.exitCloseQuit,
+          kind: LgButtonKind.primary,
+          isDefault: true,
+          onPressed: () => onClose(true),
+        ),
       ],
     );
   }

@@ -6,6 +6,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/connect_box.dart';
+import 'package:flutter_hbb/leapgate/exit_nodes.dart'
+    show isExitId, offersExit;
 import 'package:flutter_hbb/leapgate/local_status.dart';
 import 'package:flutter_hbb/leapgate/peer_list.dart';
 import 'package:flutter_hbb/leapgate/peer_tabs.dart';
@@ -16,6 +18,7 @@ import 'package:window_manager/window_manager.dart';
 
 import '../../icons/lg_icon.dart';
 import '../../l10n/app_localizations.dart';
+import '../../shell/navigation.dart' show useAsExit;
 import '../../shell/tab_overlays.dart';
 import '../../theme/lg_tokens.dart';
 import '../../widgets/lg_button.dart';
@@ -250,6 +253,30 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
     }
   }
 
+  /// What "Use as exit node" in the "Connect" menu takes: the current row, as [_runCurrent]
+  /// (08 M5-9). Null without one, for typed text that is not an ID, and for a device known not
+  /// to run Windows (only Windows serves as an exit node).
+  ({String id, PeerCategory? category})? _exitTarget() {
+    final found = _search;
+    final search = found?.search;
+    final row = _currentRow(search);
+    if (row == null) return null;
+    final Peer peer;
+    final PeerCategory? category;
+    if (search == null) {
+      peer = _capped(_listed(_tabs.current))[row];
+      category = _tabs.current;
+    } else if (row == 0) {
+      return isExitId(_input) ? (id: _input, category: null) : null;
+    } else {
+      peer = search.matches[row - 1];
+      category = found!.sources[peer.id];
+    }
+    return offersExit(peer.id, peer.platform)
+        ? (id: peer.id, category: category)
+        : null;
+  }
+
   void _move(int by) {
     final search = _search?.search;
     final ids = _rowIds(search);
@@ -368,6 +395,12 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
             hint: l10n.connectBoxDefault,
             onPressed: _runCurrent,
           ),
+          if (_exitTarget() case final exit?)
+            LgMenuItem(
+              label: l10n.exitUseAsExit,
+              checked: false,
+              onPressed: () => useAsExit(exit.id, category: exit.category),
+            ),
           LgMenuItem(
             label: l10n.connectBoxViaRelay,
             checked: false,
@@ -666,6 +699,11 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
                   label: l10n.connectBoxRemoteDesktop,
                   onPressed: () => _connect(_input),
                 ),
+                if (isExitId(_input))
+                  LgMenuItem(
+                    label: l10n.exitUseAsExit,
+                    onPressed: () => useAsExit(_input),
+                  ),
                 LgMenuItem(
                   label: l10n.connectBoxViaRelay,
                   description: l10n.connectBoxViaRelayNote,
