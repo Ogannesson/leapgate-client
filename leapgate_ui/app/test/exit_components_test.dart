@@ -14,6 +14,7 @@ import 'package:leapgate_ui/widgets/lg_button.dart';
 import 'package:leapgate_ui/widgets/lg_device.dart';
 import 'package:leapgate_ui/widgets/lg_exit_card.dart';
 import 'package:leapgate_ui/widgets/lg_exit_page.dart';
+import 'package:leapgate_ui/widgets/lg_selection.dart';
 import 'package:leapgate_ui/widgets/lg_status.dart';
 import 'package:leapgate_ui/widgets/lg_title_bar.dart';
 
@@ -311,6 +312,62 @@ void main() {
       expect(find.text('流量由中继服务器转发，速度可能较慢'), findsOneWidget);
     });
 
+    semanticsTest('the elapsed time and the note are outside the live region', (
+      tester,
+    ) async {
+      await pumpLg(
+        tester,
+        _sized(
+          _card(
+            status: const LgExitStatus(
+              LgExitStatusKind.busy,
+              '正在等待对方接受…',
+              elapsed: '（已等待 0:12）',
+            ),
+          ),
+        ),
+      );
+      expect(
+        tester
+            .getSemantics(find.textContaining('正在等待对方接受', findRichText: true))
+            .flagsCollection
+            .isLiveRegion,
+        isTrue,
+      );
+      // The clock ticks every second: it is text, not news.
+      expect(find.text('（已等待 0:12）'), findsOneWidget);
+      expect(
+        tester
+            .getSemantics(find.text('（已等待 0:12）'))
+            .flagsCollection
+            .isLiveRegion,
+        isFalse,
+      );
+      // It follows the words on the same line.
+      final words = tester.getRect(
+        find.textContaining('正在等待对方接受', findRichText: true),
+      );
+      final elapsed = tester.getRect(find.text('（已等待 0:12）'));
+      expect(elapsed.left, greaterThanOrEqualTo(words.right - 1));
+      expect(elapsed.top, closeTo(words.top, 4));
+
+      await pumpLg(tester, _sized(_card()));
+      expect(
+        tester
+            .getSemantics(find.text('流量由中继服务器转发，速度可能较慢'))
+            .flagsCollection
+            .isLiveRegion,
+        isFalse,
+      );
+      expect(
+        tester
+            .getSemantics(find.textContaining('可用 · 经中继'))
+            .flagsCollection
+            .isLiveRegion,
+        isTrue,
+      );
+    });
+
     testWidgets('the password area: typing, Enter, the check box and the error', (
       tester,
     ) async {
@@ -395,7 +452,7 @@ void main() {
                 status: const LgExitStatus(LgExitStatusKind.code, '输入验证码'),
                 code: LgExitCodeArea(
                   semanticLabel: '验证码',
-                  trustLabel: '信任此设备',
+                  trustLabel: '信任本机',
                   trust: trust,
                   onTrustChanged: (v) => set(() => trust = v),
                   onCompleted: done.add,
@@ -416,9 +473,40 @@ void main() {
         tester.widget<TextField>(find.byType(TextField)).controller!.text,
         '12',
       );
-      await tester.tap(find.text('信任此设备'));
+      await tester.tap(find.text('信任本机'));
       await tester.pump();
       expect(trust, isTrue);
+    });
+
+    testWidgets('the code area leaves the trust check box out when it is not offered', (
+      tester,
+    ) async {
+      await pumpLg(
+        tester,
+        _sized(
+          _card(
+            status: const LgExitStatus(LgExitStatusKind.code, '输入验证码'),
+            code: const LgExitCodeArea(semanticLabel: '验证码'),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.byType(LgCheckbox), findsNothing);
+      expect(find.text('信任本机'), findsNothing);
+      // With only the label and no value it is still left out.
+      await pumpLg(
+        tester,
+        _sized(
+          _card(
+            status: const LgExitStatus(LgExitStatusKind.code, '输入验证码'),
+            code: const LgExitCodeArea(
+              semanticLabel: '验证码',
+              trustLabel: '信任本机',
+            ),
+          ),
+        ),
+      );
+      expect(find.byType(LgCheckbox), findsNothing);
     });
 
     semanticsTest('each note has its own close button and keeps its place', (
@@ -570,6 +658,8 @@ void main() {
         final node = tester.getSemantics(find.byType(EditableText));
         expect(node.label, contains('端口'));
         expect(node.label, contains('此端口已被另一个出口使用'));
+        // The line under the row is for the eyes: the field's name has it.
+        expect(find.bySemanticsLabel('此端口已被另一个出口使用'), findsNothing);
       });
     });
 
@@ -743,6 +833,25 @@ void main() {
       expect(b, a);
     });
 
+    testWidgets('a grid without a bounded width says so', (tester) async {
+      // The framework reports what the failed layout drags with it too: look
+      // at the first report, the one that names the cause.
+      final reports = <FlutterErrorDetails>[];
+      final old = FlutterError.onError;
+      FlutterError.onError = reports.add;
+      addTearDown(() => FlutterError.onError = old);
+      await pumpLg(
+        tester,
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: LgExitCardGrid(children: [_card()]),
+        ),
+      );
+      expect(reports, isNotEmpty);
+      expect(reports.first.exception, isA<AssertionError>());
+      expect(reports.first.exceptionAsString(), contains('bounded width'));
+    });
+
     testWidgets('an empty grid has no height', (tester) async {
       await pumpLg(tester, _sized(const LgExitCardGrid(children: [])));
       expect(tester.getSize(find.byType(LgExitCardGrid)).height, 0);
@@ -810,6 +919,35 @@ void main() {
       expect(border.top.color.a, 1);
       await tester.pump(const Duration(milliseconds: 600));
       expect((_flashBox(tester).decoration as BoxDecoration).border, isNull);
+    });
+
+    testWidgets('a count that goes down or stays does not flash', (tester) async {
+      var count = 3;
+      late StateSetter set;
+      await pumpLg(
+        tester,
+        StatefulBuilder(
+          builder: (context, setState) {
+            set = setState;
+            return LgFlash(
+              count: count,
+              child: const SizedBox(width: 200, height: 100),
+            );
+          },
+        ),
+      );
+      set(() => count = 2);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect((_flashBox(tester).decoration as BoxDecoration).border, isNull);
+      set(() => count = 2);
+      await tester.pump();
+      expect((_flashBox(tester).decoration as BoxDecoration).border, isNull);
+      set(() => count = 3);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect((_flashBox(tester).decoration as BoxDecoration).border, isNotNull);
+      await tester.pump(const Duration(milliseconds: 2000));
     });
 
     testWidgets('showing holds it on', (tester) async {

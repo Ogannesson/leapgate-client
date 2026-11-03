@@ -56,14 +56,29 @@ enum LgExitStatusKind {
 
 /// The status line (`.xs`): a mark and a bold [label] in the colour of the
 /// kind, then optionally [reason] in regular weight and the text colour
-/// ("已停止：" and why), and a small grey [note] beside it ("流量由中继服务器
-/// 转发，速度可能较慢"). A long label wraps; the mark stays on the first line.
+/// ("已停止：" and why), [elapsed] after the label, and a small grey [note]
+/// beside it ("流量由中继服务器转发，速度可能较慢"). A long label wraps; the
+/// mark stays on the first line.
+///
+/// Only the mark, the [label] and the [reason] are announced when the status
+/// changes. [elapsed] ("（已等待 0:12）", ticking once a second) and [note]
+/// are read as text of their own: a clock in the announced part would be read
+/// out every second (the connection panel keeps its "已等待" line out of it
+/// too). Put the space before [elapsed] into the string where the language
+/// needs one (" (0:12)").
 class LgExitStatus {
-  const LgExitStatus(this.kind, this.label, {this.reason, this.note});
+  const LgExitStatus(
+    this.kind,
+    this.label, {
+    this.reason,
+    this.elapsed,
+    this.note,
+  });
 
   final LgExitStatusKind kind;
   final String label;
   final String? reason;
+  final String? elapsed;
   final String? note;
 }
 
@@ -107,9 +122,15 @@ class LgExitAction {
 }
 
 /// The card asks for a password: the password field with the show button, the
-/// "记住密码" check box. [onSubmitted] is Enter in the field. The field takes
-/// the keyboard when it appears. [errorText] ("密码错误") turns the frame red
-/// and shows the text under it.
+/// "记住密码" check box. [onSubmitted] is Enter in the field. [errorText]
+/// ("密码错误") turns the frame red and shows the text under it.
+///
+/// Focus: the field asks for the keyboard when it is first built (`autofocus`),
+/// which only works while nothing else on the page has the focus. A card that
+/// gets here because of what the user did (a click on "使用", "重试") passes a
+/// [focusNode] and calls `requestFocus()` on it itself; a card that is asked
+/// for the password again after a reconnect must not take the focus away. The
+/// code area and the port field work the same way.
 class LgExitPasswordArea {
   const LgExitPasswordArea({
     required this.controller,
@@ -143,14 +164,16 @@ class LgExitPasswordArea {
 }
 
 /// The card asks for a verification code: the same boxes and the same check
-/// box ("信任此设备") as the connection panel. [onCompleted] is called each time
-/// the last digit is typed.
+/// box ("信任本机") as the connection panel. [onCompleted] is called each time
+/// the last digit is typed. The check box is drawn only when [trustLabel] and
+/// [trust] are both given: the other side offers "trust this device" only when
+/// it has trusted devices turned on.
 class LgExitCodeArea {
   const LgExitCodeArea({
     required this.semanticLabel,
-    required this.trustLabel,
-    required this.trust,
-    required this.onTrustChanged,
+    this.trustLabel,
+    this.trust,
+    this.onTrustChanged,
     this.onCompleted,
     this.onChanged,
     this.controller,
@@ -161,8 +184,8 @@ class LgExitCodeArea {
   });
 
   final String semanticLabel;
-  final String trustLabel;
-  final bool trust;
+  final String? trustLabel;
+  final bool? trust;
   final ValueChanged<bool>? onTrustChanged;
   final ValueChanged<String>? onCompleted;
   final ValueChanged<String>? onChanged;
@@ -392,8 +415,9 @@ class _Header extends StatelessWidget {
   }
 }
 
-/// The status line (`.xs`). Announced when it changes: a card that asks for a
-/// password or goes down is news for a screen reader.
+/// The status line (`.xs`). The mark, the label and the reason are announced
+/// when they change: a card that asks for a password or goes down is news for
+/// a screen reader. The elapsed time and the note are not (see [LgExitStatus]).
 class _StatusLine extends StatelessWidget {
   const _StatusLine(this.status);
 
@@ -404,9 +428,11 @@ class _StatusLine extends StatelessWidget {
     final t = LgTokens.of(context);
     final c = t.colors;
     final Widget text;
+    final Color labelColor;
     switch (status.kind) {
       case LgExitStatusKind.direct:
       case LgExitStatusKind.relay:
+        labelColor = status.kind == LgExitStatusKind.direct ? c.direct : c.relay;
         text = DefaultTextStyle(
           style: t.textM.copyWith(color: c.text),
           child: LgRouteMark(
@@ -436,6 +462,7 @@ class _StatusLine extends StatelessWidget {
           ),
           _ => (LgIcon(LgIcons.markX, size: 12, color: c.error), c.error),
         };
+        labelColor = color;
         text = Text.rich(
           TextSpan(
             children: [
@@ -455,26 +482,36 @@ class _StatusLine extends StatelessWidget {
           style: t.textM,
         );
     }
+    final live = Semantics(liveRegion: true, container: true, child: text);
+    if (status.elapsed == null && status.note == null) return live;
     final routed =
         status.kind == LgExitStatusKind.direct ||
         status.kind == LgExitStatusKind.relay;
-    final line = status.note == null
-        ? text
-        : Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // The mark and its words keep their width; the note takes the rest.
-              if (routed) text else Flexible(child: text),
-              const SizedBox(width: LgSpace.s3),
-              Expanded(
-                child: Text(
-                  status.note!,
-                  style: t.textS.copyWith(color: c.text2),
-                ),
-              ),
-            ],
-          );
-    return Semantics(liveRegion: true, container: true, child: line);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // With a note, the mark and its words keep their width and the note
+        // takes the rest; otherwise the words may wrap.
+        if (routed && status.note != null) live else Flexible(child: live),
+        if (status.elapsed != null)
+          Text(
+            status.elapsed!,
+            style: t.textM.copyWith(
+              color: labelColor,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        if (status.note != null) ...[
+          const SizedBox(width: LgSpace.s3),
+          Expanded(
+            child: Text(
+              status.note!,
+              style: t.textS.copyWith(color: c.text2),
+            ),
+          ),
+        ],
+      ],
+    );
   }
 }
 
@@ -536,15 +573,17 @@ class _CodeBlock extends StatelessWidget {
           onChanged: area.onChanged,
           onCompleted: area.onCompleted,
         ),
-        const SizedBox(height: LgSpace.s2),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: LgCheckbox(
-            value: area.trust,
-            label: area.trustLabel,
-            onChanged: area.enabled ? area.onTrustChanged : null,
+        if (area.trustLabel != null && area.trust != null) ...[
+          const SizedBox(height: LgSpace.s2),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: LgCheckbox(
+              value: area.trust!,
+              label: area.trustLabel!,
+              onChanged: area.enabled ? area.onTrustChanged : null,
+            ),
           ),
-        ),
+        ],
       ],
     );
   }
@@ -702,7 +741,8 @@ class _PortEditBlock extends StatelessWidget {
           ),
           if (edit.errorText != null) ...[
             const SizedBox(height: LgSpace.s2),
-            LgFieldError(edit.errorText!),
+            // Read as part of the field's name (see `LgTextField._withError`).
+            ExcludeSemantics(child: LgFieldError(edit.errorText!)),
           ] else if (edit.hint != null) ...[
             const SizedBox(height: LgSpace.s3),
             Text(edit.hint!, style: t.textS.copyWith(color: c.text2)),
@@ -833,9 +873,9 @@ class _HelpBlock extends StatelessWidget {
 
 /// Marks its child for a moment with a 2 px frame in the accent colour inside
 /// the edge (`.xc.flash`): the card that "使用中" or "用作出口" scrolled to.
-/// Each time [count] goes up the frame appears at once, stays about a second
-/// and fades. With the system asking for no motion it appears and disappears
-/// without the fade. [showing] holds it on (the gallery).
+/// Each time [count] goes up (and only then) the frame appears at once, stays
+/// about a second and fades. With the system asking for no motion it appears
+/// and disappears without the fade. [showing] holds it on (the gallery).
 class LgFlash extends StatefulWidget {
   const LgFlash({
     super.key,
@@ -863,7 +903,7 @@ class _LgFlashState extends State<LgFlash> with SingleTickerProviderStateMixin {
   @override
   void didUpdateWidget(LgFlash old) {
     super.didUpdateWidget(old);
-    if (widget.count != old.count) _controller.forward(from: 0);
+    if (widget.count > old.count) _controller.forward(from: 0);
   }
 
   @override
@@ -964,6 +1004,10 @@ class _GridLayout extends MultiChildRenderObjectWidget {
 
 class _GridParentData extends ContainerBoxParentData<RenderBox> {}
 
+const _unboundedWidth =
+    'LgExitCardGrid needs a bounded width: the number of columns follows it. '
+    'Put it in a column of the page, not in a row or a horizontal scroll view.';
+
 /// Lays the children out in rows of equal columns; a row is as tall as its
 /// tallest child, and the others are laid out again at that height.
 class _RenderGrid extends RenderBox
@@ -1043,6 +1087,7 @@ class _RenderGrid extends RenderBox
 
   @override
   Size computeDryLayout(BoxConstraints constraints) {
+    assert(constraints.hasBoundedWidth, _unboundedWidth);
     final width = constraints.maxWidth;
     final columns = _columns(width);
     final cw = _columnWidth(width, columns);
@@ -1065,6 +1110,7 @@ class _RenderGrid extends RenderBox
 
   @override
   void performLayout() {
+    assert(constraints.hasBoundedWidth, _unboundedWidth);
     final width = constraints.maxWidth;
     final columns = _columns(width);
     final cw = _columnWidth(width, columns);

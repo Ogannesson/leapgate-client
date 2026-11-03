@@ -79,6 +79,12 @@ LgExitAction _exitConnect(bool en) => LgExitAction(
   onPressed: _noop,
 );
 
+LgExitAction _exitVerify(bool en) => LgExitAction(
+  label: _x(en, '验证', 'Verify'),
+  kind: LgButtonKind.primary,
+  onPressed: _noop,
+);
+
 LgExitStatus _exitInUseStatus(bool en, LgRoute route) => LgExitStatus(
   route == LgRoute.direct ? LgExitStatusKind.direct : LgExitStatusKind.relay,
   route == LgRoute.direct
@@ -157,15 +163,20 @@ LgExitPasswordArea _exitPassword(bool en, {String? error}) => LgExitPasswordArea
   errorText: error,
 );
 
-LgExitCodeArea _exitCode(bool en, {String? error, String typed = ''}) =>
-    LgExitCodeArea(
-      semanticLabel: _x(en, '验证码', 'Verification code'),
-      controller: TextEditingController(text: typed),
-      trustLabel: _x(en, '信任此设备', 'Trust this device'),
-      trust: false,
-      onTrustChanged: (_) {},
-      errorText: error,
-    );
+LgExitCodeArea _exitCode(
+  bool en, {
+  String? error,
+  String typed = '',
+  bool trust = true,
+}) => LgExitCodeArea(
+  semanticLabel: _x(en, '验证码', 'Verification code'),
+  controller: TextEditingController(text: typed),
+  // Only when the other side has trusted devices turned on.
+  trustLabel: trust ? _x(en, '信任本机', 'Trust this device') : null,
+  trust: trust ? false : null,
+  onTrustChanged: trust ? (_) {} : null,
+  errorText: error,
+);
 
 LgExitPortEdit _exitPortEdit(bool en, {String text = '21181', String? error}) =>
     LgExitPortEdit(
@@ -264,7 +275,16 @@ LgExitCard _exitCard(
           _x(en, '输入验证码', 'Enter verification code'),
         ),
         code: _exitCode(en, typed: '482'),
-        actions: [_exitConnect(en), _exitCancel(en)],
+        actions: [_exitVerify(en), _exitCancel(en)],
+      );
+    case 'code-no-trust':
+      return card(
+        status: LgExitStatus(
+          LgExitStatusKind.code,
+          _x(en, '输入验证码', 'Enter verification code'),
+        ),
+        code: _exitCode(en, typed: '482', trust: false),
+        actions: [_exitVerify(en), _exitCancel(en)],
       );
     case 'code-wrong':
       return card(
@@ -277,7 +297,7 @@ LgExitCard _exitCard(
           typed: '482915',
           error: _x(en, '验证码错误', 'Wrong verification code'),
         ),
-        actions: [_exitConnect(en), _exitCancel(en)],
+        actions: [_exitVerify(en), _exitCancel(en)],
       );
     case 'verifying':
       return card(
@@ -286,9 +306,10 @@ LgExitCard _exitCard(
       );
     case 'waiting':
       return card(
-        status: busy(
-          '正在等待对方接受…（已等待 0:12）',
-          'Waiting for the other side to accept… (0:12)',
+        status: LgExitStatus(
+          LgExitStatusKind.busy,
+          _x(en, '正在等待对方接受…', 'Waiting for the other side to accept…'),
+          elapsed: _x(en, '（已等待 0:12）', ' (0:12)'),
         ),
         actions: [_exitCancel(en)],
       );
@@ -479,6 +500,7 @@ List<Specimen> _m5Specimens() {
       ),
     )
     ..add(card('code', 'code', height: 330))
+    ..add(card('code-no-trust', 'code-no-trust', height: 290))
     ..add(card('code-wrong', 'code-wrong', height: 360))
     ..add(card('verifying', 'verifying'))
     ..add(card('waiting', 'waiting'))
