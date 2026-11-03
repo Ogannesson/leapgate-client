@@ -98,6 +98,8 @@ class LgTitleBar extends StatefulWidget {
     required this.onStartDrag,
     required this.onStartResize,
     this.homeBadge = 0,
+    this.homeAlert = false,
+    this.homeSemanticLabel,
     this.onTabContextMenu,
   });
 
@@ -114,6 +116,14 @@ class LgTitleBar extends StatefulWidget {
 
   /// Background connections shown on the home tab (exit nodes, 01 §2.1).
   final int homeBadge;
+
+  /// Draws the reminder mark before the number: an exit node waits for the
+  /// user to type a password or to be accepted (01 §3.1 block I, `.rmd`).
+  final bool homeAlert;
+
+  /// The home tab's accessible name when it says more than "主页": the number
+  /// and "需要处理". Without it the name is the label and the number.
+  final String? homeSemanticLabel;
 
   /// Right click on a tab: tab index and global pointer position.
   final void Function(int index, Offset globalPosition)? onTabContextMenu;
@@ -206,6 +216,12 @@ class _LgTitleBarState extends State<LgTitleBar> {
         selected: widget.selected == 0,
         strip: widget.selected == 0 ? c.accent : null,
         badge: widget.homeBadge,
+        alert: widget.homeAlert,
+        semanticLabel:
+            widget.homeSemanticLabel ??
+            (widget.homeBadge > 0
+                ? '${labels.home} ${widget.homeBadge}'
+                : labels.home),
         onSelect: () => widget.onSelect(0),
         onContextMenu: null,
       ),
@@ -399,6 +415,8 @@ class _Tab extends StatelessWidget {
     required this.onContextMenu,
     this.status,
     this.badge = 0,
+    this.alert = false,
+    this.semanticLabel,
     this.disconnected = false,
     this.tooltip,
     this.closeLabel,
@@ -410,6 +428,11 @@ class _Tab extends StatelessWidget {
   final Color? strip;
   final Widget? status;
   final int badge;
+
+  /// The home tab only: the reminder mark before [badge]. The mark and the
+  /// number are then decoration, [semanticLabel] says what they mean.
+  final bool alert;
+  final String? semanticLabel;
   final bool disconnected;
   final Widget? tooltip;
   final String? closeLabel;
@@ -425,7 +448,7 @@ class _Tab extends StatelessWidget {
     final tab = LgPressable(
       onPressed: onSelect,
       selected: selected,
-      semanticLabel: name,
+      semanticLabel: semanticLabel ?? name,
       onSecondaryTapUp: onContextMenu == null
           ? null
           : (d) => onContextMenu!(d.globalPosition),
@@ -447,48 +470,57 @@ class _Tab extends StatelessWidget {
                   color: selected ? c.surface : overlay,
                   borderRadius: radius,
                 ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: _maxTabName),
-                      child: Text(
-                        name,
-                        maxLines: 1,
-                        softWrap: false,
-                        overflow: TextOverflow.ellipsis,
-                        style: t.text.copyWith(
-                          color: nameColor,
-                          fontWeight: selected
-                              ? FontWeight.w700
-                              : FontWeight.w400,
+                // With a name of its own (the home tab) the texts below are
+                // decoration: the name says it all.
+                child: ExcludeSemantics(
+                  excluding: semanticLabel != null,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: _maxTabName),
+                        child: Text(
+                          name,
+                          maxLines: 1,
+                          softWrap: false,
+                          overflow: TextOverflow.ellipsis,
+                          style: t.text.copyWith(
+                            color: nameColor,
+                            fontWeight: selected
+                                ? FontWeight.w700
+                                : FontWeight.w400,
+                          ),
                         ),
                       ),
-                    ),
-                    if (status != null) ...[
-                      const SizedBox(width: LgSpace.s2),
-                      DefaultTextStyle(
-                        style: t.textS.copyWith(color: c.text2),
-                        child: status!,
-                      ),
+                      if (status != null) ...[
+                        const SizedBox(width: LgSpace.s2),
+                        DefaultTextStyle(
+                          style: t.textS.copyWith(color: c.text2),
+                          child: status!,
+                        ),
+                      ],
+                      if (semanticLabel != null && (badge > 0 || alert)) ...[
+                        // `.tab` gap 8 plus the 8 px of `.rmd`.
+                        SizedBox(width: alert ? LgSpace.s4 : LgSpace.s2),
+                        LgCountMark(badge, alert: alert, gap: 12),
+                      ] else if (badge > 0) ...[
+                        const SizedBox(width: LgSpace.s2),
+                        LgBadge(badge),
+                      ],
+                      if (onClose != null) ...[
+                        // `.tab` gap 8 plus `.x` margin 2, less the button's 2 px padding.
+                        const SizedBox(width: LgSpace.s2),
+                        LgIconButton(
+                          icon: LgIcons.x,
+                          label: closeLabel!,
+                          size: 20,
+                          iconSize: 16,
+                          focusable: false,
+                          onPressed: onClose,
+                        ),
+                      ],
                     ],
-                    if (badge > 0) ...[
-                      const SizedBox(width: LgSpace.s2),
-                      LgBadge(badge),
-                    ],
-                    if (onClose != null) ...[
-                      // `.tab` gap 8 plus `.x` margin 2, less the button's 2 px padding.
-                      const SizedBox(width: LgSpace.s2),
-                      LgIconButton(
-                        icon: LgIcons.x,
-                        label: closeLabel!,
-                        size: 20,
-                        iconSize: 16,
-                        focusable: false,
-                        onPressed: onClose,
-                      ),
-                    ],
-                  ],
+                  ),
                 ),
               ),
               if (strip != null)

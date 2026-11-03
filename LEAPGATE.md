@@ -1555,3 +1555,59 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 - 测试：`libs/leapgate` 新增 2 个（每种状态的事件 JSON、`stopped` 的原因）；根 crate `leapgate_hooks::exit::cards` 7 个，用假会话和本机回环连接：登录成功后第一个通道是本地程序的（占位连接没开通道）、对端断开后进 `interrupted`（`tunnel_ended`）；版本不支持时进 `stopped`（`exit_not_supported`）、监听关掉、KCP 守卫交给 `release_kcp` 后对端收到关闭（把守卫改成直接丢掉，这个测试会失败），"重试"后不安全连接被拒进 `stopped`（`exit_need_encryption`），再"重试"进 `in_use`；临时失败进 `interrupted`（`login_failed`，`retry_after_ms` 10000）、监听留着，"重试"马上登录；登录中途关闭，1 秒内卡片关掉、端口不再接受连接并能被别的程序占用；改端口后旧端口关掉、新端口的连接走原来的隧道（没有第二次登录）；端口被占时不登录，改端口后登录；`retry`、`set_port` 只对登记过的卡片和合法端口生效。端口关没关用连接去试（3 秒内不再接受连接即可）：整套测试一起跑时，丢掉的监听在 Windows 上还会接受连接约 1 秒，单独跑时当场关。根 crate `cargo test --lib` 215 个通过，失败的 1 个是 `installer_handoff::directory::tests::protected_directory_enforces_creator_permissions`（删测试目录时拒绝访问，单独跑也失败，和本改动无关）。
 - 只有新界面调的几个（`register`、`retry`、`set_port`、`send`、`NEXT_GEN`、`Card.ctl`）带 `#[cfg(any(feature = "flutter", test))]`，`Ctl` 在不带 flutter 时允许未构造，默认特性的 `cargo check --lib` 不报它们未使用。
 - 没在单测里做、留给验收的：`already`、`invalid_id`（要上游的会话表；单测里建会话会在本机配置目录写一份设备配置，并经 IPC 把会话数报给正在运行的服务，所以不做）；经 frb 的实际调用；真实对端下的密码、2FA、等对方接受、不安全连接提示（卡片回拒绝之后带 `exit_need_encryption` 那一步用假登录结果验了）；`connection_ready` 之后 `leapgate_session_connection` 给出的路径；中途取消走 KCP 时被控端 20 秒才关；登录被拒时被控端 CM 当场消失（03 §8.5 第 9 项）。
+
+**组件接口（designer，`ui/m5-ds` 交付，给 coder E 整合用）**
+
+组件都只画：参数是普通的值、数据类和回调，文字全部由调用方传，不引用 core 的 model、会话对象和 `bind`。每个参数、每种状态在画廊（`app/lib/gallery_m5.dart`，分区 `exit-card`、`exit-grid`、`exit-page`、`exit-directory`、`exit-by-id`、`exit-parts`、`exit-reminder`）里有一项，行为测试在 `app/test/exit_components_test.dart`。
+
+文件：`app/lib/widgets/lg_exit_card.dart`（卡片、卡片格栅、短暂高亮）、`lg_exit_page.dart`（页面版式、目录、目录行、按 ID 行、进度条、空状态条）。已有组件只加了参数，默认值不变：`LgButton`（`iconSize`、`trailingIcon`、`expanded`）、`LgTextField`（`showErrorText`，为假时框和读屏名照样说有错、但不画框下那一行，调用方自己画）、`lg_status.dart`（新增 `LgCountMark`）、`LgTitleBar`（`homeAlert`、`homeSemanticLabel`）。`gallery_export_test.dart` 多加载了 Consolas（启动参数用等宽字体）。
+
+**`LgExitCard`**（卡片，一张一台设备）。从上到下：设备头、状态行、要输入的区（密码或验证码）、两行地址、通知、改端口或按钮行、展开的说明；为空的部分不画，卡片随状态长高缩短（说明展开有 160 ms 动画，系统要求减弱动效时没有）。整张卡片是一个读屏分组，名字默认 `"$name $id"`，头里的文字只给眼睛看。
+
+| 参数 | 类型 | 说明 |
+|---|---|---|
+| `name`、`id`、`platform` | `String`、`String`（已格式化，如 `912 345 678`，身份色从它取）、`LgPlatform` | 名字太长时省略，悬停显示全文 |
+| `status` | `LgExitStatus(kind, label, {reason, elapsed, note})` | `kind`：`busy`（转圈）、`password`（钥匙）、`code`（盾牌）、`direct`、`relay`（连接方式标记，详细模式画路径）、`warning`、`error`。`label` 粗体、取状态色；`reason` 紧跟其后、常规字重、正文色（"已停止："加原因）；`elapsed` 画在 label 后面、同一行、同样粗体同色（"（已等待 0:12）"，英文要自带前导空格）；`note` 是旁边的灰色小字（经中继的说明），可换行。只有标记、`label`、`reason` 是读屏的实时区，变化会被念出来；`elapsed` 和 `note` 在实时区外、当普通文字读，不然计时每秒念一次（会话面板的"已等待"也这样）。调用方每秒换一次 `elapsed` |
+| `password` | `LgExitPasswordArea?` | 密码框（带显示 / 隐藏）、"记住密码"勾选；字段：`controller`、`semanticLabel`、`placeholder`、`showLabel`、`hideLabel`、`rememberLabel`、`remember`、`onRememberChanged`、`onSubmitted`（框里按回车）、`onChanged`、`focusNode`、`errorText`（"密码错误"，框变红、下面一行常规字重）、`enabled`。自动聚焦只是兜底，焦点约定见"整合时要注意的" |
+| `code` | `LgExitCodeArea?` | 和会话面板同一个六格框；字段：`semanticLabel`、`trustLabel`、`trust`、`onTrustChanged`（三个都可空：`trustLabel` 和 `trust` 都给了才画"信任本机"勾选，对方没开受信设备时都不传）、`onCompleted`（输满最后一位时调一次）、`onChanged`、`controller`、`focusNode`、`errorText`、`enabled`、`length`。自动聚焦同上 |
+| `addresses` | `List<LgExitAddress>` | 每项 `address`、`copyLabel`（"复制 SOCKS5 地址"，也是读屏名）、`onCopy`；地址长了省略。两行之间 4 px |
+| `notices` | `List<LgExitNotice>` | 每项 `id`（原因，用作 key，关掉一条不影响另一条）、`text`、`dismissLabel`、`onDismiss`；信息语气，不打断 |
+| `portEdit` | `LgExitPortEdit?` | 非空时按钮行让位给它：只收数字、最多五位的框（最宽 160）、"确定"、"取消"；字段：`controller`、`semanticLabel`、`confirmLabel`、`cancelLabel`、`onConfirm`（为空则"确定"禁用、回车无效）、`onCancel`（Esc 也调它）、`hint`（框下小字）、`errorText`（有错时代替 `hint`，框变红，错误文字读屏时只在框的名字里念一次）、`focusNode`。自动聚焦同上 |
+| `leadingActions`、`actions` | `List<LgExitAction>` | 按钮行：左边是文字按钮、右边是主要按钮和描边按钮。`LgExitAction(label, onPressed, {kind, icon, expanded, semanticLabel})`；`onPressed` 为空时禁用（不响应、Tab 跳过）；`expanded` 非空时按钮后面画箭头并告诉读屏展开了没有。左边第一个按钮向左探出 8 px，图标和上面的文字对齐 |
+| `help` | `LgExitHelp?` | 展开的"浏览器设置说明"：`title` 加 `items`；每项 `LgExitHelpItem(text, {code, after})`，`code` 用等宽字体，整块可以用鼠标选中复制。展开和收起由调用方切换 `help` 是否为空，同时切换"浏览器设置说明"那个按钮的 `expanded` |
+| `semanticLabel` | `String?` | 整张卡片的读屏名 |
+
+九种状态对应的参数（01 区块 I 的表；文案照 01 §7.6 和第 7.5 节的英文）：
+
+| 状态 | `status` | 其余 |
+|---|---|---|
+| 正在连接 | `busy`，"正在连接 ‹设备名›…" | `actions`：取消（`secondary`） |
+| 要密码（含输错） | `password`，"输入密码" | `password`（输错时带 `errorText`）；`actions`：连接（`primary`）、取消（`secondary`） |
+| 要验证码 | `code`，"输入验证码" | `code`（对方开了受信设备才带"信任本机"勾选）；`actions`：验证（`primary`）、取消（和会话面板同一个主按钮和文案，01 已改） |
+| 正在验证 | `busy`，"正在验证…" | `actions`：取消 |
+| 等对方接受 | `busy`，label 写"正在等待对方接受…"，`elapsed` 写"（已等待 0:12）" | `actions`：取消；计时归调用方，每秒换一次 `elapsed` |
+| 在用 | `direct` "可用 · 直连" 或 `relay` "可用 · 经中继"（带 `note`） | `addresses` 两行；`leadingActions`：修改端口（`LgIcons.edit`）、浏览器设置说明（带 `expanded`）；`actions`：停止（`secondary`，`LgIcons.square`）；`notices`、`help` 按需 |
+| 暂时断开 | `warning`，"连接已中断，下次有应用使用此代理时将自动重新连接" | `addresses` 两行；`actions`：重新连接（`primary`，`LgIcons.restart`）、停止（`secondary`，`LgIcons.square`） |
+| 已停止 | `error`，label "已停止："、`reason` 是原因 | `actions`：重试（`primary`，`LgIcons.refresh`，只有未开启、验证次数过多两种有）、移除（`secondary`，`LgIcons.trash`） |
+| 端口被占用 | `error`，"本机端口 ‹端口› 已被其他应用占用" | `actions`：修改端口（`primary`，`LgIcons.edit`）、移除 |
+| 改端口 | 保持原状态 | 再加 `portEdit`（"在用"时 `hint` 写"代理地址将改为新端口，需同步修改应用中的代理设置。"） |
+
+**`LgFlash(child, {count, showing, radius})`**：给 child 套一圈 2 px 强调色内描边（`.xc.flash`）。`count` 变大才闪（每加 1 闪一次，变小或不变不闪）：立刻出现，停约 1 秒后渐隐；系统要求减弱动效时不渐隐、约 1.5 秒后消失。`showing` 为真时一直亮（画廊用）。滚到卡片、闪一下的做法：卡片外面包 `LgFlash`，给它一个 `GlobalKey`，`Scrollable.ensureVisible(key.currentContext!)` 之后把 `count` 加 1。
+
+**`LgExitCardGrid(children, {semanticLabel, minWidth = 440, gap = 12})`**：卡片按添加顺序排进尽可能多的列，每列至少 440 宽；同一行的卡片一样高（自己写的布局，不用 `IntrinsicHeight`；卡片变高时同行的跟着变）；窗口变宽变窄时子部件不重建。自己不滚动，放进页面的滚动区；列数跟着宽度走，所以宽度必须有界（放进横向滚动或 `Row` 里会触发 assert，说明写在断言里）。`kLgExitCardMinWidth` 是 440。
+
+**`LgExitPage`**（页面主体）：`lede`、`inUseTitle`、`inUse`（`LgExitCardGrid` 或 `LgExitEmptyNote`）、`directoryTitle`、`refreshLabel`、`onRefresh`（为空时"刷新"禁用，目录加载中用）、`directory`（下面 `LgExitDirectory` 的某个状态）、`byIdTitle`、`byId`（`LgExitByIdRow`）、`controller`（滚动控制器）。自带整页滚动。放在主页的页标题"出口"正下方、和标题隔 4 px（页标题是主页自己画的），占满剩下的高度。`LgExitSection(title, {action})` 是小节标题（粗体、上面 24 px、读屏里是标题；`action` 向右探出 8 px）。`LgExitEmptyNote(text)` 是"暂无正在使用的出口"那张白条。
+
+**`LgExitDirectory`**（目录，六种状态用命名构造函数选）：`.loading(semanticLabel)`（进度条，读屏的实时区）、`.unsupported(text)`（信息横幅）、`.notLoggedIn(text, actionLabel, onAction)`、`.empty(text)`、`.error(text, actionLabel, onAction)`（红色图标加"重试"）、`.rows(entries)`（`List<LgExitEntry>`：`name`、`id`（已格式化）、`platform`、`owner`（"我的"或"所有者：李四"）、`actionLabel`（"使用"或"使用中"）、`onPressed`、`inUse`）。行里的按钮读屏名是 `"$actionLabel $name"`，整行是一个读屏分组（名字、ID、所有者只念一次）。"使用中"按钮是柔和底加对勾，点了去滚到那张卡片（`onPressed` 里做）。除 `.rows` 外各状态离上面的标题 8 px（`.loading` 是 12 px），`.rows` 紧贴。`LgExitDirectoryRow(entry, {topDivider})` 是单独的一行，`LgIndeterminateBar(semanticLabel)` 是目录加载中的 4 px 细条（系统要求减弱动效时停在原位）。
+
+**`LgExitByIdRow`**：`controller`、`placeholder`、`semanticLabel`、`useLabel`、`onUse`（为空时"使用"禁用，框里按回车同样无效）、`focusNode`、`errorText`（"ID 格式不正确"，框变红、下面一行常规字重）、`onChanged`、`enabled`。框最宽 520，按钮紧跟在后面、和框同高同顶。
+
+**导航项和主页标签上的数字、提醒**：`LgCountMark(count, {alert, gap})`（在 `lg_status.dart`）是数字徽标加可选的提醒标记（16 px 警告三角，警告色，画在数字前面）；读屏里它整个不出节点，名字由放它的控件给。导航项（`home_page.dart` 的 `_NavItem`）：`Row` 末尾放 `LgCountMark(n, alert: …)`（间距默认 16，样稿的 `.navi .rmd+.badge`），`LgPressable.semanticLabel` 写"出口，‹N› 个正在使用"（有提醒加"，需要处理"），行里的文字用 `ExcludeSemantics` 包住，免得名字念两遍；数字为 0 时不画；出口页正显示时传 `alert: false`。主页标签：`LgTitleBar(homeBadge: n, homeAlert: …, homeSemanticLabel: …)`，标签名就是 `homeSemanticLabel`（不传时是"主页 ‹n›"），数字和三角不另出节点。
+
+**整合时要注意的**
+- 卡片里的文字和按钮名全由调用方传；`LgExitAction.semanticLabel` 不传时读屏名就是按钮文字，两张卡片都有"停止"时调用方要不要加设备名由整合定（读屏下找不到谁的"停止"时加 `"停止 ‹设备名›"`，目录行的按钮已经这样做）。
+- 输错的红字用常规字重（`LgDialogFields`，样稿的 `.ferr`），卡片里的所有输入框、按 ID 的框都已包好，调用方不用管。
+- 焦点（实测的行为）：密码框、验证码框、改端口框第一次建出来时带 `autofocus`，只是兜底，它只在页面上当时没有别的控件有焦点时才拿得到。两张卡片先后要密码时，焦点留在先出现的那张；页面上已有控件有焦点时（例如键盘按过目录行的"使用"），后来进入要密码的卡片拿不到。所以卡片因为用户操作进入要密码或要验证码（点"使用"、"重试"、"重新连接"之后）时，调用方给区域传 `focusNode` 并主动 `requestFocus()`，改端口也一样；重连时又要密码是后台事件，不抢焦点，只靠提醒标记叫用户回来，不要调 `requestFocus()`。
+- Esc 只在改端口的框里有效（取消）；框里按回车会让框失去焦点（Flutter 的默认），所以回车确认之后要接着用键盘时，由调用方把焦点放回去。
+- 卡片里没有会弹浮层的组件放在合并语义的容器里；头里的名字省略时的悬停全文在 `ExcludeSemantics` 里，读屏从分组名读。
+- 样稿的身份色是写死的 `data-k="2"`，组件按 ID 算身份色（和设备卡片一致），画廊里同一个 ID 是赭黄，不是样稿的陶橙，不算差异。

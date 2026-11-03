@@ -66,6 +66,7 @@ class LgTextField extends StatefulWidget {
     this.dense = false,
     this.maxLength,
     this.inputFormatters = const [],
+    this.showErrorText = true,
   });
 
   final TextEditingController? controller;
@@ -98,6 +99,11 @@ class LgTextField extends StatefulWidget {
 
   /// Run on what is typed, before [maxLength] (an ID in groups of three, say).
   final List<TextInputFormatter> inputFormatters;
+
+  /// False leaves the line under the field out while the frame and the
+  /// accessible name still say [errorText]: the caller shows the text itself,
+  /// wider than the field (the port of an exit card).
+  final bool showErrorText;
 
   @override
   State<LgTextField> createState() => _LgTextFieldState();
@@ -241,7 +247,7 @@ class _LgTextFieldState extends State<LgTextField> {
         ],
       ),
     );
-    final box = error ? _withError(field) : field;
+    final box = error && widget.showErrorText ? _withError(field) : field;
     if (widget.leading == null && widget.trailing == null) return box;
     // The buttons at the ends are nodes beside the input's, in a group of
     // their own, so that they do not take over the node of what stands around

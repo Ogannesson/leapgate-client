@@ -256,3 +256,40 @@ class LgBadge extends StatelessWidget {
     );
   }
 }
+
+/// The count of background connections on the "出口" item of the navigation
+/// and on the home tab (`.badge`, 01 §3.1 block I), with the reminder mark
+/// before it while something there waits for the user (`.rmd`): the warning
+/// triangle, 16 px, in the warning colour. The mark never stands alone and
+/// never by colour alone: it is a shape, and the owner's accessible name says
+/// "需要处理". The mark and the number are decoration for a screen reader: the
+/// control that holds them names both ("出口，2 个正在使用，需要处理").
+///
+/// [gap] between mark and number: 16 in the navigation (`.navi` gap 12 plus the
+/// 4 px of `.rmd+.badge`), 12 on the tab.
+class LgCountMark extends StatelessWidget {
+  const LgCountMark(this.count, {super.key, this.alert = false, this.gap = 16});
+
+  final int count;
+
+  /// Draws the reminder mark before the number.
+  final bool alert;
+  final double gap;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = LgTokens.of(context).colors;
+    return ExcludeSemantics(
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (alert) ...[
+            LgIcon(LgIcons.warn, size: 16, color: c.warning),
+            SizedBox(width: gap),
+          ],
+          LgBadge(count),
+        ],
+      ),
+    );
+  }
+}

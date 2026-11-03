@@ -48,6 +48,11 @@ void main() {
           'C:/Windows/Fonts/msyh.ttc',
           'C:/Windows/Fonts/msyhbd.ttc',
         ]);
+        // The start parameter in the exit card's help is set in it.
+        await _loadFont('Consolas', [
+          'C:/Windows/Fonts/consola.ttf',
+          'C:/Windows/Fonts/consolab.ttf',
+        ]);
       });
       debugDisableShadows = false;
       tester.view.physicalSize = const Size(2400, 1400);

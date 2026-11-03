@@ -29,12 +29,26 @@ class LgButton extends StatelessWidget {
     this.horizontalPadding,
     this.semanticLabel,
     this.busy = false,
+    this.iconSize = 20,
+    this.trailingIcon,
+    this.expanded,
   });
 
   final String label;
   final VoidCallback? onPressed;
   final LgButtonKind kind;
   final LgIcons? icon;
+
+  /// The edge of [icon] and [trailingIcon]: 20, and 18 in the rows of an exit
+  /// card (`.xf .btn`, `.xa .btn` in A-P1.html).
+  final double iconSize;
+
+  /// An icon after the label: the arrow of a button that unfolds something.
+  final LgIcons? trailingIcon;
+
+  /// For a button that opens or folds something: whether it is open now. A
+  /// reader says "expanded" or "collapsed".
+  final bool? expanded;
   final bool large;
   final FocusNode? focusNode;
   final bool autofocus;
@@ -63,6 +77,7 @@ class LgButton extends StatelessWidget {
       focusNode: focusNode,
       autofocus: autofocus,
       semanticLabel: semanticLabel ?? label,
+      expanded: expanded,
       builder: (context, states) {
         final disabled = states.contains(WidgetState.disabled);
         Color? bg;
@@ -134,11 +149,15 @@ class LgButton extends StatelessWidget {
                     const LgSpinner(size: 20),
                     const SizedBox(width: LgSpace.s2),
                   ] else if (icon != null) ...[
-                    LgIcon(icon!, size: 20),
+                    LgIcon(icon!, size: iconSize),
                     const SizedBox(width: LgSpace.s2),
                   ],
                   // The name comes from the pressable; the text would read it twice.
                   Flexible(child: ExcludeSemantics(child: Text(label))),
+                  if (trailingIcon != null) ...[
+                    const SizedBox(width: LgSpace.s2),
+                    LgIcon(trailingIcon!, size: iconSize),
+                  ],
                 ],
               ),
             ),
