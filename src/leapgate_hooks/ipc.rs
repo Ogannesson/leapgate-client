@@ -86,7 +86,7 @@ pub(crate) async fn query_direct_listen() -> Option<leapgate::direct::Listen> {
 /// CM end, from upstream's CM IPC loop: the main window's messages go to the CM page as events.
 pub(crate) fn on_cm(msg: Msg) {
     #[cfg(feature = "flutter")]
-    if matches!(msg, Msg::ShowCm | Msg::UiMode { .. }) {
+    if matches!(msg, Msg::ShowCm | Msg::UiMode { .. } | Msg::Lang { .. }) {
         if let Some(sink) = CM_EVENTS.lock().unwrap().as_ref() {
             if let Ok(event) = serde_json::to_string(&msg) {
                 sink.add(event);

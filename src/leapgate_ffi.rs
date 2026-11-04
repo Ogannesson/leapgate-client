@@ -105,8 +105,9 @@ pub fn leapgate_ui_mode_changed(mode: String) {
     }));
 }
 
-/// The CM page's events from the main window (C2, S7), as JSON: `{"name":"show_cm"}`,
-/// `{"name":"ui_mode","mode":…}`. A new subscription replaces the previous one.
+/// The CM page's events from the main window (C2, S7, M6), as JSON: `{"name":"show_cm"}`,
+/// `{"name":"ui_mode","mode":…}`, `{"name":"lang","lang":…}`. A new subscription replaces the
+/// previous one.
 pub fn leapgate_cm_events(sink: StreamSink<String>) -> ResultType<()> {
     crate::leapgate_hooks::ipc::set_cm_events(sink);
     Ok(())
@@ -345,4 +346,14 @@ pub fn leapgate_verify_bot(
 /// `ok`, `wrong_code`, or `not_saved` (the code was right but the service does not have it).
 pub fn leapgate_verify_2fa(code: String) -> String {
     crate::leapgate_hooks::settings::verify_2fa(code).to_owned()
+}
+
+/// Tells the CM the UI language changed, the resolved one (`zh-cn` or `en`). Instead of
+/// upstream's `main_change_language`, whose message has the CM store its whole, older
+/// LocalConfig.
+pub fn leapgate_lang_changed(lang: String) {
+    #[cfg(not(target_os = "ios"))]
+    crate::ui_interface::send_to_cm(&crate::ipc::Data::Leapgate(leapgate::ipc::Msg::Lang {
+        lang,
+    }));
 }
