@@ -569,3 +569,30 @@ const String kOptionAllowTerminalClipboardWrite =
 const String kOptionVideoSaveDirectory = "video-save-directory";
 
 // M6b outgoing (coder D, `LEAPGATE.md` §10.14): upstream's names and values.
+
+/// UserDefaultConfig: what a new device starts with (02 §1.4.2).
+const String kOptionViewStyle = "view_style";
+const String kOptionScrollStyle = "scroll_style";
+const String kOptionEdgeScrollEdgeThickness = "edge-scroll-edge-thickness";
+const String kOptionImageQuality = "image_quality";
+const String kOptionCustomImageQuality = "custom_image_quality";
+const String kOptionCustomFps = "custom-fps";
+const String kOptionI444 = "i444";
+const String kOptionShowRemoteCursor = "show_remote_cursor";
+const String kOptionFollowRemoteCursor = "follow_remote_cursor";
+const String kOptionFollowRemoteWindow = "follow_remote_window";
+const String kOptionViewOnly = "view_only";
+const String kOptionSwapLeftRightMouse = "swap-left-right-mouse";
+const String kKeyTrackpadSpeed = 'trackpad-speed';
+const String kOptionDisableAudio = "disable_audio";
+const String kOptionDisableClipboard = "disable_clipboard";
+const String kOptionLockAfterSessionEnd = "lock_after_session_end";
+const String kOptionPrivacyMode = "privacy_mode";
+const String kOptionTerminalPersistent = "terminal-persistent";
+
+/// LocalConfig, read by the controlling side.
+const String kOptionTextureRender = "use-texture-render";
+const String kOptionD3DRender = "allow-d3d-render";
+
+/// Config, read by both sides.
+const String kOptionEnableHwcodec = "enable-hwcodec";

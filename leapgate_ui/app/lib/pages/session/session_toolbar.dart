@@ -118,7 +118,17 @@ class _SessionToolbarState extends State<SessionToolbar> {
     loadToolbarDock(_ffi).then((dock) {
       if (mounted) setState(() => _dock = dock);
     });
+    _multiEdge.addListener(_reloadDock);
   }
+
+  final _multiEdge =
+      appCore.options.local.listenable(kOptionAllowMultiEdgeToolbarDock);
+
+  /// Docking on any edge switched in the settings: off puts the bar back on the top edge at
+  /// once (02 §1.4.4).
+  void _reloadDock() => loadToolbarDock(_ffi).then((dock) {
+        if (mounted) setState(() => _dock = dock);
+      });
 
   @override
   void didChangeDependencies() {
@@ -141,6 +151,7 @@ class _SessionToolbarState extends State<SessionToolbar> {
   void dispose() {
     _collapseTimer?.cancel();
     _enterWorker?.dispose();
+    _multiEdge.removeListener(_reloadDock);
     super.dispose();
   }
 
@@ -232,6 +243,10 @@ class _SessionToolbarState extends State<SessionToolbar> {
         _ffi.notices,
         _env!.changed,
         appCore.options.flutter.listenable(kOptionRemoteMenubarState),
+        // The settings of 工具栏与显示器 (02 §1.4.4, §3.3).
+        appCore.options.userDefault.listenable(kKeyShowMonitorsToolbar),
+        appCore.options.local.listenable(kOptionAllowMonitorSwitchMainToolbar),
+        appCore.options.local.listenable(kOptionAllowMonitorSwitchMinToolbar),
       ]),
       builder: (context, _) => Obx(() {
         // Read here so the toolbar follows them.
