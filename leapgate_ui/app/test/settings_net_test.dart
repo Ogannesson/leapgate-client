@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ui' show PlatformDispatcher;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -92,6 +93,7 @@ const _defaultSummary = ServerSummary(
   api: 'https://leapgate.example.com',
   apiSource: ServerSource.byDefault,
   keySource: ServerSource.byDefault,
+  keyBuiltin: true,
 );
 
 late _Bind _bind;
@@ -330,12 +332,44 @@ void main() {
       expect(_bind.config['leapgate-exit-allow-nets'], '');
     });
 
-    testWidgets('locked: the switch and "编辑" do nothing, the links still go', (tester) async {
+    testWidgets('locked: nothing in the section can be used, the links included', (tester) async {
       exitOn();
       await _pump(tester, exitNodeSection, locked: true);
       expect(tester.widget<LgSwitch>(_switch('允许作为出口')).onChanged, isNull);
       expect(tester.widget<LgButton>(_button('编辑')).onPressed, isNull);
-      expect(tester.widget<LgButton>(_button('修改')).onPressed, isNotNull);
+      expect(tester.widget<LgButton>(_button('修改')).onPressed, isNull);
+    });
+
+    testWidgets('full access allows tunnels: "修改" goes to the access mode', (tester) async {
+      exitOn();
+      _bind.config
+        ..['access-mode'] = 'full'
+        ..[kOptionEnableTunnel] = 'N';
+      await _pump(tester, exitNodeSection);
+      await tester.tap(_button('修改').last);
+      expect(_nav.settings.single,
+          (section: SettingsSectionId.permissions, item: 'access-mode'));
+    });
+
+    testWidgets('buttons that only say a verb are named by their item', (tester) async {
+      exitOn();
+      _bind.config['approve-mode'] = 'click';
+      await _pump(tester, exitNodeSection);
+      for (final name in ['设置固定密码', '修改审批方式', '编辑放行的网段', '修改 TCP 隧道']) {
+        expect(find.bySemanticsLabel(name), findsOneWidget);
+      }
+    });
+
+    testWidgets('an unreadable session count asks in general and leaves the switch usable', (tester) async {
+      exitOn();
+      _lg.incomingCounts = 'not json';
+      await _pump(tester, exitNodeSection);
+      await tester.tap(_switch('允许作为出口'));
+      await _settle(tester);
+      expect(find.text('正在使用本机作为出口的会话将断开。'), findsOneWidget);
+      await tester.tap(find.text('取消'));
+      await _settle(tester);
+      expect(tester.widget<LgSwitch>(_switch('允许作为出口')).onChanged, isNotNull);
     });
   });
 
@@ -432,9 +466,19 @@ void main() {
       await tester.tap(find.text('English').last);
       await _settle(tester);
       expect(_bind.local[kCommConfKeyLang], 'en');
-      expect(_bind.callsTo(#mainChangeLanguage).single.namedArguments[#lang],
-          'en');
+      // The CM is told over block 2; upstream's call would make it store its old LocalConfig.
+      expect(_bind.callsTo(#mainChangeLanguage), isEmpty);
+      expect(_lg.calls.last, 'lang:en');
       expect(_api.saved.last, {'leapgate-ui-lang': 'en'});
+
+      // Following the system: the CM gets the language shown, not the empty choice.
+      await tester.tap(find.bySemanticsLabel('语言: English'));
+      await _settle(tester);
+      await tester.tap(find.text('跟随系统').last);
+      await _settle(tester);
+      expect(_bind.local[kCommConfKeyLang], '');
+      expect(_lg.calls.last,
+          'lang:${PlatformDispatcher.instance.locale.languageCode == 'zh' ? 'zh-cn' : 'en'}');
     });
 
     testWidgets('the app follows the theme and language as they are written', (tester) async {
@@ -790,12 +834,32 @@ void main() {
       expect(_api.socks.single.proxy, '');
     });
 
-    testWidgets('locked: changes wait for the unlock, export does not', (tester) async {
+    testWidgets('locked: nothing in the section can be used, export included', (tester) async {
       await _pump(tester, networkSection, locked: true);
       expect(tester.widget<LgButton>(_button('修改')).onPressed, isNull);
       expect(tester.widget<LgButton>(_button('导入')).onPressed, isNull);
-      expect(tester.widget<LgButton>(_button('导出')).onPressed, isNotNull);
+      expect(tester.widget<LgButton>(_button('导出')).onPressed, isNull);
       expect(tester.widget<LgSwitch>(_switch('使用 WebSocket')).onChanged, isNull);
+    });
+
+    testWidgets('the buttons are named by what they act on', (tester) async {
+      await _pump(tester, networkSection);
+      for (final name in ['修改服务器', '导入服务器配置', '导出服务器配置', '设置代理']) {
+        expect(find.bySemanticsLabel(name), findsOneWidget);
+      }
+    });
+
+    testWidgets('server dialog: no built-in key, no hint that an empty key uses one', (tester) async {
+      _api.summary = const ServerSummary(
+          id: 'home.example.com',
+          idSource: ServerSource.user,
+          api: 'https://home.example.com',
+          apiSource: ServerSource.user,
+          keySource: ServerSource.user);
+      await _pump(tester, networkSection);
+      await tester.tap(_button('修改'));
+      await _settle(tester);
+      expect(find.textContaining('留空时使用内置的 Key'), findsNothing);
     });
   });
 

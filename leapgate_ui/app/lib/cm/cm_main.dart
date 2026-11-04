@@ -30,14 +30,12 @@ Future<void> runConnectionManager() async {
   registerCmEvents(model, chat, files);
   final local = appCore.options.local;
   final detailMode = ValueNotifier(isDetailMode(local));
-  listenToMainWindow(model, detailMode);
-  // Upstream `main.dart` `_registerEventHandler`: the theme comes with the event; Rust has stored
-  // the language in this process's LocalConfig before it sends `language`.
-  final theme = ValueNotifier(local.get(kCommConfKeyTheme));
+  // The language comes from the main window over block 2 (`leapgate_lang_changed`), not stored.
   final language = ValueNotifier(local.get(kCommConfKeyLang));
-  appCore.events
-    ..on('theme', (evt) => theme.value = evt['dark'] as String? ?? '')
-    ..on('language', (_) => language.value = local.get(kCommConfKeyLang));
+  listenToMainWindow(model, detailMode, language: language);
+  // Upstream `main.dart` `_registerEventHandler`: the theme comes with the event, not stored.
+  final theme = ValueNotifier(local.get(kCommConfKeyTheme));
+  appCore.events.on('theme', (evt) => theme.value = evt['dark'] as String? ?? '');
   runApp(
     LeapgateApp(
       detailMode: detailMode,

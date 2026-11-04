@@ -47,12 +47,14 @@ Future<bool> setTheme(OptionScope local, String theme) async {
   return saved;
 }
 
-/// Writes the language ('' follows the system), tells the CM as upstream's language combo does,
-/// and keeps [kOptionLeapgateUiLang] in step.
+/// Writes the language ('' follows the system), tells the CM the language shown, and keeps
+/// [kOptionLeapgateUiLang] in step.
 Future<bool> setUiLang(OptionScope local, OptionScope config, String lang,
     Locale system) async {
   final saved = await local.set(kCommConfKeyLang, lang);
-  await bind.mainChangeLanguage(lang: lang);
+  // Not upstream's `mainChangeLanguage`: it makes the CM store its whole LocalConfig, read when
+  // it started, over the main window's later changes. The CM gets the language shown instead.
+  await lgBind.leapgateLangChanged(lang: resolveUiLang(lang, system));
   await syncUiLang(local, config, system);
   return saved;
 }
