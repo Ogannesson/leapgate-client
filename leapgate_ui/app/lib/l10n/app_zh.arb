@@ -1194,5 +1194,11 @@
   "settingsTwoFactorCantTurnOn": "无法开启二次验证",
   "settingsTwoFactorDeleteLabel": "删除所选受信设备",
   "settingsTwoFactorDeleteAllLabel": "删除全部受信设备",
-  "settingsShortcutResetLabel": "恢复默认快捷键"
+  "settingsShortcutResetLabel": "恢复默认快捷键",
+  "settingsTwoFactorBotSendTo": "验证码将发送给：{chat}",
+  "settingsTwoFactorBotNotYours": "如果这不是你的 Telegram 对话，请取消，再从你的账号向机器人发送一条消息。",
+  "settingsTwoFactorBotConfirm": "确认",
+  "settingsTwoFactorBotGroup": "{name}（群组）",
+  "settingsTwoFactorBotChannel": "{name}（频道）",
+  "settingsTwoFactorBotFailed": "无法验证 Token"
 }

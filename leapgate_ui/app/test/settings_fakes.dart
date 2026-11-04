@@ -21,7 +21,9 @@ class FakeSettingsApi implements SettingsApi {
       (key) => key.isEmpty ? KeyCheck.empty : KeyCheck.valid;
   List<LocalAdapter> adapters = const [];
   DirectListen listen = const DirectListen();
-  BotCheck bot = (result: 'ok', text: '');
+  BotLookup bot = const BotLookup(
+      result: 'ok', chatId: '1001', chatType: 'private', chatLabel: '@zhangsan');
+  bool botSaved = true;
   TwoFactorCheck twoFactor = 'ok';
 
   @override
@@ -60,7 +62,10 @@ class FakeSettingsApi implements SettingsApi {
   Future<DirectListen> directListen() async => listen;
 
   @override
-  Future<BotCheck> verifyBot(String token) async => bot;
+  Future<BotLookup> lookupBot(String token) async => bot;
+
+  @override
+  Future<bool> saveBot(String token, String chatId) async => botSaved;
 
   @override
   Future<TwoFactorCheck> verify2fa(String code) async => twoFactor;

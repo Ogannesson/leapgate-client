@@ -172,13 +172,28 @@ Future<SettingsSectionState> _pump(WidgetTester tester,
 /// Holds an answer of the settings API until the test completes it.
 class _HeldApi extends FakeSettingsApi {
   final twoFactorAnswer = Completer<TwoFactorCheck>();
-  final botAnswer = Completer<BotCheck>();
+  final botAnswer = Completer<BotLookup>();
+  final saveAnswer = Completer<bool>();
 
   @override
   Future<TwoFactorCheck> verify2fa(String code) => twoFactorAnswer.future;
 
   @override
-  Future<BotCheck> verifyBot(String token) => botAnswer.future;
+  Future<BotLookup> lookupBot(String token) => botAnswer.future;
+
+  @override
+  Future<bool> saveBot(String token, String chatId) => saveAnswer.future;
+}
+
+/// Records the bots saved.
+class _BotApi extends FakeSettingsApi {
+  final saves = <(String token, String chatId)>[];
+
+  @override
+  Future<bool> saveBot(String token, String chatId) {
+    saves.add((token, chatId));
+    return super.saveBot(token, chatId);
+  }
 }
 
 Map<String, dynamic> _device(String id, String name, int daysAgo, int hwid) => {
@@ -388,7 +403,19 @@ void main() {
   });
 
   group('Telegram 机器人 (02 §1.6.4)', () {
-    testWidgets('not set: the three errors, then set', (tester) async {
+    /// The dialog over the section with "made-up" typed as the token.
+    Future<void> openWithToken(WidgetTester tester) async {
+      _bind.twoFactor = true;
+      await _pump(tester, twoFactorSection);
+      await tester.tap(_button('设置'));
+      await _settle(tester);
+      await tester.enterText(find.byType(EditableText), 'made-up');
+      await tester.pump();
+    }
+
+    testWidgets('lookup errors; nothing is saved', (tester) async {
+      final api = _BotApi();
+      settingsApi = api;
       _bind.twoFactor = true;
       await _pump(tester, twoFactorSection);
       expect(find.text('未设置'), findsOneWidget);
@@ -406,38 +433,99 @@ void main() {
         ('network', '无法连接 Telegram。请检查网络连接。'),
         ('no_chat', '未找到与机器人的对话。请先向机器人发送一条消息（例如 /start）。'),
         ('invalid_token', 'Token 无效'),
-        ('other', '无法保存设置'),
+        ('other', '无法验证 Token'),
       ]) {
-        _api.bot = (result: result, text: '');
+        api.bot = BotLookup(result: result, text: 'request failed');
         await tester.tap(_button('确定'));
         await _settle(tester);
         expect(find.text(text), findsOneWidget);
       }
-
-      _api.bot = (result: 'ok', text: '');
-      _bind.bot = true;
-      await tester.tap(_button('确定'));
-      await _settle(tester);
-      expect(find.text('设置 Telegram 机器人'), findsNothing);
-      expect(find.text('已设置'), findsOneWidget);
+      // Rust's words for the last one, folded away.
+      expect(find.text('技术细节'), findsOneWidget);
+      expect(api.saves, isEmpty);
     });
 
-    testWidgets('while verifying it can\'t be sent twice', (tester) async {
-      _bind.twoFactor = true;
-      final held = _HeldApi();
-      settingsApi = held;
-      await _pump(tester, twoFactorSection);
+    testWidgets('the chat to confirm: a person, a group, a channel',
+        (tester) async {
+      for (final (type, label, shown) in [
+        ('private', '@zhangsan', '验证码将发送给：@zhangsan'),
+        ('group', '家里', '验证码将发送给：家里（群组）'),
+        ('supergroup', '公司', '验证码将发送给：公司（群组）'),
+        ('channel', '通知', '验证码将发送给：通知（频道）'),
+      ]) {
+        _api.bot = BotLookup(
+            result: 'ok', chatId: '-1001', chatType: type, chatLabel: label);
+        await openWithToken(tester);
+        await tester.tap(_button('确定'));
+        await _settle(tester);
+        expect(find.text(shown), findsOneWidget);
+        expect(
+            find.text('如果这不是你的 Telegram 对话，请取消，再从你的账号向机器人发送一条消息。'),
+            findsOneWidget);
+        expect(find.text('设置 Telegram 机器人'), findsWidgets);
+        await tester.tap(_button('取消'));
+        await _settle(tester);
+      }
+    });
+
+    testWidgets('"确认" saves the chat, "取消" does not', (tester) async {
+      final api = _BotApi();
+      settingsApi = api;
+      await openWithToken(tester);
+      await tester.tap(_button('确定'));
+      await _settle(tester);
+      await tester.tap(_button('取消'));
+      await _settle(tester);
+      expect(find.text('验证码将发送给：@zhangsan'), findsNothing);
+      expect(api.saves, isEmpty);
+
       await tester.tap(_button('设置'));
       await _settle(tester);
       await tester.enterText(find.byType(EditableText), 'made-up');
       await tester.pump();
       await tester.tap(_button('确定'));
       await _settle(tester);
+      _bind.bot = true;
+      await tester.tap(_button('确认'));
+      await _settle(tester);
+      expect(api.saves.single, ('made-up', '1001'));
+      expect(find.text('设置 Telegram 机器人'), findsNothing);
+      expect(find.text('已设置'), findsOneWidget);
+    });
+
+    testWidgets('a chat the service did not keep says so', (tester) async {
+      _api.botSaved = false;
+      await openWithToken(tester);
+      await tester.tap(_button('确定'));
+      await _settle(tester);
+      await tester.tap(_button('确认'));
+      await _settle(tester);
+      expect(find.text('无法保存设置'), findsOneWidget);
+      expect(find.text('验证码将发送给：@zhangsan'), findsOneWidget);
+    });
+
+    testWidgets('while looking up and saving it can\'t be sent twice',
+        (tester) async {
+      final held = _HeldApi();
+      settingsApi = held;
+      await openWithToken(tester);
+      await tester.tap(_button('确定'));
+      await _settle(tester);
       expect(find.text('正在验证…'), findsOneWidget);
       expect(tester.widget<LgButton>(_button('取消')).onPressed, isNull);
-      held.botAnswer.complete((result: 'ok', text: ''));
+      held.botAnswer.complete(const BotLookup(
+          result: 'ok', chatId: '1001', chatType: 'private', chatLabel: '@zhangsan'));
       await _settle(tester);
       expect(find.text('正在验证…'), findsNothing);
+
+      await tester.tap(_button('确认'));
+      await _settle(tester);
+      expect(tester.widget<LgButton>(_button('取消')).onPressed, isNull);
+      // A busy button does not respond (`LgButton.busy`).
+      expect(tester.widget<LgButton>(_button('确认')).busy, isTrue);
+      held.saveAnswer.complete(true);
+      await _settle(tester);
+      expect(find.text('验证码将发送给：@zhangsan'), findsNothing);
     });
 
     testWidgets('removing it asks first', (tester) async {
