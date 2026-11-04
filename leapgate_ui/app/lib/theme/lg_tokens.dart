@@ -494,6 +494,15 @@ abstract final class LgFixed {
     'Microsoft YaHei UI',
     'Microsoft YaHei',
   ];
+
+  /// The monospace face of key combinations, the 2FA secret, the fingerprint and
+  /// ports (`ui-monospace,Consolas,"Courier New"` in A-P6-设置.html). A
+  /// figures-and-letters face only: nothing in Chinese is set in it.
+  static const String monoFamily = 'Consolas';
+  static const List<String> monoFamilyFallback = [
+    'Cascadia Mono',
+    'Courier New',
+  ];
 }
 
 class LgTokens extends ThemeExtension<LgTokens> {
@@ -527,6 +536,20 @@ class LgTokens extends ThemeExtension<LgTokens> {
     leadingDistribution: TextLeadingDistribution.even,
     fontWeight: weight,
     fontFeatures: const [FontFeature.tabularFigures()],
+  );
+
+  /// [style] in the monospace face ([LgFixed.monoFamily]).
+  static TextStyle monoStyle(
+    double size,
+    double lineHeight, [
+    FontWeight weight = FontWeight.w400,
+  ]) => TextStyle(
+    fontFamily: LgFixed.monoFamily,
+    fontFamilyFallback: LgFixed.monoFamilyFallback,
+    fontSize: size,
+    height: lineHeight / size,
+    leadingDistribution: TextLeadingDistribution.even,
+    fontWeight: weight,
   );
 
   @override

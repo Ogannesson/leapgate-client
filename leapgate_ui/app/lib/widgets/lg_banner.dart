@@ -40,6 +40,7 @@ class LgBanner extends StatelessWidget {
     this.text,
     this.icon,
     this.slim = false,
+    this.dense = false,
     this.actionLabel,
     this.onAction,
     this.actionIcon,
@@ -66,6 +67,10 @@ class LgBanner extends StatelessWidget {
   /// `.bnr.big` of the connection panel (16 px, icon on the first line).
   final bool slim;
 
+  /// The banner of the settings page (`.bnr` in A-P6-设置.html): 8 px above and
+  /// under and the medium text, with [slim].
+  final bool dense;
+
   /// The button at the end ("重试"); [actionIcon] goes before its label.
   final String? actionLabel;
   final VoidCallback? onAction;
@@ -91,9 +96,9 @@ class LgBanner extends StatelessWidget {
       liveRegion: tone == LgTone.error || tone == LgTone.warning,
       child: Container(
         padding: slim
-            ? const EdgeInsets.symmetric(
+            ? EdgeInsets.symmetric(
                 horizontal: LgSpace.s4,
-                vertical: LgSpace.s3,
+                vertical: dense ? LgSpace.s2 : LgSpace.s3,
               )
             : const EdgeInsets.all(LgSpace.s4),
         decoration: BoxDecoration(
@@ -128,7 +133,7 @@ class LgBanner extends StatelessWidget {
                     if (text != null) TextSpan(text: text),
                   ],
                 ),
-                style: t.text.copyWith(color: c.text),
+                style: (dense ? t.textM : t.text).copyWith(color: c.text),
               ),
             ),
             if (actionLabel != null) ...[
@@ -146,7 +151,10 @@ class LgBanner extends StatelessWidget {
               // `.xi`: 28 px, sitting 4 px into the banner's padding.
               Transform.translate(
                 offset: const Offset(LgSpace.s1, 0),
-                child: _DismissButton(label: dismissLabel!, onPressed: onDismiss!),
+                child: _DismissButton(
+                  label: dismissLabel!,
+                  onPressed: onDismiss!,
+                ),
               ),
             ],
           ],

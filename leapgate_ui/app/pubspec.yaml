@@ -35,6 +35,9 @@ dependencies:
   # "Save as" of a screenshot (pages/session/session_notices.dart); the version upstream's
   # flutter/pubspec.lock pins (05-M2b拆法.md §2.3)
   file_picker: 5.5.0
+  # The QR code of the "turn on 2FA" dialog (widgets/lg_qr_code.dart); the version upstream
+  # pins (flutter/pubspec.yaml), pure Dart (09-M6拆法.md "不用定、写进约定就行的")
+  qr_flutter: 4.1.0
 
 dev_dependencies:
   flutter_test:
