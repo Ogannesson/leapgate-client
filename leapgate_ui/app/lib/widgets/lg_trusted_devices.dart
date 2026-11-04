@@ -57,6 +57,8 @@ class LgTrustedDevices extends StatelessWidget {
     this.pickedCountLabel,
     this.deleteLabel,
     this.onDeleteSelected,
+    this.deleteSemanticLabel,
+    this.deleteAllSemanticLabel,
   }) : assert(picked.length == 0 || deleteLabel != null);
 
   /// "受信设备".
@@ -83,6 +85,11 @@ class LgTrustedDevices extends StatelessWidget {
   final String? deleteLabel;
   final VoidCallback? onDeleteSelected;
 
+  /// What a screen reader says for the two delete buttons ("删除所选受信设备"); the label
+  /// otherwise.
+  final String? deleteSemanticLabel;
+  final String? deleteAllSemanticLabel;
+
   @override
   Widget build(BuildContext context) {
     final t = LgTokens.of(context);
@@ -99,6 +106,7 @@ class LgTrustedDevices extends StatelessWidget {
             if (picked.isNotEmpty && deleteLabel != null)
               LgButton(
                 label: deleteLabel!,
+                semanticLabel: deleteSemanticLabel,
                 kind: LgButtonKind.danger,
                 horizontalPadding: LgSpace.s3,
                 onPressed: onDeleteSelected,
@@ -106,6 +114,7 @@ class LgTrustedDevices extends StatelessWidget {
             if (devices.isNotEmpty)
               LgButton(
                 label: deleteAllLabel,
+                semanticLabel: deleteAllSemanticLabel,
                 kind: LgButtonKind.text,
                 onPressed: onDeleteAll,
               ),
