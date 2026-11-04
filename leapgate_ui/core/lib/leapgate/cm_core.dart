@@ -43,8 +43,7 @@ abstract class CmWindow implements AppWindow {
 }
 
 /// The global events the CM handles (upstream `models/model.dart:365-367`, `:392-445`). `theme`
-/// and `language` are not handled: like the new main window, the CM follows the system until
-/// the settings page (M6) stores a choice.
+/// and `language` are registered by the app's CM entry, which owns the app's look.
 void registerCmEvents(ServerModel model, CmChatModel chat, CmFileModel files) {
   final events = appCore.events;
   events.on('add_connection', model.addConnection);

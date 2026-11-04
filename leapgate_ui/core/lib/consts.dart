@@ -507,3 +507,16 @@ const String kCommConfKeyTheme = 'theme';
 /// LocalConfig, shared with the old UI: Rust's language code (`zh-cn`, `en`), empty follows the
 /// system.
 const String kCommConfKeyLang = 'lang';
+
+// M6a network: upstream's names and values (`flutter/lib/consts.dart:179-199`).
+
+/// LocalConfig, read by the controlling side.
+const String kOptionEnableTcpPunch = "enable-tcp-punch";
+const String kOptionEnableUdpPunch = "enable-udp-punch";
+const String kOptionEnableIpv6Punch = "enable-ipv6-punch";
+const String kOptionRelayFallbackDelay = "relay-fallback-delay";
+
+/// Config, read by both sides.
+const String kOptionAllowWebSocket = "allow-websocket";
+const String kOptionAllowInsecureTLSFallback = "allow-insecure-tls-fallback";
+const String kOptionDisableUdp = "disable-udp";

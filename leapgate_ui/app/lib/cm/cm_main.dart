@@ -17,8 +17,7 @@ import 'cm_window.dart';
 /// The `--cm` process, as upstream's `runConnectionManagerScreen` (`flutter/lib/main.dart:285-302`)
 /// without `hide_cm` (03 §5.2 M3): the platform interface starts as the connection manager,
 /// which runs Rust's `cm_init`, then the CM's events are registered on the global stream.
-/// Light / dark and the language follow the system, as the main window's do until the settings
-/// page (M6) stores a choice; the interface mode follows the main window's (S7).
+/// The theme, the language (02 §1.5.1) and the interface mode (S7) follow the main window's.
 Future<void> runConnectionManager() async {
   desktopType = DesktopType.cm;
   await windowManager.ensureInitialized();
@@ -29,11 +28,21 @@ Future<void> runConnectionManager() async {
   final chat = CmChatModel(model);
   final files = CmFileModel(model);
   registerCmEvents(model, chat, files);
-  final detailMode = ValueNotifier(isDetailMode(appCore.options.local));
+  final local = appCore.options.local;
+  final detailMode = ValueNotifier(isDetailMode(local));
   listenToMainWindow(model, detailMode);
+  // Upstream `main.dart` `_registerEventHandler`: the theme comes with the event; Rust has stored
+  // the language in this process's LocalConfig before it sends `language`.
+  final theme = ValueNotifier(local.get(kCommConfKeyTheme));
+  final language = ValueNotifier(local.get(kCommConfKeyLang));
+  appCore.events
+    ..on('theme', (evt) => theme.value = evt['dark'] as String? ?? '')
+    ..on('language', (_) => language.value = local.get(kCommConfKeyLang));
   runApp(
     LeapgateApp(
       detailMode: detailMode,
+      theme: theme,
+      language: language,
       home: CmPage(model: model, chat: chat, files: files, window: window),
     ),
   );
