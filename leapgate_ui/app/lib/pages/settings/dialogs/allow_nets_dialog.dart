@@ -5,12 +5,10 @@ import 'package:flutter_hbb/leapgate/settings/settings_api.dart';
 import '../../../icons/lg_icon.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../shell/tab_overlays.dart';
-import '../../../theme/lg_tokens.dart';
+import '../../../widgets/lg_banner.dart';
 import '../../../widgets/lg_button.dart';
 import '../../../widgets/lg_feedback.dart';
 import '../../../widgets/lg_form_dialog.dart';
-import '../../../widgets/lg_text_field.dart';
-import '../net_rows.dart';
 
 /// "放行的网段" (02 §1.6.6): what to store in `leapgate-exit-allow-nets` (empty after "清除"),
 /// null when cancelled. Rust checks each line as typed (E5).
@@ -52,15 +50,29 @@ class _AllowNetsDialogState extends State<_AllowNetsDialog> {
     super.dispose();
   }
 
+  /// Asked over the dialog (02 §3.5).
   Future<void> _clear() async {
     final l10n = widget.l10n;
-    final ok = await confirmInSettings(
-      widget.overlays,
-      title: l10n.settingsExitNetsClearTitle,
-      action: l10n.settingsExitNetsClear,
-      cancel: l10n.homeCancel,
-      danger: true,
-    );
+    final ok = await widget.overlays.show<bool>(
+          null,
+          (context, close) => LgDialogScrim(
+            onEscape: () => close(false),
+            child: LgConfirmDialog(
+              title: l10n.settingsExitNetsClearTitle,
+              actions: [
+                LgDialogAction(
+                    label: l10n.homeCancel, onPressed: () => close(false)),
+                LgDialogAction(
+                  label: l10n.settingsExitNetsClear,
+                  kind: LgButtonKind.dangerSolid,
+                  isDefault: true,
+                  onPressed: () => close(true),
+                ),
+              ],
+            ),
+          ),
+        ) ??
+        false;
     if (ok) widget.close('');
   }
 
@@ -71,15 +83,33 @@ class _AllowNetsDialogState extends State<_AllowNetsDialog> {
   @override
   Widget build(BuildContext context) {
     final l10n = widget.l10n;
-    final t = LgTokens.of(context);
     final lines = _check.lines.entries.toList()
       ..sort((a, b) => a.key.compareTo(b.key));
+    // A wrong line stops "确定"; a line that is always blocked only warns.
+    final invalid = lines.any((l) => l.value == NetLineState.invalid);
     return LgFormDialog(
       title: l10n.settingsExitNets,
       icon: LgIcons.exit,
       note: l10n.settingsExitNetsRule,
+      banner: lines.isEmpty
+          ? null
+          : LgBanner(
+              tone: invalid ? LgTone.error : LgTone.warning,
+              slim: true,
+              dense: true,
+              text: [
+                for (final MapEntry(key: line, value: state) in lines)
+                  state == NetLineState.invalid
+                      ? l10n.settingsExitNetsInvalidLine(line)
+                      : l10n.settingsExitNetsBlockedLine(line),
+              ].join('\n'),
+            ),
+      leading: LgButton(
+        label: l10n.settingsExitNetsClear,
+        kind: LgButtonKind.danger,
+        onPressed: _clear,
+      ),
       actions: [
-        LgDialogAction(label: l10n.settingsExitNetsClear, onPressed: _clear),
         LgDialogAction(
             label: l10n.homeCancel, onPressed: () => widget.close(null)),
         LgDialogAction(
@@ -100,14 +130,6 @@ class _AllowNetsDialogState extends State<_AllowNetsDialog> {
                 setState(() => _check = settingsApi.allowNetsCheck(text)),
           ),
         ),
-        for (final MapEntry(key: line, value: state) in lines)
-          Padding(
-            padding: const EdgeInsets.only(top: LgSpace.s1),
-            child: state == NetLineState.invalid
-                ? LgFieldError(l10n.settingsExitNetsInvalidLine(line))
-                : Text(l10n.settingsExitNetsBlockedLine(line),
-                    style: t.textS.copyWith(color: t.colors.warning)),
-          ),
       ],
     );
   }

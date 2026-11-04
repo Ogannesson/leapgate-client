@@ -128,13 +128,20 @@ class _ProxyDialogState extends State<_ProxyDialog> {
       title: l10n.settingsNetProxy,
       icon: LgIcons.globe,
       banner: _failed
-          ? LgBanner(tone: LgTone.error, text: l10n.settingsSaveFailed, slim: true)
+          ? LgBanner(
+              tone: LgTone.error,
+              text: l10n.settingsSaveFailed,
+              slim: true,
+              dense: true)
+          : null,
+      leading: wasSet
+          ? LgButton(
+              label: l10n.settingsNetProxyRemove,
+              kind: LgButtonKind.danger,
+              onPressed: _busy ? null : _remove,
+            )
           : null,
       actions: [
-        if (wasSet)
-          LgDialogAction(
-              label: l10n.settingsNetProxyRemove,
-              onPressed: _busy ? null : _remove),
         LgDialogAction(
             label: l10n.homeCancel,
             onPressed: _busy ? null : () => widget.close(false)),

@@ -9,7 +9,8 @@ import 'package:flutter_hbb/leapgate/ui_mode.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../widgets/lg_panel_inputs.dart';
 import '../../../widgets/lg_selection.dart';
-import '../net_rows.dart';
+import '../../../widgets/lg_settings_rows.dart';
+import '../settings_flow.dart';
 import '../settings_registry.dart';
 
 /// Item ids of this section.
@@ -50,13 +51,14 @@ Widget _appearance(BuildContext context, SettingsSectionContext ctx) {
     'dark' => 'dark',
     _ => kThemeSystem,
   };
-  return Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [
-      NetRow(
-        ctx: ctx,
-        item: kAppearanceItemTheme,
+  return SettingsFlow([
+    LgSettingsBlock(children: [
+      LgSettingsRow(
+        key: ctx.keyOf(kAppearanceItemTheme),
         name: l10n.settingsAppearanceTheme,
+        wide: true,
+        marked: ctx.isMarked(kAppearanceItemTheme),
+        error: ctx.errorOf(kAppearanceItemTheme),
         control: LgSegmented<String>(
           segments: [
             LgSegment('light', l10n.settingsAppearanceLight),
@@ -68,11 +70,13 @@ Widget _appearance(BuildContext context, SettingsSectionContext ctx) {
               ctx.save(kAppearanceItemTheme, () => setTheme(local, v)),
         ),
       ),
-      NetRow(
-        ctx: ctx,
-        item: kAppearanceItemMode,
+      LgSettingsRow(
+        key: ctx.keyOf(kAppearanceItemMode),
         name: l10n.settingsAppearanceMode,
         description: l10n.settingsAppearanceModeNote,
+        wide: true,
+        marked: ctx.isMarked(kAppearanceItemMode),
+        error: ctx.errorOf(kAppearanceItemMode),
         control: LgSegmented<bool>(
           segments: [
             LgSegment(false, l10n.uiModeSimple),
@@ -83,13 +87,16 @@ Widget _appearance(BuildContext context, SettingsSectionContext ctx) {
               ctx.save(kAppearanceItemMode, () => setDetailMode(local, v)),
         ),
       ),
-      NetRow(
-        ctx: ctx,
-        item: kAppearanceItemLang,
+      LgSettingsRow(
+        key: ctx.keyOf(kAppearanceItemLang),
         name: l10n.settingsAppearanceLang,
+        wide: true,
+        marked: ctx.isMarked(kAppearanceItemLang),
+        error: ctx.errorOf(kAppearanceItemLang),
         control: SizedBox(
           width: 200,
           child: LgSelectField<String>(
+            dense: true,
             semanticLabel: l10n.settingsAppearanceLang,
             items: [
               LgSelectItem('', l10n.settingsAppearanceSystem),
@@ -104,6 +111,6 @@ Widget _appearance(BuildContext context, SettingsSectionContext ctx) {
           ),
         ),
       ),
-    ],
-  );
+    ]),
+  ]);
 }
