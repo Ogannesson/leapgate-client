@@ -208,6 +208,7 @@ Widget _shortcuts(BuildContext context, SettingsSectionContext ctx) {
       trailing: [
         LgButton(
             label: l10n.settingsShortcutReset,
+            semanticLabel: l10n.settingsShortcutResetLabel,
             onPressed: passThrough ? null : reset),
       ],
     ),

@@ -1193,5 +1193,6 @@
   "settingsSessionsPreviewLabel": "预览移除壁纸",
   "settingsTwoFactorCantTurnOn": "无法开启二次验证",
   "settingsTwoFactorDeleteLabel": "删除所选受信设备",
-  "settingsTwoFactorDeleteAllLabel": "删除全部受信设备"
+  "settingsTwoFactorDeleteAllLabel": "删除全部受信设备",
+  "settingsShortcutResetLabel": "恢复默认快捷键"
 }
