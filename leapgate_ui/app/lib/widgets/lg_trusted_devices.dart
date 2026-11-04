@@ -213,7 +213,8 @@ class _TrustedRow extends StatelessWidget {
                         ),
                         const SizedBox(width: LgSpace.s3),
                         SizedBox(
-                          width: 72,
+                          // "Expires today" and "23 days left" are about 80 wide.
+                          width: 96,
                           child: Text(
                             device.remaining,
                             maxLines: 1,

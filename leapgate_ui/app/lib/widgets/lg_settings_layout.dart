@@ -388,7 +388,11 @@ class LgSettingsSearchField extends StatelessWidget {
   final ValueChanged<int>? onMove;
 
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
-    if (event is KeyUpEvent) return KeyEventResult.ignored;
+    // The keys the input method is composing with (a pinyin candidate list, say)
+    // are its own: Up and Down pick a candidate, Esc drops the composition.
+    if (event is KeyUpEvent || controller.value.composing.isValid) {
+      return KeyEventResult.ignored;
+    }
     final key = event.logicalKey;
     if (key == LogicalKeyboardKey.arrowDown && onMove != null) {
       onMove!(1);

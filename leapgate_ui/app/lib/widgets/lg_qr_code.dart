@@ -13,8 +13,10 @@ import 'lg_button.dart';
 ///
 /// A scanner wants dark modules on a light ground, so the card keeps the light
 /// theme's ink on its white in both themes: the code is not in the page's colours
-/// in the dark theme, on purpose. The quiet zone is the 8 px of padding plus
-/// the code's own.
+/// in the dark theme, on purpose. `qr_flutter` draws no quiet zone of its own;
+/// the 16 px of padding is it, about four or five modules for the codes this
+/// card carries (an `otpauth://` link is a version 5 or 6 code, 3 px a module in
+/// the 136 px left).
 class LgQrCode extends StatelessWidget {
   const LgQrCode({
     super.key,
@@ -36,7 +38,7 @@ class LgQrCode extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const ink = Color(0xFF14282B);
+    final ink = LgColors.light.text;
     final paper = LgColors.light.surface;
     return Semantics(
       image: true,
@@ -45,7 +47,7 @@ class LgQrCode extends StatelessWidget {
         child: Container(
           width: size,
           height: size,
-          padding: const EdgeInsets.all(LgSpace.s2),
+          padding: const EdgeInsets.all(LgSpace.s4),
           decoration: BoxDecoration(
             color: paper,
             borderRadius: BorderRadius.circular(LgRadius.r12),
@@ -55,8 +57,8 @@ class LgQrCode extends StatelessWidget {
             padding: EdgeInsets.zero,
             backgroundColor: paper,
             errorCorrectionLevel: QrErrorCorrectLevel.M,
-            eyeStyle: const QrEyeStyle(eyeShape: QrEyeShape.square, color: ink),
-            dataModuleStyle: const QrDataModuleStyle(
+            eyeStyle: QrEyeStyle(eyeShape: QrEyeShape.square, color: ink),
+            dataModuleStyle: QrDataModuleStyle(
               dataModuleShape: QrDataModuleShape.square,
               color: ink,
             ),

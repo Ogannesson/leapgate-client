@@ -61,6 +61,49 @@ void main() {
     });
 
     testWidgets(
+      'a switch row is read once: the name is the switch, not also a text',
+      (tester) async {
+        final handle = tester.ensureSemantics();
+        await pumpLg(
+          tester,
+          _block([
+            LgSettingsRow.toggle(
+              name: '自适应码率',
+              description: '根据网络状况自动调整画面码率',
+              value: true,
+              onChanged: (_) {},
+            ),
+          ]),
+        );
+        expect(find.bySemanticsLabel('自适应码率'), findsOneWidget);
+        // The description is still read.
+        expect(find.bySemanticsLabel('根据网络状况自动调整画面码率'), findsOneWidget);
+        handle.dispose();
+      },
+    );
+
+    testWidgets(
+      'a row with another kind of control keeps its name for a reader',
+      (tester) async {
+        final handle = tester.ensureSemantics();
+        await pumpLg(
+          tester,
+          _block([
+            LgSettingsRow(
+              name: '固定密码',
+              control: LgSettingsValueActions(
+                value: '未设置',
+                actions: [LgSettingsAction(label: '设置', onPressed: () {})],
+              ),
+            ),
+          ]),
+        );
+        expect(find.bySemanticsLabel('固定密码'), findsOneWidget);
+        handle.dispose();
+      },
+    );
+
+    testWidgets(
       'disabled: the control does not respond and the reason is told',
       (tester) async {
         var n = 0;
@@ -538,6 +581,32 @@ void main() {
       expect(find.text('2.5'), findsOneWidget);
       expect(reverted, 1);
     });
+
+    testWidgets(
+      'Enter keeps the focus in the box, so Esc still puts the saved value back after a refused one',
+      (tester) async {
+        final log = <String>[];
+        var reverted = 0;
+        await pumpLg(tester, field(log: log, onReverted: () => reverted++));
+        await tester.tap(find.byType(TextField));
+        await tester.enterText(find.byType(TextField), '999');
+        await tester.testTextInput.receiveAction(TextInputAction.done);
+        await tester.pump();
+        expect(log, ['999']);
+        expect(
+          FocusManager.instance.primaryFocus?.context
+              ?.findAncestorWidgetOfExactType<EditableText>(),
+          isNotNull,
+          reason: 'the focus is still in the box',
+        );
+        // The section refused it (it did not change [text]); Esc puts 2.5 back.
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.pump();
+        expect(find.text('2.5'), findsOneWidget);
+        expect(find.text('999'), findsNothing);
+        expect(reverted, 1);
+      },
+    );
 
     testWidgets('Esc with nothing to put back is left to others', (
       tester,

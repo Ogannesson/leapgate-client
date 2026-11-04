@@ -429,6 +429,27 @@ List<Specimen> _m6Specimens() {
         h: 560,
       ),
     )
+    // The same section in English: the nav names run to two lines, the
+    // length control goes under its name.
+    ..add(
+      frame(
+        'smallest-window-access-english',
+        (en) => _m6Frame(
+          width: 720,
+          height: 560,
+          nav: _m6Nav(en: en),
+          content: _m6Content(
+            title: _x(en, '访问与密码', 'Access and passwords'),
+            width: 720 - 8 - 180 - 16,
+            height: 560,
+            children: _m6AccessChildren(en),
+          ),
+        ),
+        en: true,
+        w: 720,
+        h: 560,
+      ),
+    )
     ..add(
       frame(
         'smallest-window-english',

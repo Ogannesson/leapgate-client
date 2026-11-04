@@ -328,6 +328,16 @@ void main() {
       expect(find.byType(LgDeviceAvatar), findsNothing);
     });
 
+    testWidgets('the days column is 96 wide, room for "Expires today"', (
+      tester,
+    ) async {
+      await pumpLg(tester, _trusted());
+      final column = find
+          .ancestor(of: find.text('剩余 23 天'), matching: find.byType(SizedBox))
+          .first;
+      expect(tester.getSize(column).width, 96);
+    });
+
     testWidgets('a long name ends in "…" and the columns stay', (tester) async {
       await pumpLg(
         tester,
@@ -618,6 +628,16 @@ void main() {
           reason: brightness.name,
         );
         expect(tester.getSize(find.byType(LgQrCode)), const Size(168, 168));
+        // The modules are the light theme's ink in both themes, so that a
+        // scanner finds dark on light; 16 px of quiet zone round them.
+        final qr = tester.widget<QrImageView>(find.byType(QrImageView));
+        expect(qr.dataModuleStyle.color, LgColors.light.text, reason: 'data');
+        expect(qr.eyeStyle.color, LgColors.light.text, reason: 'eyes');
+        expect(qr.backgroundColor, LgColors.light.surface);
+        expect(
+          tester.getSize(find.byType(QrImageView)),
+          const Size(168 - 32, 168 - 32),
+        );
       }
     });
 

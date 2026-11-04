@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:leapgate_ui/theme/lg_tokens.dart';
@@ -195,6 +196,53 @@ void main() {
       },
     );
 
+    testWidgets(
+      'while the input method is composing, Up, Down and Esc are its own',
+      (tester) async {
+        final moves = <int>[];
+        final changes = <String>[];
+        final controller = TextEditingController();
+        addTearDown(controller.dispose);
+        await pumpLg(
+          tester,
+          _nav(
+            log: [],
+            search: controller,
+            onMove: moves.add,
+            onChanged: changes.add,
+          ),
+        );
+        await tester.tap(find.byType(TextField));
+        await tester.pump();
+        // "ni" is on its way to becoming 你: the underlined, composing text.
+        controller.value = const TextEditingValue(
+          text: 'ni',
+          selection: TextSelection.collapsed(offset: 2),
+          composing: TextRange(start: 0, end: 2),
+        );
+        await tester.pump();
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.pump();
+        expect(moves, isEmpty);
+        expect(controller.text, 'ni', reason: 'Esc leaves the typing alone');
+        expect(changes, isEmpty);
+
+        // Composition over (the candidate was picked): the keys work again.
+        controller.value = const TextEditingValue(
+          text: '你',
+          selection: TextSelection.collapsed(offset: 1),
+        );
+        await tester.pump();
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+        expect(moves, [1]);
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.pump();
+        expect(controller.text, '');
+      },
+    );
+
     testWidgets('Esc in an empty box is left alone', (tester) async {
       final changes = <String>[];
       await pumpLg(tester, _nav(log: [], onChanged: changes.add));
@@ -284,24 +332,28 @@ void main() {
       tester,
     ) async {
       var on = false;
-      await pumpLg(
-        tester,
-        content(
-          700,
-          locked: true,
-          children: [
-            LgSettingsBlock(
-              children: [
-                LgSettingsRow.toggle(
-                  name: '仅使用数字',
-                  value: on,
-                  onChanged: (v) => on = v,
-                ),
-              ],
-            ),
-          ],
-        ),
+      final handle = tester.ensureSemantics();
+      Widget page({required bool locked}) => content(
+        700,
+        locked: locked,
+        children: [
+          LgSettingsBlock(
+            children: [
+              LgSettingsRow.toggle(
+                name: '仅使用数字',
+                value: on,
+                onChanged: (v) => on = v,
+              ),
+            ],
+          ),
+        ],
       );
+      bool canTap() => tester
+          .getSemantics(find.bySemanticsLabel('仅使用数字'))
+          .getSemanticsData()
+          .hasAction(SemanticsAction.tap);
+
+      await pumpLg(tester, page(locked: true));
       await tester.tap(find.byType(LgSwitch), warnIfMissed: false);
       expect(on, isFalse);
       // Tab does not go into it either.
@@ -309,8 +361,17 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.tab);
       await tester.sendKeyEvent(LogicalKeyboardKey.space);
       expect(on, isFalse);
-      // The controls are still in the tree for a reader.
+      // The control is still in the tree for a reader, but a reader cannot
+      // press it: IgnorePointer takes the tap action off its node.
       expect(find.byType(LgSwitch), findsOneWidget);
+      expect(canTap(), isFalse);
+
+      // Unlocked it can be pressed, by pointer and by a reader.
+      await pumpLg(tester, page(locked: false));
+      expect(canTap(), isTrue);
+      await tester.tap(find.byType(LgSwitch));
+      expect(on, isTrue);
+      handle.dispose();
     });
 
     testWidgets('unlocking keeps what was typed in the controls under it', (

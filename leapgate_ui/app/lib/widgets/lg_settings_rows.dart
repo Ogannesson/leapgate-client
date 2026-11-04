@@ -213,9 +213,11 @@ class LgSettingsRow extends StatelessWidget {
     this.disabledReason,
     this.error,
     this.errorAtEnd = false,
+    this.nameNamesControl = false,
   });
 
-  /// A row whose control is a switch, named by [name].
+  /// A row whose control is a switch, named by [name]. The switch carries the
+  /// name for a reader, so the visible name is not read a second time.
   factory LgSettingsRow.toggle({
     Key? key,
     required String name,
@@ -241,6 +243,7 @@ class LgSettingsRow extends StatelessWidget {
     disabled: disabled,
     disabledReason: disabledReason,
     error: error,
+    nameNamesControl: true,
   );
 
   final String name;
@@ -258,18 +261,27 @@ class LgSettingsRow extends StatelessWidget {
   final String? error;
   final bool errorAtEnd;
 
+  /// The control already says [name] to a reader (a switch given the name as
+  /// its label): the visible name is left out of the semantics, or it would be
+  /// read twice. Rows whose control is named otherwise ("修改", "设置固定密码")
+  /// keep it.
+  final bool nameNamesControl;
+
   @override
   Widget build(BuildContext context) {
     final t = LgTokens.of(context);
     final c = t.colors;
     final narrow = LgSettingsMetrics.narrowOf(context);
+    final nameText = Text(name, style: t.text.copyWith(color: c.text));
     final text = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
         LgSettingsDimmed(
           dimmed: disabled,
-          child: Text(name, style: t.text.copyWith(color: c.text)),
+          child: nameNamesControl
+              ? ExcludeSemantics(child: nameText)
+              : nameText,
         ),
         if (description != null)
           Text(description!, style: t.textS.copyWith(color: c.text2)),
@@ -645,6 +657,12 @@ class LgSettingsStatusRow extends StatelessWidget {
 /// puts [text] back ([onReverted]). A wrong value is the section's to refuse:
 /// it gives [errorText] (the frame turns red) and shows the words in the row's
 /// `error` with `errorAtEnd`, wide enough to read.
+///
+/// A box that is taken out of the tree (the section is switched, the page is
+/// left) while it still has the focus does not hand over what is typed: its
+/// focus node is gone before it can tell. The page takes the focus away
+/// (`FocusManager.instance.primaryFocus?.unfocus()`) before it switches the
+/// content, and so has the value handed over first.
 class LgSettingsNumberField extends StatefulWidget {
   const LgSettingsNumberField({
     super.key,
@@ -778,6 +796,9 @@ class _LgSettingsNumberFieldState extends State<LgSettingsNumberField> {
                 _sent = null;
                 widget.onChanged?.call(v);
               },
+              // Enter must not take the focus out of the box: after a refused
+              // value Esc still puts the saved one back.
+              onEditingComplete: () {},
               onSubmitted: (_) => _commit(),
             ),
           ),
