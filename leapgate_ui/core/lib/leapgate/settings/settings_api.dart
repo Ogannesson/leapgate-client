@@ -67,6 +67,7 @@ class ServerSummary {
       this.api = '',
       this.apiSource = ServerSource.none,
       this.keySource = ServerSource.none,
+      this.keyBuiltin = false,
       this.relay = ''});
 
   factory ServerSummary.fromJson(Map<String, dynamic> m) {
@@ -79,6 +80,7 @@ class ServerSummary {
       api: part('api')['value'] as String? ?? '',
       apiSource: _source(part('api')['source'] as String?),
       keySource: _source(part('key')['source'] as String?),
+      keyBuiltin: part('key')['builtin'] == true,
       relay: part('relay')['value'] as String? ?? '',
     );
   }
@@ -89,6 +91,9 @@ class ServerSummary {
   final String api;
   final ServerSource apiSource;
   final ServerSource keySource;
+
+  /// The build has a built-in key ("留空时使用内置的 Key" only then, 02 §1.6.8).
+  final bool keyBuiltin;
   final String relay;
 }
 

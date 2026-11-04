@@ -1714,7 +1714,7 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 - M6-4：主页服务状态行在代理、WebSocket、禁用 UDP 开着时的警告，等 02 §4.3 第 4 条的实测结果再做（主会话转给 A）。
 
 **coder B 的要点**
-- 出口：开关写 Y / N；前提状态行从访问与密码、权限的值算，"修改"用 `showSettings` 和上面固定的项 id；关闭前的确认数来自 `LocalStatusModel` 已有的传入会话数（C1 的 `exit`）；放行的网段对话框用 `settingsApi.allowNetsCheck`，保存它给的 `value`。
+- 出口：开关写 Y / N；前提状态行从访问与密码、权限的值算，"修改"用 `showSettings` 和上面固定的项 id；关闭前的确认数在点关闭时现查一次 C1 的 `exit`（2026-11-04 按实现改，原写从 `LocalStatusModel` 取；为 0 时不确认，查不到时用不带数字的那句）；放行的网段对话框用 `settingsApi.allowNetsCheck`，保存它给的 `value`。
 - 连接方式：打洞直连和三个键的对应照 02 §1.4.1（打开只写 `enable-ipv6-punch = Y`，关闭两个都写 N）；等待直连的时间 0.1~99.9、一位小数、空 = 2.5；顶部状态条：代理、WebSocket、禁用 UDP、Key 不可用（`keyCheck` 为 `invalid`，或为 `empty` 且 S1 的 Key 来源是 `none`）、兼容服务器（`serverKind`）。
 - 外观：`theme`、`lang` 是和旧界面共用的 LocalConfig 键；写入后照上游调 `mainChangeTheme`、`mainChangeLanguage`；主窗口的 `MaterialApp` 按这两个键设 `themeMode` 和 `locale` 并监听；CM 登记 `theme`、`language` 两个全局事件跟着切换。`lang` 存的是新界面不支持的语言时按"跟随系统"显示和处理、不改写（09 §4.8）。启动时和改语言后，把解析后的实际语言（`zh-cn` 或 `en`）经 S9 写进 Config 键 `leapgate-ui-lang`（值不同才写）。
 - 网络和服务器：摘要用 `serverSummary` 和 `serverKind`；实际生效的 API 是明文 http 且不是回环地址时显示警告；服务器对话框照 02 §1.6.8，"API 留空时会用的地址"用第一块现成的 `mainGetCommonSync('resolve-api-server:…')`，Key 用 `keyCheck`，ID 和中继服务器用 `mainTestIfValidServer` 验证；已登录且 API 变了时按 09 §4.5 的先后（先验证、再向旧服务器退出登录、再保存，退出失败不挡保存）；导入导出走剪贴板，编解码照上游 `common.dart:2921-2973`，导入只预填、点"确定"才保存；代理对话框读 `mainGetSocks`、写 `settingsApi.setSocks`；WebSocket、禁用 UDP 开启前页内确认。TLS 回退的说明按 09 §4.6：B 列出还走上游代码的 HTTP 请求，写进提交说明，文案由主会话定稿。
@@ -1754,3 +1754,9 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 - R：S9 的合并和三种返回；S1 的来源推导表；S2 三态；S3；E5 的逐行判断（含 `0.0.0.0/0`、198.18.0.0/15、各类始终禁止）；S10 按上游原文归类；S11 两种语言正文。
 - core（A、B 各自的）：解锁控制器的上锁时机；出口前提的计算；服务器摘要的显示规则；导入导出编解码。
 - app：02 §1.10 里这八个小节、搜索、锁定的每个状态一个行为测试，用 `FakeSettingsApi` 喂数据。
+
+**已知限制**（2026-11-04 整体审查后记下，不修）
+- 已登录时改 API 服务器，按 09 §4.5 先退出登录再保存；保存返回 `failed`（安装版、服务没应答）时，账号已退出、服务器没改。
+- 搜索结果或链接指向的行要等异步读值才出现时（出口的"放行的网段"、网络小节的服务器摘要），第一帧找不到这一行，不会滚过去，只在数据到了以后显示标记。这几个小节都短、行在顶部。
+- S9 是"读整表、合并、写回"，读和写之间（毫秒级）服务进程自己写的键（`leapgate-api-caps`、`leapgate-api-nocaps`）可能被冲掉；上游 `set_option` 用最多旧 1 秒的缓存整表写回，窗口更大。上游每秒用服务进程的整表覆盖界面的选项缓存，和 S9 的 `refresh_options()` 之间也有约 1 秒的竞争。
+- S10 `verify_bot` 在整个 Telegram 请求期间持有保存锁（上游把查询和保存放在一个函数里），这期间别的 Config 保存要排队。M6a 不调用它，M6b 前再定要不要拆开。
