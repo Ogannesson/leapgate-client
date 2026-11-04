@@ -46,14 +46,15 @@ pub fn offline(installed: bool, stop_service: &str) -> Saved {
 }
 
 /// S10: a `bot_chat` result as `ok`, `invalid_token` (Telegram's 401 or 404), `no_chat` (no
-/// message to the bot yet) or `network` (every other error).
+/// message to the bot yet) or `other` (Telegram's other errors, a reply that is not getUpdates'
+/// JSON). The request failing is `network`, decided before there is a reply to read.
 pub fn bot_result<T>(result: &Result<Option<T>, String>) -> &'static str {
     match result {
         Ok(Some(_)) => "ok",
         Ok(None) => "no_chat",
         Err(e) => match telegram_error_code(e) {
             Some(401 | 404) => "invalid_token",
-            _ => "network",
+            _ => "other",
         },
     }
 }
@@ -93,7 +94,7 @@ pub fn bot_chat(resp: &str) -> Result<Option<BotChat>, String> {
         ));
     }
     let Some(updates) = value["result"].as_array() else {
-        return Ok(None);
+        return Err("Unexpected getUpdates response: no result list".to_owned());
     };
     Ok(updates.iter().rev().find_map(|u| {
         let chat = u
@@ -107,10 +108,13 @@ pub fn bot_chat(resp: &str) -> Result<Option<BotChat>, String> {
         };
         let text = |k: &str| chat[k].as_str().unwrap_or_default();
         let kind = text("type");
+        // A name made to look like `@username` loses its leading `@`.
         let label = if kind == "private" {
             match (text("username"), text("last_name")) {
-                ("", "") => text("first_name").to_owned(),
-                ("", last) => format!("{} {last}", text("first_name")),
+                ("", "") => text("first_name").trim_start_matches('@').to_owned(),
+                ("", last) => format!("{} {last}", text("first_name"))
+                    .trim_start_matches('@')
+                    .to_owned(),
                 (username, _) => format!("@{username}"),
             }
         } else {
@@ -176,17 +180,11 @@ mod tests {
             bot_result(&err(
                 "Telegram API error: Conflict: can't use getUpdates method while webhook is active; use deleteWebhook to delete the webhook first (error_code: 409)"
             )),
-            "network"
-        );
-        assert_eq!(
-            bot_result(&err(
-                "error sending request for url (https://api.telegram.org/bot<token>/getUpdates)"
-            )),
-            "network"
+            "other"
         );
         assert_eq!(
             bot_result(&err("expected value at line 1 column 1")),
-            "network"
+            "other"
         );
     }
 
@@ -285,7 +283,39 @@ mod tests {
         let conflict = bot_chat(
             r#"{"ok":false,"error_code":409,"description":"Conflict: can't use getUpdates method while webhook is active; use deleteWebhook to delete the webhook first"}"#,
         );
-        assert_eq!(bot_result(&conflict), "network");
-        assert_eq!(bot_result(&bot_chat("<html>Bad Gateway</html>")), "network");
+        assert_eq!(bot_result(&conflict), "other");
+        assert_eq!(bot_result(&bot_chat("<html>Bad Gateway</html>")), "other");
+        assert_eq!(bot_result(&bot_chat(r#"{"ok":true}"#)), "other");
+    }
+
+    /// The UI reads these three keys, with the id as a string.
+    #[test]
+    fn telegram_chat_json_shape() {
+        let chat = bot_chat(&updates(&[
+            r#"{"id":123456789,"first_name":"Example","type":"private"}"#,
+        ]))
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            hbb_common::serde_json::to_value(chat).unwrap(),
+            hbb_common::serde_json::json!({
+                "id": "123456789",
+                "type": "private",
+                "label": "Example",
+            })
+        );
+    }
+
+    #[test]
+    fn telegram_name_drops_a_leading_at() {
+        let one = |c: &str| bot_chat(&updates(&[c])).unwrap();
+        assert_eq!(
+            one(r#"{"id":123456789,"first_name":"@@example_user","type":"private"}"#),
+            chat("123456789", "private", "example_user")
+        );
+        assert_eq!(
+            one(r#"{"id":123456789,"first_name":"@Example","last_name":"User","type":"private"}"#),
+            chat("123456789", "private", "Example User")
+        );
     }
 }

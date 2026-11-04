@@ -189,17 +189,28 @@ pub(crate) fn server_kind() -> String {
     server_info::kind_with(&|k| crate::ui_interface::get_option(k)).to_string()
 }
 
-/// S10's first step: the chat the codes would go to, saving nothing. The error is a
-/// `settings::bot_result` kind and the text without the token.
+/// S10's first step: the chat the codes would go to, saving nothing. The error is `network`
+/// when the request fails, otherwise a `settings::bot_result` kind, and the text without the
+/// token.
 pub(crate) fn bot_lookup(token: &str) -> Result<settings::BotChat, (&'static str, String)> {
-    let url = format!("https://api.telegram.org/bot{}/getUpdates", token);
+    // A negative offset takes the last 100 updates; without it a backlog of over 100 would
+    // hide the newest message.
+    let url = format!(
+        "https://api.telegram.org/bot{}/getUpdates?offset=-100",
+        token
+    );
     // As upstream's `get_chatid_telegram`: the caller may be in a tokio runtime.
-    let result = std::thread::spawn(move || crate::post_request_sync(url, "".to_owned(), ""))
+    let resp = std::thread::spawn(move || crate::post_request_sync(url, "".to_owned(), ""))
         .join()
         .map_err(|_| "Thread panicked".to_owned())
-        .and_then(|resp| resp.map_err(|e| e.to_string()))
-        .and_then(|resp| settings::bot_chat(&resp));
-    let kind = settings::bot_result(&result);
+        .and_then(|resp| resp.map_err(|e| e.to_string()));
+    let (kind, result) = match resp {
+        Ok(resp) => {
+            let result = settings::bot_chat(&resp);
+            (settings::bot_result(&result), result)
+        }
+        Err(text) => ("network", Err(text)),
+    };
     match result {
         Ok(Some(chat)) => Ok(chat),
         Ok(None) => Err((kind, String::new())),
