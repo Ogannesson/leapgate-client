@@ -191,7 +191,10 @@ void main() {
       await tester.pump();
       expect(find.text('传入连接 › 权限'), findsOneWidget);
 
+      // The exit node and connection sections match too ("仅 TCP", "TCP 打洞"): down to the
+      // second result and back up to the first.
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
       await tester.sendKeyEvent(LogicalKeyboardKey.enter);
       await settle(tester);
       expect(find.text('传入连接 › 权限'), findsNothing);

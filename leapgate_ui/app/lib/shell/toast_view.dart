@@ -32,5 +32,10 @@ String? toastText(AppLocalizations l10n, String? key) => switch (key) {
       // The session toolbar's.
       'menuToastWaylandReset' => l10n.menuToastWaylandReset,
       'menuToastWaylandResetFailed' => l10n.menuToastWaylandResetFailed,
+      // The network and server section's.
+      'settingsNetSaved' => l10n.settingsNetSaved,
+      'settingsNetExported' => l10n.settingsNetExported,
+      'settingsNetClipboardEmpty' => l10n.settingsNetClipboardEmpty,
+      'settingsNetInvalidConfig' => l10n.settingsNetInvalidConfig,
       _ => translate(key),
     };
