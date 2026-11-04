@@ -7,18 +7,23 @@ use crate::ipc::{self, Data};
 use base::config::keys;
 use hbb_common::config::{self, Config};
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-use hbb_common::tokio;
+use hbb_common::{log, tokio};
 use leapgate::{
     server_info::{self, Servers},
     settings::{self, Saved},
 };
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Mutex};
+
+/// Held while this process writes the service's option table: each write reads the whole table
+/// and sends it back, so two at once would drop one's change. frb runs exports concurrently.
+static SAVING: Mutex<()> = Mutex::new(());
 
 /// S9: merges `changes` into the service's options over one IPC connection (read the whole
 /// table, merge, write it back, wait for the confirmation), then into this process's config.
 /// Without the service, `settings::offline` decides. Upstream's side effects of writing these
 /// options follow.
 pub(crate) fn set_options(changes: HashMap<String, String>) -> Saved {
+    let _saving = SAVING.lock().unwrap();
     let _nat = crate::CheckTestNatType::new();
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     let saved = match save_to_service(&changes) {
@@ -27,10 +32,7 @@ pub(crate) fn set_options(changes: HashMap<String, String>) -> Saved {
             Saved::Saved
         }
         None => {
-            let saved = settings::offline(
-                crate::ui_interface::is_installed(),
-                &crate::ui_interface::get_option("stop-service"),
-            );
+            let saved = offline();
             if saved == Saved::Failed {
                 return saved;
             }
@@ -60,20 +62,35 @@ fn save_here(changes: &HashMap<String, String>) {
     Config::set_options(options);
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn offline() -> Saved {
+    settings::offline(
+        crate::ui_interface::is_installed(),
+        &crate::ui_interface::get_option("stop-service"),
+    )
+}
+
 /// The options the service confirmed, `None` when it did not.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tokio::main(flavor = "current_thread")]
 async fn save_to_service(changes: &HashMap<String, String>) -> Option<HashMap<String, String>> {
-    let mut c = ipc::connect(1000, "").await.ok()?;
+    let Ok(mut c) = ipc::connect(1000, "").await else {
+        log::info!("leapgate settings: options not saved, the service did not answer");
+        return None;
+    };
     c.send(&Data::Options(None)).await.ok()?;
     let Ok(Some(Data::Options(Some(mut options)))) = c.next_timeout(1000).await else {
+        log::info!("leapgate settings: options not saved, reading the service's options failed");
         return None;
     };
     settings::merge(&mut options, changes);
     c.send(&Data::Options(Some(options.clone()))).await.ok()?;
     match c.next_timeout(1000).await {
         Ok(Some(Data::Options(None))) => Some(options),
-        _ => None,
+        _ => {
+            log::info!("leapgate settings: options sent, the service did not confirm them");
+            None
+        }
     }
 }
 
@@ -89,12 +106,7 @@ pub(crate) fn set_socks(proxy: String, username: String, password: String) -> bo
         };
         let socks = (!socks.proxy.is_empty()).then_some(socks);
         let _nat = crate::CheckTestNatType::new();
-        if !socks_to_service(&socks)
-            && settings::offline(
-                crate::ui_interface::is_installed(),
-                &crate::ui_interface::get_option("stop-service"),
-            ) == Saved::Failed
-        {
+        if !socks_to_service(&socks) && offline() == Saved::Failed {
             return false;
         }
         Config::set_socks(socks);
@@ -111,6 +123,7 @@ pub(crate) fn set_socks(proxy: String, username: String, password: String) -> bo
 #[tokio::main(flavor = "current_thread")]
 async fn socks_to_service(socks: &Option<config::Socks5Server>) -> bool {
     let Ok(mut c) = ipc::connect(1000, "").await else {
+        log::info!("leapgate settings: proxy not saved, the service did not answer");
         return false;
     };
     // An empty proxy removes it, as upstream sends a removal.
@@ -119,7 +132,11 @@ async fn socks_to_service(socks: &Option<config::Socks5Server>) -> bool {
     {
         return false;
     }
-    matches!(c.next_timeout(1000).await, Ok(Some(Data::Socks(v))) if v == *socks)
+    let confirmed = matches!(c.next_timeout(1000).await, Ok(Some(Data::Socks(v))) if v == *socks);
+    if !confirmed {
+        log::info!("leapgate settings: proxy sent, the service did not confirm it");
+    }
+    confirmed
 }
 
 /// S1's JSON. Options come from this process's cache, the current rendezvous server from the
@@ -175,6 +192,8 @@ pub(crate) fn server_kind() -> String {
 /// S10: checks the token with Telegram and saves the bot as upstream does, then confirms the
 /// service has it (upstream's save fails silently). The token is left out of the text.
 pub(crate) fn verify_bot(token: &str) -> (&'static str, String) {
+    // Upstream checks with Telegram and saves in one call, so the lock spans both.
+    let _saving = SAVING.lock().unwrap();
     let result = crate::auth_2fa::get_chatid_telegram(token).map_err(|e| e.to_string());
     let mut kind = settings::bot_result(&result);
     if kind == "ok" && !saved_in_service("bot") {
@@ -192,6 +211,7 @@ pub(crate) fn verify_bot(token: &str) -> (&'static str, String) {
 /// `ok`, `wrong_code`, or `not_saved` when the code was right but the service does not have the
 /// secret (upstream's save fails silently).
 pub(crate) fn verify_2fa(code: String) -> &'static str {
+    let _saving = SAVING.lock().unwrap();
     if !crate::ui_interface::verify2fa(code) {
         "wrong_code"
     } else if saved_in_service("2fa") {
@@ -201,7 +221,8 @@ pub(crate) fn verify_2fa(code: String) -> &'static str {
     }
 }
 
-/// Whether the service holds the value this process just wrote for `key`.
+/// Whether the service holds the value this process just wrote for `key`. Without the service,
+/// upstream's save wrote it here only, which counts as `settings::offline` says (as in S9).
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tokio::main(flavor = "current_thread")]
 async fn saved_in_service(key: &str) -> bool {
@@ -210,7 +231,7 @@ async fn saved_in_service(key: &str) -> bool {
         return false;
     }
     let Ok(mut c) = ipc::connect(1000, "").await else {
-        return false;
+        return offline() != Saved::Failed;
     };
     if c.send(&Data::Options(None)).await.is_err() {
         return false;

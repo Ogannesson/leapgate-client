@@ -230,23 +230,28 @@ const EMBEDDED_V4: [(Ipv6Addr, u8); 2] = [
 /// This device's own addresses change, so they are not reported.
 fn always_refused(net: &Net) -> bool {
     match net {
-        Net::V4(n) => {
-            let (ip, bits) = (u128::from(n.get_prefix()), n.get_bits());
-            HARD_V4
-                .iter()
-                .chain(RESERVED_V4.iter())
-                .any(|&(r, rb)| inside(ip, bits, u128::from(u32::from(r)), rb, 32))
-        }
+        Net::V4(n) => v4_always_refused(u128::from(n.get_prefix()), n.get_bits()),
         Net::V6(n) => {
             let (ip, bits) = (n.get_prefix(), n.get_bits());
             let within = |&(r, rb): &(Ipv6Addr, u8)| inside(ip, bits, u128::from(r), rb, 128);
             let overlaps = |&(r, rb): &(Ipv6Addr, u8)| {
                 within(&(r, rb)) || inside(u128::from(r), rb, ip, bits, 128)
             };
+            // A network wholly inside one of them is the IPv4 network in its low 32 bits.
+            if EMBEDDED_V4.iter().any(within) {
+                return v4_always_refused(ip & u128::from(u32::MAX), bits - 96);
+            }
             HARD_V6.iter().any(within)
                 || (within(&(Ipv6Addr::UNSPECIFIED, 3)) && !EMBEDDED_V4.iter().any(overlaps))
         }
     }
+}
+
+fn v4_always_refused(ip: u128, bits: u8) -> bool {
+    HARD_V4
+        .iter()
+        .chain(RESERVED_V4.iter())
+        .any(|&(r, rb)| inside(ip, bits, u128::from(u32::from(r)), rb, 32))
 }
 
 /// Whether the network `net/bits` lies inside `range/range_bits`, for addresses `width` bits
@@ -833,6 +838,10 @@ mod tests {
             "2002::/16",
             "3fff::/20",
             "4000::/2",
+            // IPv4 inside IPv6 is judged as IPv4.
+            "::ffff:127.0.0.1",
+            "64:ff9b::7f00:1",
+            "::ffff:169.254.0.0/112",
         ] {
             assert_eq!(check_allow_nets(blocked).lines, vec![issue(1, "blocked")], "{blocked}");
         }
@@ -851,6 +860,8 @@ mod tests {
             "2001:db8::/31",
             "::ffff:0:0/96",
             "64:ff9b::/96",
+            "::ffff:10.0.0.0/104",
+            "::/64",
         ] {
             assert_eq!(check_allow_nets(open).lines, vec![], "{open}");
         }

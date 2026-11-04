@@ -105,7 +105,7 @@ pub fn telegram_2fa(code: &str, id: &str, ip: &str) -> String {
 
 fn telegram_2fa_in(lang: &str, code: &str, id: &str, ip: &str) -> String {
     if lang == "zh-cn" {
-        format!("二次验证码：{code}\n\nID 为 {id} 的设备有新的连接，来源 IP 地址为 {ip}。")
+        format!("二次验证的验证码：{code}\n\n设备 {id} 有新的连接，来源 IP 地址为 {ip}。")
     } else {
         format!(
             "2FA code: {code}\n\nA new connection has been established to your device with ID {id}. The source IP address is {ip}."
@@ -122,7 +122,7 @@ mod tests {
     fn telegram_text_follows_the_ui_language() {
         assert_eq!(
             telegram_2fa_in("zh-cn", "123456", "987654321", "192.0.2.10"),
-            "二次验证码：123456\n\nID 为 987654321 的设备有新的连接，来源 IP 地址为 192.0.2.10。"
+            "二次验证的验证码：123456\n\n设备 987654321 有新的连接，来源 IP 地址为 192.0.2.10。"
         );
         // English, as upstream wrote it, for any other value or none.
         for lang in ["en", "", "ja"] {
