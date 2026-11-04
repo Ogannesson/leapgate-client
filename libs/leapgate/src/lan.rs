@@ -174,6 +174,37 @@ pub(crate) fn is_physical(nics: &[Nic], ip: IpAddr) -> bool {
     }
 }
 
+/// S4: one adapter's addresses for direct IP access.
+#[derive(Debug, PartialEq, serde::Serialize)]
+pub struct Addresses {
+    pub name: String,
+    pub ipv4: Vec<Ipv4Addr>,
+    pub ipv6: Vec<Ipv6Addr>,
+}
+
+/// The addresses of the physical adapters ICE would gather from, without temporary IPv6
+/// addresses (they change and are not meant to be dialed). Blocking.
+pub fn local_addresses() -> Vec<Addresses> {
+    addresses(&nics())
+}
+
+fn addresses(nics: &[Nic]) -> Vec<Addresses> {
+    nics.iter()
+        .filter(|n| n.can_gather())
+        .map(|n| Addresses {
+            name: n.name.clone(),
+            ipv4: n.ipv4.iter().copied().filter(|&ip| !excluded_ip(ip)).collect(),
+            ipv6: n
+                .ipv6
+                .iter()
+                .filter(|a| a.suffix != Suffix::Temporary)
+                .map(|a| a.ip)
+                .collect(),
+        })
+        .filter(|a| !a.ipv4.is_empty() || !a.ipv6.is_empty())
+        .collect()
+}
+
 fn select_candidates(nics: &[Nic], sock_local: SocketAddr) -> Vec<SocketAddr> {
     let SocketAddr::V4(sock_v4) = sock_local else {
         return Vec::new();
@@ -789,6 +820,34 @@ mod tests {
         down.up = false;
         assert!(!down.can_gather());
         assert!(!tun().can_gather());
+    }
+
+    #[test]
+    fn direct_access_addresses_of_physical_adapters() {
+        let mut wired = nic("Ethernet", IF_TYPE_ETHERNET, "192.168.1.145", true, 0);
+        wired.ipv6 = vec![
+            v6("2001:db8:1:2::10", Suffix::Other),
+            v6("2001:db8:1:2:a5b0:1c2d:3e4f:5061", Suffix::Temporary),
+            v6("2001:db8:1:2::abcd", Suffix::Dhcp),
+        ];
+        let host_only = nic("Ethernet 2", IF_TYPE_ETHERNET, "172.20.80.1", false, 0);
+        let got = addresses(&[tun(), wired, host_only]);
+        assert_eq!(
+            got,
+            vec![Addresses {
+                name: "Ethernet".to_owned(),
+                ipv4: vec![Ipv4Addr::new(192, 168, 1, 145)],
+                ipv6: vec![
+                    "2001:db8:1:2::10".parse().unwrap(),
+                    "2001:db8:1:2::abcd".parse().unwrap()
+                ],
+            }]
+        );
+        assert_eq!(
+            hbb_common::serde_json::to_value(&got).unwrap(),
+            hbb_common::serde_json::json!([{"name": "Ethernet", "ipv4": ["192.168.1.145"],
+                "ipv6": ["2001:db8:1:2::10", "2001:db8:1:2::abcd"]}])
+        );
     }
 
     #[test]

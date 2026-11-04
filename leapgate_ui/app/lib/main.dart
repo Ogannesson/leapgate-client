@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui';
 
@@ -9,6 +10,7 @@ import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/bridge.dart';
 import 'package:flutter_hbb/leapgate/local_status.dart';
 import 'package:flutter_hbb/leapgate/options.dart';
+import 'package:flutter_hbb/leapgate/settings/appearance.dart';
 import 'package:flutter_hbb/leapgate/ui_error_log.dart';
 import 'package:flutter_hbb/leapgate/ui_mode.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
@@ -60,6 +62,9 @@ Future<void> main(List<String> args) async {
       _listenLinks();
       handleLaunchArgs(args, bind.mainUriPrefixSync());
     });
+    // The language shown, for the texts the service writes (S11).
+    unawaited(syncUiLang(appCore.options.local, appCore.options.config,
+        PlatformDispatcher.instance.locale));
     // The top bar is drawn by the app (docs/新界面/01-内容与逻辑说明.md §2.1). The runner already
     // sized and centered the window.
     windowManager.waitUntilReadyToShow(
@@ -98,49 +103,71 @@ void _listenLinks() {
 
 class LeapgateApp extends StatelessWidget {
   const LeapgateApp(
-      {super.key, required this.home, this.local, this.detailMode});
+      {super.key,
+      required this.home,
+      this.local,
+      this.detailMode,
+      this.theme,
+      this.language});
 
   final Widget home;
 
-  /// LocalConfig, for the interface mode (01 §2.3); without it, or [detailMode], the mode is the
-  /// simple one.
+  /// LocalConfig, for the interface mode (01 §2.3), the theme and the language (02 §1.5.1); the
+  /// settings page and the home page's "View" menu write them through the same scope, so a
+  /// change applies at once. Without it, or the three listenables below, the app is in the
+  /// simple mode and follows the system.
   final OptionScope? local;
 
   /// The connection manager's interface mode, which follows the main window's (S7).
   final ValueListenable<bool>? detailMode;
 
+  /// The connection manager's theme and language values, which follow the main window's
+  /// (upstream `main.dart` `_registerEventHandler`).
+  final ValueListenable<String>? theme;
+  final ValueListenable<String>? language;
+
   @override
   Widget build(BuildContext context) {
-    final detailMode = this.detailMode;
-    if (detailMode != null) {
-      return ValueListenableBuilder(
-        valueListenable: detailMode,
-        builder: (context, detail, _) =>
-            _app(detail ? LgMode.detail : LgMode.compact),
+    final local = this.local;
+    if (local != null) {
+      return ListenableBuilder(
+        listenable: Listenable.merge([
+          local.listenable(kOptionLeapgateUiMode),
+          local.listenable(kCommConfKeyTheme),
+          local.listenable(kCommConfKeyLang),
+        ]),
+        builder: (context, _) => _app(isDetailMode(local),
+            local.get(kCommConfKeyTheme), local.get(kCommConfKeyLang)),
       );
     }
-    final local = this.local;
-    if (local == null) return _app(LgMode.compact);
-    // The home page's "View" menu writes it through the same scope, so a switch applies at once.
     return ListenableBuilder(
-      listenable: local.listenable(kOptionLeapgateUiMode),
-      builder: (context, _) =>
-          _app(isDetailMode(local) ? LgMode.detail : LgMode.compact),
+      listenable: Listenable.merge([detailMode, theme, language]),
+      builder: (context, _) => _app(detailMode?.value ?? false,
+          theme?.value ?? '', language?.value ?? ''),
     );
   }
 
-  Widget _app(LgMode mode) {
-    // Light / dark follow the system until the settings page (M6) stores the user's choice.
+  Widget _app(bool detail, String theme, String lang) {
+    final mode = detail ? LgMode.detail : LgMode.compact;
+    final choice = uiLangChoice(lang);
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       theme: buildLgTheme(brightness: Brightness.light, mode: mode),
       darkTheme: buildLgTheme(brightness: Brightness.dark, mode: mode),
+      themeMode: themeModeOf(theme),
       // The tokens switch mode halfway through a theme animation; switch at once instead.
       themeAnimationDuration: Duration.zero,
       onGenerateTitle: (context) => AppLocalizations.of(context)!.appName,
       localizationsDelegates: AppLocalizations.localizationsDelegates,
-      // English first: any other system language falls back to it.
       supportedLocales: AppLocalizations.supportedLocales,
+      locale: choice.isEmpty ? null : localeOfUiLang(choice),
+      // Following the system: Chinese when its first language is, any other falls back to
+      // English (02 §1.5.1), the language `leapgate-ui-lang` is given.
+      localeListResolutionCallback: (locales, _) => localeOfUiLang(resolveUiLang(
+          '',
+          locales == null || locales.isEmpty
+              ? const Locale('en')
+              : locales.first)),
       home: home,
     );
   }

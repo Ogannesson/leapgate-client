@@ -2,9 +2,12 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/generated_bridge.dart';
 import 'package:flutter_hbb/leapgate/options.dart';
+import 'package:flutter_hbb/leapgate/settings/settings_api.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:uuid/uuid.dart';
+
+import 'settings_fakes.dart';
 
 /// Keeps each store in a map the way Rust does: an empty value removes the key.
 class _FakeBind implements RustdeskImpl {
@@ -111,11 +114,33 @@ int Function() _count(Listenable listenable) {
 void main() {
   late _FakeBind fake;
   late OptionsModel options;
+  late FakeSettingsApi s9;
 
   setUp(() {
     fake = _FakeBind();
     platformFFI.setBindingForTesting(fake);
+    settingsApi = s9 = FakeSettingsApi()..writeThrough = true;
     options = OptionsModel();
+  });
+
+  test('Config saves through S9: a failure says so and tells no listener', () async {
+    final heard = _count(options.config.listenable('k'));
+    expect(await options.config.set('k', 'c'), isTrue);
+    expect(s9.saved, [
+      {'k': 'c'}
+    ]);
+    expect(heard(), 1);
+
+    s9.saveResult = SaveResult.failed;
+    expect(await options.config.set('k', 'd'), isFalse);
+    expect(fake.config, {'k': 'c'});
+    expect(heard(), 1);
+  });
+
+  test('stop-service keeps upstream\'s call, which asks for administrator permission', () async {
+    expect(await options.config.set('stop-service', 'Y'), isTrue);
+    expect(s9.saved, isEmpty);
+    expect(fake.config, {'stop-service': 'Y'});
   });
 
   test('each scope reads and writes its own store', () async {

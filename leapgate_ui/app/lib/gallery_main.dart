@@ -52,9 +52,14 @@ import 'widgets/lg_password_dialog.dart';
 import 'widgets/lg_password_row.dart';
 import 'widgets/lg_people_list.dart';
 import 'widgets/lg_pressable.dart';
+import 'widgets/lg_qr_code.dart';
 import 'widgets/lg_route_details.dart';
 import 'widgets/lg_selection.dart';
 import 'widgets/lg_session_toolbar.dart';
+import 'widgets/lg_settings_layout.dart';
+import 'widgets/lg_settings_rows.dart';
+import 'widgets/lg_settings_search.dart';
+import 'widgets/lg_shortcuts.dart';
 import 'widgets/lg_slider.dart';
 import 'widgets/lg_status.dart';
 import 'widgets/lg_tab_tip.dart';
@@ -63,11 +68,13 @@ import 'widgets/lg_tag_color_dialog.dart';
 import 'widgets/lg_text_field.dart';
 import 'widgets/lg_title_bar.dart';
 import 'widgets/lg_tooltip.dart';
+import 'widgets/lg_trusted_devices.dart';
 
 part 'gallery_cm_chat.dart';
 part 'gallery_m2b.dart';
 part 'gallery_m4.dart';
 part 'gallery_m5.dart';
+part 'gallery_m6.dart';
 
 const _exportDir = String.fromEnvironment('LG_GALLERY_EXPORT');
 
@@ -757,6 +764,7 @@ List<Specimen> buildSpecimens() {
   list.addAll(_cmChatSpecimens());
   list.addAll(_m4Specimens());
   list.addAll(_m5Specimens());
+  list.addAll(_m6Specimens());
   return list;
 }
 

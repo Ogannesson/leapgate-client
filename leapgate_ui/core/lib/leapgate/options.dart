@@ -1,7 +1,9 @@
 import 'package:flutter/foundation.dart';
 
 import '../common.dart';
+import '../consts.dart';
 import '../models/platform_model.dart';
+import 'settings/settings_api.dart';
 
 class _KeyNotifier extends ChangeNotifier {
   void fire() => notifyListeners();
@@ -30,9 +32,9 @@ abstract class OptionScope with _KeyNotifiers {
 
   bool getBool(String key) => option2bool(key, get(key));
 
-  /// Returns whether the value was saved. Until S9 (03 §6.1) Rust reports no result, so this is
-  /// true once the bridge call returns; an exception from the bridge propagates. After S9 it
-  /// returns Rust's answer.
+  /// Returns whether the value was saved. Config answers through S9; the other scopes have no
+  /// result from Rust, so true once the bridge call returns. An exception from the bridge
+  /// propagates.
   Future<bool> set(String key, String value) async {
     await _write(key, value);
     _changed(key);
@@ -53,6 +55,17 @@ class _ConfigScope extends OptionScope {
   @override
   Future<void> _write(String key, String value) =>
       bind.mainSetOption(key: key, value: value);
+
+  /// Through S9 (`LEAPGATE.md` §10.13), which says whether the service took it. `stop-service`
+  /// asks for administrator permission and stays on upstream's call.
+  @override
+  Future<bool> set(String key, String value) async {
+    if (key == kOptionStopService) return super.set(key, value);
+    final saved =
+        await settingsApi.setOptions({key: value}) != SaveResult.failed;
+    if (saved) _changed(key);
+    return saved;
+  }
 }
 
 /// LocalConfig: this user's UI preferences (`Leapgate_local.toml`).
@@ -74,6 +87,17 @@ class _FlutterScope extends OptionScope {
   @override
   Future<void> _write(String key, String value) =>
       bind.setLocalFlutterOption(k: key, v: value);
+}
+
+/// UserDefaultConfig (`Leapgate_default.toml`): the options a device's peer file starts from the
+/// first time this device connects to it (02 §1.4.2).
+class _UserDefaultScope extends OptionScope {
+  @override
+  String get(String key) => bind.mainGetUserDefaultOption(key: key);
+
+  @override
+  Future<void> _write(String key, String value) =>
+      bind.mainSetUserDefaultOption(key: key, value: value);
 }
 
 /// One remote device's options (its peer file). While a session to that device is open, read
@@ -99,6 +123,7 @@ class OptionsModel {
   final OptionScope config = _ConfigScope();
   final OptionScope local = _LocalScope();
   final OptionScope flutter = _FlutterScope();
+  final OptionScope userDefault = _UserDefaultScope();
   final _peers = <String, OptionScope>{};
 
   /// The same object for the same [id], so its listeners hear every write made through it.

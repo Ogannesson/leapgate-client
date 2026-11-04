@@ -5,7 +5,8 @@
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeSet, sync::Mutex};
 
-/// Serialized as the CM's UI events too: `{"name":"show_cm"}`, `{"name":"ui_mode","mode":…}`.
+/// Serialized as the CM's UI events too: `{"name":"show_cm"}`, `{"name":"ui_mode","mode":…}`,
+/// `{"name":"lang","lang":…}`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "name", rename_all = "snake_case")]
 pub enum Msg {
@@ -15,6 +16,13 @@ pub enum Msg {
     ShowCm,
     /// Main window to CM: the UI mode changed (S7).
     UiMode { mode: String },
+    /// Main window to service: `None` asks; the reply carries the direct IP access listener's
+    /// last result, `None` when there is none yet (S5).
+    DirectListen { listen: Option<crate::direct::Listen> },
+    /// Main window to CM: the UI language changed, the resolved one (`zh-cn` or `en`). The CM
+    /// switches without writing it: upstream's language message has the CM store its whole
+    /// LocalConfig, which would overwrite the main window's later changes.
+    Lang { lang: String },
 }
 
 /// Authorized incoming connections by type. Exits are not counted in `port_forward`.
@@ -91,6 +99,16 @@ mod tests {
             Msg::UiMode {
                 mode: "detailed".to_owned(),
             },
+            Msg::DirectListen { listen: None },
+            Msg::Lang {
+                lang: "en".to_owned(),
+            },
+            Msg::DirectListen {
+                listen: Some(crate::direct::Listen::Failed {
+                    port: 21118,
+                    error: crate::direct::ListenError::Denied,
+                }),
+            },
         ] {
             let s = serde_json::to_string(&msg).unwrap();
             assert_eq!(serde_json::from_str::<Msg>(&s).unwrap(), msg);
@@ -105,6 +123,13 @@ mod tests {
             })
             .unwrap(),
             json!({"name": "ui_mode", "mode": "simple"})
+        );
+        assert_eq!(
+            serde_json::to_value(Msg::Lang {
+                lang: "zh-cn".to_owned()
+            })
+            .unwrap(),
+            json!({"name": "lang", "lang": "zh-cn"})
         );
         assert_eq!(
             serde_json::to_value(counts).unwrap(),

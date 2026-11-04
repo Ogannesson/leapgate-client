@@ -2,9 +2,11 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/local_status.dart';
+import 'package:flutter_hbb/leapgate/settings/unlock.dart';
 import 'package:flutter_hbb/leapgate/ui_mode.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:leapgate_ui/main.dart' show LeapgateApp;
+import 'package:leapgate_ui/shell/navigation.dart';
 import 'package:leapgate_ui/theme/lg_tokens.dart';
 import 'package:leapgate_ui/widgets/lg_button.dart';
 
@@ -61,15 +63,88 @@ void main() {
     await unmount(tester);
   });
 
-  testWidgets('"Change" only on the portable version', (tester) async {
-    bind.installed = true;
+  testWidgets(
+      'the installed version unlocks before "Change", for that change only (R2-Q31)',
+      (tester) async {
+    bind
+      ..installed = true
+      ..unlockPin = '2468';
     await pumpWith(tester, method: kUsePermanentPassword);
-    expect(find.text('修改'), findsNothing);
-    await unmount(tester);
+    await tapText(tester, '修改');
+    expect(find.text('输入解锁 PIN'), findsWidgets);
+    expect(find.text('设置固定密码'), findsNothing);
 
-    bind.installed = false;
+    await tester.enterText(find.byType(EditableText).last, '1111');
+    await tapText(tester, '解锁');
+    expect(find.text('PIN 错误'), findsOneWidget);
+    await tester.enterText(find.byType(EditableText).last, '2468');
+    await tapText(tester, '解锁');
+    expect(find.text('设置固定密码'), findsOneWidget);
+    expect(settingsUnlock.locked, isFalse);
+
+    await tapText(tester, '取消');
+    expect(find.text('设置固定密码'), findsNothing);
+    expect(settingsUnlock.locked, isTrue);
+    await unmount(tester);
+  });
+
+  testWidgets('"Change" with no PIN asks for administrator permission', (
+    tester,
+  ) async {
+    bind
+      ..installed = true
+      ..superUser = false;
     await pumpWith(tester, method: kUsePermanentPassword);
-    expect(find.bySemanticsLabel('修改固定密码'), findsOneWidget);
+    await tapText(tester, '修改');
+    expect(bind.callsTo(#mainCheckSuperUserPermission), hasLength(1));
+    expect(find.text('设置固定密码'), findsNothing);
+    // Refused: the red line under the row, until an unlock goes through (01 P1 block A).
+    expect(find.text('未获得管理员权限，固定密码未修改'), findsOneWidget);
+    bind.superUser = true;
+    await tapText(tester, '修改');
+    expect(find.text('未获得管理员权限，固定密码未修改'), findsNothing);
+    await tapText(tester, '取消');
+    await unmount(tester);
+  });
+
+  testWidgets('the refused line goes with an unlock on the settings page', (
+    tester,
+  ) async {
+    bind
+      ..installed = true
+      ..superUser = false;
+    await pumpWith(tester, method: kUsePermanentPassword);
+    await tapText(tester, '修改');
+    expect(find.text('未获得管理员权限，固定密码未修改'), findsOneWidget);
+
+    bind.superUser = true;
+    await tapText(tester, '设置');
+    await tapText(tester, '解锁');
+    expect(find.text('已锁定。修改这些设置需要管理员权限。'), findsNothing);
+    expect(find.text('未获得管理员权限，固定密码未修改'), findsNothing);
+    await tester.pump(const Duration(seconds: 3));
+    await unmount(tester);
+  });
+
+  testWidgets('"Change" with a PIN: closing its dialog says nothing', (
+    tester,
+  ) async {
+    bind
+      ..installed = true
+      ..unlockPin = '2468';
+    await pumpWith(tester, method: kUsePermanentPassword);
+    await tapText(tester, '修改');
+    await tapText(tester, '取消');
+    expect(find.text('输入解锁 PIN'), findsNothing);
+    expect(find.text('未获得管理员权限，固定密码未修改'), findsNothing);
+    await unmount(tester);
+  });
+
+  testWidgets('"More access settings" opens 访问与密码', (tester) async {
+    final nav = mainNavigation as FakeNavigation;
+    await pumpWith(tester);
+    await tapText(tester, '更多访问设置');
+    expect(nav.settings.single.section, SettingsSectionId.access);
     await unmount(tester);
   });
 

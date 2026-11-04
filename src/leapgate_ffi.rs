@@ -105,8 +105,9 @@ pub fn leapgate_ui_mode_changed(mode: String) {
     }));
 }
 
-/// The CM page's events from the main window (C2, S7), as JSON: `{"name":"show_cm"}`,
-/// `{"name":"ui_mode","mode":…}`. A new subscription replaces the previous one.
+/// The CM page's events from the main window (C2, S7, M6), as JSON: `{"name":"show_cm"}`,
+/// `{"name":"ui_mode","mode":…}`, `{"name":"lang","lang":…}`. A new subscription replaces the
+/// previous one.
 pub fn leapgate_cm_events(sink: StreamSink<String>) -> ResultType<()> {
     crate::leapgate_hooks::ipc::set_cm_events(sink);
     Ok(())
@@ -269,4 +270,90 @@ pub fn leapgate_exit_set_port(id: String, port: i32) -> SyncReturn<bool> {
         let _ = (id, port);
         SyncReturn(false)
     }
+}
+
+// ---- Settings (M6) ----
+// `LEAPGATE.md` §10.13. Server addresses and capabilities are read from the UI's option cache,
+// not from this process's `Config` (09 §4.1).
+
+/// S9: `changes` is a JSON object `{key: value}`, an empty value removes the option.
+/// `saved`, `saved_local` (no service runs; it takes them when it starts) or `failed`.
+pub fn leapgate_set_options(changes: String) -> String {
+    let saved = match serde_json::from_str(&changes) {
+        Ok(changes) => crate::leapgate_hooks::settings::set_options(changes),
+        Err(_) => leapgate::settings::Saved::Failed,
+    };
+    saved.as_str().to_owned()
+}
+
+/// S9 for the proxy; an empty `proxy` removes it. `true` when it was saved.
+pub fn leapgate_set_socks(
+    proxy: String,
+    username: String,
+    password: String,
+) -> bool {
+    crate::leapgate_hooks::settings::set_socks(proxy, username, password)
+}
+
+/// E5: `{"valid","count","lines":[{"line","state"}],"value"}` (`LEAPGATE.md` §10.13).
+pub fn leapgate_exit_allow_nets_check(text: String) -> SyncReturn<String> {
+    let check = leapgate::exit::check_allow_nets(&text);
+    SyncReturn(serde_json::to_string(&check).unwrap_or_default())
+}
+
+/// S1: `{"id":{"value","source","default"},"api":{"value","source"},"key":{"source","builtin"},
+/// "relay":{"value"}}`; `id.default` is the first built-in ID server, empty without one;
+/// `key.builtin` whether the build has a key.
+pub fn leapgate_server_summary() -> String {
+    crate::leapgate_hooks::settings::server_summary()
+}
+
+/// S2: `{"kind":"leapgate"|"compat"|"checking","features":[…]}`.
+pub fn leapgate_server_kind() -> SyncReturn<String> {
+    SyncReturn(crate::leapgate_hooks::settings::server_kind())
+}
+
+/// S3: `empty`, `valid` or `invalid`.
+pub fn leapgate_key_check(
+    key: String,
+) -> SyncReturn<String> {
+    SyncReturn(leapgate::sign::key_check(&key).to_owned())
+}
+
+/// S4: `[{"name","ipv4":[…],"ipv6":[…]}]` for the physical adapters, without temporary IPv6
+/// addresses.
+pub fn leapgate_local_addresses() -> String {
+    serde_json::to_string(&leapgate::lan::local_addresses()).unwrap_or_else(|_| "[]".to_owned())
+}
+
+/// S5: the service's direct IP access listener, `{"state":"listening","port":N}`,
+/// `{"state":"failed","port":N,"error":"in_use"|"denied"|"other"}`, or `{}` without a result.
+pub fn leapgate_direct_listen() -> String {
+    crate::leapgate_hooks::ipc::query_direct_listen()
+        .and_then(|listen| serde_json::to_string(&listen).ok())
+        .unwrap_or_else(|| "{}".to_owned())
+}
+
+/// S10: `{"result":"ok"|"network"|"invalid_token"|"no_chat"|"other","text":…}`; `text` is
+/// upstream's error text, without the token.
+pub fn leapgate_verify_bot(
+    token: String,
+) -> String {
+    let (result, text) = crate::leapgate_hooks::settings::verify_bot(&token);
+    serde_json::json!({ "result": result, "text": text }).to_string()
+}
+
+/// `ok`, `wrong_code`, or `not_saved` (the code was right but the service does not have it).
+pub fn leapgate_verify_2fa(code: String) -> String {
+    crate::leapgate_hooks::settings::verify_2fa(code).to_owned()
+}
+
+/// Tells the CM the UI language changed, the resolved one (`zh-cn` or `en`). Instead of
+/// upstream's `main_change_language`, whose message has the CM store its whole, older
+/// LocalConfig.
+pub fn leapgate_lang_changed(lang: String) {
+    #[cfg(not(target_os = "ios"))]
+    crate::ui_interface::send_to_cm(&crate::ipc::Data::Leapgate(leapgate::ipc::Msg::Lang {
+        lang,
+    }));
 }

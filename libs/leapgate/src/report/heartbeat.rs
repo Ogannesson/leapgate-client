@@ -440,6 +440,19 @@ mod tests {
         assert!(!run(&fake, &cap, &hb).await);
         assert_eq!(fake.sent.lock().unwrap().len(), 2);
         assert_eq!(fake.caps(), "");
+        // S2: the settings page shows a compatible server.
+        assert_eq!(*fake.nocaps.lock().unwrap(), ROOT);
+
+        // The server gains the API: the record moves over.
+        cap.lock().unwrap().1 = Cap::Unsupported {
+            recheck_at: Instant::now(),
+        };
+        *fake.replies.lock().unwrap() =
+            vec![signed(200, r#"{"api":1,"features":[],"time":1}"#)].into();
+        due(&hb);
+        assert!(run(&fake, &cap, &hb).await);
+        assert_eq!(fake.caps(), format!("{ROOT}\n"));
+        assert_eq!(*fake.nocaps.lock().unwrap(), "");
     }
 
     #[hbb_common::tokio::test(crate = "hbb_common::tokio")]

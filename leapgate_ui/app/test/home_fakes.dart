@@ -6,6 +6,8 @@ import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/app_window.dart';
 import 'package:flutter_hbb/leapgate/bridge.dart';
 import 'package:flutter_hbb/leapgate/local_status.dart';
+import 'package:flutter_hbb/leapgate/settings/settings_api.dart';
+import 'package:flutter_hbb/leapgate/settings/unlock.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:leapgate_ui/l10n/app_localizations.dart';
@@ -16,6 +18,7 @@ import 'package:leapgate_ui/theme/lg_theme.dart';
 import 'package:leapgate_ui/theme/lg_tokens.dart';
 
 import '../../core/test/fakes.dart' show FakeLeapgate;
+import 'settings_fakes.dart';
 
 export '../../core/test/fakes.dart' show FakeLeapgate;
 
@@ -44,6 +47,14 @@ class FakeBind implements RustdeskImpl {
   /// `#isDisableAccount`, `#isDisableAb`, `#isDisableGroupPanel` that answer true.
   final disabledOptions = <Symbol>{};
 
+  /// Config, as `mainGetOptionSync` reads it; `mainSetOption` writes it ('' removes).
+  final config = <String, String>{};
+
+  /// The unlock PIN, whether UAC lets the user through, and what saving a PIN answers (M6a).
+  String unlockPin = '';
+  bool superUser = true;
+  String setPinError = '';
+
   List<Invocation> callsTo(Symbol name) =>
       calls.where((c) => c.memberName == name).toList();
 
@@ -52,6 +63,25 @@ class FakeBind implements RustdeskImpl {
     calls.add(invocation);
     final args = invocation.namedArguments;
     switch (invocation.memberName) {
+      case #mainSetOption:
+        final key = args[#key] as String;
+        final value = args[#value] as String;
+        value.isEmpty ? config.remove(key) : config[key] = value;
+        return Future<void>.value();
+      case #mainGetOptionSync:
+        return config[args[#key]] ?? '';
+      case #mainGetUnlockPin:
+        return unlockPin;
+      case #mainCheckSuperUserPermission:
+        return Future.value(superUser);
+      case #mainSetUnlockPin:
+        if (setPinError.isEmpty) unlockPin = (args[#pin] as String).trim();
+        return setPinError;
+      case #mainSupportedPrivacyModeImpls:
+        return '[]';
+      // No proxy (the connection notes, M6-4).
+      case #mainGetSocks:
+        return Future.value(const <String>[]);
       case #mainLoadRecentPeers:
       case #mainLoadFavPeers:
       case #mainLoadLanPeers:
@@ -64,7 +94,6 @@ class FakeBind implements RustdeskImpl {
       case #mainWol:
       case #mainCreateShortcut:
       case #mainUpdateTemporaryPassword:
-      case #mainSetOption:
       case #mainCheckMouseTime:
         return Future<void>.value();
       case #mainGetLocalOption:
@@ -113,7 +142,7 @@ class FakeBind implements RustdeskImpl {
         return Future.value(passwordSaves);
       case #mainGetOption:
         return Future.value(
-            args[#key] == 'access-mode' ? accessMode : '');
+            args[#key] == 'access-mode' ? accessMode : config[args[#key]] ?? '');
       case #mainGetMouseTime:
         return Future.value(lastRemoteInput.millisecondsSinceEpoch.toDouble());
     }
@@ -146,6 +175,12 @@ class FakeNavigation implements MainNavigation {
 
   @override
   void showHome({bool focusConnectBox = false, String? connectBoxText}) {}
+
+  final settings = <({SettingsSectionId section, String? item})>[];
+
+  @override
+  void showSettings(SettingsSectionId section, {String? item}) =>
+      settings.add((section: section, item: item));
 }
 
 /// Fresh fakes behind `bind`, `appCore` and `mainNavigation` for one test.
@@ -155,6 +190,10 @@ class FakeNavigation implements MainNavigation {
   final leapgate = FakeLeapgate();
   setLgBindForTesting(leapgate);
   appCore = AppCore(window: FakeWindow());
+  // Config saves go through S9 (`LEAPGATE.md` §10.13); this one hands them to the fake bridge.
+  settingsApi = FakeSettingsApi()..writeThrough = true;
+  // The settings lock is one for the app; a test unlocking it leaves it to the next.
+  addTearDown(settingsUnlock.lock);
   // Their event handlers are registered by name; the next test's AppCore needs the names free.
   addTearDown(appCore.recentPeers.dispose);
   addTearDown(appCore.favPeers.dispose);
@@ -184,6 +223,7 @@ Future<LocalStatusModel> pumpHome(
   Size size = const Size(1280, 760),
   TabOverlays? overlays,
   void Function(LocalStatusModel model)? setUp,
+  Locale locale = const Locale('zh'),
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
@@ -196,7 +236,7 @@ Future<LocalStatusModel> pumpHome(
   overlays ??= TabOverlays();
   await tester.pumpWidget(
     MaterialApp(
-      locale: const Locale('zh'),
+      locale: locale,
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
       theme: buildLgTheme(brightness: Brightness.light, mode: LgMode.compact),

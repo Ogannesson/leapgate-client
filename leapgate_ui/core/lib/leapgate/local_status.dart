@@ -5,9 +5,15 @@ import 'package:flutter/foundation.dart';
 
 import '../consts.dart';
 import '../models/platform_model.dart';
+import 'app_core.dart';
 import 'bridge.dart';
+import 'settings/server_config.dart' show readSocks;
 
 enum ServiceStatus { ready, connecting, notReady, stopped }
+
+/// A proxy, WebSocket or UDP turned off: other devices can't connect to this one (M6-4,
+/// measured with 02 §4.3 item 4). In the order the home page picks the first.
+enum NetworkWarning { proxy, webSocket, udpDisabled }
 
 // Values of kOptionVerificationMethod, as upstream `models/server_model.dart:22-24` names them.
 // That file comes into core with the connection manager (M3); these move there then.
@@ -89,6 +95,10 @@ class LocalStatusModel extends ChangeNotifier {
   /// 会话）" while one of them is a remote desktop or a terminal, "‹N› 个传入会话进行中"
   /// otherwise (01 P1 block A).
   IncomingSessions incoming = IncomingSessions.none;
+
+  /// What keeps other devices from connecting to this one while the service line still reads
+  /// "正在连接服务器…" (M6-4, 01 P1 block A); the first one that is on, null for none.
+  NetworkWarning? networkWarning;
   Timer? _timer;
   Timer? _incomingTimer;
 
@@ -134,13 +144,51 @@ class LocalStatusModel extends ChangeNotifier {
     }
   }
 
-  /// "Refresh" on the one-time password; the next poll shows the new one.
+  /// "Refresh" on the one-time password, and after its length or "仅使用数字" changed (02
+  /// §1.3.1); the next poll shows the new one.
   Future<void> refreshOneTimePassword() => bind.mainUpdateTemporaryPassword();
 
-  /// "Start service" (upstream `common.dart` `start_service(true)`; the superuser check there
-  /// is macOS only). Rust starts the service when `stop-service` is cleared.
-  Future<void> startService() =>
-      bind.mainSetOption(key: kOptionStopService, value: '');
+  /// Whether "停止服务" / "启动服务" asks first (02 §1.3.8, §3.5): stopping always; starting on
+  /// the installed version while sessions or exit nodes are in use, since Leapgate closes and
+  /// reopens.
+  bool serviceAsksFirst({required bool stop}) =>
+      stop ||
+      bind.mainIsInstalled() &&
+          (appCore.sessions.devices.isNotEmpty ||
+              appCore.exitNodes.runningCount > 0);
+
+  /// Stops or starts the service: Rust stops or starts it when `stop-service` is set or cleared
+  /// (upstream `common.dart` `start_service`; the superuser check there is macOS only). Not
+  /// through S9. On the installed version Rust removes or installs the Windows service under UAC
+  /// and Leapgate restarts, so a call that returns did not do it, cancelled and failed alike
+  /// (09 §4.4): false then.
+  Future<bool> toggleService({required bool stop}) async {
+    await bind.mainSetOption(key: kOptionStopService, value: stop ? 'Y' : '');
+    return !bind.mainIsInstalled();
+  }
+
+  /// Polls since [start]; the proxy is read on the first and every tenth.
+  int _polls = 0;
+  bool _proxy = false;
+
+  /// The three of [NetworkWarning] only, not the whole of `readConnectionNotes`: WebSocket and
+  /// UDP from the options cache on every poll, the proxy (`mainGetSocks`, a new connection to
+  /// the service each time) every 10 polls. A failure keeps the last warning and leaves the rest
+  /// of the poll alone.
+  Future<NetworkWarning?> _readNetworkWarning() async {
+    try {
+      if (_polls++ % 10 == 0) _proxy = (await readSocks()).proxy.isNotEmpty;
+      final config = appCore.options.config;
+      if (_proxy) return NetworkWarning.proxy;
+      if (config.getBool(kOptionAllowWebSocket)) return NetworkWarning.webSocket;
+      if (config.get(kOptionDisableUdp) == 'Y') return NetworkWarning.udpDisabled;
+      return null;
+    } catch (e) {
+      lgBind.leapgateLog(
+          level: 2, msg: 'leapgate ui: network warning not read: ${e.runtimeType}');
+      return networkWarning;
+    }
+  }
 
   Future<void> _poll() async {
     final id = await bind.mainGetMyId();
@@ -152,6 +200,7 @@ class LocalStatusModel extends ChangeNotifier {
     final verificationMethod =
         await bind.mainGetOption(key: kOptionVerificationMethod);
     final systemError = await bind.mainGetError();
+    final networkWarning = await _readNetworkWarning();
     final status = stopped
         ? ServiceStatus.stopped
         : switch (connect['status_num']) {
@@ -167,13 +216,15 @@ class LocalStatusModel extends ChangeNotifier {
         oneTimePassword != this.oneTimePassword ||
         approveMode != this.approveMode ||
         verificationMethod != this.verificationMethod ||
-        systemError != this.systemError) {
+        systemError != this.systemError ||
+        networkWarning != this.networkWarning) {
       this.id = id;
       this.status = status;
       this.oneTimePassword = oneTimePassword;
       this.approveMode = approveMode;
       this.verificationMethod = verificationMethod;
       this.systemError = systemError;
+      this.networkWarning = networkWarning;
       notifyListeners();
     }
   }

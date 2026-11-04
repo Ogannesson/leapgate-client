@@ -8,6 +8,8 @@ pub mod directory;
 mod policy;
 pub mod proxy;
 
+pub use policy::check_allow_nets;
+
 use hbb_common::config::Config;
 use std::time::Duration;
 

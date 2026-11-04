@@ -43,8 +43,7 @@ abstract class CmWindow implements AppWindow {
 }
 
 /// The global events the CM handles (upstream `models/model.dart:365-367`, `:392-445`). `theme`
-/// and `language` are not handled: like the new main window, the CM follows the system until
-/// the settings page (M6) stores a choice.
+/// and `language` are registered by the app's CM entry, which owns the app's look.
 void registerCmEvents(ServerModel model, CmChatModel chat, CmFileModel files) {
   final events = appCore.events;
   events.on('add_connection', model.addConnection);
@@ -61,11 +60,13 @@ void registerCmEvents(ServerModel model, CmChatModel chat, CmFileModel files) {
 
 /// What the main window tells the CM (C2, S7): "查看" brings the window to the front, unless
 /// there is nobody to show (the window would be empty); a new interface mode goes to
-/// [detailMode]. Subscribed when the CM starts: Rust drops a message that comes before. The mode
-/// is not written to LocalConfig here: the CM's copy of it was read when it started, and a write
-/// would store that old copy over the main window's later changes.
+/// [detailMode], the language shown (`zh-cn` or `en`) to [language]. Subscribed when the CM
+/// starts: Rust drops a message that comes before. Neither is written to LocalConfig here: the
+/// CM's copy of it was read when it started, and a write would store that old copy over the main
+/// window's later changes.
 StreamSubscription<String> listenToMainWindow(
-        ServerModel model, ValueNotifier<bool> detailMode) =>
+        ServerModel model, ValueNotifier<bool> detailMode,
+        {ValueNotifier<String>? language}) =>
     lgBind.leapgateCmEvents().listen((event) {
       final evt = jsonDecode(event) as Map<String, dynamic>;
       switch (evt['name']) {
@@ -73,6 +74,8 @@ StreamSubscription<String> listenToMainWindow(
           if (model.clients.isNotEmpty) model.window.bringToFront();
         case 'ui_mode':
           detailMode.value = evt['mode'] == 'detail';
+        case 'lang':
+          language?.value = evt['lang'] as String? ?? '';
       }
     });
 

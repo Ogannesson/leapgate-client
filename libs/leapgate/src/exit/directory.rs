@@ -30,17 +30,19 @@ struct Exits {
 }
 
 /// The JSON the dialog shows: `{"state": "unsupported" | "not_logged_in" | "error"}`, or
-/// `{"state": "ok", "exits": [...]}`.
-pub async fn fetch() -> String {
+/// `{"state": "ok", "exits": [...]}`. `option` reads the UI's option cache: the installed UI
+/// process's `Config` can lag behind the service's (09 §4.1).
+pub async fn fetch(option: impl Fn(&str) -> String) -> String {
     // F3: the announced feature decides; a 404 or 405 is not taken as "no directory".
-    if !report::has_feature("exit") {
+    if !report::has_feature_with(&option, "exit") {
         return UNSUPPORTED.to_owned();
     }
     let token = LocalConfig::get_option("access_token");
     if token.is_empty() {
         return NOT_LOGGED_IN.to_owned();
     }
-    let failure = match api::get_user(&report::api_root(), "exits", &token).await {
+    let root = report::api_root_with(&option);
+    let failure = match api::get_user(&root, "exits", &token).await {
         Ok((status, body)) => {
             let out = render(status, &body);
             if out != ERROR {

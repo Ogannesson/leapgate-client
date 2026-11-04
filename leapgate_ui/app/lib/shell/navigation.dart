@@ -3,6 +3,10 @@ import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/exit_nodes.dart' show isExitId;
 import 'package:flutter_hbb/leapgate/recent_peers.dart' show PeerCategory;
 
+import '../pages/settings/settings_ids.dart';
+
+export '../pages/settings/settings_ids.dart' show SettingsSectionId;
+
 /// How the home page and links open sessions and switch tabs (M2a, `LEAPGATE.md` §10.8). The
 /// session block implements it in the main window; the home block only calls it.
 abstract class MainNavigation {
@@ -20,6 +24,11 @@ abstract class MainNavigation {
   /// ("+" on the title bar, 01 §2.1); [connectBoxText], when given, replaces its text, all
   /// selected ("修改 ID" on the connection panel, `04-M2a拆法.md` §5.1).
   void showHome({bool focusConnectBox = false, String? connectBoxText});
+
+  /// Switches to the home tab's settings page at [section], scrolled to [item] and marking it
+  /// for about 2 seconds when given (02 §1.2.1, §1.2.4). [item] is the id the section registers
+  /// (`settings_registry.dart`).
+  void showSettings(SettingsSectionId section, {String? item});
 }
 
 /// Set by the main window; tests set a fake.
@@ -58,6 +67,26 @@ class ExitPageRequests extends ChangeNotifier {
 }
 
 final exitPageRequests = ExitPageRequests();
+
+/// Requests to show the settings page at a section. The home page switches to the settings
+/// page; the settings page takes the request once it is built.
+class SettingsPageRequests extends ChangeNotifier {
+  ({SettingsSectionId section, String? item})? _request;
+
+  /// The section to open and the item to scroll to and mark, once; null when there is none.
+  ({SettingsSectionId section, String? item})? take() {
+    final request = _request;
+    _request = null;
+    return request;
+  }
+
+  void request(SettingsSectionId section, {String? item}) {
+    _request = (section: section, item: item);
+    notifyListeners();
+  }
+}
+
+final settingsPageRequests = SettingsPageRequests();
 
 /// "Use as exit node" in a device menu or the connect box (08 M5-9): as "Use" in the
 /// directory, the card is made and logs in at once; a device with a card already is only

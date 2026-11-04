@@ -380,4 +380,20 @@ void main() {
       model.dispose();
     });
   });
+
+  test('the main window\'s language goes to the CM', () {
+    fakeAsync((async) {
+      final lg = FakeLeapgate();
+      setLgBindForTesting(lg);
+      final model = start();
+      final language = ValueNotifier('zh-cn');
+      final sub = listenToMainWindow(model, ValueNotifier(false),
+          language: language);
+      lg.cmEvents.add('{"name":"lang","lang":"en"}');
+      async.flushMicrotasks();
+      expect(language.value, 'en');
+      sub.cancel();
+      model.dispose();
+    });
+  });
 }

@@ -2,10 +2,12 @@ import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/generated_bridge.dart';
 import 'package:flutter_hbb/leapgate/bridge.dart';
 import 'package:flutter_hbb/leapgate/local_status.dart';
+import 'package:flutter_hbb/leapgate/settings/settings_api.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fakes.dart';
+import 'settings_fakes.dart';
 
 /// What Rust answers for this device: the ID, the server connection and the options.
 class _StatusBind implements RustdeskImpl {
@@ -30,6 +32,22 @@ class _StatusBind implements RustdeskImpl {
       options[key] ?? '';
 
   @override
+  String mainGetOptionSync({required String key, dynamic hint}) =>
+      options[key] ?? '';
+
+  /// The proxy, user and password; empty when none is set.
+  List<String> socks = const [];
+
+  /// The service did not answer the proxy question.
+  bool socksFails = false;
+
+  @override
+  Future<List<String>> mainGetSocks({dynamic hint}) async {
+    if (socksFails) throw StateError('no service');
+    return socks;
+  }
+
+  @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
@@ -38,6 +56,9 @@ void main() {
     late _StatusBind bind;
     late FakeLeapgate lg;
     setUp(() {
+      // `appCore.options` for the connection notes, then this test's answers.
+      installFakes();
+      settingsApi = FakeSettingsApi();
       bind = _StatusBind();
       platformFFI.setBindingForTesting(bind);
       lg = FakeLeapgate();
@@ -96,6 +117,45 @@ void main() {
     });
   });
 
+  group('LocalStatusModel.networkWarning (M6-4)', () {
+    late _StatusBind bind;
+    setUp(() {
+      installFakes();
+      settingsApi = FakeSettingsApi();
+      bind = _StatusBind();
+      platformFFI.setBindingForTesting(bind);
+    });
+
+    Future<NetworkWarning?> poll() async {
+      final model = LocalStatusModel()..start();
+      await settle();
+      model.dispose();
+      return model.networkWarning;
+    }
+
+    test('none, then the first that is on: proxy, WebSocket, UDP off', () async {
+      expect(await poll(), isNull);
+      bind.options[kOptionDisableUdp] = 'Y';
+      expect(await poll(), NetworkWarning.udpDisabled);
+      bind.options[kOptionAllowWebSocket] = 'Y';
+      expect(await poll(), NetworkWarning.webSocket);
+      bind.socks = const ['socks5://198.51.100.20:1080', '', ''];
+      expect(await poll(), NetworkWarning.proxy);
+    });
+
+    test('a failed proxy question leaves the ID and the service line alone', () async {
+      bind
+        ..socksFails = true
+        ..options[kOptionDisableUdp] = 'Y';
+      final model = LocalStatusModel()..start();
+      await settle();
+      model.dispose();
+      expect(model.id, '135792468');
+      expect(model.status, ServiceStatus.ready);
+      expect(model.networkWarning, isNull);
+    });
+  });
+
   group('LocalStatusModel.passwordRow (01 P1 block A)', () {
     PasswordRow row(
             {ServiceStatus status = ServiceStatus.ready,
@@ -127,4 +187,49 @@ void main() {
       expect(row(method: 'something-else'), PasswordRow.both);
     });
   });
+
+  group('LocalStatusModel.toggleService (02 §1.3.8)', () {
+    late _ServiceBind bind;
+    setUp(() {
+      bind = _ServiceBind();
+      platformFFI.setBindingForTesting(bind);
+    });
+
+    test('portable: the option alone, and it is done', () async {
+      final model = LocalStatusModel();
+      expect(await model.toggleService(stop: true), isTrue);
+      expect(bind.options[kOptionStopService], 'Y');
+      expect(await model.toggleService(stop: false), isTrue);
+      expect(bind.options[kOptionStopService], '');
+    });
+
+    test('installed: a call that returns did not happen', () async {
+      bind.installed = true;
+      final model = LocalStatusModel();
+      expect(await model.toggleService(stop: true), isFalse);
+      expect(await model.toggleService(stop: false), isFalse);
+    });
+
+    test('stopping always asks first', () {
+      expect(LocalStatusModel().serviceAsksFirst(stop: true), isTrue);
+    });
+  });
+}
+
+/// `stop-service` as Rust receives it, on the portable or installed version.
+class _ServiceBind implements RustdeskImpl {
+  final options = <String, String>{};
+  bool installed = false;
+
+  @override
+  Future<void> mainSetOption(
+      {required String key, required String value, dynamic hint}) async {
+    options[key] = value;
+  }
+
+  @override
+  bool mainIsInstalled({dynamic hint}) => installed;
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

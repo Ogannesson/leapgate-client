@@ -1365,7 +1365,8 @@ async fn direct_server(server: ServerPtr) {
         ) || option2bool("stop-service", &Config::get_option("stop-service"));
         if !disabled && listener.is_none() {
             port = get_direct_port();
-            match hbb_common::tcp::listen_any(port as _).await {
+            // leapgate: keep the result for the settings page (S5)
+            match leapgate::direct::noted(port, hbb_common::tcp::listen_any(port as _).await) {
                 Ok(l) => {
                     listener = Some(l);
                     log::info!(

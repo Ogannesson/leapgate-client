@@ -492,3 +492,48 @@ const String filterAbTagOption = 'filter-ab-by-intersection';
 /// LocalConfig: the exit nodes' local proxy ports as JSON `{device ID: port}` (M5-6), Leapgate's
 /// own; the old UI kept its exit port in the device's port forwards.
 const String kOptionLeapgateExitPorts = 'leapgate-exit-ports';
+
+// M6a: keys both settings lanes read (`LEAPGATE.md` §10.13). Each lane appends the rest below,
+// coder A under "M6a access", coder B under "M6a network".
+
+/// Config: the exit node switch; Rust only takes "Y" (第四期 A5), the page writes Y / N.
+const String kOptionLeapgateAllowExit = 'leapgate-allow-exit';
+const String kOptionEnableTunnel = 'enable-tunnel';
+
+/// LocalConfig, shared with the old UI: `light`, `dark`, anything else follows the system
+/// (upstream `common.dart:579-630`).
+const String kCommConfKeyTheme = 'theme';
+
+/// LocalConfig, shared with the old UI: Rust's language code (`zh-cn`, `en`), empty follows the
+/// system.
+const String kCommConfKeyLang = 'lang';
+
+// M6a access (upstream `flutter/lib/consts.dart`).
+
+const String kOptionTemporaryPasswordLength = 'temporary-password-length';
+const String kOptionAllowNumericOneTimePassword =
+    'allow-numeric-one-time-password';
+const String kOptionEnableKeyboard = 'enable-keyboard';
+const String kOptionEnableRemotePrinter = 'enable-remote-printer';
+const String kOptionEnableClipboard = 'enable-clipboard';
+const String kOptionEnableFileTransfer = 'enable-file-transfer';
+const String kOptionEnableAudio = 'enable-audio';
+const String kOptionEnableCamera = 'enable-camera';
+const String kOptionEnableTerminal = 'enable-terminal';
+const String kOptionEnableRemoteRestart = 'enable-remote-restart';
+const String kOptionEnableRecordSession = 'enable-record-session';
+const String kOptionEnableBlockInput = 'enable-block-input';
+const String kOptionEnablePrivacyMode = 'enable-privacy-mode';
+
+// M6a network: upstream's names and values (`flutter/lib/consts.dart:179-199`).
+
+/// LocalConfig, read by the controlling side.
+const String kOptionEnableTcpPunch = "enable-tcp-punch";
+const String kOptionEnableUdpPunch = "enable-udp-punch";
+const String kOptionEnableIpv6Punch = "enable-ipv6-punch";
+const String kOptionRelayFallbackDelay = "relay-fallback-delay";
+
+/// Config, read by both sides.
+const String kOptionAllowWebSocket = "allow-websocket";
+const String kOptionAllowInsecureTLSFallback = "allow-insecure-tls-fallback";
+const String kOptionDisableUdp = "disable-udp";

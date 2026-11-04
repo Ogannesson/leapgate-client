@@ -3,6 +3,7 @@ import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/local_status.dart';
 import 'package:flutter_hbb/leapgate/recent_peers.dart' show formatPeerId;
 import 'package:flutter_hbb/leapgate/remote_block.dart';
+import 'package:flutter_hbb/leapgate/settings/unlock.dart';
 
 import '../../icons/lg_icon.dart';
 import '../../l10n/app_localizations.dart';
@@ -13,7 +14,12 @@ import '../../widgets/lg_banner.dart';
 import '../../widgets/lg_button.dart';
 import '../../widgets/lg_list_chrome.dart';
 import '../../widgets/lg_pressable.dart';
+import '../../widgets/lg_settings_rows.dart' show LgTextLink;
 import '../../widgets/lg_status.dart';
+import '../settings/dialogs/service.dart';
+import '../settings/dialogs/unlock_pin.dart';
+import '../settings/settings_flow.dart' show commitSettingsInput;
+import '../settings/settings_page.dart';
 import 'account/account.dart';
 import 'devices_page.dart';
 import 'exit/exit_page.dart';
@@ -60,6 +66,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     super.initState();
     connectBoxFocusRequests.addListener(_onFocusRequest);
     exitPageRequests.addListener(_onExitRequest);
+    settingsPageRequests.addListener(_onSettingsRequest);
+    settingsUnlock.addListener(_onUnlock);
     WidgetsBinding.instance.addObserver(this);
   }
 
@@ -67,6 +75,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   void dispose() {
     connectBoxFocusRequests.removeListener(_onFocusRequest);
     exitPageRequests.removeListener(_onExitRequest);
+    settingsPageRequests.removeListener(_onSettingsRequest);
+    settingsUnlock.removeListener(_onUnlock);
     WidgetsBinding.instance.removeObserver(this);
     _connectBox.dispose();
     _connectBoxFocus.dispose();
@@ -90,14 +100,53 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       );
     }
     // The box exists only on the devices page; focus it once that is built.
-    setState(() => _section = HomeSection.devices);
+    _show(HomeSection.devices);
     WidgetsBinding.instance.addPostFrameCallback(
       (_) => _connectBoxFocus.requestFocus(),
     );
   }
 
   /// "Use as exit node" ([useAsExit]): the exit page scrolls to the card itself.
-  void _onExitRequest() => setState(() => _section = HomeSection.exitNodes);
+  void _onExitRequest() => _show(HomeSection.exitNodes);
+
+  /// Leaving the settings page hands over what was typed into it first: its number fields save
+  /// when they lose the focus, which they don't once they are gone (`commitSettingsInput`).
+  void _show(HomeSection section) {
+    if (_section == HomeSection.settings && section != _section) {
+      commitSettingsInput();
+    }
+    setState(() => _section = section);
+  }
+
+  /// A link to a settings section ([MainNavigation.showSettings]): the settings page takes the
+  /// section and item itself.
+  void _onSettingsRequest() => setState(() => _section = HomeSection.settings);
+
+  /// The password row's "修改": the installed version unlocks first, with the settings page's
+  /// lock, for this change only (01 P1 block A, R2-Q31). Already unlocked on the settings page,
+  /// it stays so.
+  Future<void> _changePassword(AppLocalizations l10n) async {
+    final wasLocked = settingsUnlock.locked;
+    final unlocked = await unlockSettings(widget.overlays, l10n);
+    // UAC cancelled or failed says so under the row; a PIN dialog the user closed says nothing
+    // (01 P1 block A).
+    if (mounted && !unlocked && settingsUnlock.denied) {
+      setState(() => _passwordDenied = true);
+    }
+    if (unlocked) await showPermanentPasswordDialog(widget.overlays, l10n);
+    if (wasLocked) settingsUnlock.lock();
+  }
+
+  /// "修改" got no administrator permission the last time.
+  bool _passwordDenied = false;
+
+  /// The red line goes with the next unlock that goes through, here or on the settings page
+  /// (01 P1 block A: "下次操作成功后消失"); the password can't be changed without one.
+  void _onUnlock() {
+    if (_passwordDenied && !settingsUnlock.locked) {
+      setState(() => _passwordDenied = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -115,12 +164,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           child: _SideColumn(
             status: widget.status,
             section: _section,
-            onSection: (s) => setState(() => _section = s),
-            // The installed version unlocks first (01 P1 block A, R2-Q31), with the settings
-            // page (M6).
-            onChangePassword: appCore.options.isInstalled
-                ? null
-                : () => showPermanentPasswordDialog(widget.overlays, l10n),
+            onSection: _show,
+            onChangePassword: () => _changePassword(l10n),
+            passwordError: _passwordDenied
+                ? l10n.settingsUnlockPasswordNotChanged
+                : null,
             overlays: widget.overlays,
           ),
         ),
@@ -162,6 +210,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                   const SizedBox(height: LgSpace.s1),
                   Expanded(child: ExitPage(overlays: widget.overlays)),
                 ],
+                if (_section == HomeSection.settings) ...[
+                  const SizedBox(height: LgSpace.s3),
+                  Expanded(
+                    child: SettingsPage(
+                        overlays: widget.overlays, status: widget.status),
+                  ),
+                ],
               ],
             ),
           ),
@@ -192,6 +247,7 @@ class _SideColumn extends StatelessWidget {
     required this.section,
     required this.onSection,
     required this.onChangePassword,
+    required this.passwordError,
     required this.overlays,
   });
 
@@ -199,6 +255,7 @@ class _SideColumn extends StatelessWidget {
   final HomeSection section;
   final ValueChanged<HomeSection> onSection;
   final VoidCallback? onChangePassword;
+  final String? passwordError;
   final TabOverlays overlays;
 
   @override
@@ -269,6 +326,7 @@ class _SideColumn extends StatelessWidget {
                     PasswordRowView(
                       status: status,
                       onChange: onChangePassword,
+                      error: passwordError,
                     ),
                     SizedBox(height: short ? LgSpace.s2 : LgSpace.s5),
                     DefaultTextStyle(
@@ -297,11 +355,22 @@ class _SideColumn extends StatelessWidget {
                       },
                     ),
                     if (status.status == ServiceStatus.stopped)
-                      LgButton(
-                        label: l10n.homeStartService,
-                        kind: LgButtonKind.text,
-                        onPressed: status.startService,
+                      _StartService(status: status, overlays: overlays)
+                    // M6-4: with these the line keeps reading "正在连接服务器…" (02 §4.3 item 4)
+                    // while no one can connect. A stopped service says so already.
+                    else if (status.networkWarning case final warning?) ...[
+                      const SizedBox(height: LgSpace.s1),
+                      _NetworkWarning(
+                        text: switch (warning) {
+                          NetworkWarning.proxy => l10n.settingsServiceWarnProxy,
+                          NetworkWarning.webSocket =>
+                            l10n.settingsServiceWarnWebSocket,
+                          NetworkWarning.udpDisabled =>
+                            l10n.settingsServiceWarnUdp,
+                        },
+                        link: l10n.settingsSectionNetwork,
                       ),
+                    ],
                     if (status.incoming.total > 0) ...[
                       const SizedBox(height: LgSpace.s2),
                       LgControlledNote(
@@ -372,6 +441,99 @@ class _SideColumn extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// "启动服务" while the service is stopped: the settings page's way (02 §1.3.8, §3.3), with the
+/// red line under it when administrator permission was not granted.
+class _StartService extends StatefulWidget {
+  const _StartService({required this.status, required this.overlays});
+
+  final LocalStatusModel status;
+  final TabOverlays overlays;
+
+  @override
+  State<_StartService> createState() => _StartServiceState();
+}
+
+class _StartServiceState extends State<_StartService> {
+  bool _busy = false;
+  String? _error;
+
+  Future<void> _start(AppLocalizations l10n) async {
+    setState(() => _busy = true);
+    final result = await toggleService(
+      widget.overlays,
+      l10n,
+      widget.status,
+      stop: false,
+    );
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      if (result != null) _error = result.error;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = LgTokens.of(context);
+    final l10n = AppLocalizations.of(context)!;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        LgButton(
+          label: l10n.homeStartService,
+          icon: appCore.options.isInstalled ? LgIcons.uac : null,
+          kind: LgButtonKind.text,
+          busy: _busy,
+          onPressed: _busy ? null : () => _start(l10n),
+        ),
+        if (_error != null)
+          Text(_error!, style: t.textS.copyWith(color: t.colors.error)),
+      ],
+    );
+  }
+}
+
+/// The warning under the service line (M6-4, 01 P1 block A): why other devices can't connect,
+/// and the link to 通用 › 网络和服务器.
+class _NetworkWarning extends StatelessWidget {
+  const _NetworkWarning({required this.text, required this.link});
+
+  final String text;
+  final String link;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = LgTokens.of(context);
+    final c = t.colors;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 1),
+              child: LgIcon(LgIcons.warn, size: 16, color: c.warning),
+            ),
+            const SizedBox(width: LgSpace.s2),
+            Expanded(
+              child: Text(text, style: t.textS.copyWith(color: c.text)),
+            ),
+          ],
+        ),
+        Padding(
+          padding: const EdgeInsets.only(left: 16 + LgSpace.s2, top: 2),
+          child: LgTextLink(
+            label: link,
+            onPressed: () =>
+                mainNavigation.showSettings(SettingsSectionId.network),
+          ),
+        ),
+      ],
     );
   }
 }

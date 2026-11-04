@@ -4,12 +4,20 @@ import 'package:flutter_hbb/leapgate/recent_peers.dart';
 import '../../l10n/app_localizations.dart';
 
 /// A next step under a connection error (01 §4.3 "下一步").
-enum NextStep { retry, reconnect, useRelay, changeId, closeTab }
+enum NextStep {
+  retry,
+  reconnect,
+  useRelay,
+  changeId,
+  closeTab,
+
+  /// Settings › 网络和服务器 on the home tab (02 §1.2.1).
+  openNetworkSettings,
+}
 
 /// What the connection panel says about a failure and which buttons it offers, by C3's reason
-/// code (`LEAPGATE.md` §10.4, 01 §4.3). "打开网络设置" waits for the settings page (M6) and is
-/// left out; a reason left with no step offers "关闭标签". Code `other`, which also carries a
-/// server's own refusal text, shows the message as Rust sent it.
+/// code (`LEAPGATE.md` §10.4, 01 §4.3); a reason left with no step offers "关闭标签". Code
+/// `other`, which also carries a server's own refusal text, shows the message as Rust sent it.
 ({String text, List<NextStep> steps}) reasonView(
     AppLocalizations l10n, ConnReason reason, String id) {
   const retryClose = [NextStep.retry, NextStep.closeTab];
@@ -20,14 +28,20 @@ enum NextStep { retry, reconnect, useRelay, changeId, closeTab }
         [NextStep.changeId, NextStep.closeTab]
       ),
     'peer_offline' => (l10n.connReasonPeerOffline, retryClose),
-    'key_mismatch' => (l10n.connReasonKeyMismatch, const <NextStep>[]),
+    'key_mismatch' => (
+        l10n.connReasonKeyMismatch,
+        [NextStep.openNetworkSettings]
+      ),
     'key_overuse' => (l10n.connReasonKeyOveruse, close),
     'punch_failed' => (l10n.connReasonPunchFailed, retryClose),
     'rendezvous_failed' => (
         l10n.connReasonRendezvousFailed,
         [NextStep.retry]
       ),
-    'secure_tcp_failed' => (l10n.connReasonSecureTcpFailed, [NextStep.retry]),
+    'secure_tcp_failed' => (
+        l10n.connReasonSecureTcpFailed,
+        [NextStep.retry, NextStep.openNetworkSettings]
+      ),
     'direct_reset' => (
         l10n.connReasonDirectReset,
         [NextStep.useRelay, NextStep.retry, NextStep.closeTab]

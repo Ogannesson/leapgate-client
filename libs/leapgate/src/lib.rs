@@ -4,6 +4,7 @@
 pub mod account;
 pub mod api;
 pub mod brand;
+pub mod direct;
 pub(crate) mod dns;
 pub mod exit;
 pub mod ice;
@@ -15,7 +16,9 @@ pub mod reason;
 pub mod rendezvous;
 pub mod report;
 pub mod route;
+pub mod server_info;
 pub mod session;
+pub mod settings;
 pub mod sign;
 pub mod ui;
 pub mod update;

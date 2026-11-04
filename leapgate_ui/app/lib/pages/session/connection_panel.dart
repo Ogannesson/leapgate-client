@@ -313,6 +313,9 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
                 mainNavigation.showHome(connectBoxText: ffi.id);
               },
             NextStep.closeTab => conn.cancel,
+            // The tab stays; the settings page is on the home tab.
+            NextStep.openNetworkSettings => () =>
+                mainNavigation.showSettings(SettingsSectionId.network),
           };
           actions.add(LgPanelAction(
             label: switch (step) {
@@ -321,6 +324,7 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
               NextStep.useRelay => l10n.connUseRelay,
               NextStep.changeId => l10n.connChangeId,
               NextStep.closeTab => l10n.connCloseTab,
+              NextStep.openNetworkSettings => l10n.settingsNetOpenSettings,
             },
             onPressed: onPressed,
             primary: i == 0,
