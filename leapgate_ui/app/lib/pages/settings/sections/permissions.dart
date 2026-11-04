@@ -7,7 +7,8 @@ import 'package:flutter_hbb/leapgate/settings/access.dart';
 
 import '../../../l10n/app_localizations.dart';
 import '../../../widgets/lg_selection.dart';
-import '../settings_parts.dart';
+import '../../../widgets/lg_settings_rows.dart';
+import '../settings_flow.dart';
 import '../settings_registry.dart';
 
 /// `access-mode`: Rust takes anything but these two as custom (`connection.rs:2689-2738`);
@@ -86,58 +87,80 @@ class _Permissions extends StatelessWidget {
     final open = !ctx.locked;
     final custom = open && mode == '';
     final permissions = _permissions(l10n);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    Widget toggle(_Permission p) {
+      final (key, name, description) = p;
+      return KeyedSubtree(
+        key: ctx.keyOf(key),
+        child: LgSettingsRow.toggle(
+          name: name,
+          description: description,
+          marked: ctx.isMarked(key),
+          error: ctx.errorOf(key),
+          value: switch (mode) {
+            _full => true,
+            _view => false,
+            _ => _config.getBool(key),
+          },
+          onChanged: custom
+              ? (v) => ctx.save(key, () => _config.setBool(key, v))
+              : null,
+        ),
+      );
+    }
+
+    return SettingsFlow(
       children: [
-        SettingsRow(
-          ctx: ctx,
-          id: kOptionAccessMode,
-          name: l10n.settingsPermAccessMode,
-          description: l10n.settingsAccessNewConnectionsOnly,
-          enabled: open,
-          below: SettingsChoice<String>(
-            horizontal: true,
-            options: [
-              ('', l10n.settingsPermCustom),
-              (_full, l10n.settingsPermFull),
-              (_view, l10n.settingsPermView),
-            ],
-            value: mode,
-            onChanged: open
-                ? (v) => ctx.save(
-                    kOptionAccessMode,
-                    () => _config.set(kOptionAccessMode, v),
-                  )
-                : null,
-          ),
+        LgSettingsBlock(
+          children: [
+            KeyedSubtree(
+              key: ctx.keyOf(kOptionAccessMode),
+              child: LgSettingsRow(
+                name: l10n.settingsPermAccessMode,
+                description: l10n.settingsAccessNewConnectionsOnly,
+                wide: true,
+                marked: ctx.isMarked(kOptionAccessMode),
+                error: ctx.errorOf(kOptionAccessMode),
+                control: LgSegmented<String>(
+                  segments: [
+                    LgSegment('', l10n.settingsPermCustom),
+                    LgSegment(_full, l10n.settingsPermFull),
+                    LgSegment(_view, l10n.settingsPermView),
+                  ],
+                  selected: mode,
+                  onChanged: open
+                      ? (v) {
+                          if (v == mode) return;
+                          ctx.save(
+                            kOptionAccessMode,
+                            () => _config.set(kOptionAccessMode, v),
+                          );
+                        }
+                      : null,
+                ),
+              ),
+            ),
+          ],
         ),
         // The whole group shows what applies: all on with full access, all off with screen
         // sharing only (upstream `fakeValue`).
         if (mode != '')
-          SettingsNote(
+          LgSettingsNote(
             l10n.settingsPermDecidedBy(
               mode == _full ? l10n.settingsPermFull : l10n.settingsPermView,
             ),
           ),
-        for (final (key, name, description) in permissions)
-          SettingsRow(
-            ctx: ctx,
-            id: key,
-            name: name,
-            description: description,
-            enabled: custom,
-            control: LgSwitch(
-              value: switch (mode) {
-                _full => true,
-                _view => false,
-                _ => _config.getBool(key),
-              },
-              semanticLabel: name,
-              onChanged: custom
-                  ? (v) => ctx.save(key, () => _config.setBool(key, v))
-                  : null,
-            ),
-          ),
+        LgSettingsBlock(
+          disabled: mode != '',
+          children: [
+            for (final p in permissions.take(permissions.length - 1)) toggle(p),
+          ],
+        ),
+        // Apart from the twelve (02 §1.3.2).
+        LgSettingsBlock(
+          gap: true,
+          disabled: mode != '',
+          children: [toggle(permissions.last)],
+        ),
       ],
     );
   }

@@ -2,10 +2,12 @@ import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/generated_bridge.dart';
 import 'package:flutter_hbb/leapgate/bridge.dart';
 import 'package:flutter_hbb/leapgate/local_status.dart';
+import 'package:flutter_hbb/leapgate/settings/settings_api.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fakes.dart';
+import 'settings_fakes.dart';
 
 /// What Rust answers for this device: the ID, the server connection and the options.
 class _StatusBind implements RustdeskImpl {
@@ -30,6 +32,16 @@ class _StatusBind implements RustdeskImpl {
       options[key] ?? '';
 
   @override
+  String mainGetOptionSync({required String key, dynamic hint}) =>
+      options[key] ?? '';
+
+  /// The proxy, user and password; empty when none is set.
+  List<String> socks = const [];
+
+  @override
+  Future<List<String>> mainGetSocks({dynamic hint}) async => socks;
+
+  @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
@@ -38,6 +50,9 @@ void main() {
     late _StatusBind bind;
     late FakeLeapgate lg;
     setUp(() {
+      // `appCore.options` for the connection notes, then this test's answers.
+      installFakes();
+      settingsApi = FakeSettingsApi();
       bind = _StatusBind();
       platformFFI.setBindingForTesting(bind);
       lg = FakeLeapgate();
@@ -93,6 +108,33 @@ void main() {
           '{"remote":0,"file_transfer":1,"port_forward":0,"exit":0,"camera":0,"terminal":1}';
       model = await poll();
       expect(model.incoming, const IncomingSessions(2, controlled: true));
+    });
+  });
+
+  group('LocalStatusModel.networkWarning (M6-4)', () {
+    late _StatusBind bind;
+    setUp(() {
+      installFakes();
+      settingsApi = FakeSettingsApi();
+      bind = _StatusBind();
+      platformFFI.setBindingForTesting(bind);
+    });
+
+    Future<NetworkWarning?> poll() async {
+      final model = LocalStatusModel()..start();
+      await settle();
+      model.dispose();
+      return model.networkWarning;
+    }
+
+    test('none, then the first that is on: proxy, WebSocket, UDP off', () async {
+      expect(await poll(), isNull);
+      bind.options[kOptionDisableUdp] = 'Y';
+      expect(await poll(), NetworkWarning.udpDisabled);
+      bind.options[kOptionAllowWebSocket] = 'Y';
+      expect(await poll(), NetworkWarning.webSocket);
+      bind.socks = const ['socks5://198.51.100.20:1080', '', ''];
+      expect(await poll(), NetworkWarning.proxy);
     });
   });
 

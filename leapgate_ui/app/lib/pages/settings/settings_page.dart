@@ -1,29 +1,25 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_hbb/leapgate/local_status.dart';
 import 'package:flutter_hbb/leapgate/settings/unlock.dart';
 
-import '../../icons/lg_icon.dart';
 import '../../l10n/app_localizations.dart';
 import '../../shell/navigation.dart';
 import '../../shell/tab_overlays.dart';
-import '../../theme/lg_tokens.dart';
-import '../../widgets/lg_button.dart';
-import '../../widgets/lg_pressable.dart';
-import '../../widgets/lg_text_field.dart';
+import '../../widgets/lg_settings_layout.dart';
+import '../../widgets/lg_settings_search.dart';
 import 'dialogs/unlock_pin.dart';
-import 'settings_status.dart';
+import 'settings_flow.dart';
 import 'settings_registry.dart';
 import 'settings_section_state.dart';
+import 'settings_status.dart';
 
 /// The section shown last in this run; the first opening shows 访问与密码 (02 §1.2.1).
 SettingsSectionId _remembered = SettingsSectionId.access;
 
-/// The navigation column's width (02 §1.2.2: about 180).
-const double _navWidth = 180;
-
-/// The section content's widest (02 §1.2.2: about 640).
-const double _contentWidth = 640;
+/// Locked sections whose items are not all under the lock: they grey the rest themselves, and
+/// the page leaves them usable (服务与 ID: starting and stopping the service asks for
+/// administrator permission itself, 02 §1.2.6).
+const _dimsItself = {SettingsSectionId.service};
 
 /// One search result: where the item is and how to show it (02 §1.2.4).
 class _Hit {
@@ -89,7 +85,6 @@ class _SettingsPageState extends State<SettingsPage>
     settingsPageRequests.addListener(_onRequest);
     settingsUnlock.addListener(_onLock);
     WidgetsBinding.instance.addObserver(this);
-    _query.addListener(() => setState(() => _hit = 0));
     _onRequest();
   }
 
@@ -98,7 +93,9 @@ class _SettingsPageState extends State<SettingsPage>
     settingsPageRequests.removeListener(_onRequest);
     settingsUnlock.removeListener(_onLock);
     WidgetsBinding.instance.removeObserver(this);
-    // Another page of the home tab (02 §1.2.6); the main window locks on the rest.
+    // Another page of the home tab (02 §1.2.6); the main window locks on the rest. What was
+    // typed is handed over before the home page switches (`commitSettingsInput`): here the
+    // fields are gone already.
     settingsUnlock.lock();
     _state?.dispose();
     _scroll.dispose();
@@ -125,9 +122,12 @@ class _SettingsPageState extends State<SettingsPage>
     _open(request.section, item: request.item);
   }
 
-  /// Opens [section], read afresh; with [item], scrolls to it and marks it (02 §1.2.4).
+  /// Opens [section], read afresh; with [item], scrolls to it and marks it (02 §1.2.4). What
+  /// was typed into the section on screen is handed over first.
   void _open(SettingsSectionId section, {String? item}) {
+    commitSettingsInput();
     _query.clear();
+    _hit = 0;
     if (section != _current) {
       _state?.dispose();
       _state = null;
@@ -151,37 +151,12 @@ class _SettingsPageState extends State<SettingsPage>
     });
   }
 
-  Future<void> _unlock(AppLocalizations l10n) async {
-    await unlockSettings(widget.overlays, l10n);
+  void _move(int by, int count) {
+    if (count == 0) return;
+    setState(() => _hit = (_hit + by).clamp(0, count - 1));
   }
 
-  KeyEventResult _onSearchKey(List<_Hit> hits, KeyEvent event) {
-    if (!_searchFocus.hasPrimaryFocus ||
-        event is KeyUpEvent ||
-        _query.value.composing.isValid) {
-      return KeyEventResult.ignored;
-    }
-    switch (event.logicalKey) {
-      case LogicalKeyboardKey.arrowDown:
-      case LogicalKeyboardKey.arrowUp:
-        if (hits.isEmpty) return KeyEventResult.handled;
-        final by = event.logicalKey == LogicalKeyboardKey.arrowDown ? 1 : -1;
-        setState(() => _hit = (_hit + by).clamp(0, hits.length - 1));
-        return KeyEventResult.handled;
-      case LogicalKeyboardKey.enter:
-      case LogicalKeyboardKey.numpadEnter:
-        if (event is KeyDownEvent && hits.isNotEmpty) {
-          final hit = hits[_hit.clamp(0, hits.length - 1)];
-          _open(hit.section.id, item: hit.item.id);
-        }
-        return KeyEventResult.handled;
-      case LogicalKeyboardKey.escape:
-        if (_query.text.isEmpty) return KeyEventResult.ignored;
-        _query.clear();
-        return KeyEventResult.handled;
-    }
-    return KeyEventResult.ignored;
-  }
+  void _openHit(_Hit hit) => _open(hit.section.id, item: hit.item.id);
 
   @override
   Widget build(BuildContext context) {
@@ -192,110 +167,71 @@ class _SettingsPageState extends State<SettingsPage>
       orElse: () => sections.first,
     );
     final hits = _search(sections, _query.text);
+    final locked = settingsUnlock.locked;
     return SettingsStatus(
       status: widget.status,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          SizedBox(
-            width: _navWidth,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Focus(
-                  canRequestFocus: false,
-                  skipTraversal: true,
-                  onKeyEvent: (_, event) => _onSearchKey(hits, event),
-                  child: LgTextField(
-                    controller: _query,
-                    focusNode: _searchFocus,
-                    placeholder: l10n.settingsSearchPlaceholder,
-                    semanticLabel: l10n.settingsSearchPlaceholder,
-                    dense: true,
-                    leading: const LgIcon(LgIcons.search, size: 18),
-                  ),
+      child: LgSettingsLayout(
+        navigation: LgSettingsNav(
+          semanticLabel: l10n.settingsSearchSections,
+          search: LgSettingsSearchField(
+            controller: _query,
+            focusNode: _searchFocus,
+            placeholder: l10n.settingsSearchPlaceholder,
+            clearLabel: l10n.settingsSearchClear,
+            onChanged: (_) => setState(() => _hit = 0),
+            onMove: (by) => _move(by, hits.length),
+            onSubmitted: (_) {
+              if (hits.isNotEmpty) {
+                _openHit(hits[_hit.clamp(0, hits.length - 1)]);
+              }
+            },
+          ),
+          children: [
+            for (final group in SettingsGroup.values)
+              if (sections.any((s) => s.id.group == group))
+                LgSettingsNavGroup(
+                  title: settingsGroupTitle(l10n, group),
+                  items: [
+                    for (final s in sections.where((s) => s.id.group == group))
+                      LgSettingsNavItem(
+                        label: s.title,
+                        selected: s.id == section.id,
+                        locked: s.locked && locked,
+                        lockedLabel: l10n.settingsUnlockLockedMark,
+                        onPressed: () => _open(s.id),
+                      ),
+                  ],
                 ),
-                const SizedBox(height: LgSpace.s3),
-                Expanded(child: _nav(l10n, sections, section)),
-              ],
-            ),
-          ),
-          const SizedBox(width: LgSpace.s5),
-          Expanded(
-            child: _query.text.trim().isEmpty
-                ? _content(l10n, section)
-                : _results(l10n, hits),
-          ),
-        ],
+          ],
+        ),
+        content: _query.text.trim().isEmpty
+            ? _content(l10n, section)
+            : LgSettingsContent(
+                children: [
+                  LgSettingsSearchResults(
+                    results: [
+                      for (final h in hits)
+                        LgSettingsSearchResult(
+                          path:
+                              '${settingsGroupTitle(l10n, h.section.id.group)} › ${h.section.title}',
+                          name: h.item.name,
+                          description: h.detail.isEmpty ? null : h.detail,
+                        ),
+                    ],
+                    query: _query.text,
+                    selectedIndex: hits.isEmpty
+                        ? -1
+                        : _hit.clamp(0, hits.length - 1),
+                    onOpen: (i) => _openHit(hits[i]),
+                    emptyText: l10n.settingsSearchNone,
+                  ),
+                ],
+              ),
       ),
     );
   }
 
-  Widget _nav(
-    AppLocalizations l10n,
-    List<SettingsSection> sections,
-    SettingsSection current,
-  ) {
-    final t = LgTokens.of(context);
-    final c = t.colors;
-    final locked = settingsUnlock.locked;
-    return ListView(
-      children: [
-        for (final group in SettingsGroup.values)
-          if (sections.any((s) => s.id.group == group)) ...[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                LgSpace.s3,
-                LgSpace.s2,
-                LgSpace.s3,
-                LgSpace.s1,
-              ),
-              child: Text(
-                settingsGroupTitle(l10n, group),
-                style: t.textS.copyWith(
-                  color: c.text2,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-            for (final s in sections.where((s) => s.id.group == group))
-              LgPressable(
-                onPressed: () => _open(s.id),
-                selected: s.id == current.id,
-                semanticLabel: s.title,
-                builder: (context, states) => Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: LgSpace.s3,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: s.id == current.id ? c.nav : null,
-                    borderRadius: BorderRadius.circular(LgRadius.r12),
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          s.title,
-                          style: t.text.copyWith(
-                            color: s.id == current.id ? c.navFg : c.text,
-                          ),
-                        ),
-                      ),
-                      if (s.locked && locked)
-                        LgIcon(LgIcons.lock, size: 14, color: c.text2),
-                    ],
-                  ),
-                ),
-              ),
-          ],
-      ],
-    );
-  }
-
   Widget _content(AppLocalizations l10n, SettingsSection section) {
-    final t = LgTokens.of(context);
-    final c = t.colors;
     _lockable = section.locked;
     final locked = section.locked && settingsUnlock.locked;
     final state = _state ??= SettingsSectionState(
@@ -303,110 +239,23 @@ class _SettingsPageState extends State<SettingsPage>
       saveFailedText: l10n.settingsSaveFailed,
       locked: locked,
     );
-    return SingleChildScrollView(
+    return LgSettingsContent(
       controller: _scroll,
-      child: Align(
-        alignment: AlignmentDirectional.topStart,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: _contentWidth),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Semantics(
-                header: true,
-                child: Text(
-                  section.title,
-                  style: LgTokens.style(
-                    18,
-                    26,
-                    FontWeight.w700,
-                  ).copyWith(color: c.text),
-                ),
-              ),
-              const SizedBox(height: LgSpace.s3),
-              if (locked) ...[
-                Container(
-                  padding: const EdgeInsets.all(LgSpace.s3),
-                  decoration: BoxDecoration(
-                    color: c.surface2,
-                    borderRadius: BorderRadius.circular(LgRadius.r12),
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(child: Text(l10n.settingsUnlockLocked)),
-                      LgButton(
-                        label: l10n.settingsUnlock,
-                        icon: LgIcons.uac,
-                        kind: LgButtonKind.primary,
-                        onPressed: () => _unlock(l10n),
-                      ),
-                    ],
-                  ),
-                ),
-                if (settingsUnlock.denied)
-                  Padding(
-                    padding: const EdgeInsets.only(top: LgSpace.s1),
-                    child: Text(
-                      l10n.settingsUnlockDenied,
-                      style: t.textS.copyWith(color: c.error),
-                    ),
-                  ),
-                const SizedBox(height: LgSpace.s3),
-              ],
-              ListenableBuilder(
-                listenable: state,
-                builder: (context, _) => section.build(context, state),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _results(AppLocalizations l10n, List<_Hit> hits) {
-    final t = LgTokens.of(context);
-    final c = t.colors;
-    if (hits.isEmpty) {
-      return Align(
-        alignment: AlignmentDirectional.topStart,
-        child: Text(
-          l10n.settingsSearchNone,
-          style: t.text.copyWith(color: c.text2),
-        ),
-      );
-    }
-    final current = _hit.clamp(0, hits.length - 1);
-    return ListView(
+      title: section.title,
+      locked: locked && !_dimsItself.contains(section.id),
+      lockBar: locked
+          ? LgSettingsLockBar(
+              text: l10n.settingsUnlockLocked,
+              unlockLabel: l10n.settingsUnlock,
+              error: settingsUnlock.denied ? l10n.settingsUnlockDenied : null,
+              onUnlock: () => unlockSettings(widget.overlays, l10n),
+            )
+          : null,
       children: [
-        for (final (i, hit) in hits.indexed)
-          LgPressable(
-            focusable: false,
-            onPressed: () => _open(hit.section.id, item: hit.item.id),
-            semanticLabel: hit.item.name,
-            selected: i == current,
-            builder: (context, states) => Container(
-              padding: const EdgeInsets.all(LgSpace.s2),
-              decoration: BoxDecoration(
-                color: i == current || states.contains(WidgetState.hovered)
-                    ? c.hover
-                    : null,
-                borderRadius: BorderRadius.circular(LgRadius.r12),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '${settingsGroupTitle(l10n, hit.section.id.group)} › ${hit.section.title}',
-                    style: t.textS.copyWith(color: c.text2),
-                  ),
-                  Text(hit.item.name, style: t.text.copyWith(color: c.text)),
-                  if (hit.detail.isNotEmpty)
-                    Text(hit.detail, style: t.textS.copyWith(color: c.text2)),
-                ],
-              ),
-            ),
-          ),
+        ListenableBuilder(
+          listenable: state,
+          builder: (context, _) => section.build(context, state),
+        ),
       ],
     );
   }

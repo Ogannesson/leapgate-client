@@ -6,7 +6,9 @@ import 'package:flutter_hbb/leapgate/local_status.dart';
 import '../../icons/lg_icon.dart';
 import '../../l10n/app_localizations.dart';
 import '../../shell/navigation.dart';
+import '../../theme/lg_tokens.dart';
 import '../../widgets/lg_button.dart';
+import '../../widgets/lg_settings_rows.dart' show LgTextLink;
 import '../../widgets/lg_password_row.dart';
 
 /// The password row of this device (01 P1 block A): label, content, the note when both
@@ -26,11 +28,14 @@ class PasswordRowView extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _row(l10n),
-        // A text button until designer's link (`.lnk-row` in A-P1.html).
-        LgButton(
-          label: l10n.settingsAccessMore,
-          kind: LgButtonKind.text,
-          onPressed: () => mainNavigation.showSettings(SettingsSectionId.access),
+        // `.lnk-row` in A-P1.html.
+        Padding(
+          padding: const EdgeInsets.only(top: LgSpace.s2),
+          child: LgTextLink(
+            label: l10n.settingsAccessMore,
+            onPressed: () =>
+                mainNavigation.showSettings(SettingsSectionId.access),
+          ),
         ),
       ],
     );

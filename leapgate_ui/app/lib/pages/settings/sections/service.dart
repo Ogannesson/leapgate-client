@@ -9,10 +9,11 @@ import '../../../icons/lg_icon.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../widgets/lg_button.dart';
 import '../../../widgets/lg_feedback.dart';
+import '../../../widgets/lg_settings_rows.dart';
 import '../../../widgets/lg_status.dart';
 import '../dialogs/service.dart';
 import '../dialogs/unlock_pin.dart';
-import '../settings_parts.dart';
+import '../settings_flow.dart';
 import '../settings_registry.dart';
 import '../settings_status.dart';
 
@@ -117,96 +118,119 @@ class _ServiceState extends State<_Service> {
         // Known once unlocked (`SettingsUnlock.unlock` reads it); locked, the row is grey and
         // says nothing about it.
         final pinSet = settingsUnlock.pinSet;
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        final locked = ctx.locked;
+        return SettingsFlow(
           children: [
-            SettingsRow(
-              ctx: ctx,
-              id: _service,
-              name: l10n.settingsServiceService,
-              // Word for word the home page's service line (02 §1.3.8).
-              below: switch (status.status) {
-                ServiceStatus.ready => LgStatusText(
-                  LgStatus.online,
-                  l10n.serviceReady,
+            // Outside the lock (02 §1.2.6): the page leaves this section usable and the
+            // blocks under the lock grey themselves.
+            LgSettingsBlock(
+              children: [
+                KeyedSubtree(
+                  key: ctx.keyOf(_service),
+                  child: LgSettingsRow(
+                    name: l10n.settingsServiceService,
+                    marked: ctx.isMarked(_service),
+                    error: ctx.errorOf(_service),
+                    // Word for word the home page's service line (02 §1.3.8).
+                    body: switch (status.status) {
+                      ServiceStatus.ready => LgStatusText(
+                        LgStatus.online,
+                        l10n.serviceReady,
+                      ),
+                      ServiceStatus.connecting => LgStatusText(
+                        LgStatus.connecting,
+                        l10n.serviceConnecting,
+                      ),
+                      ServiceStatus.notReady => LgStatusText(
+                        LgStatus.warning,
+                        l10n.serviceNotReady,
+                      ),
+                      ServiceStatus.stopped => LgStatusText(
+                        LgStatus.error,
+                        l10n.serviceStopped,
+                      ),
+                    },
+                    control: LgSettingsValueActions(
+                      actions: [
+                        LgSettingsAction(
+                          label: stopped
+                              ? l10n.homeStartService
+                              : l10n.settingsServiceStop,
+                          icon: installed ? LgIcons.uac : null,
+                          busy: _busy,
+                          onPressed: _busy
+                              ? null
+                              : () => _toggle(status, !stopped),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
-                ServiceStatus.connecting => LgStatusText(
-                  LgStatus.connecting,
-                  l10n.serviceConnecting,
-                ),
-                ServiceStatus.notReady => LgStatusText(
-                  LgStatus.warning,
-                  l10n.serviceNotReady,
-                ),
-                ServiceStatus.stopped => LgStatusText(
-                  LgStatus.error,
-                  l10n.serviceStopped,
-                ),
-              },
-              control: LgButton(
-                label: stopped
-                    ? l10n.homeStartService
-                    : l10n.settingsServiceStop,
-                icon: installed ? LgIcons.uac : null,
-                kind: LgButtonKind.secondary,
-                busy: _busy,
-                onPressed: _busy ? null : () => _toggle(status, !stopped),
-              ),
+              ],
             ),
-            SettingsRow(
-              ctx: ctx,
-              id: _id,
-              name: l10n.settingsServiceId,
-              below: Text(formatPeerId(status.id)),
-              control: LgButton(
-                label: l10n.homeCopy,
-                semanticLabel: l10n.homeCopyId,
-                icon: LgIcons.copy,
-                kind: LgButtonKind.text,
-                onPressed: status.id.isEmpty ? null : () => _copyId(status.id),
-              ),
+            LgSettingsBlock(
+              disabled: locked,
+              children: [
+                KeyedSubtree(
+                  key: ctx.keyOf(_id),
+                  child: LgSettingsInfoRow(
+                    label: l10n.settingsServiceId,
+                    value: formatPeerId(status.id),
+                    marked: ctx.isMarked(_id),
+                    copyLabel: l10n.homeCopy,
+                    copySemanticLabel: l10n.homeCopyId,
+                    onCopy: status.id.isEmpty || locked
+                        ? null
+                        : () => _copyId(status.id),
+                  ),
+                ),
+              ],
             ),
             if (installed)
-              SettingsRow(
-                ctx: ctx,
-                id: _pin,
-                name: l10n.settingsServiceUnlockPin,
-                description: l10n.settingsServiceUnlockPinNote,
-                enabled: !ctx.locked,
-                below: Wrap(
-                  spacing: 12,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    if (pinSet != null)
-                      Text(
-                        pinSet
+              LgSettingsBlock(
+                disabled: locked,
+                children: [
+                  KeyedSubtree(
+                    key: ctx.keyOf(_pin),
+                    child: LgSettingsRow(
+                      name: l10n.settingsServiceUnlockPin,
+                      description: l10n.settingsServiceUnlockPinNote,
+                      marked: ctx.isMarked(_pin),
+                      error: ctx.errorOf(_pin),
+                      wide: true,
+                      control: LgSettingsValueActions(
+                        value: pinSet == null
+                            ? null
+                            : pinSet
                             ? l10n.settingsAccessSet
                             : l10n.settingsAccessNotSet,
+                        emphasized: pinSet == true,
+                        actions: [
+                          LgSettingsAction(
+                            label: pinSet == true
+                                ? l10n.settingsServiceChangePin
+                                : l10n.settingsServiceSetPin,
+                            onPressed: locked
+                                ? null
+                                : () async {
+                                    if (await showSetUnlockPinDialog(
+                                      ctx.overlays,
+                                      l10n,
+                                    )) {
+                                      ctx.setError(_pin, null);
+                                    }
+                                  },
+                          ),
+                          if (pinSet == true)
+                            LgSettingsAction(
+                              label: l10n.settingsServiceRemovePin,
+                              onPressed: locked ? null : _removePin,
+                            ),
+                        ],
                       ),
-                    LgButton(
-                      label: pinSet == true
-                          ? l10n.settingsServiceChangePin
-                          : l10n.settingsServiceSetPin,
-                      kind: LgButtonKind.text,
-                      onPressed: ctx.locked
-                          ? null
-                          : () async {
-                              if (await showSetUnlockPinDialog(
-                                ctx.overlays,
-                                l10n,
-                              )) {
-                                ctx.setError(_pin, null);
-                              }
-                            },
                     ),
-                    if (pinSet == true)
-                      LgButton(
-                        label: l10n.settingsServiceRemovePin,
-                        kind: LgButtonKind.text,
-                        onPressed: ctx.locked ? null : _removePin,
-                      ),
-                  ],
-                ),
+                  ),
+                ],
               ),
           ],
         );

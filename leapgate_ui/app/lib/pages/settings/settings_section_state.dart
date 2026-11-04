@@ -83,8 +83,18 @@ class SettingsSectionState extends ChangeNotifier
     return ok;
   }
 
+  bool _disposed = false;
+
+  /// A save handed over as the page switched away (the page takes the focus first, so a number
+  /// field commits) finishes after its section's context is gone; it has nothing to tell then.
+  @override
+  void notifyListeners() {
+    if (!_disposed) super.notifyListeners();
+  }
+
   @override
   void dispose() {
+    _disposed = true;
     _markTimer?.cancel();
     super.dispose();
   }

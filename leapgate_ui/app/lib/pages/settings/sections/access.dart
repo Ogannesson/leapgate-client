@@ -6,10 +6,10 @@ import 'package:flutter_hbb/leapgate/options.dart';
 import 'package:flutter_hbb/leapgate/permanent_password.dart';
 
 import '../../../l10n/app_localizations.dart';
-import '../../../widgets/lg_button.dart';
 import '../../../widgets/lg_selection.dart';
+import '../../../widgets/lg_settings_rows.dart';
 import '../../home/home_dialogs.dart' show showPermanentPasswordDialog;
-import '../settings_parts.dart';
+import '../settings_flow.dart';
 import '../settings_registry.dart';
 import '../settings_status.dart';
 
@@ -95,6 +95,10 @@ class _Access extends StatelessWidget {
     if (await ctx.save(item, write)) await status.refreshOneTimePassword();
   }
 
+  /// A row with its key, so search and links can scroll to it.
+  Widget _keyed(String id, Widget row) =>
+      KeyedSubtree(key: ctx.keyOf(id), child: row);
+
   @override
   Widget build(BuildContext context) {
     final status = SettingsStatus.of(context);
@@ -114,90 +118,161 @@ class _Access extends StatelessWidget {
       _ => '6',
     };
     final open = !ctx.locked;
-    // "在本机接受" uses no password: the three below grey out (02 §1.3.1; upstream hid them).
-    final passwords = open && approve != _approveClick;
-    final oneTime = passwords && method != kUsePermanentPassword;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    // "在本机接受" uses no password: the blocks below grey out (02 §1.3.1; upstream hid them).
+    final click = approve == _approveClick;
+    final noOneTime = !click && method == kUsePermanentPassword;
+    final passwords = open && !click;
+    final oneTime = passwords && !noOneTime;
+
+    LgRadio<String> radio(
+      String value,
+      String group,
+      String label,
+      ValueChanged<String>? onChanged,
+    ) => LgRadio<String>(
+      value: value,
+      groupValue: group,
+      label: label,
+      onChanged: onChanged == null
+          ? null
+          : (v) {
+              if (v != group) onChanged(v);
+            },
+    );
+
+    void setApprove(String v) =>
+        ctx.save(_approve, () => _config.set(kOptionApproveMode, v));
+
+    return SettingsFlow(
       children: [
-        SettingsRow(
-          ctx: ctx,
-          id: _approve,
-          name: l10n.settingsAccessApproveMode,
-          description: l10n.settingsAccessNewConnectionsOnly,
-          enabled: open,
-          below: SettingsChoice<String>(
-            options: [
-              (_approvePassword, l10n.settingsAccessApprovePassword),
-              (_approveClick, l10n.settingsAccessApproveClick),
-              ('', l10n.settingsAccessApproveBoth),
-            ],
-            value: approve,
-            onChanged: open
-                ? (v) => ctx.save(
-                    _approve,
-                    () => _config.set(kOptionApproveMode, v),
-                  )
-                : null,
-          ),
+        LgSettingsBlock(
+          children: [
+            _keyed(
+              _approve,
+              LgSettingsRow(
+                name: l10n.settingsAccessApproveMode,
+                description: l10n.settingsAccessNewConnectionsOnly,
+                marked: ctx.isMarked(_approve),
+                error: ctx.errorOf(_approve),
+                body: LgSettingsOptions(
+                  children: [
+                    radio(
+                      _approvePassword,
+                      approve,
+                      l10n.settingsAccessApprovePassword,
+                      open ? setApprove : null,
+                    ),
+                    radio(
+                      _approveClick,
+                      approve,
+                      l10n.settingsAccessApproveClick,
+                      open ? setApprove : null,
+                    ),
+                    radio(
+                      '',
+                      approve,
+                      l10n.settingsAccessApproveBoth,
+                      open ? setApprove : null,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ),
-        if (approve == _approveClick)
-          SettingsNote(l10n.settingsAccessClickNoPassword),
-        SettingsRow(
-          ctx: ctx,
-          id: _verification,
-          name: l10n.settingsAccessVerification,
-          enabled: passwords,
-          below: SettingsChoice<String>(
-            options: [
-              (kUseTemporaryPassword, l10n.settingsAccessOneTimeOnly),
-              (kUsePermanentPassword, l10n.settingsAccessPermanentOnly),
-              (kUseBothPasswords, l10n.settingsAccessBothPasswords),
-            ],
-            value: method,
-            onChanged: passwords ? _setVerification : null,
-          ),
+        if (click) LgSettingsNote(l10n.settingsAccessClickNoPassword),
+        LgSettingsBlock(
+          disabled: click,
+          children: [
+            _keyed(
+              _verification,
+              LgSettingsRow(
+                name: l10n.settingsAccessVerification,
+                marked: ctx.isMarked(_verification),
+                error: ctx.errorOf(_verification),
+                body: LgSettingsOptions(
+                  children: [
+                    for (final (value, label) in [
+                      (kUseTemporaryPassword, l10n.settingsAccessOneTimeOnly),
+                      (kUsePermanentPassword, l10n.settingsAccessPermanentOnly),
+                      (kUseBothPasswords, l10n.settingsAccessBothPasswords),
+                    ])
+                      radio(
+                        value,
+                        method,
+                        label,
+                        passwords ? _setVerification : null,
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ),
-        SettingsNote(l10n.settingsAccessOneTime, title: true),
-        if (passwords && method == kUsePermanentPassword)
-          SettingsNote(l10n.settingsAccessPermanentNoOneTime),
-        SettingsRow(
-          ctx: ctx,
-          id: _length,
-          name: l10n.settingsAccessLength,
-          enabled: oneTime,
-          control: SettingsChoice<String>(
-            horizontal: true,
-            options: const [('6', '6'), ('8', '8'), ('10', '10')],
-            value: length,
-            onChanged: oneTime
-                ? (v) => _setOneTime(
-                    status,
-                    _length,
-                    () => _config.set(kOptionTemporaryPasswordLength, v),
-                  )
-                : null,
-          ),
+        LgSettingsSubtitle(l10n.settingsAccessOneTime),
+        if (noOneTime) LgSettingsNote(l10n.settingsAccessPermanentNoOneTime),
+        LgSettingsBlock(
+          disabled: click || noOneTime,
+          children: [
+            _keyed(
+              _length,
+              LgSettingsRow(
+                name: l10n.settingsAccessLength,
+                wide: true,
+                marked: ctx.isMarked(_length),
+                error: ctx.errorOf(_length),
+                control: LgSegmented<String>(
+                  segments: const [
+                    LgSegment('6', '6'),
+                    LgSegment('8', '8'),
+                    LgSegment('10', '10'),
+                  ],
+                  selected: length,
+                  onChanged: oneTime
+                      ? (v) {
+                          if (v == length) return;
+                          _setOneTime(
+                            status,
+                            _length,
+                            () =>
+                                _config.set(kOptionTemporaryPasswordLength, v),
+                          );
+                        }
+                      : null,
+                ),
+              ),
+            ),
+            _keyed(
+              _numeric,
+              LgSettingsRow.toggle(
+                name: l10n.settingsAccessNumeric,
+                value: _config.getBool(kOptionAllowNumericOneTimePassword),
+                marked: ctx.isMarked(_numeric),
+                error: ctx.errorOf(_numeric),
+                onChanged: oneTime
+                    ? (v) => _setOneTime(
+                        status,
+                        _numeric,
+                        () => _config.setBool(
+                          kOptionAllowNumericOneTimePassword,
+                          v,
+                        ),
+                      )
+                    : null,
+              ),
+            ),
+          ],
         ),
-        SettingsRow(
-          ctx: ctx,
-          id: _numeric,
-          name: l10n.settingsAccessNumeric,
-          enabled: oneTime,
-          control: LgSwitch(
-            value: _config.getBool(kOptionAllowNumericOneTimePassword),
-            semanticLabel: l10n.settingsAccessNumeric,
-            onChanged: oneTime
-                ? (v) => _setOneTime(
-                    status,
-                    _numeric,
-                    () =>
-                        _config.setBool(kOptionAllowNumericOneTimePassword, v),
-                  )
-                : null,
-          ),
+        LgSettingsBlock(
+          gap: true,
+          disabled: click,
+          children: [
+            _keyed(
+              _permanent,
+              _PermanentRow(l10n: l10n, ctx: ctx, enabled: passwords),
+            ),
+          ],
         ),
-        _PermanentRow(l10n: l10n, ctx: ctx, enabled: passwords),
       ],
     );
   }
@@ -240,21 +315,19 @@ class _PermanentRowState extends State<_PermanentRow> {
       future: _state,
       builder: (context, snapshot) {
         final isSet = snapshot.data?.isSet ?? false;
-        return SettingsRow(
-          ctx: widget.ctx,
-          id: _permanent,
+        return LgSettingsRow(
           name: l10n.settingsAccessPermanent,
-          enabled: widget.enabled,
-          below: Row(
-            children: [
-              Text(isSet ? l10n.settingsAccessSet : l10n.settingsAccessNotSet),
-              const SizedBox(width: 12),
-              LgButton(
+          marked: widget.ctx.isMarked(_permanent),
+          error: widget.ctx.errorOf(_permanent),
+          control: LgSettingsValueActions(
+            value: isSet ? l10n.settingsAccessSet : l10n.settingsAccessNotSet,
+            emphasized: isSet,
+            actions: [
+              LgSettingsAction(
                 label: isSet
                     ? l10n.homeChange
                     : l10n.settingsAccessSetPermanent,
                 semanticLabel: isSet ? l10n.homeChangePassword : null,
-                kind: LgButtonKind.text,
                 onPressed: widget.enabled && snapshot.hasData ? _edit : null,
               ),
             ],
