@@ -78,9 +78,10 @@ pub struct BotChat {
     pub label: String,
 }
 
-/// S10: the chat of the latest update with a message in Telegram's getUpdates response.
-/// Upstream's `get_chatid_telegram` takes the earliest, but anyone can find a bot and message
-/// it first. Telegram's errors keep upstream's text, which `bot_result` reads.
+/// S10: the chat of the latest update with a `message` or a `channel_post` (a channel's posts
+/// come as the latter) in Telegram's getUpdates response. Upstream's `get_chatid_telegram`
+/// takes the earliest message, but anyone can find a bot and message it first. Telegram's
+/// errors keep upstream's text, which `bot_result` reads.
 pub fn bot_chat(resp: &str) -> Result<Option<BotChat>, String> {
     let value: Value = hbb_common::serde_json::from_str(resp).map_err(|e| e.to_string())?;
     if let Some(code) = value.get("error_code").and_then(Value::as_i64) {
@@ -95,7 +96,10 @@ pub fn bot_chat(resp: &str) -> Result<Option<BotChat>, String> {
         return Ok(None);
     };
     Ok(updates.iter().rev().find_map(|u| {
-        let chat = u.get("message")?.get("chat")?;
+        let chat = u
+            .get("message")
+            .or_else(|| u.get("channel_post"))?
+            .get("chat")?;
         let id = match &chat["id"] {
             Value::Number(n) => n.to_string(),
             Value::String(s) => s.clone(),
@@ -229,8 +233,26 @@ mod tests {
             chat("-1001234567890", "supergroup", "Example group")
         );
         assert_eq!(
-            one(r#"{"id":"@example_channel","title":"Example channel","type":"channel"}"#),
-            chat("@example_channel", "channel", "Example channel")
+            bot_chat(&format!(r#"{{"ok":true,"result":[{CHANNEL_POST}]}}"#)).unwrap(),
+            chat("-1009876543210", "channel", "Example channel")
+        );
+    }
+
+    /// A channel's posts come as `channel_post`, with the channel as both sender and chat.
+    const CHANNEL_POST: &str = r#"{"update_id":20,"channel_post":{"message_id":2,"sender_chat":{"id":-1009876543210,"title":"Example channel","type":"channel"},"chat":{"id":-1009876543210,"title":"Example channel","type":"channel"},"date":1700000000,"text":"hi"}}"#;
+
+    #[test]
+    fn telegram_chat_is_the_latest_message_or_channel_post() {
+        let mut resp = updates(&[r#"{"id":111111111,"first_name":"First","type":"private"}"#]);
+        resp.insert_str(
+            resp.len() - 2,
+            &format!(
+                r#",{CHANNEL_POST},{{"update_id":21,"edited_channel_post":{{"chat":{{"id":-1001111111111,"title":"Edited","type":"channel"}}}}}}"#
+            ),
+        );
+        assert_eq!(
+            bot_chat(&resp),
+            Ok(chat("-1009876543210", "channel", "Example channel"))
         );
     }
 
