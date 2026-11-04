@@ -14,6 +14,7 @@ import '../../widgets/lg_button.dart';
 import '../../widgets/lg_list_chrome.dart';
 import '../../widgets/lg_pressable.dart';
 import '../../widgets/lg_status.dart';
+import '../settings/settings_page.dart';
 import 'account/account.dart';
 import 'devices_page.dart';
 import 'exit/exit_page.dart';
@@ -60,6 +61,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     super.initState();
     connectBoxFocusRequests.addListener(_onFocusRequest);
     exitPageRequests.addListener(_onExitRequest);
+    settingsPageRequests.addListener(_onSettingsRequest);
     WidgetsBinding.instance.addObserver(this);
   }
 
@@ -67,6 +69,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   void dispose() {
     connectBoxFocusRequests.removeListener(_onFocusRequest);
     exitPageRequests.removeListener(_onExitRequest);
+    settingsPageRequests.removeListener(_onSettingsRequest);
     WidgetsBinding.instance.removeObserver(this);
     _connectBox.dispose();
     _connectBoxFocus.dispose();
@@ -98,6 +101,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   /// "Use as exit node" ([useAsExit]): the exit page scrolls to the card itself.
   void _onExitRequest() => setState(() => _section = HomeSection.exitNodes);
+
+  /// A link to a settings section ([MainNavigation.showSettings]): the settings page takes the
+  /// section and item itself.
+  void _onSettingsRequest() => setState(() => _section = HomeSection.settings);
 
   @override
   Widget build(BuildContext context) {
@@ -161,6 +168,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                   // Right under the title (`LgExitPage`).
                   const SizedBox(height: LgSpace.s1),
                   Expanded(child: ExitPage(overlays: widget.overlays)),
+                ],
+                if (_section == HomeSection.settings) ...[
+                  const SizedBox(height: LgSpace.s3),
+                  Expanded(child: SettingsPage(overlays: widget.overlays)),
                 ],
               ],
             ),

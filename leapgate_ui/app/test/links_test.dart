@@ -20,6 +20,9 @@ class _Navigation implements MainNavigation {
 
   @override
   void showHome({bool focusConnectBox = false, String? connectBoxText}) {}
+
+  @override
+  void showSettings(SettingsSectionId section, {String? item}) {}
 }
 
 void main() {

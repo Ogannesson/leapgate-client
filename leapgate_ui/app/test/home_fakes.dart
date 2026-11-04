@@ -146,6 +146,12 @@ class FakeNavigation implements MainNavigation {
 
   @override
   void showHome({bool focusConnectBox = false, String? connectBoxText}) {}
+
+  final settings = <({SettingsSectionId section, String? item})>[];
+
+  @override
+  void showSettings(SettingsSectionId section, {String? item}) =>
+      settings.add((section: section, item: item));
 }
 
 /// Fresh fakes behind `bind`, `appCore` and `mainNavigation` for one test.

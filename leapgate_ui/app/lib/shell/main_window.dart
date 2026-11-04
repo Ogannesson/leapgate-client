@@ -180,6 +180,12 @@ class _MainWindowState extends State<MainWindow>
     }
   }
 
+  @override
+  void showSettings(SettingsSectionId section, {String? item}) {
+    _select(null);
+    settingsPageRequests.request(section, item: item);
+  }
+
   // M2a opens one view per tab, the remote desktop.
   FFI _viewOf(String device) => appCore.sessions.sessionsOf(device).first;
 

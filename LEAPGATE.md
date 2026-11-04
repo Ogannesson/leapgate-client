@@ -1671,3 +1671,86 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 - Esc 只在改端口的框里有效（取消）；框里按回车会让框失去焦点（Flutter 的默认），所以回车确认之后要接着用键盘时，由调用方把焦点放回去。
 - 卡片里没有会弹浮层的组件放在合并语义的容器里；头里的名字省略时的悬停全文在 `ExcludeSemantics` 里，读屏从分组名读。
 - 样稿的身份色是写死的 `data-k="2"`，组件按 ID 算身份色（和设备卡片一致），画廊里同一个 ID 是赭黄，不是样稿的陶橙，不算差异。
+
+### 10.13 M6a 的分工约定
+
+依据：总仓库 `docs/新界面/09-M6拆法.md`（下称"09"；维护者 2026-11-04 把 M6-1~M6-6 全部按推荐定）。界面行为以 `docs/新界面/02-第二轮内容与逻辑说明.md`（下称"02"）§1.2~§1.6、§3 为准，主页的联动以 01 §3.1 区块 A 为准；样稿 `A-P6-设置.html`、`A-P6-设置-对话框.html`（"修改 ID"、多语言列表、TLS 回退的旧说明按 02 §5.2 作废）。M6a 做框架、搜索、解锁和八个小节，designer 的全部组件和全部 Rust 项也在这一段；其余十二个小节是 M6b，到时另写一节。
+
+**分支和文件边界**（都从 `ui/m6a` 切，做完合回 `ui/m6a`；整合 worktree 是 `.wt/ui-m4`，块 2 的桥和 pub 缓存在它里面）
+
+| 分支 | 谁 | 只改这些 |
+|---|---|---|
+| `ui/rust-m6` | coder R | `libs/leapgate/src/`（`exit/policy.rs` 拆出逐项解析、新文件 `server_info.rs`（S1、S2）、`sign.rs`、`lan.rs`、新文件 `direct.rs`（S5）、`ipc.rs` 的 `Msg` 末尾加变体、`lang.rs`（Telegram 正文）、`report/mod.rs`（S2 的落盘、`root_from` 改调 S1 的推导）、`exit/directory.rs`（09 §4.1））；`src/leapgate_ffi.rs`（末尾追加 M6 一段）；`src/leapgate_hooks/ipc.rs`（S5 的分支）；新文件 `src/leapgate_hooks/settings.rs`（S9、S10 的进程间部分）；上游只两处：`src/rendezvous_mediator.rs` 监听那一行（S5）、`src/server/connection.rs` Telegram 正文那 6 行换成 1 个调用（S11），各带 `// leapgate:` 注释；本节的 Rust 部分 |
+| `ui/m6-ds` | designer | `app/lib/widgets/`（新组件）、`app/lib/icons/`（盾牌图标）、`app/lib/gallery_*.dart`、组件的测试；`app/pubspec.yaml` 加 `qr_flutter: 4.1.0` 和用同一个 `PUB_CACHE` 重新生成的 lock |
+| `ui/m6a-access` | coder A（框架和访问） | core 新文件 `leapgate/settings/unlock.dart` 和 A 需要的其他 `leapgate/settings/*.dart`；`consts.dart`（只在"M6a access"下追加）；app `pages/settings/` 下的 `settings_page.dart`（换掉占位）、`settings_section_state.dart`（可加成员，不改已有接口）、新文件（搜索、导航之类）、`sections/access.dart`、`permissions.dart`、`service.dart`、`dialogs/` 下解锁 PIN 和设置 PIN 两个对话框；`pages/home/home_page.dart`（密码行"修改"先解锁、M6-4 的警告行）、`pages/home/password_row.dart`（"更多访问设置"）、`shell/main_window.dart`（切标签、窗口隐藏时让解锁控制器上锁）；ARB；测试 |
+| `ui/m6a-net` | coder B（出口和网络） | core `leapgate/settings/` 下 B 需要的新文件（服务器配置的导入导出编解码、出口前提的计算等）；`consts.dart`（只在"M6a network"下追加）；app `pages/settings/sections/exit_node.dart`、`connection.dart`、`appearance.dart`、`network.dart`、`account.dart`，`dialogs/` 下放行的网段、服务器、代理三个对话框；`app/lib/main.dart`（主题、语言）、`app/lib/cm/cm_main.dart`（登记 `theme`、`language` 事件）、`pages/session/reasons.dart`、`pages/session/connection_panel.dart`（"打开网络设置"）；ARB；测试 |
+
+- `settings_registry.dart`、`settings_ids.dart`、`shell/navigation.dart` 的 `showSettings` 和 `settingsPageRequests`、core `leapgate/settings/settings_api.dart`、两份 `settings_fakes.dart` 是第 0 步写好的接口，两个 coder 都不改；确实要改先报主会话。小节文件只认注册表、选项 model、`settingsApi` 和组件，彼此不引用。
+- ARB 键以 `settings` 开头，A 用 `settingsAccess*`、`settingsPerm*`、`settingsService*`、`settingsUnlock*`、`settingsSearch*`，B 用 `settingsExit*`、`settingsConn*`、`settingsAppearance*`、`settingsNet*`、`settingsAccount*`；加在两个 ARB 文件末尾，中英文同时加，文案照 02 逐字照抄，英文照 02 §5.5，没有的新写并列进提交说明。改完 ARB 跑 `flutter gen-l10n`。
+- coder 先用 M0~M5 的组件和简单的占位控件把逻辑写通，整合时换成 designer 的组件。占位不求好看，但行为测试要能按文字和语义标签找到它们。
+- 块 2 的新导出在 R 合入、重新生成桥之前不存在：`RustSettingsApi` 现在每个方法都抛 `UnimplementedError`（标着 `TODO(M6 整合)`），整合时由主会话换成真实调用；测试一律用 `FakeSettingsApi`（core 和 app 的 `test/settings_fakes.dart` 各一份，内容相同）。页面不直接调 `bind`：第一块的 `bind.main*` 调用包在 core 的 model 里（§10.7），会弹 UAC 的三处见下。
+
+**框架的接口**（第 0 步已写，`app/lib/pages/settings/`）
+- `settings_ids.dart`：三组、二十个小节的固定 id（`SettingsSectionId`），链接在小节建好之前就能指名。
+- `settings_registry.dart`：`SettingsSection`（id、标题、`items()`、`visible()`、`locked`、`build(context, ctx)`）、`SettingsItem`（id、名字、说明、单选项名，给搜索用）、`SettingsSectionContext`（`overlays`、`locked`、`keyOf(item)`、`isMarked(item)`、`errorOf` / `setError`、`save(item, write)`）、`settingsSections(l10n)`（按 id 顺序；M6b 往这里加）。`items()` 只列此刻显示的项（被开关藏起来的不列，锁住的照列）。
+- `settings_section_state.dart`：`SettingsSectionState`，上面接口的实现，页面和测试共用；`save` 失败时那一项下面写 `settingsSaveFailed`，成功清掉，两种都重建小节。
+- 小节在每次重建时从选项 model 重新读值；页面在打开小节、主窗口拿回焦点、保存之后重建（09 §4.2），不加定时刷新。
+- 跨小节链接用的项 id（出口前提的"修改"要用，A 必须用这几个 id 登记）：访问与密码的 `approve-mode`、`verification-method`、`permanent-password`；权限的 `enable-tunnel`。其余项 id 用选项键或小写短横线的名字，各自定。
+- `MainNavigation.showSettings(section, {item})`：切到主页标签的设置页、打开那个小节、滚到那一项并标记约 2 秒（`SettingsSectionState.mark`）。
+- 选项 model（§10.7）加了 `userDefault`（UserDefaultConfig）。`config.set` 在整合时改走 S9（`stop-service` 除外），`failed` 时返回 false；在那之前恒为真。
+
+**解锁**（coder A，02 §1.2.6，R2-Q3、R2-Q31）
+- 只在安装版。`locked` 为真的小节（访问与密码、权限、出口、服务与 ID、网络和服务器，以及 M6b 的传入连接各节）共用一次解锁；离开设置页（切到设备、出口页，切到任一会话标签，主窗口隐藏或关闭）上锁，设置页里切小节、搜索不上锁。
+- 点"解锁"时才调 `mainGetUnlockPin`（同步、内部经 IPC 最多等 1 秒，不在构建时调）：有 PIN 就弹"输入解锁 PIN"（底部"改用管理员权限解锁"），在界面里比对、不限次数（M6-3）；没有就调 `mainCheckSuperUserPermission`，返回假就在锁定条下写"未获得管理员权限，设置仍处于锁定状态"。
+- 主页密码行"修改"在安装版先走同一套解锁，成功后打开设置固定密码对话框，对话框关闭时上锁。
+- 不受锁约束的：服务的启动 / 停止（自己弹 UAC）。
+
+**coder A 的其余要点**
+- 服务与 ID：服务状态行和主页逐字相同（`LocalStatusModel`）；安装版停止 / 启动服务调 `mainSetOption('stop-service', …)`，成功时进程退出重开，调用返回就说明没成，下面写"未获得管理员权限，服务未停止"（启动时"……服务未启动"），取消和失败不分（09 §4.4）；便携版停止的确认正文等 02 §4.3 第 3 条的实测结果（R2-Q7），先按 02 写。解锁 PIN：设置 / 修改 / 移除，长度在 Dart 里先校验（至少 4 个字符）。
+- 访问与密码：选"仅固定密码"而没设固定密码时先开对话框（02 §1.3.1）；"仅使用数字"改了当场刷新一次性密码。
+- 权限：访问模式不是"自定义"时整组灰显并显示实际生效的值（02 §1.3.2）。
+- 搜索：索引来自各小节的 `items()`，只匹配当前语言，不区分大小写，键盘上下、回车、Esc（02 §1.2.4）。
+- 本次运行内记住上次打开的小节。
+- M6-4：主页服务状态行在代理、WebSocket、禁用 UDP 开着时的警告，等 02 §4.3 第 4 条的实测结果再做（主会话转给 A）。
+
+**coder B 的要点**
+- 出口：开关写 Y / N；前提状态行从访问与密码、权限的值算，"修改"用 `showSettings` 和上面固定的项 id；关闭前的确认数来自 `LocalStatusModel` 已有的传入会话数（C1 的 `exit`）；放行的网段对话框用 `settingsApi.allowNetsCheck`，保存它给的 `value`。
+- 连接方式：打洞直连和三个键的对应照 02 §1.4.1（打开只写 `enable-ipv6-punch = Y`，关闭两个都写 N）；等待直连的时间 0.1~99.9、一位小数、空 = 2.5；顶部状态条：代理、WebSocket、禁用 UDP、Key 不可用（`keyCheck` 为 `invalid`，或为 `empty` 且 S1 的 Key 来源是 `none`）、兼容服务器（`serverKind`）。
+- 外观：`theme`、`lang` 是和旧界面共用的 LocalConfig 键；写入后照上游调 `mainChangeTheme`、`mainChangeLanguage`；主窗口的 `MaterialApp` 按这两个键设 `themeMode` 和 `locale` 并监听；CM 登记 `theme`、`language` 两个全局事件跟着切换。`lang` 存的是新界面不支持的语言时按"跟随系统"显示和处理、不改写（09 §4.8）。启动时和改语言后，把解析后的实际语言（`zh-cn` 或 `en`）经 S9 写进 Config 键 `leapgate-ui-lang`（值不同才写）。
+- 网络和服务器：摘要用 `serverSummary` 和 `serverKind`；实际生效的 API 是明文 http 且不是回环地址时显示警告；服务器对话框照 02 §1.6.8，"API 留空时会用的地址"用第一块现成的 `mainGetCommonSync('resolve-api-server:…')`，Key 用 `keyCheck`，ID 和中继服务器用 `mainTestIfValidServer` 验证；已登录且 API 变了时按 09 §4.5 的先后（先验证、再向旧服务器退出登录、再保存，退出失败不挡保存）；导入导出走剪贴板，编解码照上游 `common.dart:2921-2973`，导入只预填、点"确定"才保存；代理对话框读 `mainGetSocks`、写 `settingsApi.setSocks`；WebSocket、禁用 UDP 开启前页内确认。TLS 回退的说明按 09 §4.6：B 列出还走上游代码的 HTTP 请求，写进提交说明，文案由主会话定稿。
+- 账号：照 02 §1.5.3，用 M4 的账号 model 和登录对话框。
+- 会话错误 `key_mismatch`、`secure_tcp_failed` 加 `NextStep.openNetworkSettings`：`mainNavigation.showSettings(SettingsSectionId.network)`（先切到主页标签，`showSettings` 自己会切）。
+
+**Rust 导出（块 2）**
+
+| 导出 | 参数 | 返回 |
+|---|---|---|
+| `leapgate_set_options`（S9） | `changes: String`（JSON 对象 `{键: 值}`，空值删除） | `String`：`saved` / `saved_local` / `failed` |
+| `leapgate_set_socks`（S9） | `proxy`、`username`、`password: String` | `bool`：服务进程收下了 |
+| `leapgate_exit_allow_nets_check`（E5） | `text: String`（对话框原文，每行一条） | `SyncReturn<String>`：`{"valid":bool,"count":N,"lines":[{"line":行号,"state":"invalid"\|"blocked"}],"value":要存的值}`；行号从 1 起、按原文；`blocked` 是"始终禁止"的警告，仍可保存 |
+| `leapgate_server_summary`（S1） | — | `String`：`{"id":{"value","source"},"api":{"value","source"},"key":{"source"},"relay":{"value"}}`；`id` 的来源 `exe` / `user` / `custom` / `cache_default` / `cache_last` / `default` / `none`，`api` 的 `exe` / `user` / `derived` / `default` / `none`，`key` 的 `exe` / `user` / `default` / `none` |
+| `leapgate_server_kind`（S2） | — | `SyncReturn<String>`：`{"kind":"leapgate"\|"compat"\|"checking","features":[…]}` |
+| `leapgate_key_check`（S3） | `key: String` | `SyncReturn<String>`：`empty` / `valid` / `invalid` |
+| `leapgate_local_addresses`（S4） | — | `String`：`[{"name","ipv4":[…],"ipv6":[…]}]`，不列临时 IPv6 地址 |
+| `leapgate_direct_listen`（S5） | — | `String`：`{"state":"listening","port":N}` / `{"state":"failed","port":N,"error":"in_use"\|"denied"\|"other"}` / `{}`（服务不在或还没有结果） |
+| `leapgate_verify_bot`（S10） | `token: String` | `String`：`{"result":"ok"\|"network"\|"invalid_token"\|"no_chat"\|"other","text":…}` |
+| `leapgate_verify_2fa` | `code: String` | `String`：`ok` / `wrong_code` / `not_saved` |
+
+没有 `SyncReturn` 的都是异步导出。S11 不导出：界面经 S9 写 Config 键 `leapgate-ui-lang`。
+
+**Rust 的做法和约束**（09 §1.2、§2.4、§4.1）
+- S9：自己开一条 IPC 连接，同一条连接上先发 `Options(None)` 取服务进程当前的整表，合并改动，发 `Options(Some)`，等服务进程回 `Options(None)` 确认；确认到了写本地 `Config::set_options` 并调 `ui_interface::refresh_options()`，返回 `saved`。连不上时：安装版、`stop-service` 不是 Y → `failed`，不写本地；其他情况写本地，返回 `saved_local`（服务下次启动时导入）。照搬上游写选项时的副作用：`CheckTestNatType` 的判断、TLS 回退改了清 TLS 缓存、`audio-input` 改了重启音频服务。上游 `ui_interface.rs`、`ipc.rs` 不改。
+- S1、S2 和 `exit/directory.rs`：服务器地址和能力从界面进程的选项缓存（`ui_interface::get_option`）取，交给 `libs/leapgate` 的纯函数；不在界面进程里直接读 `Config`（安装版界面进程的 `Config` 可能是旧的，09 §4.1）。S1 的来源推导写成纯函数，`report::root_from` 也改调它，不出第三份复刻。
+- S2：确认不支持时写 `leapgate-api-nocaps = <api 根>`，确认支持时清掉；三态 = 有对得上的 caps → `leapgate`，有对得上的 nocaps → `compat`，都没有 → `checking`。
+- S5：`leapgate::direct::noted(port, result)` 原样返回 `result` 并记下结果，上游那一行只多这一层包装；查询走 `leapgate::ipc::Msg` 末尾新加的变体，服务端分支在 `src/leapgate_hooks/ipc.rs`。`denied` 对应 Windows 10013。
+- S10：按上游错误原文的格式（`Telegram API error: … (error_code: N)`）归类：401、404 → `invalid_token`，空值 → `no_chat`，其余错误 → `network`；成功后再读一次服务进程的配置，`bot` 没存上就回 `other`。`leapgate_verify_2fa` 同理：验证码对了再确认密钥存上了。用上游原文写单测钉住。
+- S11：`leapgate-ui-lang` 为 `zh-cn` 时中文正文，其余（含没设）照现在的英文；正文放 `libs/leapgate/src/lang.rs`。
+- E5：从 `parse_allow_nets` 拆出逐项解析；"始终禁止"按网段整个落在回环、链路本地、保留段或元数据地址里判断，不拿首地址判断（`0.0.0.0/0` 不能报）；198.18.0.0/15 不算；"本机地址"是动态的，不报。`value` 是 `parse_allow_nets` 读得懂的存储格式。
+- 状态类型和 JSON 放 `libs/leapgate`，带单测；上游两处挂钩之外不碰上游文件。
+
+**组件（designer）**：规则同 10.8"组件约定"（只管画、文字由调用方传、带语义标签、两套主题和两套尺寸、画廊里每种状态一项、有行为测试），加 10.8 新加的"合并语义的容器里不放带浮层的组件"。要做的和画框见 09 §2.2：设置页版式（小节导航含组标题和搜索框、小节内容区、960×600 时控件换到名字下面一行）、设置行（灰显带原因、行下红字、标记约 2 秒）、小节里的小标题、锁定条（带盾牌按钮和下面一行红字）、盾牌图标、状态加按钮的行、数字输入框加单位、搜索结果列表、受信设备列表、快捷键行和录制对话框、二维码（`qr_flutter`）、关于页的行；M6b 用的几样也在这一轮做完。
+
+**测试**
+- R：S9 的合并和三种返回；S1 的来源推导表；S2 三态；S3；E5 的逐行判断（含 `0.0.0.0/0`、198.18.0.0/15、各类始终禁止）；S10 按上游原文归类；S11 两种语言正文。
+- core（A、B 各自的）：解锁控制器的上锁时机；出口前提的计算；服务器摘要的显示规则；导入导出编解码。
+- app：02 §1.10 里这八个小节、搜索、锁定的每个状态一个行为测试，用 `FakeSettingsApi` 喂数据。

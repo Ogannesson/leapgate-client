@@ -46,6 +46,8 @@ abstract class OptionScope with _KeyNotifiers {
 /// Config: this device's settings (`Leapgate2.toml` options). On the installed version the
 /// service process owns them; the UI process reads its copy, which Rust refreshes over IPC, and a
 /// write goes to the service over IPC.
+// TODO(M6 整合): write through `settingsApi.setOptions` (S9, `LEAPGATE.md` §10.13) except
+// `stop-service`, and return false from [set] when it answers `failed`.
 class _ConfigScope extends OptionScope {
   @override
   String get(String key) => bind.mainGetOptionSync(key: key);
@@ -76,6 +78,17 @@ class _FlutterScope extends OptionScope {
       bind.setLocalFlutterOption(k: key, v: value);
 }
 
+/// UserDefaultConfig (`Leapgate_default.toml`): the options a device's peer file starts from the
+/// first time this device connects to it (02 §1.4.2).
+class _UserDefaultScope extends OptionScope {
+  @override
+  String get(String key) => bind.mainGetUserDefaultOption(key: key);
+
+  @override
+  Future<void> _write(String key, String value) =>
+      bind.mainSetUserDefaultOption(key: key, value: value);
+}
+
 /// One remote device's options (its peer file). While a session to that device is open, read
 /// and write them through the session's [SessionOptions] instead: the session reads its own
 /// in-memory copy and does not see writes made here.
@@ -99,6 +112,7 @@ class OptionsModel {
   final OptionScope config = _ConfigScope();
   final OptionScope local = _LocalScope();
   final OptionScope flutter = _FlutterScope();
+  final OptionScope userDefault = _UserDefaultScope();
   final _peers = <String, OptionScope>{};
 
   /// The same object for the same [id], so its listeners hear every write made through it.

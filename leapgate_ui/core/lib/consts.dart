@@ -492,3 +492,18 @@ const String filterAbTagOption = 'filter-ab-by-intersection';
 /// LocalConfig: the exit nodes' local proxy ports as JSON `{device ID: port}` (M5-6), Leapgate's
 /// own; the old UI kept its exit port in the device's port forwards.
 const String kOptionLeapgateExitPorts = 'leapgate-exit-ports';
+
+// M6a: keys both settings lanes read (`LEAPGATE.md` §10.13). Each lane appends the rest below,
+// coder A under "M6a access", coder B under "M6a network".
+
+/// Config: the exit node switch; Rust only takes "Y" (第四期 A5), the page writes Y / N.
+const String kOptionLeapgateAllowExit = 'leapgate-allow-exit';
+const String kOptionEnableTunnel = 'enable-tunnel';
+
+/// LocalConfig, shared with the old UI: `light`, `dark`, anything else follows the system
+/// (upstream `common.dart:579-630`).
+const String kCommConfKeyTheme = 'theme';
+
+/// LocalConfig, shared with the old UI: Rust's language code (`zh-cn`, `en`), empty follows the
+/// system.
+const String kCommConfKeyLang = 'lang';
