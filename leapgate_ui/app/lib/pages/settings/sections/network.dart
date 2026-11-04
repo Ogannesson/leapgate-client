@@ -244,14 +244,19 @@ class _NetworkBodyState extends State<_NetworkBody> {
             child: LgSettingsValueActions(actions: [
               LgSettingsAction(
                 label: l10n.settingsNetChange,
+                semanticLabel: l10n.settingsNetChangeServerLabel,
                 kind: noId ? LgButtonKind.primary : LgButtonKind.secondary,
                 onPressed: locked ? null : _editServer,
               ),
               LgSettingsAction(
                   label: l10n.settingsNetImport,
+                  semanticLabel: l10n.settingsNetImportLabel,
                   onPressed: locked ? null : _import),
+              // A locked section can't be used at all (02 §1.2.5 rule 4).
               LgSettingsAction(
-                  label: l10n.settingsNetExport, onPressed: _export),
+                  label: l10n.settingsNetExport,
+                  semanticLabel: l10n.settingsNetExportLabel,
+                  onPressed: locked ? null : _export),
             ]),
           ),
         ]),
@@ -282,6 +287,9 @@ class _NetworkBodyState extends State<_NetworkBody> {
                       label: socks.proxy.isEmpty
                           ? l10n.settingsNetProxySet
                           : l10n.settingsNetChange,
+                      semanticLabel: socks.proxy.isEmpty
+                          ? l10n.settingsNetSetProxyLabel
+                          : l10n.settingsNetChangeProxyLabel,
                       onPressed: locked ? null : _editProxy,
                     ),
                   ],

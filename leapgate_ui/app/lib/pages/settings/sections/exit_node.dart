@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_hbb/common.dart' show isWindows;
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
+import 'package:flutter_hbb/leapgate/bridge.dart';
 import 'package:flutter_hbb/leapgate/settings/exit_settings.dart';
 
 import '../../../l10n/app_localizations.dart';
@@ -76,9 +77,17 @@ class _ExitBodyState extends State<_ExitBody> {
       // The service may take up to 2 s to answer: the switch waits, so a second click can't
       // stack a second question.
       setState(() => _counting = true);
-      final count = await exitSessionCount();
+      int? count;
+      try {
+        count = await exitSessionCount();
+      } catch (e) {
+        // An answer that can't be read is an unknown count: asked with the general body.
+        lgBind.leapgateLog(
+            level: 2, msg: 'leapgate ui: exit session count unreadable: $e');
+      } finally {
+        if (mounted) setState(() => _counting = false);
+      }
       if (!mounted) return;
-      setState(() => _counting = false);
       if (count != 0) {
         final ok = await ctx.overlays.show<bool>(
               null,
@@ -132,11 +141,18 @@ class _ExitBodyState extends State<_ExitBody> {
     final on = exitAllowed(config);
     final p = _prerequisites;
     final nets = allowedNetCount(config.get(kOptionLeapgateExitAllowNets));
-    LgSettingsAction link(SettingsSectionId section, String item) =>
+    // A locked section can't be used at all (02 §1.2.5 rule 4), its links included.
+    LgSettingsAction link(
+            SettingsSectionId section, String item, String semanticLabel) =>
         LgSettingsAction(
           label: l10n.settingsExitChange,
-          onPressed: () => mainNavigation.showSettings(section, item: item),
+          semanticLabel: semanticLabel,
+          onPressed: ctx.locked
+              ? null
+              : () => mainNavigation.showSettings(section, item: item),
         );
+    // With "完全访问" the tunnel switch is greyed under the access mode: that is what to change.
+    final fullAccess = config.get(kOptionAccessMode) == 'full';
     LgSettingsStatusRow status(bool ok, String text,
             {String? description,
             List<LgSettingsAction> actions = const [],
@@ -171,19 +187,26 @@ class _ExitBodyState extends State<_ExitBody> {
               status(false, l10n.settingsExitPasswordNotSet, actions: [
                 LgSettingsAction(
                   label: l10n.settingsExitSet,
+                  semanticLabel: l10n.settingsExitSetPasswordLabel,
                   onPressed: ctx.locked ? null : () => _setPassword(l10n),
                 ),
               ]),
             FixedPassword.oneTimeOnly => status(
                 false, l10n.settingsExitPasswordOneTimeOnly,
-                actions: [link(SettingsSectionId.access, 'verification-method')]),
+                actions: [
+                  link(SettingsSectionId.access, 'verification-method',
+                      l10n.settingsExitChangeVerificationLabel),
+                ]),
           },
           switch (p.approval) {
             Approval.password =>
               status(true, l10n.settingsExitApprovalPassword),
             Approval.both => status(true, l10n.settingsExitApprovalBoth),
             Approval.click => status(false, l10n.settingsExitApprovalClick,
-                actions: [link(SettingsSectionId.access, 'approve-mode')]),
+                actions: [
+                  link(SettingsSectionId.access, 'approve-mode',
+                      l10n.settingsExitChangeApprovalLabel),
+                ]),
           },
         ]),
         LgSettingsSubtitle(l10n.settingsExitLanProtection),
@@ -201,13 +224,19 @@ class _ExitBodyState extends State<_ExitBody> {
             actions: [
               LgSettingsAction(
                 label: l10n.settingsExitEdit,
+                semanticLabel: l10n.settingsExitEditNetsLabel,
                 onPressed: ctx.locked ? null : () => _editNets(l10n),
               ),
             ],
           ),
           p.tunnelAllowed
-              ? status(false, l10n.settingsExitTunnelOn,
-                  actions: [link(SettingsSectionId.permissions, kOptionEnableTunnel)])
+              ? status(false, l10n.settingsExitTunnelOn, actions: [
+                  fullAccess
+                      ? link(SettingsSectionId.permissions, kOptionAccessMode,
+                          l10n.settingsExitChangeAccessModeLabel)
+                      : link(SettingsSectionId.permissions, kOptionEnableTunnel,
+                          l10n.settingsExitChangeTunnelLabel),
+                ])
               : status(true, l10n.settingsExitTunnelOff),
         ]),
         // A status row has no error line of its own.

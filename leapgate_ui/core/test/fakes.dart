@@ -187,6 +187,10 @@ class FakeLeapgate implements lg.Leapgate {
       calls.add('uiMode:$mode');
 
   @override
+  Future<void> leapgateLangChanged({required String lang, dynamic hint}) async =>
+      calls.add('lang:$lang');
+
+  @override
   Stream<String> leapgateCmEvents({dynamic hint}) => cmEvents.stream;
 
   @override

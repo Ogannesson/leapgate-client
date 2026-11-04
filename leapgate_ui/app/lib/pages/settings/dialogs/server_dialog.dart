@@ -207,7 +207,12 @@ class _ServerDialogState extends State<_ServerDialog> {
               : null,
         ),
         _field(kOptionKey, l10n.settingsNetKey, _key,
-            hint: id.isEmpty ? l10n.settingsNetKeyHint : l10n.settingsNetKeyHintCustom),
+            // Only a build with a key of its own has one to fall back to (02 §1.6.8).
+            hint: !widget.summary.keyBuiltin
+                ? null
+                : id.isEmpty
+                    ? l10n.settingsNetKeyHint
+                    : l10n.settingsNetKeyHintCustom),
         Padding(
           padding: const EdgeInsets.only(top: LgSpace.s6),
           child: LgSettingsSubtitle(l10n.settingsNetAdvanced),
