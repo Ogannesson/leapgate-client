@@ -47,12 +47,16 @@ class SettingsSection {
     required this.build,
     this.visible = _always,
     this.locked = false,
+    this.lede,
   });
 
   static bool _always() => true;
 
   final SettingsSectionId id;
   final String title;
+
+  /// 标题下的说明行，02 里有的小节才给。
+  final String? lede;
 
   /// The items shown now, in display order. An item hidden because a switch above it is off is
   /// left out; a locked one is listed (02 §1.2.4).

@@ -19,6 +19,7 @@ import 'package:leapgate_ui/pages/settings/sections/toolbar.dart';
 import 'package:leapgate_ui/pages/settings/settings_registry.dart';
 import 'package:leapgate_ui/pages/settings/settings_section_state.dart';
 import 'package:leapgate_ui/pages/settings/settings_status.dart';
+import 'package:leapgate_ui/shell/navigation.dart' show settingsPageRequests;
 import 'package:leapgate_ui/shell/tab_overlays.dart';
 import 'package:leapgate_ui/theme/lg_theme.dart';
 import 'package:leapgate_ui/theme/lg_tokens.dart';
@@ -179,10 +180,18 @@ void main() {
   });
 
   group('defaults for new devices', () {
-    testWidgets('the defaults: what a fresh install starts new devices with', (tester) async {
-      await _pump(tester, newDeviceDefaultsSection);
+    testWidgets('the line under the title, on the settings page', (tester) async {
+      await pumpHome(tester, id: '135792468', status: ServiceStatus.ready);
+      settingsPageRequests.request(SettingsSectionId.newDeviceDefaults);
+      await _settle(tester);
+      expect(find.text('新设备的默认设置'), findsWidgets);
       expect(find.text('连接新设备时使用以下设置。连接过的设备沿用各自保存的设置。'),
           findsOneWidget);
+      await unmount(tester);
+    });
+
+    testWidgets('the defaults: what a fresh install starts new devices with', (tester) async {
+      await _pump(tester, newDeviceDefaultsSection);
       final segments = tester
           .widgetList<LgSegmented<String>>(find.byType(LgSegmented<String>))
           .map((s) => s.selected);
@@ -267,6 +276,25 @@ void main() {
       await _settle(tester);
       expect(_bind.defaults[kKeyTrackpadSpeed], '250');
       expect(find.text('须为 10~1000 之间的整数'), findsNothing);
+    });
+
+    testWidgets('trackpad speed: the box follows the slider while it moves', (tester) async {
+      await _pump(tester, newDeviceDefaultsSection);
+      final box = find.descendant(
+          of: find.byWidgetPredicate((w) =>
+              w is LgSettingsNumberField && w.semanticLabel == '触控板速度'),
+          matching: find.byType(EditableText));
+      final slider = find.byWidgetPredicate(
+          (w) => w is LgSlider && w.semanticLabel == '触控板速度');
+      expect(tester.widget<EditableText>(box).controller.text, '100');
+      tester.widget<LgSlider>(slider).onChanged!(300);
+      await tester.pump();
+      expect(tester.widget<EditableText>(box).controller.text, '300');
+      expect(_bind.defaults[kKeyTrackpadSpeed], isNull);
+      await tester.pump(const Duration(seconds: 1));
+      await _settle(tester);
+      expect(_bind.defaults[kKeyTrackpadSpeed], '300');
+      expect(tester.widget<EditableText>(box).controller.text, '300');
     });
   });
 
@@ -354,6 +382,13 @@ void main() {
               .widgetList<LgShortcutGroup>(find.byType(LgShortcutGroup))
               .every((g) => g.disabled),
           isTrue);
+      // Out of use, not only dimmed: a screen reader can't reach "修改", "清除" or the reset.
+      expect(
+          tester
+              .widgetList<LgShortcutRow>(find.byType(LgShortcutRow))
+              .every((r) => r.onEdit == null && r.onClear == null),
+          isTrue);
+      expect(tester.widget<LgButton>(_button('恢复默认')).onPressed, isNull);
     });
 
     testWidgets('recording: the five states, and replacing', (tester) async {

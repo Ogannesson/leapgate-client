@@ -203,7 +203,13 @@ Widget _shortcuts(BuildContext context, SettingsSectionContext ctx) {
     LgSettingsListHeader(
       key: ctx.keyOf(kShortcutItemList),
       title: l10n.settingsShortcutList,
-      trailing: [LgButton(label: l10n.settingsShortcutReset, onPressed: reset)],
+      // While the keys go to the remote device the whole list is out of use, the reset too
+      // (02 §1.4.6); the dimming only draws it.
+      trailing: [
+        LgButton(
+            label: l10n.settingsShortcutReset,
+            onPressed: passThrough ? null : reset),
+      ],
     ),
     if (passThrough) LgSettingsNote(l10n.settingsShortcutPaused),
     for (final (title, actions) in groups)
@@ -215,9 +221,11 @@ Widget _shortcuts(BuildContext context, SettingsSectionContext ctx) {
           rows: [
             for (final (id, name) in rows)
               _row(l10n, id, name, bindings,
-                  onEdit: () => edit(id, name),
-                  onClear: () => ctx.save(
-                      kShortcutItemList, () => _done(setShortcutBinding(id)))),
+                  onEdit: passThrough ? null : () => edit(id, name),
+                  onClear: passThrough
+                      ? null
+                      : () => ctx.save(kShortcutItemList,
+                          () => _done(setShortcutBinding(id)))),
           ],
         ),
   ]);
@@ -225,7 +233,7 @@ Widget _shortcuts(BuildContext context, SettingsSectionContext ctx) {
 
 LgShortcutRow _row(AppLocalizations l10n, String id, String name,
     List<Map<String, dynamic>> bindings,
-    {required VoidCallback onEdit, required VoidCallback onClear}) {
+    {required VoidCallback? onEdit, required VoidCallback? onClear}) {
   final binding = bindings.where((b) => b['action'] == id).firstOrNull;
   return LgShortcutRow(
     action: name,

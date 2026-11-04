@@ -257,6 +257,7 @@ class _SettingsPageState extends State<SettingsPage>
     return LgSettingsContent(
       controller: _scroll,
       title: section.title,
+      lede: section.lede,
       locked: locked && !_dimsItself.contains(section.id),
       lockBar: locked
           ? LgSettingsLockBar(

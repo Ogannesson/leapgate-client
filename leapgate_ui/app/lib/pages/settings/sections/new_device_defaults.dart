@@ -70,6 +70,7 @@ SettingsSection newDeviceDefaultsSection(AppLocalizations l10n) =>
     SettingsSection(
       id: SettingsSectionId.newDeviceDefaults,
       title: l10n.settingsSectionNewDeviceDefaults,
+      lede: l10n.settingsDefaultsLede,
       items: () {
         final defaults = appCore.options.userDefault;
         return [
@@ -113,7 +114,6 @@ SettingsSection newDeviceDefaultsSection(AppLocalizations l10n) =>
 
 Widget _defaults(BuildContext context, SettingsSectionContext ctx) {
   final l10n = AppLocalizations.of(context)!;
-  final t = LgTokens.of(context);
   final defaults = appCore.options.userDefault;
 
   void save(String item, String value) =>
@@ -156,7 +156,6 @@ Widget _defaults(BuildContext context, SettingsSectionContext ctx) {
   final trackpadError = ctx.errorOf(kKeyTrackpadSpeed);
 
   return SettingsFlow([
-    Text(l10n.settingsDefaultsLede, style: t.textM.copyWith(color: t.colors.text2)),
     LgSettingsSubtitle(l10n.toolbarDisplay),
     LgSettingsBlock(children: [
       segmented(kOptionViewStyle, l10n.settingsDefaultsViewStyle, [
@@ -328,7 +327,7 @@ class _DebouncedSlider extends StatefulWidget {
     required this.format,
     required this.onSave,
     this.width = 200,
-    this.showValue = true,
+    this.trailing,
   });
 
   final double value;
@@ -339,7 +338,10 @@ class _DebouncedSlider extends StatefulWidget {
   final String Function(double value) format;
   final ValueChanged<double> onSave;
   final double width;
-  final bool showValue;
+
+  /// What follows the slider, given the value it shows now (while moving too); the value
+  /// written out when null.
+  final Widget Function(double value)? trailing;
 
   @override
   State<_DebouncedSlider> createState() => _DebouncedSliderState();
@@ -393,16 +395,16 @@ class _DebouncedSliderState extends State<_DebouncedSlider> {
             },
           ),
         ),
-        if (widget.showValue) ...[
-          const SizedBox(width: LgSpace.s3),
-          SizedBox(width: 72, child: Text(widget.format(value))),
-        ],
+        const SizedBox(width: LgSpace.s3),
+        widget.trailing?.call(value) ??
+            SizedBox(width: 72, child: Text(widget.format(value))),
       ],
     );
   }
 }
 
-/// "触控板速度": the slider, and a box for the exact percentage (10~1000).
+/// "触控板速度": the slider, and a box for the exact percentage (10~1000) that follows the slider
+/// while it moves (upstream `TrackpadSpeedWidget.updateValue`).
 class _TrackpadSpeed extends StatelessWidget {
   const _TrackpadSpeed({
     required this.value,
@@ -421,24 +423,17 @@ class _TrackpadSpeed extends StatelessWidget {
   final VoidCallback onReverted;
 
   @override
-  Widget build(BuildContext context) => Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _DebouncedSlider(
-            value: value.toDouble(),
-            min: kMinTrackpadSpeed.toDouble(),
-            max: kMaxTrackpadSpeed.toDouble(),
-            step: 10,
-            semanticLabel: label,
-            format: (v) => '${v.round()}%',
-            onSave: (v) => onSave(v.round()),
-            width: 160,
-            // The box beside it shows the value.
-            showValue: false,
-          ),
-          const SizedBox(width: LgSpace.s3),
-          LgSettingsNumberField(
-            text: '$value',
+  Widget build(BuildContext context) => _DebouncedSlider(
+        value: value.toDouble(),
+        min: kMinTrackpadSpeed.toDouble(),
+        max: kMaxTrackpadSpeed.toDouble(),
+        step: 10,
+        semanticLabel: label,
+        format: (v) => '${v.round()}%',
+        onSave: (v) => onSave(v.round()),
+        width: 160,
+        trailing: (shown) => LgSettingsNumberField(
+            text: '${shown.round()}',
             unit: '%',
             width: 72,
             semanticLabel: label,
@@ -457,6 +452,5 @@ class _TrackpadSpeed extends StatelessWidget {
             },
             onReverted: onReverted,
           ),
-        ],
       );
 }
