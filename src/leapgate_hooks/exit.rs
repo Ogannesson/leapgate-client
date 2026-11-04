@@ -561,7 +561,7 @@ pub(crate) mod cards {
                 },
             };
             let Some((res, insecure_refused)) =
-                login_or_close(&session, &mut receiver, &mut forward, key, token).await
+                login_or_close(&session, &mut receiver, &mut listener, &mut forward, key, token).await
             else {
                 break;
             };
@@ -639,10 +639,13 @@ pub(crate) mod cards {
     }
 
     /// The login, raced against the session's close: upstream's login loop drops `Close`. `None`
-    /// when closed; a KCP login dropped this way leaves the peer to its silence timeout.
+    /// when closed: the listener goes at once and the login is told by its receiver closing, so
+    /// it closes the connection itself. Dropping the login would drop a KCP guard with it, and
+    /// the peer, its prompt up, would hear nothing until its own timeouts.
     async fn login_or_close<S: CardSession>(
         session: &S,
         receiver: &mut mpsc::UnboundedReceiver<Data>,
+        listener: &mut Option<TcpListener>,
         forward: &mut Framed<TcpStream, BytesCodec>,
         key: &str,
         token: &str,
@@ -654,13 +657,17 @@ pub(crate) mod cards {
             tokio::select! {
                 res = &mut login => return Some(res),
                 d = receiver.recv() => match d {
-                    Some(Data::Close) | None => return None,
+                    Some(Data::Close) | None => break,
                     Some(d) => {
                         let _ = tx.send(d);
                     }
                 },
             }
         }
+        *listener = None;
+        drop(tx);
+        let _ = login.await;
+        None
     }
 
     /// A10, as `run`.
@@ -778,7 +785,9 @@ pub(crate) mod cards {
             NotExit(Stream, Option<KcpStream>),
             Refused { insecure: bool },
             Fail,
-            Hang,
+            /// Logging in until the session closes, then closing this connection as
+            /// `connect_and_login_mux` does, its KCP guard kept for the FIN.
+            Hang(Option<(KcpStream, Stream)>),
         }
 
         #[derive(Clone)]
@@ -822,7 +831,7 @@ pub(crate) mod cards {
         impl CardSession for Fake {
             async fn login(
                 &self,
-                _ui: &mut mpsc::UnboundedReceiver<Data>,
+                ui: &mut mpsc::UnboundedReceiver<Data>,
                 _forward: &mut Framed<TcpStream, BytesCodec>,
                 _key: &str,
                 _token: &str,
@@ -855,7 +864,15 @@ pub(crate) mod cards {
                     }
                     Some(Login::Refused { insecure }) => (Ok(None), insecure),
                     Some(Login::Fail) => (Err(anyhow!("Timeout")), false),
-                    Some(Login::Hang) | None => std::future::pending().await,
+                    Some(Login::Hang(conn)) => {
+                        while ui.recv().await.is_some() {}
+                        if let Some((guard, stream)) = conn {
+                            drop(stream);
+                            release_kcp(Some(guard)).await;
+                        }
+                        (Ok(None), false)
+                    }
+                    None => std::future::pending().await,
                 }
             }
 
@@ -1027,7 +1044,7 @@ pub(crate) mod cards {
         #[tokio::test]
         async fn closing_mid_login_closes_the_listener_at_once() {
             let (id, port) = ("card-cancel", free_port());
-            let close = start(id, port, vec![Login::Hang]);
+            let close = start(id, port, vec![Login::Hang(None)]);
             wait_for(id, r#""state":"connecting""#).await;
             assert!(listening(port).await);
             close.send(Data::Close).unwrap();
@@ -1035,6 +1052,20 @@ pub(crate) mod cards {
             wait_not_listening(port).await;
             // Another program can take the port.
             assert!(std::net::TcpListener::bind(("127.0.0.1", port as u16)).is_ok());
+        }
+
+        #[tokio::test]
+        async fn closing_mid_login_closes_the_peer_connection_at_once() {
+            let (id, port) = ("card-cancel-peer", free_port());
+            let ((guard, ours), (_peer_guard, mut peer)) = kcp_pair().await;
+            let close = start(id, port, vec![Login::Hang(Some((guard, ours)))]);
+            wait_for(id, r#""state":"connecting""#).await;
+            close.send(Data::Close).unwrap();
+            // The peer hears the close, so its accept prompt goes with it (09 §5.3 item 9).
+            let end = timeout(3000, peer.next()).await;
+            assert!(matches!(end, Ok(None) | Ok(Some(Err(_)))), "peer not closed: {:?}", end);
+            // While the guard sees the FIN out, the port is free for the card added next.
+            wait_not_listening(port).await;
         }
 
         #[tokio::test]

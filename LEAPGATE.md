@@ -1584,7 +1584,7 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 - `leapgate_exit_session_add` 照 `session_add`（`src/flutter.rs:1301-1380`）抄，固定 `ConnType::PORT_FORWARD`，`args = [端口, 出口哨兵地址, "65536"]`，走 `io_loop` 现成的三参数分支（`src/ui_session_interface.rs:2050-2069`），不碰设备配置里的 `port_forwards`；去掉 `LocalConfig::set_remote_id`；先查 `get_session_by_peer_id(id, PORT_FORWARD)`，有了就回 `already`；登记进 `exit.rs` 的卡片登记表（键是设备 ID）。
 - `exit.rs` 的 `run` 开头按卡片登记表分流：查到就进卡片模式 `run_card`，查不到走原来的懒登录。原来的 `run`、`serve` 一行不动。
 - `run_card`：起监听 → 失败推 `port_in_use`，等改端口或关闭（不登录）→ 成功就立刻登录。第一次登录的占位连接（M5-4）三条约束：监听起来后**先**接受自己连自己的那条占位连接，**再**开始接真实客户端；占位连接不交给 SOCKS / HTTP 握手；登录函数返回后两头一起丢，不开通道。代码注释写清原因。
-- 取消：`run_card` 自己持有会话的接收端，登录和关闭信号放进同一个 `select!`；收到 `Close` 就丢掉登录、关监听、推 `closed`；其余 `Data`（`Login`、`Message`、`ContinueInsecureConnection` / `RejectInsecureConnection`）转给登录。中途丢掉登录时走 KCP 的话被控端要等 20 秒静默关闭，写进已知限制。
+- 取消：`run_card` 自己持有会话的接收端，登录和关闭信号放进同一个 `select!`；收到 `Close` 就关监听、关掉转给登录的那个接收端，等登录自己收尾后推 `closed`；其余 `Data`（`Login`、`Message`、`ContinueInsecureConnection` / `RejectInsecureConnection`）转给登录。登录（`connect_and_login_mux`，上游函数里加了两处 `leapgate:`）看到接收端关了就先丢 stream 再 `release_kcp`、返回 `Ok(None)`，走 KCP 时 FIN 也能发出去，被控端当场关连接、CM 消失（09 §5.3 第 9 项）。最初是直接丢掉登录，KCP 守卫跟着丢、端点当场中止，被控端要等自己的超时（上游 IPv6 打洞的 KCP 没有 20 秒静默关闭，M6a 验收时等到 180 秒的登录期限才关）。
 - 登录结局照 `serve` 的三种处理守卫（K0）：可用 → `set_muxed`，推 `in_use`；被拒 → 先丢 stream 再 `release_kcp`（`exit.rs:165-169`），关监听，推 `stopped`，运行实例不退出、原地等重试或关闭（M5-7）；临时失败 → 推 `interrupted`（`login_failed`），记冷却。
 - 隧道结束：`Tunnel::ended()`（`self.state.subscribe()` 后等到不再是 `Muxed`），推 `interrupted`（`tunnel_ended`）；之后照 C9 由下一条本地连接触发懒重连（推 `connecting`）。
 - 事件推送照 M3 的 `leapgate_cm_events`：块 2 一个全局 `StreamSink<String>`，不经会话事件流、不经 `libs/leapgate` 的广播。
@@ -1635,7 +1635,7 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
   - 新订阅补发的是每张卡片最后一条事件的原文，`interrupted` 里的 `retry_after_ms` 是推出时的值（10000），不扣掉已经过去的时间（界面不显示它）。
   - 为了不接真实对端也能测，`run_card` 对会话的要求收成一个小接口 `CardSession`（登录、隧道建立后发连接就绪事件两个方法），正式实现就是 `Session<T>`，测试换成假的。
 - 已知限制：
-  - 登录中途取消（`session_close`）时，登录连同 KCP 守卫一起丢掉，KCP 端点当场中止、发不出 FIN，被控端要等 20 秒静默关闭才关（`c0858dd2d`）；TCP 和中继当场关。
+  - 登录中途取消时，登录还在上游 `Client::start` 里（打洞、连中继）的话，要等它连上或失败才收尾（登录循环开始前先看接收端，关了就直接关连接，不向被控端发登录请求）；监听当场关，卡片在界面上当场消失，只是 Rust 这边的会话线程多留一会儿。收尾时 `release_kcp` 最多再等 10 秒。
   - 旧界面懒登录中途关隧道窗口时，`Close` 仍被上游登录循环吞掉，监听一直留着（M5-13，不修）。
   - 登录进行中收到的"重试""改端口"排队，等这次登录结束再处理。
   - 刚 `session_close` 一张卡片、它的运行实例还没关掉监听时，马上为同一台设备再 `session_add`，新卡片可能先报 `port_in_use`（端口还被旧的占着），再"重试"一次就好。登记表按代号区分新旧卡片：新卡片登记以后，旧卡片的事件不再推出、清理也不会删掉新卡片的登记；新卡片登记之前已经推出的旧事件，界面按 `session_id` 丢掉。
@@ -1645,7 +1645,7 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
   - 停掉一张走 KCP、隧道正在用的卡片时，`run_card` 丢掉隧道后马上返回，会话的运行时随 `io_loop` 结束，隧道任务和它后面的 `release_kcp` 来不及跑完，KCP 发不出 FIN，被控端要等约 20 秒静默关闭；登录被拒、守卫刚交给 `release_kcp` 后不久（对端常不回 FIN，`release_kcp` 通常等满 10 秒，§9 K0）就关卡片，同样会被截断。要修得让 `run_card` 返回前等这些任务做完：被拒那一路要在循环里记下任务句柄；隧道那一路要改 `port_forward_mux.rs` 的 `set_muxed` 交出它起的任务。都是新加的状态，这次不做；改成在循环里直接等 `release_kcp` 也试过，卡片会有几秒不响应"重试"和关闭，没采用。验收时看停止后被控端多久关。
 - 测试：`libs/leapgate` 新增 2 个（每种状态的事件 JSON、`stopped` 的原因）；根 crate `leapgate_hooks::exit::cards` 7 个，用假会话和本机回环连接：登录成功后第一个通道是本地程序的（占位连接没开通道）、对端断开后进 `interrupted`（`tunnel_ended`）；版本不支持时进 `stopped`（`exit_not_supported`）、监听关掉、KCP 守卫交给 `release_kcp` 后对端收到关闭（把守卫改成直接丢掉，这个测试会失败），"重试"后不安全连接被拒进 `stopped`（`exit_need_encryption`），再"重试"进 `in_use`；临时失败进 `interrupted`（`login_failed`，`retry_after_ms` 10000）、监听留着，"重试"马上登录；登录中途关闭，1 秒内卡片关掉、端口不再接受连接并能被别的程序占用；改端口后旧端口关掉、新端口的连接走原来的隧道（没有第二次登录）；端口被占时不登录，改端口后登录；`retry`、`set_port` 只对登记过的卡片和合法端口生效。端口关没关用连接去试（3 秒内不再接受连接即可）：整套测试一起跑时，丢掉的监听在 Windows 上还会接受连接约 1 秒，单独跑时当场关。根 crate `cargo test --lib` 215 个通过，失败的 1 个是 `installer_handoff::directory::tests::protected_directory_enforces_creator_permissions`（删测试目录时拒绝访问，单独跑也失败，和本改动无关）。
 - 只有新界面调的几个（`register`、`retry`、`set_port`、`send`、`NEXT_GEN`、`Card.ctl`）带 `#[cfg(any(feature = "flutter", test))]`，`Ctl` 在不带 flutter 时允许未构造，默认特性的 `cargo check --lib` 不报它们未使用。
-- 没在单测里做、留给验收的：`already`、`invalid_id`（要上游的会话表；单测里建会话会在本机配置目录写一份设备配置，并经 IPC 把会话数报给正在运行的服务，所以不做）；经 frb 的实际调用；真实对端下的密码、2FA、等对方接受、不安全连接提示（卡片回拒绝之后带 `exit_need_encryption` 那一步用假登录结果验了）；`connection_ready` 之后 `leapgate_session_connection` 给出的路径；中途取消走 KCP 时被控端 20 秒才关；登录被拒时被控端 CM 当场消失（03 §8.5 第 9 项）。
+- 没在单测里做、留给验收的：`already`、`invalid_id`（要上游的会话表；单测里建会话会在本机配置目录写一份设备配置，并经 IPC 把会话数报给正在运行的服务，所以不做）；经 frb 的实际调用；真实对端下的密码、2FA、等对方接受、不安全连接提示（卡片回拒绝之后带 `exit_need_encryption` 那一步用假登录结果验了）；`connection_ready` 之后 `leapgate_session_connection` 给出的路径；中途取消时被控端当场关（单测用假登录验了 `login_or_close` 让登录自己收尾，`connect_and_login_mux` 里那两处要真实对端）；登录被拒时被控端 CM 当场消失（03 §8.5 第 9 项）。
 
 **组件接口（designer，`ui/m5-ds` 交付，给 coder E 整合用）**
 
