@@ -271,6 +271,7 @@ class LgSelectField<T> extends StatelessWidget {
     required this.value,
     required this.onChanged,
     this.semanticLabel,
+    this.dense = false,
   });
 
   final List<LgSelectItem<T>> items;
@@ -282,12 +283,16 @@ class LgSelectField<T> extends StatelessWidget {
   /// Accessible name ("Windows 用户"); the chosen label is read with it.
   final String? semanticLabel;
 
+  /// A button high instead of an input high, with the medium text: the
+  /// drop-down of a settings row (`.s-sel`). Give it a width.
+  final bool dense;
+
   @override
   Widget build(BuildContext context) {
     final t = LgTokens.of(context);
     final c = t.colors;
     final chosen = items.where((i) => i.value == value).firstOrNull;
-    final radius = BorderRadius.circular(LgRadius.r12);
+    final radius = BorderRadius.circular(dense ? LgRadius.r10 : LgRadius.r12);
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.hasBoundedWidth
@@ -325,8 +330,13 @@ class LgSelectField<T> extends StatelessWidget {
                 show: states.contains(WidgetState.focused),
                 radius: radius,
                 child: Container(
-                  height: t.sizes.main,
-                  padding: const EdgeInsets.symmetric(horizontal: LgSpace.s4),
+                  height: dense ? t.sizes.button : t.sizes.main,
+                  padding: dense
+                      ? const EdgeInsets.only(
+                          left: LgSpace.s4,
+                          right: LgSpace.s3,
+                        )
+                      : const EdgeInsets.symmetric(horizontal: LgSpace.s4),
                   decoration: BoxDecoration(
                     color: disabled ? c.disabled : c.surface,
                     borderRadius: radius,
@@ -342,7 +352,9 @@ class LgSelectField<T> extends StatelessWidget {
                             chosen?.label ?? '',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: t.text.copyWith(color: c.text),
+                            style: (dense ? t.textM : t.text).copyWith(
+                              color: c.text,
+                            ),
                           ),
                         ),
                         const SizedBox(width: LgSpace.s3),

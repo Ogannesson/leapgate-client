@@ -37,6 +37,7 @@ class LgFormDialog extends StatelessWidget {
     this.banner,
     this.children = const [],
     this.width = 440,
+    this.leading,
   });
 
   /// "登录", "添加设备", "修改标签颜色".
@@ -55,6 +56,12 @@ class LgFormDialog extends StatelessWidget {
   final List<Widget> children;
   final List<LgDialogAction> actions;
   final double width;
+
+  /// Something at the start of the button row, away from the answer
+  /// (`.acts2 .mv`): a link ("改用管理员权限解锁") or a button that undoes
+  /// the whole thing ("清除", "全部恢复默认"). Not part of [actions], so Enter
+  /// never runs it.
+  final Widget? leading;
 
   @override
   Widget build(BuildContext context) {
@@ -128,21 +135,16 @@ class LgFormDialog extends StatelessWidget {
                       ),
                     ...children,
                     const SizedBox(height: LgSpace.s6),
-                    Wrap(
-                      alignment: WrapAlignment.end,
-                      spacing: LgSpace.s3,
-                      runSpacing: LgSpace.s3,
-                      children: [
-                        for (final a in actions)
-                          LgButton(
-                            label: a.label,
-                            semanticLabel: a.semanticLabel,
-                            kind: a.kind,
-                            busy: a.busy,
-                            onPressed: a.onPressed,
-                          ),
-                      ],
-                    ),
+                    if (leading == null)
+                      _buttons()
+                    else
+                      Row(
+                        children: [
+                          Flexible(child: leading!),
+                          const SizedBox(width: LgSpace.s3),
+                          Expanded(child: _buttons()),
+                        ],
+                      ),
                   ],
                 ),
               ),
@@ -152,6 +154,22 @@ class LgFormDialog extends StatelessWidget {
       ),
     );
   }
+
+  Widget _buttons() => Wrap(
+    alignment: WrapAlignment.end,
+    spacing: LgSpace.s3,
+    runSpacing: LgSpace.s3,
+    children: [
+      for (final a in actions)
+        LgButton(
+          label: a.label,
+          semanticLabel: a.semanticLabel,
+          kind: a.kind,
+          busy: a.busy,
+          onPressed: a.onPressed,
+        ),
+    ],
+  );
 }
 
 /// A field of a form dialog with its label above (`.flbl`): the label in small
