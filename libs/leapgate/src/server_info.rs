@@ -62,9 +62,10 @@ impl Item {
     }
 }
 
-/// `{"id":{"value","source","default"},"api":{"value","source"},"key":{"source"},
+/// `{"id":{"value","source","default"},"api":{"value","source"},"key":{"source","builtin"},
 /// "relay":{"value"}}`. `id.default` is the build's first built-in ID server, empty without
-/// one: the server dialog shows it for an empty field.
+/// one, and `key.builtin` whether the build has a key: the server dialog shows them for empty
+/// fields.
 pub fn summary(s: &Servers) -> Value {
     let id = id(s);
     json!({
@@ -74,7 +75,7 @@ pub fn summary(s: &Servers) -> Value {
             "default": s.builtin.first().copied().unwrap_or_default(),
         },
         "api": api(s),
-        "key": {"source": key_source(s)},
+        "key": {"source": key_source(s), "builtin": !s.default_key.is_empty()},
         "relay": {"value": s.relay},
     })
 }
@@ -325,9 +326,34 @@ mod tests {
             json!({
                 "id": {"value": "rs.example.net", "source": "default", "default": "rs.example.net"},
                 "api": {"value": "https://api.example.net", "source": "default"},
-                "key": {"source": "default"},
+                "key": {"source": "default", "builtin": true},
                 "relay": {"value": "relay.example.org"},
             })
+        );
+    }
+
+    #[test]
+    fn key_builtin_whatever_key_is_in_use() {
+        let user = Servers {
+            key: "user key",
+            ..base()
+        };
+        assert_eq!(
+            summary(&user)["key"],
+            json!({"source": "user", "builtin": true})
+        );
+        let without = Servers {
+            key: "user key",
+            default_key: "",
+            ..base()
+        };
+        assert_eq!(
+            summary(&without)["key"],
+            json!({"source": "user", "builtin": false})
+        );
+        assert_eq!(
+            summary(&Servers::default())["key"],
+            json!({"source": "none", "builtin": false})
         );
     }
 
