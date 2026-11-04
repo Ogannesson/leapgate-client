@@ -246,6 +246,8 @@ class _TwoFactorBodyState extends State<_TwoFactorBody> {
                 onDeleteAll: open ? () => _deleteAll(l10n) : null,
                 pickedCountLabel: l10n.settingsTwoFactorPicked(_picked.length),
                 deleteLabel: l10n.settingsTwoFactorDelete,
+                deleteSemanticLabel: l10n.settingsTwoFactorDeleteLabel,
+                deleteAllSemanticLabel: l10n.settingsTwoFactorDeleteAllLabel,
                 onDeleteSelected: open ? () => _deletePicked(l10n) : null,
               ),
             ),

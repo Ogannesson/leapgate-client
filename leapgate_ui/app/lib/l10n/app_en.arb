@@ -1343,5 +1343,7 @@
   "settingsAboutCopyId": "Copy this device's ID",
   "settingsRemotePrintRetryLabel": "Retry installing the Leapgate printer",
   "settingsSessionsPreviewLabel": "Preview removing the wallpaper",
-  "settingsTwoFactorCantTurnOn": "Couldn't turn on two-factor authentication"
+  "settingsTwoFactorCantTurnOn": "Couldn't turn on two-factor authentication",
+  "settingsTwoFactorDeleteLabel": "Delete the selected trusted devices",
+  "settingsTwoFactorDeleteAllLabel": "Delete all trusted devices"
 }

@@ -1191,5 +1191,7 @@
   "settingsAboutCopyId": "复制本机 ID",
   "settingsRemotePrintRetryLabel": "重试安装 Leapgate 打印机",
   "settingsSessionsPreviewLabel": "预览移除壁纸",
-  "settingsTwoFactorCantTurnOn": "无法开启二次验证"
+  "settingsTwoFactorCantTurnOn": "无法开启二次验证",
+  "settingsTwoFactorDeleteLabel": "删除所选受信设备",
+  "settingsTwoFactorDeleteAllLabel": "删除全部受信设备"
 }
