@@ -206,7 +206,8 @@ void main() {
       expect(find.text('未找到匹配的设置'), findsOneWidget);
       await tester.enterText(find.byType(EditableText).first, '本机 ID');
       await tester.pump();
-      await tapText(tester, '本机 ID');
+      // After the box: the result in 服务与 ID, then the one in 关于 (M6b).
+      await tapOn(tester, find.text('本机 ID').at(1));
       expect(
         tester
             .widget<EditableText>(find.byType(EditableText).first)

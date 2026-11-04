@@ -79,6 +79,13 @@ class FakeBind implements RustdeskImpl {
         return setPinError;
       case #mainSupportedPrivacyModeImpls:
         return '[]';
+      // What the outgoing sections read to list their items (M6b): nothing stored for new
+      // devices, no hardware codec.
+      case #mainGetUserDefaultOption:
+        return '';
+      case #mainHasHwcodec:
+      case #mainHasVram:
+        return false;
       // No proxy (the connection notes, M6-4).
       case #mainGetSocks:
         return Future.value(const <String>[]);
