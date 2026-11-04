@@ -2,14 +2,26 @@ import 'package:flutter/widgets.dart';
 
 import '../../l10n/app_localizations.dart';
 import '../../shell/tab_overlays.dart';
+import 'sections/about.dart';
 import 'sections/access.dart';
 import 'sections/account.dart';
 import 'sections/appearance.dart';
 import 'sections/connection.dart';
+import 'sections/during_sessions.dart';
 import 'sections/exit_node.dart';
 import 'sections/network.dart';
+import 'sections/new_device_defaults.dart';
+import 'sections/other.dart';
 import 'sections/permissions.dart';
+import 'sections/print_jobs.dart';
+import 'sections/remote_printing.dart';
+import 'sections/rendering.dart';
+import 'sections/restrictions.dart';
 import 'sections/service.dart';
+import 'sections/sessions.dart';
+import 'sections/shortcuts.dart';
+import 'sections/toolbar.dart';
+import 'sections/two_factor.dart';
 import 'settings_ids.dart';
 
 export 'settings_ids.dart';
@@ -35,12 +47,16 @@ class SettingsSection {
     required this.build,
     this.visible = _always,
     this.locked = false,
+    this.lede,
   });
 
   static bool _always() => true;
 
   final SettingsSectionId id;
   final String title;
+
+  /// 标题下的说明行，02 里有的小节才给。
+  final String? lede;
 
   /// The items shown now, in display order. An item hidden because a switch above it is off is
   /// left out; a locked one is listed (02 §1.2.4).
@@ -84,16 +100,29 @@ abstract interface class SettingsSectionContext implements Listenable {
   Future<bool> save(String item, Future<bool> Function() write);
 }
 
-/// Every registered section in display order. M6a registers its eight; M6b adds the rest here.
+/// Every registered section in display order. M6b's twelve are registered here from its step 0
+/// and stay hidden (`visible`) until their lane builds them (`LEAPGATE.md` §10.14).
 List<SettingsSection> settingsSections(AppLocalizations l10n) => [
       accessSection(l10n),
       permissionsSection(l10n),
+      twoFactorSection(l10n),
+      restrictionsSection(l10n),
+      sessionsSection(l10n),
       exitNodeSection(l10n),
+      remotePrintingSection(l10n),
       serviceSection(l10n),
       connectionSection(l10n),
+      newDeviceDefaultsSection(l10n),
+      duringSessionsSection(l10n),
+      toolbarSection(l10n),
+      renderingSection(l10n),
+      shortcutsSection(l10n),
+      printJobsSection(l10n),
       appearanceSection(l10n),
       networkSection(l10n),
       accountSection(l10n),
+      otherSection(l10n),
+      aboutSection(l10n),
     ]..sort((a, b) => a.id.index.compareTo(b.id.index));
 
 /// The group's name in the navigation.

@@ -17,9 +17,16 @@ import 'settings_status.dart';
 SettingsSectionId _remembered = SettingsSectionId.access;
 
 /// Locked sections whose items are not all under the lock: they grey the rest themselves, and
-/// the page leaves them usable (服务与 ID: starting and stopping the service asks for
-/// administrator permission itself, 02 §1.2.6).
-const _dimsItself = {SettingsSectionId.service};
+/// the page leaves them usable (服务与 ID: starting and stopping the service, 会话: RDP session
+/// sharing, 远程打印: installing the printer ask for administrator permission themselves,
+/// 02 §1.2.6). 二次验证 and 访问限制 grey their own blocks the same way.
+const _dimsItself = {
+  SettingsSectionId.service,
+  SettingsSectionId.twoFactor,
+  SettingsSectionId.restrictions,
+  SettingsSectionId.sessions,
+  SettingsSectionId.remotePrinting,
+};
 
 /// One search result: where the item is and how to show it (02 §1.2.4).
 class _Hit {
@@ -257,6 +264,7 @@ class _SettingsPageState extends State<SettingsPage>
     return LgSettingsContent(
       controller: _scroll,
       title: section.title,
+      lede: section.lede,
       locked: locked && !_dimsItself.contains(section.id),
       lockBar: locked
           ? LgSettingsLockBar(

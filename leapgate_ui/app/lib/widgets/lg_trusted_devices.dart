@@ -25,10 +25,15 @@ class LgTrustedDevice {
     required this.formattedId,
     required this.platform,
     required this.remaining,
-  });
+    String? pickKey,
+  }) : pickKey = pickKey ?? id;
 
   /// The ID as stored; the identity colour comes from it.
   final String id;
+
+  /// What the list picks and reports by: the ID unless two entries can share one (one device
+  /// trusted on two machines, told apart by the caller).
+  final String pickKey;
   final String name;
 
   /// "912 345 678".
@@ -52,16 +57,18 @@ class LgTrustedDevices extends StatelessWidget {
     this.pickedCountLabel,
     this.deleteLabel,
     this.onDeleteSelected,
+    this.deleteSemanticLabel,
+    this.deleteAllSemanticLabel,
   }) : assert(picked.length == 0 || deleteLabel != null);
 
   /// "受信设备".
   final String title;
   final List<LgTrustedDevice> devices;
 
-  /// The IDs of the picked rows.
+  /// The [LgTrustedDevice.pickKey]s of the picked rows.
   final Set<String> picked;
 
-  /// A row was clicked or Space/Enter was pressed on it.
+  /// A row was clicked or Space/Enter was pressed on it; gives its [LgTrustedDevice.pickKey].
   final ValueChanged<String> onToggle;
 
   /// "全部删除"; not shown when there is no device.
@@ -77,6 +84,11 @@ class LgTrustedDevices extends StatelessWidget {
   /// "删除" (the picked ones).
   final String? deleteLabel;
   final VoidCallback? onDeleteSelected;
+
+  /// What a screen reader says for the two delete buttons ("删除所选受信设备"); the label
+  /// otherwise.
+  final String? deleteSemanticLabel;
+  final String? deleteAllSemanticLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -94,6 +106,7 @@ class LgTrustedDevices extends StatelessWidget {
             if (picked.isNotEmpty && deleteLabel != null)
               LgButton(
                 label: deleteLabel!,
+                semanticLabel: deleteSemanticLabel,
                 kind: LgButtonKind.danger,
                 horizontalPadding: LgSpace.s3,
                 onPressed: onDeleteSelected,
@@ -101,6 +114,7 @@ class LgTrustedDevices extends StatelessWidget {
             if (devices.isNotEmpty)
               LgButton(
                 label: deleteAllLabel,
+                semanticLabel: deleteAllSemanticLabel,
                 kind: LgButtonKind.text,
                 onPressed: onDeleteAll,
               ),
@@ -115,12 +129,12 @@ class LgTrustedDevices extends StatelessWidget {
           for (final (i, d) in devices.indexed)
             _TrustedRow(
               device: d,
-              picked: picked.contains(d.id),
+              picked: picked.contains(d.pickKey),
               ruleAbove:
                   i > 0 &&
-                  !picked.contains(d.id) &&
-                  !picked.contains(devices[i - 1].id),
-              onPressed: () => onToggle(d.id),
+                  !picked.contains(d.pickKey) &&
+                  !picked.contains(devices[i - 1].pickKey),
+              onPressed: () => onToggle(d.pickKey),
             ),
       ],
     );

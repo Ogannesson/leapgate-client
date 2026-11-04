@@ -12,7 +12,6 @@ import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/session.dart';
-import 'package:flutter_hbb/models/platform_model.dart';
 
 import '../../../icons/lg_icon.dart';
 import '../../../l10n/app_localizations.dart';
@@ -49,7 +48,7 @@ bool monitorsShown(FFI ffi) =>
     displaySwitchAllowed(ffi) && ffi.ffiModel.pi.displaysCount.value > 1;
 
 bool get _flat =>
-    bind.mainGetUserDefaultOption(key: kKeyShowMonitorsToolbar) == 'Y';
+    appCore.options.userDefault.get(kKeyShowMonitorsToolbar) == 'Y';
 
 bool get _nextButton =>
     appCore.options.local.getBool(kOptionAllowMonitorSwitchMainToolbar);

@@ -334,13 +334,21 @@ pub fn leapgate_direct_listen() -> String {
         .unwrap_or_else(|| "{}".to_owned())
 }
 
-/// S10: `{"result":"ok"|"network"|"invalid_token"|"no_chat"|"other","text":…}`; `text` is
-/// upstream's error text, without the token.
-pub fn leapgate_verify_bot(
-    token: String,
-) -> String {
-    let (result, text) = crate::leapgate_hooks::settings::verify_bot(&token);
-    serde_json::json!({ "result": result, "text": text }).to_string()
+/// S10's first step, saving nothing: `{"result":"ok","chat":{"id","type","label"}}` with the chat
+/// of the bot's latest message, or `{"result":"network"|"invalid_token"|"no_chat"|"other",
+/// "text":…}`; `text` is the error text, without the token.
+pub fn leapgate_bot_lookup(token: String) -> String {
+    match crate::leapgate_hooks::settings::bot_lookup(&token) {
+        Ok(chat) => serde_json::json!({ "result": "ok", "chat": chat }),
+        Err((result, text)) => serde_json::json!({ "result": result, "text": text }),
+    }
+    .to_string()
+}
+
+/// S10's second step, after the user confirmed the chat: `ok`, or `other` when the service does
+/// not have it.
+pub fn leapgate_bot_save(token: String, chat_id: String) -> String {
+    crate::leapgate_hooks::settings::bot_save(&token, chat_id).to_owned()
 }
 
 /// `ok`, `wrong_code`, or `not_saved` (the code was right but the service does not have it).

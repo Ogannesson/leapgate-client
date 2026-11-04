@@ -1046,6 +1046,104 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 
 证据：A 的 `C:\leapgate-e2e\evidence\m6a-fix-1104\`（`b\` 是 B 真机截图，`vis\` 是样稿和画廊并排图，`94-gallery-diff-vs-*.txt` 是逐像素比较结果，`gallery-3449-fix\` 是这轮画廊）。
 
+#### M6b 设置页第二段（2026-11-05，`5b42b000c`）
+
+黑盒功能验收，无人值守，不含外观检查。依据 09 §5.4 和 02 §1.3.3~§1.3.5、§1.3.7、§1.4.2~§1.4.7、§1.5.4、§1.5.5、§1.6.3~§1.6.5、§1.10、§3.3。控制端 A（便携版新界面），被控端 B（便携版新界面），安装版在测试虚拟机上。M6b 只改了 Dart，所以没有旧界面冒烟。新界面按 `5b42b000c` 编（`bridge,build -ForceBridge`，`CARGO_BUILD_JOBS=2`，引擎带补丁 0003，`flutter_windows.dll` `8667024A…`），构建哈希在 A 的证据目录 `m6b-1105\00-builds.txt`。A 上只用 UI Automation 的 `Invoke` 和投递窗口消息；B 上按键用 `keybd_event`。
+
+**这次验收中途断过一次**：前一个 tester 在 2026-11-05 凌晨跑到一半（约 02:55）会话中断，没留书面结论。接手的 tester 逐项核对它的完整操作记录：能在记录里找到明确的工具输出（界面读到的文字、配置键值、连上或断开的日志）的项直接认领，证据不完整的重做。下表"来源"一列写"认领"或"重做"。二次验证的密钥和验证码只在 B 的内存里算、投递，没有进任何输出、日志、文件、命令行参数，开启对话框没截图。
+
+| 项 | 来源 | 结果 |
+|---|---|---|
+| 二次验证 | 认领 | 通过。B 上开启：对话框里密钥由脚本从界面读进内存、算出一次性验证码、投递，"开启"后状态变"已开启"；A 连 B 进"2 / 验证身份"，输入验证码后连上；再连一次并勾"信任此设备"，第三次连不再要验证码；B 的受信设备列表出现 A（"‹用户名›, ‹ID›, 剩余 89 天"）；"删除所选受信设备"后再连，又出现验证码输入框；"关闭二次验证"弹确认框，确认后状态"未开启"、配置键 `2fa` 被删 |
+| Telegram | 认领 | 部分通过。Token 填 `123456:invalidtoken` 点"确定"：输入框带"Token 无效"；B 的代理设成不可达的本机端口后同样操作：框带"无法连接 Telegram。请检查网络连接。"（代理验完已移除，B 状态回"已就绪"，没有断任何机器的网）。"未找到对话"需要真机器人，**未验证** |
+| 白名单 | 认领 | 通过。IP 白名单对话框写两行（第二行格式不对）：框下"第 2 行格式不正确"、点"确定"不关框；改成一行 `192.0.2.10` 后保存，状态"已启用 · 1 条"，A 连 B 看到"远程设备仅允许指定的 IP 地址或 ID 连接，本机不在允许范围内。"；"清除"先弹"清除全部条目并停用 IP 白名单？"，确认后键变空、状态"未启用"。ID 白名单同理（写入不含 A 的 ID，A 连不上；清除后键变空）。两个白名单都清除后 A 又能连上 B（后面的自动断开用例就是这样连上的） |
+| 直接 IP 访问 | 认领 | 通过。B 打开后写 `direct-server = Y`，显示"端口"输入框和"本机地址：…"（B 的 IPv4 和两个 IPv6）；A 用 B 的 IPv6 地址直连成功（会话标签"未加密"、工具栏"直连，未加密"）。B 上先起一个独占 21118 的监听进程再打开：输入框读屏名变成"端口 21118 已被其他应用占用"并有同文的提示行，B 日志 `Failed to start direct server on port: 21118 … os error 10013`；只结束这个自己起的监听进程，之后关掉开关 |
+| 会话：自动断开 | 认领 | 通过。B 开"无操作时自动断开"，时长填 1，配置 `auto-disconnect-timeout = 1`；A 连 B 后空闲，B 日志 `Connection closed: auto disconnect`，A 的会话页写"长时间无操作，远程设备已自动断开连接。"并带"重新连接" |
+| 会话：壁纸预览、声音来源、录制位置 | 认领 | 通过。"预览移除壁纸"点后按钮依次是"正在预览…（4）（3）（2）"，然后恢复；声音来源下拉列出系统声音和本机麦克风，选麦克风写 `audio-input`，改回系统声音后键被删；"打开录制文件夹"在资源管理器开了默认的录制目录，"修改录制文件位置"弹出系统的"选择文件夹"对话框，取消后没改任何路径 |
+| 会话：RDP 会话共享、隐私模式实现（安装版） | 认领 | 通过。虚拟机安装版上先解锁（UAC 已设成直接通过）：点"允许 RDP 会话共享"，注册表卸载项里 `share_rdp` 从 false 变 true；隐私模式实现方式选"使用虚拟显示器"后，用户目录和服务账号目录的 `Leapgate2.toml` 都写入对应的 `privacy-mode-impl-key`（含虚拟显示器、不含放大镜排除项），改选"遮挡屏幕"后两处都变成不含虚拟显示器、含放大镜排除项 |
+| 远程打印 | 认领 | **部分通过，安装一步未验证**。B（便携版）显示"仅安装版支持远程打印"。虚拟机安装版：显示"未安装 Leapgate 打印机"和"安装打印机"；点安装后界面写"无法安装 Leapgate 打印机。"，按钮变"重试安装 Leapgate 打印机"并有"技术细节"，日志 `The driver inf file "drivers/RustDeskPrinterDriver/RustDeskPrinterDriver.inf" does not exists`。这次的构建没有打包打印机驱动文件（待办里"补上游 CI 打包的外部组件"），"安装 → 已安装"走不完；界面的失败路径是对的 |
+| 新设备的默认设置 | 认领一半、重做一半 | 通过。A 把默认设置改成"原始大小""均衡""显示远程光标"关、"静音"开后：认领的部分是已连过的设备配置不变（仍是 `adaptive`/`best`/光标开/不静音，重连后也不变）；重做的部分是删掉 A 上这台设备的 peer 配置后重新连 B：新生成的 peer 配置是 `view_style = original`、`image_quality = balanced`、`show_remote_cursor = false`、`disable_audio = false`（`98-defaults-redo.txt`） |
+| 工具栏与显示器、渲染 | 认领 | 通过。会话开着时，"允许工具栏停靠在窗口任意一边"关掉后，工具栏从悬浮的 1378 宽条当场变回窗口里的固定条；"使用纹理渲染"关、开，画面在会话里当场重建、窗口截图亮度检查有画面；显示器相关三项写对应的键（`show_monitors_toolbar`、`allow-monitor-switch-main-toolbar`、`allow-monitor-switch-min-toolbar`） |
+| 快捷键 | 认领 | 通过。打开总开关后写入默认绑定（九个动作，Ctrl+Alt+Shift 加各自的键）；"原始大小"改录 Ctrl+Alt+Shift+Q，只按 Q、缺 Ctrl 等不保存并提示"组合键须包含 Ctrl、Alt 或 Shift"；录到已被占用的组合时提示"已用于“显示远程光标”，替换后该操作将没有快捷键"，点"替换"后原动作变"未设置"；清除、"恢复默认快捷键"（先确认）都对。会话里 B 对 A 按 Ctrl+Alt+Shift+M，对端 peer 配置 `view_style` 当场从 `original` 变 `adaptive`；打开"将组合键发送到远程设备"后同样的键不再触发，整个列表灰显写"已暂停全部快捷键"，按钮点不了 |
+| 收到的打印任务 | 认领 | 通过。四种处理方式：使用默认打印机 → `allow-printer-auto-print = Y`；使用指定的打印机 → `printer-incomming-job-action = selected` 加 `printer-selected-name`；不打印 → `dismiss`；每次询问 → `allow-printer-auto-print = N`、动作键删除，和 02 §1.4.7 一致 |
+| 其他、关于 | 认领 | 通过。"关闭窗口前确认断开会话"关、开：会话开着点关闭时弹"断开全部 1 个会话并关闭窗口？"，关掉确认后弹"关闭窗口？"；关闭方式选"退出"写 `leapgate-close-action = exit` 且进程退出、选"在后台运行"进程留着、"每次询问"键被删；硬件编解码开关写 `enable-hwcodec`；关于页复制版本、指纹、本机 ID 都和读剪贴板一致（测完恢复剪贴板）；"源代码"在浏览器打开 GitHub 公开镜像的仓库页，核对页面标题后关掉了这个标签页 |
+| 会话期间（09 表外，小节验过） | 认领 | 通过。"会话间同步剪贴板""传出会话期间保持屏幕常亮""自动录制传出会话"和三选一的开关写对应的键；"传出会话期间保持屏幕常亮"开着时 `powercfg /requests` 的 DISPLAY 里有 B 的进程，关掉后无 |
+| 搜索 | 认领 | 通过。中文搜"纹理渲染"得"传出连接 › 渲染，使用纹理渲染…"，英文搜"GDI"得"传入连接 › 会话，使用 DirectX 采集屏幕…"；回车打开对应小节并滚到该项，该项被高亮框起来（`search-gdi-crop.png`） |
+| 锁 | 认领 | 通过（只能部分验）。便携版上这几节不带"已锁定"，全部能直接用；安装版的锁定条在虚拟机上显示"已锁定。修改这些设置需要管理员权限。" |
+| 旧界面 | — | 不跑（M6b 只改 Dart） |
+| 最新 stable 检查 | 认领，4K 上屏重做 | 通过，4K 一次崩溃见下。3.47.9 仍是最新 stable（沿用上一轮的核对）。步骤 1 `-ForceBridge` 构建通过；analyze：core 97 条（92 条 info 加 5 条 `file_model.dart` 复制件的 warning，和 M5、M6a 一样），app 0 条；两包测试 core 282 个、app 951 个通过（2 个跳过）；画廊 3.44.9 导出 2608 张，和 M6a 复测的画廊逐像素比 2608 张全部相同。4K 上屏用 3.47.9 构建连 B（4K），共四轮，第一轮崩溃，第二、三、四轮各 145~266 秒不等，没有再崩 |
+
+**4K 上屏的一次崩溃**（`92-4k-run1-crash.txt`、`95-4k-crash-events.txt`、`96-4k-run3.txt`、`97-4k-run4.txt`）：第一轮 A 用 3.47.9 构建连 B（4K），连上约 78 秒后在 02:51:38 进程崩溃（应用程序错误 1000，故障模块 `libleapgate.dll`，异常代码 `0xc0000409`，偏移 `0xfc6f61`；1001 的 P9 是 7，即 `FAST_FAIL_FATAL_APP_EXIT`，是 Rust 一侧主动终止，不是 `flutter_windows.dll`），而之前几轮崩的是 `flutter_windows.dll`，这次不是。崩的是 3.47.9 那份构建，但 `libleapgate.dll` 和 3.44.9 那份哈希相同（`3C1D89B0…`），故障点在 Rust，和 Flutter 版本、M6b 的 Dart 改动都没有关系。崩前 2 秒 A 的日志有 `[FFMPEG_RAM_ENC] av_frame_get_buffer, ret = Cannot allocate memory` 和 `Failed to handle video frame, fail counter: 1`，当时 A 在玩游戏、可用提交内存只有约 9 GB。同一份构建之后连跑三轮（第二轮 02:55~02:57，三次取样；第三轮 266 秒；第四轮 265 秒，其间可用提交内存在 10~26 GB 之间），没有崩，句柄稳定在约 1440~1460，工作集 450~500 MB，没有崩溃事件，stderr 只有 Impeller 一行。**结论：没有复现**，判断是 A 内存吃紧时硬解码分配帧缓冲失败后 Rust 一侧终止进程，一次性崩溃、三轮复跑正常；没有拿到崩溃转储里的调用栈，所以只能写成"和低内存同时发生"，不能写成确定的因果。留给后面：如果 4K 硬解码在内存紧时崩溃要修，属于上游 hwcodec 的分配失败处理，不在 M6b 范围
+
+**没有定性、记下来的**
+1. 投递文字：和 M6a 一样，一次发多个字符会丢，单个输入框和中文要逐字符发。
+2. 打印机驱动没有随构建打包，所以"安装 → 已安装"没法验，等外部组件补上以后在测试虚拟机上补一次。
+3. "未找到对话"（Telegram）需要真机器人，留给维护者。
+4. 测试虚拟机：用 `--silent-install` 装好后，`--silent-install` 命令本身在 2 分钟时被 telechir 超时截断，但服务和界面都已装好；回滚到 `m6-admin` 后 `qm shutdown` 照旧要加 `--forceStop`。
+
+**收尾**：A 8 个配置文件、B 4 个配置文件和测前备份 `pre-m6b-20261105` 逐个哈希一致（`99-A-restore-hashes.txt`；A 多出的默认设置文件和直连时生成的 peer 配置、B 多出的 peers 目录都已删）；B 的二次验证、白名单、直接 IP 访问、代理、快捷键和打印任务处理方式随配置盖回恢复原样；A 上、B 上的 Leapgate 都已结束（只结束了我们自己起的进程）；没有残留计划任务，A 的 `task\` 空，没有 MSIX 包内副本，原版 RustDesk、mihomo 没碰；测试机上前一个 tester 留下的一次性中继脚本和探测文件已删；测试虚拟机已回滚到 `m6-admin` 并关机。
+
+##### M6b Telegram 真机补测（2026-11-05，`a9717abec`）
+
+Telegram 机器人设置改成两步（`leapgate_bot_lookup` 只查、什么都不存，用户确认后 `leapgate_bot_save` 才保存）之后，对最终提交补测。新界面按 `a9717abec` 编（`bridge,build -ForceBridge`，`CARGO_BUILD_JOBS=2`）：`flutter_windows.dll` `8667024A…`、`leapgate.exe` `1A7716C8…`、`libleapgate.dll` `8D8C6F65…`、`data/app.so` `C83162D3…`。只用 A：UI Automation `Invoke` 加投递消息，不注入真实键鼠；二次验证的密钥只在内存里算验证码、投递，不进任何输出（开启二次验证是为了让"Telegram 机器人"这一项出现）。
+
+| 项 | 结果 |
+|---|---|
+| Token 无效 | **通过**。填一个格式像 Token 的编造值，点"确定"：输入框读屏名变成"Token / Token 无效"，框下红字"Token 无效"，对话框停在输入态，没有进确认态；点之前和之后配置里都没有 `bot` 相关的键。这个文案只有拿到 Telegram 的拒绝回应才会出现（网络不通是另一句），说明请求确实发出去并收到了回应。**没有直接看到请求网址**（没抓包，客户端也不记这次请求），`?offset=-100` 和 POST 方式靠读码之外没有第二证据，没验 |
+| 无法连接 Telegram | **通过**。A 的代理设成本机一个没人监听的端口（没断任何机器的网），同样操作：读屏名"Token / 无法连接 Telegram。请检查网络连接。"，8 次每 2 秒读取都不变。代理在界面里"移除代理"，`Leapgate2.toml` 的 `[socks]` 三个键随之删除，和测前一致 |
+| 日志里没有 Token | **通过**。拿填过的编造值（整串和冒号后面的部分）在本次运行的 `leapgate_rCURRENT.log`、`leapgate_r2026-11-05_04-11-59.log`、stderr、A 全部历史日志和 `config` 目录所有文件里搜：都搜不到。这次操作在日志里一行都没留（没有 `getUpdates`、没有 `telegram`） |
+| 确认态、"未找到对话" | **未验证，留给维护者试用**：需要真机器人。确认态的外观也没有看到：画廊里没有这个状态（见最终外观检查的建议） |
+
+截图 `shots\tg-invalid-0.png`、`shots\tg-noconn-0.png`（Token 和一次性密码都已盖色块）。
+
+##### M6b 最终外观检查（2026-11-05，`a9717abec`）
+
+对象是准备合入 main 的最终提交。做法：画廊 3.44.9 重新导出，和之前的画廊逐像素比；十二个小节和样稿 `A-P6-设置.html` 的 `p6-dk-*` 画框（Playwright 渲染，浅色深色各一份）并排比；三个对话框和 `A-P6-设置-对话框.html` 并排比；真机 A（浅色）、B（深色，测完系统主题改回浅色）把十二个小节各看一遍；共享组件回看靠画廊。样稿里已作废或 02 改过的项（"关闭主窗口时"三选一、录制位置的副标题、关于页只有"源代码"一个链接、"真彩色 4:4:4"、便携版隐藏的安装版项）以 02 为准，不算差异。
+
+**画廊（3.44.9 导出，2608 张）**：和 M6b 功能验收的画廊（`5b42b000c`）、M6a 最终外观检查的画廊（`e78688154`）各逐像素比：2608 张全部完全相同，没有任何一张变化、没有新增或减少。所以 `LgTrustedDevices`（按键选中、读屏名）、`SettingsSection` 的 `lede`、设置页框架的灰显这几处改动没有改变任何画廊图，M6a 的几个小节不会变样；锁定整页（`settings-frame_locked`）也相同。
+
+**必须改（1 条）**
+1. 对话框左边有一个"清除"或"移除代理"按钮时，"取消""确定"没有靠右对齐，离输入框右边缘差约 127 个逻辑像素（样稿里这一对贴着右边缘）。IP 白名单对话框（"清除"）和 M6a 的代理对话框（"移除代理"，Dump 里"确定"右端 2061、内容右边缘 2208，同一个偏差）都是这样；只有取消、确定两个按钮的对话框（Telegram）是靠右的，所以问题在带前置按钮的那种按钮行版式。ID 白名单、网段的"清除"对话框应当同样，没单独看。画廊里没有带前置按钮的对话框，所以之前的检查都没发现。截图 `shots\L-dlg-ip-empty-0.png`，并排图 `vis\22-dlg-ip-empty.png`。
+
+**小项（不挡合入）**
+1. 快捷键页的键帽，方向键写 `Right`、`Left`，样稿是箭头字符（→ ←）；02 没规定，看维护者要哪种（`shots\L09b-keys-on-0.png`，`vis\09b-keys-on.png`）。
+2. IP 白名单对话框出错时：真机是顶上一条红色提示条加输入框上方一行"IP 白名单"字，样稿是输入框下面一行红字加出错那一行的红下划线；对话框图标真机是盾牌、样稿是列表图标（`vis\21-dlg-ip-bad.png`）。02 §1.6.5 只写"逐行标出"，不算偏离，看要不要统一。
+3. 录制文件位置（便携版）的路径文字，真机是正文字体放在副标题下面，样稿是等宽字体放在按钮左边；副标题是 02 加的，路径字体要不要等宽看设计（`shots\L05-会话期间-0.png`）。
+4. 设置页左栏导航滚动以后（选"其他"、"关于"时），最上面一项被搜索框切掉半行，露出一半文字（`shots\L11-其他-0.png`、`shots\L12-关于-0.png`，深色同）。是列表滚动的正常表现，但切在搜索框下沿比较突兀，可以让搜索框下面留一点渐隐或者让滚动对齐整行。
+5. 样稿里 Telegram 对话框正文（`p6-dl-tg-init`）比同一份样稿里 IP 白名单对话框的正文大且深，样稿自己不一致；真机的 Telegram 对话框和 IP 白名单对话框的正文是一样的，不算问题，记下来免得再查。
+
+**对照结论**
+
+| 对照范围 | 结果 |
+|---|---|
+| 十二个小节的整页版式（A 浅色、B 深色）：二次验证、访问限制、会话、远程打印、会话期间、新设备的默认设置、工具栏与显示器、渲染、快捷键（关、开两态）、收到的打印任务、其他、关于 | 通过：标题、分组标题、行高、行分隔线、开关、分段控件、下拉、单选、按钮文字竖直居中、字重、颜色和样稿一致，深色的对比度和选中态正常；差异只有上面的小项和 02 改过的项。便携版没有 RDP 会话共享、隐私模式、"仅在 Leapgate 运行时允许连接"、局域网发现、安装打印机按钮，是预期 |
+| 对话框：开启二次验证（A 上看过，二维码和密钥不截图，版式靠读屏树和画廊）、Telegram 机器人（输入态、Token 无效、无法连接）、IP 白名单（空、有错） | Telegram 的输入态、错误态和样稿一致（标题图标、字段、按钮层级、错误红字）；IP 白名单见必须改第 1 条和小项第 2 条；开启二次验证没有逐像素对照。**Telegram 确认态没有看到** |
+| 共享组件回看 | 通过：见上面画廊结论，2608 张全部相同 |
+
+**没看的**：Telegram 确认态的外观（画廊没有这个状态，真机要真机器人）；开启二次验证对话框、ID 白名单、网段清除对话框、深色里的各对话框没有并排对照；安装版里的锁定条和 UAC 盾牌（沿用功能验收时在测试虚拟机上看过的）。**建议**：给 Telegram 确认态（和"保存失败"那一行）补一个画廊状态，下一轮就能逐像素管住它；带前置按钮的对话框也补一个，这类版式问题才查得出来。
+
+证据：A 的 `C:\leapgate-e2e\evidence\m6b-final-1105\`（`shots\` 是 A 真机截图，`b-dark\` 是 B 深色截图，`vis\` 是样稿和真机并排图，`94-gallery-diff-vs-*.txt` 是逐像素比较结果，`gallery-3449-fix\` 是这轮画廊，`00-builds.txt` 构建哈希，`99-A-restore-hashes.txt` 恢复哈希）。
+
+##### M6b 定向复查（`8efb531f0`，2026-11-05）
+
+对象是修了最终外观检查那条必须改的提交（只改 Dart，Rust 没动）。**判定：通过，没有必须改项，没有新问题要交回 coder**；一条极小的观感项记在后面，不挡合入。
+
+**构建**：新界面 `-Ui leapgate`，`bridge,build -ForceBridge`，约几分钟；`leapgate.exe` `1A7716C8…`（和 `a9717abec` 那次相同）、`libleapgate.dll` `AAC312FE…`（上次 `8D8C6F65…`，Rust 源码没改，差异来自重编，没有深究）、`flutter_windows.dll` `8667024A…`、`data/app.so` `66736630…`。
+
+**画廊（3.44.9 导出，2612 张）**：和上一轮 `a9717abec` 的画廊（2608 张）逐像素比：共有的 2608 张里 2604 张完全相同（连一个像素都不差，不只是差超过 32 的），4 张变了、4 张新增，没有尺寸变化。
+- 变化的 4 张都是 `settings-dialog_unlock-pin-link`（浅色深色各简洁、详细），超过 32 的像素数 4511、3757（浅色）、1421、1280（深色）。这是画廊里唯一带前置按钮（"改用管理员权限解锁"）的对话框。量法：取输入框右边缘和"解锁"按钮右边缘（浅色简洁，1 倍）：旧 384 对输入框 451，差 67；新 451 对 451，对齐。两个按钮竖直中心都是 223.5，前置链接的字高中心 225（差 1.5 像素，是链接文字和按钮框的量法差异，视觉上居中）。前置链接位置没变（x 68~187）。深色同样对齐。
+- 新增 4 张是 `settings-dialog_telegram-confirm-chat`（浅深色 × 简洁详细）。
+- 预期里的"`undo-button-at-start`"和带方向键的快捷键状态：**没有变化**。`undo-button-at-start` 的按钮不是前置按钮那种版式；画廊里的 `shortcut-list_*` 状态不含方向键，所以箭头改动在画廊里看不到，靠真机验。别处没有任何变化，M6a、M6b 的其他小节和共享组件不受影响。
+
+**Telegram 确认态（画廊新增，浅深色、简洁详细都看了）**：文字和 02 §1.6.4 一致（"验证码将发送给：@zhangsan"，下一行小字"如果这不是你的 Telegram 对话，请取消，再从你的账号向机器人发送一条消息。"，按钮"取消""确认"）。版式和同一份样稿里的 IP 白名单对话框一致：图标加标题一行，正文、小字、按钮行的间距相仿，取消、确认靠右边缘，确认是主色。深色的对比度正常，小字比正文淡一档，小字在 520 宽下折两行（简洁）或两行（详细，折点不同），不溢出。样稿里没有确认态，所以没有逐像素对照；"保存失败"那一行没有画廊状态。
+
+**真机（A，浅色，1936×1209，150%）**
+- IP 白名单对话框（输入一行后"清除"出现，没点"确定"）：输入框右边缘和"确定"右边缘都是 1255，"取消""确定"右端贴着；"清除"在左，三个按钮中心同高（约 871）。对照 `A-P6-设置-对话框.html` 的 `p6-dl-ip-ok`：样稿是"清除"左、"取消""确定"右、贴输入框右边缘，一致。
+- M6a 代理对话框（先存了一个不可达的本机代理，"移除代理"出现，没改别的）："移除代理"在左，"取消""确定"右端贴着输入框右边缘，三者同高。验完点了"移除代理"。
+- 快捷键页（打开"在远程会话中使用快捷键"）：「下一个显示器」是 `Ctrl Alt Shift →`，「上一个显示器」是 `Ctrl Alt Shift ←`，不再是 `Right`、`Left`。箭头在键帽里水平垂直居中，键帽高度和其他键一致；**箭头字形比 `Ctrl`、`Alt` 的字母小，约一半高，看着偏轻**（等宽字体里的箭头字符，3 倍放大图 `shots\kb-keycaps-zoom.png`），单字符键帽也比文字键帽窄。能读，不挡合入；要更醒目可以给箭头单独放大一档。
+
+证据在 A 的 `C:\leapgate-e2e\evidence\m6b-recheck-1105\`（`00-builds.txt`、`94-gallery-diff-vs-a9717abec.txt`、`94-anydiff.txt`、`gallery-3449-fix\`、`cmp\` 并排图、`shots\` 真机截图，一次性密码区已盖色块，`99-A-restore-hashes.txt`）。
+
 ### 10.6 core 的结构（M1）
 
 03 §3.3 第 1、2、4、5、6、8 条在 `core/lib/leapgate/` 落成下面几个文件，复制进来的 models 和改写的 `FfiModel` 接在这上面。
@@ -1796,7 +1894,8 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 | `leapgate_key_check`（S3） | `key: String` | `SyncReturn<String>`：`empty` / `valid` / `invalid` |
 | `leapgate_local_addresses`（S4） | — | `String`：`[{"name","ipv4":[…],"ipv6":[…]}]`，不列临时 IPv6 地址 |
 | `leapgate_direct_listen`（S5） | — | `String`：`{"state":"listening","port":N}` / `{"state":"failed","port":N,"error":"in_use"\|"denied"\|"other"}` / `{}`（服务不在或还没有结果） |
-| `leapgate_verify_bot`（S10） | `token: String` | `String`：`{"result":"ok"\|"network"\|"invalid_token"\|"no_chat"\|"other","text":…}` |
+| `leapgate_bot_lookup`（S10 第一步） | `token: String` | `String`：`{"result":"ok","chat":{"id":…,"type":"private"\|"group"\|"supergroup"\|"channel","label":…}}` / `{"result":"network"\|"invalid_token"\|"no_chat"\|"other","text":…}`。请求没发出去或没拿到响应（`post_request_sync` 出错、线程 panic）→ `network`；Telegram 回了 401、404 → `invalid_token`；Telegram 回了其他 `error_code`（例如设过 webhook 时的 409），或响应不是 JSON、结构解析不了 → `other`。只查、不存 |
+| `leapgate_bot_save`（S10 第二步） | `token: String`，`chat_id: String` | `String`：`ok` / `other`（服务进程没存上） |
 | `leapgate_verify_2fa` | `code: String` | `String`：`ok` / `wrong_code` / `not_saved` |
 | `leapgate_lang_changed` | `lang: String`（解析后的实际语言，`zh-cn` 或 `en`） | 无。经 `send_to_cm` 发 `Msg::Lang`，CM 推 `{"name":"lang","lang":…}` 给 `leapgate_cm_events`，CM 直接切换、不写盘。代替上游 `mainChangeLanguage`：上游的 `Data::Language` 让 CM 把内存里整份旧的 LocalConfig 写回文件（`src/ui_cm_interface.rs` 收到语言消息那一处），会盖掉主窗口之后写的主题、界面模式、出口端口表等 |
 
@@ -1807,7 +1906,7 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 - S1、S2 和 `exit/directory.rs`：服务器地址和能力从界面进程的选项缓存（`ui_interface::get_option`）取，交给 `libs/leapgate` 的纯函数；不在界面进程里直接读 `Config`（安装版界面进程的 `Config` 可能是旧的，09 §4.1）。S1 的来源推导写成纯函数，`report::root_from` 也改调它，不出第三份复刻。
 - S2：确认不支持时写 `leapgate-api-nocaps = <api 根>`，确认支持时清掉；三态 = 有对得上的 caps → `leapgate`，有对得上的 nocaps → `compat`，都没有 → `checking`。
 - S5：`leapgate::direct::noted(port, result)` 原样返回 `result` 并记下结果，上游那一行只多这一层包装；查询走 `leapgate::ipc::Msg` 末尾新加的变体，服务端分支在 `src/leapgate_hooks/ipc.rs`。`denied` 对应 Windows 10013。
-- S10：按上游错误原文的格式（`Telegram API error: … (error_code: N)`）归类：401、404 → `invalid_token`，空值 → `no_chat`，其余错误 → `network`；成功后再读一次服务进程的配置，`bot` 没存上就回 `other`。`leapgate_verify_2fa` 同理：验证码对了再确认密钥存上了。用上游原文写单测钉住。
+- S10 分两步（2026-11-05 改，02 §1.6.4"确认收件对话"）：上游 `get_chatid_telegram` 取 getUpdates 里**最早**一条消息的对话、不给人看就保存，机器人的用户名谁都能搜到，有人先给它发过消息，验证码就会发到那个人那里。所以不再调它：`leapgate_bot_lookup` 照上游在新线程里调 `post_request_sync` 发 getUpdates（带 `offset=-100`：不带时 Telegram 给最早未确认的 100 条，积压超过 100 条就拿不到刚发的那条；负数取队尾 100 条，代价是更早的更新被 Telegram 标成已确认、之后不再返回），由 `libs/leapgate` 的 `settings::bot_chat` 取**最近**一条带 `message` 或 `channel_post`（频道里发的帖子是这种）的更新里的对话，两者一视同仁，`edited_message`、`edited_channel_post` 等其他种类跳过（id 数字或字符串都转成字符串；显示名私聊是 `@username`，没有就是"名 姓"、去掉开头的 `@`，免得把名字设成"@某人"冒充用户名；群组、频道是 `title`），什么都不存、不拿保存锁；请求本身失败直接归 `network`，拿到响应后 Telegram 的错误照上游原文的格式（`Telegram API error: … (error_code: N)`）写，再由 `bot_result` 归类：401、404 → `invalid_token`，没有对话 → `no_chat`，其余 Telegram 错误、不是 JSON、没有 `result` 列表 → `other`；`text` 里的 Token 换成 `<token>`。用户确认后 `leapgate_bot_save` 在保存锁下照上游私有的 `TelegramBot::save` 存（用上游公开的 `TelegramBot` 结构序列化，`into_string`、`save` 那几行抄进 `src/leapgate_hooks/settings.rs`，`src/auth_2fa.rs` 不改），再读一次服务进程的配置，`bot` 没存上就回 `other`。`leapgate_verify_2fa` 同理：验证码对了再确认密钥存上了。解析和归类用写死的 getUpdates 响应和 Telegram 错误原文写单测钉住。
 - S11：`leapgate-ui-lang` 为 `zh-cn` 时中文正文，其余（含没设）照现在的英文；正文放 `libs/leapgate/src/lang.rs`。
 - E5：从 `parse_allow_nets` 拆出逐项解析；"始终禁止"按网段整个落在回环、链路本地、保留段或元数据地址里判断，不拿首地址判断（`0.0.0.0/0` 不能报）；198.18.0.0/15 不算；"本机地址"是动态的，不报。`value` 是 `parse_allow_nets` 读得懂的存储格式。
 - 状态类型和 JSON 放 `libs/leapgate`，带单测；上游两处挂钩之外不碰上游文件。
@@ -1823,4 +1922,36 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 - 已登录时改 API 服务器，按 09 §4.5 先退出登录再保存；保存返回 `failed`（安装版、服务没应答）时，账号已退出、服务器没改。
 - 搜索结果或链接指向的行要等异步读值才出现时（出口的"放行的网段"、网络小节的服务器摘要），第一帧找不到这一行，不会滚过去，只在数据到了以后显示标记。这几个小节都短、行在顶部。
 - S9 是"读整表、合并、写回"，读和写之间（毫秒级）服务进程自己写的键（`leapgate-api-caps`、`leapgate-api-nocaps`）可能被冲掉；上游 `set_option` 用最多旧 1 秒的缓存整表写回，窗口更大。上游每秒用服务进程的整表覆盖界面的选项缓存，和 S9 的 `refresh_options()` 之间也有约 1 秒的竞争。
-- S10 `verify_bot` 在整个 Telegram 请求期间持有保存锁（上游把查询和保存放在一个函数里），这期间别的 Config 保存要排队。M6a 不调用它，M6b 前再定要不要拆开。
+- S10 原来的 `verify_bot` 在整个 Telegram 请求期间持有保存锁（上游把查询和保存放在一个函数里）。已拆开（2026-11-05，见上面"Rust 的做法和约束"S10 那条）：查询 `leapgate_bot_lookup` 不拿锁，只有确认后的 `leapgate_bot_save` 在锁下写一次。
+
+### 10.14 M6b 的分工约定
+
+依据：09（§1.1 M6b 几行、§2.3、§3 第 5 步、§5.4），界面行为以 02 §1.3.3~§1.3.5、§1.3.7、§1.4.2~§1.4.7、§1.5.4、§1.5.5、§1.6.3~§1.6.5、§1.10、§3.3 为准，02 §4.3 第 1、7 条的实测结果已回填在 02（第 6、10 条没验成，按 02 现写）；样稿同 §10.13。框架、组件、Rust 导出都是 M6a 做好的（§10.13），M6b 只有两个 coder 写页面：没有占位阶段，直接用 designer 的组件和真实导出。
+
+**分支和文件边界**（都从 `ui/m6b` 切，做完合回 `ui/m6b`；整合 worktree 仍是 `.wt/ui-m4`）
+
+| 分支 | 谁 | 只改这些 |
+|---|---|---|
+| `ui/m6b-in` | coder C（传入其余） | core `leapgate/settings/` 下 C 需要的新文件（受信设备的解析、声音来源（照上游 `audio_input.dart`）、白名单的校验、二次验证和 Telegram 的状态）；`consts.dart`（只在"M6b incoming"下追加）；app `pages/settings/sections/two_factor.dart`、`restrictions.dart`、`sessions.dart`、`remote_printing.dart`、`during_sessions.dart`（换掉占位），`dialogs/` 下新文件（开启二次验证、Telegram 机器人、IP / ID 白名单）；`shell/main_window.dart` 只改 `keepDisplayOn` 那一处（照 `keep-awake-during-outgoing-sessions`，`待调.md` 2026-10-31 那条）；ARB；测试 |
+| `ui/m6b-out` | coder D（传出其余和通用） | core `leapgate/settings/` 下 D 需要的新文件（快捷键的绑定读写和录制校验，从上游 `page_body.dart`、`recording_dialog.dart` 去界面化后搬进来，约 250 行）；`consts.dart`（只在"M6b outgoing"下追加）；app `pages/settings/sections/new_device_defaults.dart`、`toolbar.dart`、`rendering.dart`、`shortcuts.dart`、`print_jobs.dart`、`other.dart`、`about.dart`（换掉占位）；`pages/session/toolbar/monitor_menu.dart`（默认值改经选项 model，09 §2.1）和会话里读工具栏、显示器、渲染这几项设置的文件，只为让已开的会话当场跟着变（02 §3.3），改了哪些列进提交说明；ARB；测试 |
+
+- 第 0 步（`ui/m6b` 第一个提交）已把十二个小节的占位文件登记进 `settings_registry.dart`，都是 `visible: () => false`。各自做完时按 02 设 `visible`（例如远程打印、收到的打印任务只在 Windows）。`settings_registry.dart`、`settings_ids.dart`、`settings_page.dart`、`settings_section_state.dart`、`settings_flow.dart`、`settings_status.dart`、`shell/navigation.dart`、core `settings_api.dart`、两份 `settings_fakes.dart`、`app/lib/widgets/` 两个 coder 都不改；确实要改先报主会话（组件缺什么由主会话转给 designer）。小节文件彼此不引用。
+- 锁：C 的四个传入小节 `locked: true`（占位已设），用 `ctx.locked` 灰显；自己弹 UAC 的（RDP 会话共享、安装打印机）不受锁约束，结果照 09 §1.2 拿：RDP 调用返回后再读一次 `mainIsShareRdp`，打印机看全局事件 `install-printer-res`。
+- ARB 键以 `settings` 开头，C 用 `settingsTwoFactor*`、`settingsRestrict*`、`settingsSessions*`、`settingsRemotePrint*`、`settingsDuring*`，D 用 `settingsDefaults*`、`settingsToolbar*`、`settingsRender*`、`settingsShortcut*`、`settingsPrintJobs*`、`settingsOther*`、`settingsAbout*`；加在两个 ARB 文件末尾，中英文同时加，文案照 02 逐字照抄，英文照 02 §5.5，没有的新写并列进提交说明。改完 ARB 跑 `flutter gen-l10n`。
+- 写选项一律经选项 model（`config.set` 走 S9，`ctx.save` 管"无法保存设置"），页面不直接调 `bind`；第一块的 `bind.main*` 调用包在 core 的 model 里。新设备的默认设置用 `userDefault` 作用域（§10.7）。
+
+**用到的 M6a 导出和组件**
+- C：`settingsApi.localAddresses`（S4，直接 IP 访问的本机地址）、`directListen`（S5，端口和"端口 ‹端口› 已被其他应用占用"；先读 `direct-server` 选项，记录在关掉以后还在）、`verifyBot`（S10）、`verify2fa`（验证码对了再确认密钥存上了，`not_saved` 照 02 §1.6.10 写）；组件 `LgTrustedDevices`、`LgQrCode`、`LgQrKeyRow`、`LgSettingsStatusRow`、`LgSettingsNumberField`、`LgSettingsSubtitle`。
+- D：组件 `LgShortcutGroup`、`LgShortcutRow`、`LgShortcutRecordDialog`、`LgSettingsInfoRow`（关于页的行，带复制）、`LgSettingsNumberField`；关于页的版本用 `leapgate_version`（S12）。
+
+**几处约定**
+- 二次验证：开启对话框把密钥显示在二维码下（上游的做法，02 §1.6.3）。测试和画廊里只用写死的假密钥，验收时不截这个对话框（09 §5.4）。
+- S10 拆成查询和保存两步（2026-11-05，§10.13"Rust 的做法和约束"S10 那条）：Telegram 对话框先调 `leapgate_bot_lookup`，显示确认态（"验证码将发送给：‹对话›"），用户点"确认"才调 `leapgate_bot_save`；两次请求期间都显示进行中、不能重复点。
+- 声音来源改了以后由 S9 照上游重启音频服务（§10.13"Rust 的做法和约束"），页面不另做。
+- 录制位置：会话（传入的录制）和会话期间（传出的录制）共用同一个目录项，都在 C；选文件夹用 app 已有的 `file_picker`。
+- 快捷键：总开关打开时写入默认绑定，录制的五种状态、冲突替换、恢复默认照 02 §1.4.6；"发送到远程设备"打开时快捷键不生效，判断沿用 M2b 的快捷键 model。
+- 关于：版本、源代码链接、上游版权行和"基于 RustDesk"照 02 §1.5.5；行内复制用 `LgSettingsInfoRow`。
+
+**测试**
+- core：受信设备的解析；声音来源列表；白名单的逐行校验；快捷键绑定读写和录制校验（五种状态、冲突）。
+- app：02 §1.10 里这十二个小节和三个对话框的每个状态一个行为测试，用 `FakeSettingsApi` 喂数据；已开会话在工具栏、渲染改了以后当场跟着变（D）；有出站会话时按 `keep-awake-during-outgoing-sessions` 决定是否阻止熄屏（C）。

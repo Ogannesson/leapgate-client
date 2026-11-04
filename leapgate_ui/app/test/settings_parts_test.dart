@@ -708,6 +708,11 @@ void main() {
         final cancelRect = tester.getRect(find.text('取消'));
         expect(lead.right, lessThan(cancelRect.left));
         expect(lead.center.dy, closeTo(cancelRect.center.dy, 2));
+        // The buttons still end at the right edge, as without a leading item.
+        expect(
+          tester.getRect(find.widgetWithText(LgButton, '解锁')).right,
+          closeTo(tester.getRect(find.byType(LgTextField)).right, 1),
+        );
         await tester.tap(find.text('改用管理员权限解锁'));
         await tester.tap(find.text('取消'));
         await tester.tap(find.text('解锁'));

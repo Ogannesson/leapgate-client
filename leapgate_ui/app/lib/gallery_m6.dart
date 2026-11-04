@@ -1655,6 +1655,49 @@ List<Specimen> _m6Specimens() {
     ..add(
       Specimen(
         'settings-dialog',
+        'telegram-confirm-chat',
+        const Size(520, 300),
+        padding: 0,
+        (context) {
+          final t = LgTokens.of(context);
+          return _m6Stage(
+            width: 520,
+            height: 300,
+            LgFormDialog(
+              title: '设置 Telegram 机器人',
+              icon: LgIcons.send,
+              actions: const [
+                LgDialogAction(label: '取消', onPressed: _noop),
+                LgDialogAction(
+                  label: '确认',
+                  kind: LgButtonKind.primary,
+                  onPressed: _noop,
+                ),
+              ],
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: LgSpace.s4),
+                  child: Text(
+                    '验证码将发送给：@zhangsan',
+                    style: t.text.copyWith(color: t.colors.text),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(top: LgSpace.s2),
+                  child: Text(
+                    '如果这不是你的 Telegram 对话，请取消，再从你的账号向机器人发送一条消息。',
+                    style: t.textS.copyWith(color: t.colors.text2),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    )
+    ..add(
+      Specimen(
+        'settings-dialog',
         'unlock-pin-link',
         const Size(520, 280),
         padding: 0,
