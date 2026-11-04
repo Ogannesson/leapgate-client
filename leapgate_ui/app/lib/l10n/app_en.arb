@@ -1188,7 +1188,7 @@
   "settingsRestrictLan": "Let devices on the local network discover this device",
   "settingsRestrictLanNote": "Devices on the same local network can see this device's ID, name, user name and MAC address",
   "settingsRestrictIpRule": "One IP address or network per line, for example 192.0.2.10, 198.51.100.0/24, 2001:db8::/32",
-  "settingsRestrictIdRule": "One ID per line. * and ? can be used as wildcards",
+  "settingsRestrictIdRule": "One ID per line. * and ? can be used as wildcards.",
   "settingsRestrictCount": "{count, plural, =1{1 entry} other{{count} entries}}",
   "@settingsRestrictCount": {"placeholders": {"count": {"type": "int"}}},
   "settingsRestrictInvalidLine": "Line {line} isn't in a valid format",
@@ -1198,7 +1198,7 @@
   "settingsRestrictClearIdTitle": "Clear all entries and turn off the ID allow list?",
   "settingsSessionsDuring": "During connections",
   "settingsSessionsAutoDisconnect": "Disconnect automatically when idle",
-  "settingsSessionsAutoDisconnectNote": "Disconnects a remote desktop session after the set time without keyboard or mouse input. Only applies to later connections",
+  "settingsSessionsAutoDisconnectNote": "Disconnects a remote desktop session after the set time without keyboard or mouse input. Applies to new connections only.",
   "settingsSessionsTimeout": "Time",
   "settingsSessionsMinutes": "minutes",
   "settingsSessionsTimeoutInvalid": "Enter a whole number from 1 to 65535",
@@ -1238,7 +1238,7 @@
   "settingsRemotePrintFailed": "Couldn't install the Leapgate printer.",
   "settingsRemotePrintReady": "Installed",
   "settingsRemotePrintInstall": "Install printer",
-  "settingsRemotePrintRetry": "Try again",
+  "settingsRemotePrintRetry": "Retry",
   "settingsRemotePrintPermission": "Remote printing permission",
   "settingsRemotePrintAllowed": "Remote printing: Allowed",
   "settingsRemotePrintNotAllowed": "Remote printing: Not allowed",
@@ -1340,5 +1340,8 @@
   "settingsAboutSource": "Source code",
   "settingsAboutCopyVersion": "Copy version",
   "settingsAboutCopyFingerprint": "Copy fingerprint",
-  "settingsAboutCopyId": "Copy this device's ID"
+  "settingsAboutCopyId": "Copy this device's ID",
+  "settingsRemotePrintRetryLabel": "Retry installing the Leapgate printer",
+  "settingsSessionsPreviewLabel": "Preview removing the wallpaper",
+  "settingsTwoFactorCantTurnOn": "Couldn't turn on two-factor authentication"
 }

@@ -101,15 +101,25 @@ List<TrustedDevice> parseTrustedDevices(String json) {
 Future<List<TrustedDevice>> readTrustedDevices() async =>
     parseTrustedDevices(await bind.mainGetTrustedDevices());
 
-/// Removes [devices]; all of them clears the list, as upstream does.
-Future<void> removeTrustedDevices(
+/// Removes [devices]; all of them clears the list, as upstream does. Rust answers nothing, so
+/// true when the service's list no longer has them.
+Future<bool> removeTrustedDevices(
     List<TrustedDevice> devices, int total) async {
-  if (devices.length == total) return bind.mainClearTrustedDevices();
-  await bind.mainRemoveTrustedDevices(
-      json: jsonEncode([for (final d in devices) d.hwid]));
+  if (devices.length == total) {
+    await bind.mainClearTrustedDevices();
+  } else {
+    await bind.mainRemoveTrustedDevices(
+        json: jsonEncode([for (final d in devices) d.hwid]));
+  }
+  final gone = {for (final d in devices) d.hwidHex};
+  return !(await readTrustedDevices()).any((d) => gone.contains(d.hwidHex));
 }
 
-Future<void> clearTrustedDevices() => bind.mainClearTrustedDevices();
+/// True when the service's list is empty afterwards.
+Future<bool> clearTrustedDevices() async {
+  await bind.mainClearTrustedDevices();
+  return (await readTrustedDevices()).isEmpty;
+}
 
 /// The code typed in "开启二次验证": six digits, as Rust's TOTP has them.
 bool twoFactorCodeComplete(String code) => RegExp(r'^\d{6}$').hasMatch(code);

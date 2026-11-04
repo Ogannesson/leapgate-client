@@ -233,6 +233,9 @@ class _SessionsBodyState extends State<_SessionsBody> {
                       label: _previewLeft > 0
                           ? l10n.settingsSessionsPreviewing(_previewLeft)
                           : l10n.settingsSessionsPreview,
+                      semanticLabel: _previewLeft > 0
+                          ? null
+                          : l10n.settingsSessionsPreviewLabel,
                       kind: LgButtonKind.secondary,
                       onPressed: open && _previewLeft == 0 ? _preview : null,
                     ),
@@ -281,7 +284,8 @@ class _SessionsBodyState extends State<_SessionsBody> {
       LgSettingsBlock(
         disabled: ctx.locked,
         children: [
-          if (sources != null && !sources.isEmpty)
+          // Drawn, empty, until the sources are read, so search and links find the row.
+          if (sources == null || !sources.isEmpty)
             LgSettingsRow(
               key: ctx.keyOf(kOptionAudioInput),
               name: l10n.settingsSessionsAudio,
@@ -295,14 +299,17 @@ class _SessionsBodyState extends State<_SessionsBody> {
                   dense: true,
                   semanticLabel: l10n.settingsSessionsAudio,
                   items: [
-                    if (sources.loopback) LgSelectItem('', l10n.chatSystemSound),
-                    for (final d in sources.devices) LgSelectItem(d, d),
+                    if (sources?.loopback ?? false)
+                      LgSelectItem('', l10n.chatSystemSound),
+                    for (final d in sources?.devices ?? const <String>[])
+                      LgSelectItem(d, d),
                   ],
                   // '' is the default: "系统声音" where there is one.
-                  value: sources.current.isEmpty && !sources.loopback
+                  value: sources == null ||
+                          (sources.current.isEmpty && !sources.loopback)
                       ? null
                       : sources.current,
-                  onChanged: open
+                  onChanged: open && sources != null
                       ? (v) => ctx.save(
                           kOptionAudioInput, () => config.set(kOptionAudioInput, v))
                       : null,

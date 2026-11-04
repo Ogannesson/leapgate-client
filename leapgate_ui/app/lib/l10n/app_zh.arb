@@ -1188,5 +1188,8 @@
   "settingsAboutSource": "源代码",
   "settingsAboutCopyVersion": "复制版本",
   "settingsAboutCopyFingerprint": "复制指纹",
-  "settingsAboutCopyId": "复制本机 ID"
+  "settingsAboutCopyId": "复制本机 ID",
+  "settingsRemotePrintRetryLabel": "重试安装 Leapgate 打印机",
+  "settingsSessionsPreviewLabel": "预览移除壁纸",
+  "settingsTwoFactorCantTurnOn": "无法开启二次验证"
 }
