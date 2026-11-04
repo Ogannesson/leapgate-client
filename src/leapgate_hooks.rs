@@ -3,6 +3,8 @@
 
 pub(crate) mod exit;
 pub(crate) mod ipc;
+#[cfg(any(target_os = "android", target_os = "ios", feature = "flutter"))]
+pub(crate) mod settings;
 
 use crate::{
     client::{Client, Interface},

@@ -6,6 +6,7 @@
 //! are kept apart so the two sides add rows without touching each other's lines.
 
 use crate::exit;
+use hbb_common::config::Config;
 
 static CONTROLLER: &[(&str, &str)] = &[
     (exit::MSG_NOT_ENABLED, "对方设备没有开启出口"),
@@ -93,10 +94,44 @@ static CONTROLLED: &[(&str, &str)] = &[
     ),
 ];
 
+/// The Config option the UI writes its resolved language to (`zh-cn` or `en`), for text the
+/// service sends on its own (S11). A Config option so the service reads it.
+pub const UI_LANG_KEY: &str = "leapgate-ui-lang";
+
+/// The Telegram message carrying a 2FA code, in the UI's language (S11).
+pub fn telegram_2fa(code: &str, id: &str, ip: &str) -> String {
+    telegram_2fa_in(&Config::get_option(UI_LANG_KEY), code, id, ip)
+}
+
+fn telegram_2fa_in(lang: &str, code: &str, id: &str, ip: &str) -> String {
+    if lang == "zh-cn" {
+        format!("二次验证码：{code}\n\nID 为 {id} 的设备有新的连接，来源 IP 地址为 {ip}。")
+    } else {
+        format!(
+            "2FA code: {code}\n\nA new connection has been established to your device with ID {id}. The source IP address is {ip}."
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::HashSet;
+
+    #[test]
+    fn telegram_text_follows_the_ui_language() {
+        assert_eq!(
+            telegram_2fa_in("zh-cn", "123456", "987654321", "192.0.2.10"),
+            "二次验证码：123456\n\nID 为 987654321 的设备有新的连接，来源 IP 地址为 192.0.2.10。"
+        );
+        // English, as upstream wrote it, for any other value or none.
+        for lang in ["en", "", "ja"] {
+            assert_eq!(
+                telegram_2fa_in(lang, "123456", "987654321", "192.0.2.10"),
+                "2FA code: 123456\n\nA new connection has been established to your device with ID 987654321. The source IP address is 192.0.2.10."
+            );
+        }
+    }
 
     #[test]
     fn tables_have_unique_keys_and_complete_translations() {

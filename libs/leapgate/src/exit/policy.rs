@@ -104,35 +104,159 @@ const RESERVED_V4: [(Ipv4Addr, u8); 8] = [
 /// cidr-utils' own parser, which takes `10` as 10.0.0.0/8 and masks such as `/255.0.0.0`.
 pub fn parse_allow_nets(text: &str) -> Result<AllowNets, String> {
     let mut nets = AllowNets::default();
-    for item in text
-        .split(|c: char| c == ',' || c.is_whitespace())
-        .filter(|s| !s.is_empty())
-    {
-        let bad = || item.to_owned();
-        let (addr, bits) = match item.split_once('/') {
-            Some((a, b)) => (a, Some(b)),
-            None => (item, None),
-        };
-        let addr: IpAddr = addr.parse().map_err(|_| bad())?;
-        let max = if addr.is_ipv4() { 32 } else { 128 };
-        let bits = match bits {
-            None => max,
-            Some(b) if !b.is_empty() && b.bytes().all(|c| c.is_ascii_digit()) => {
-                b.parse::<u8>().ok().filter(|&b| b <= max).ok_or_else(bad)?
-            }
-            Some(_) => return Err(bad()),
-        };
-        // Host bits are cleared, as cidr-utils does.
-        match addr {
-            IpAddr::V4(ip) => nets
-                .v4
-                .push(Ipv4Cidr::from_prefix_and_bits(ip, bits).map_err(|_| bad())?),
-            IpAddr::V6(ip) => nets
-                .v6
-                .push(Ipv6Cidr::from_prefix_and_bits(ip, bits).map_err(|_| bad())?),
+    for item in items(text) {
+        match parse_net(item).ok_or_else(|| item.to_owned())? {
+            Net::V4(n) => nets.v4.push(n),
+            Net::V6(n) => nets.v6.push(n),
         }
     }
     Ok(nets)
+}
+
+fn items(text: &str) -> impl Iterator<Item = &str> {
+    text.split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|s| !s.is_empty())
+}
+
+enum Net {
+    V4(Ipv4Cidr),
+    V6(Ipv6Cidr),
+}
+
+/// One item of `parse_allow_nets`.
+fn parse_net(item: &str) -> Option<Net> {
+    let (addr, bits) = match item.split_once('/') {
+        Some((a, b)) => (a, Some(b)),
+        None => (item, None),
+    };
+    let addr: IpAddr = addr.parse().ok()?;
+    let max = if addr.is_ipv4() { 32 } else { 128 };
+    let bits = match bits {
+        None => max,
+        Some(b) if !b.is_empty() && b.bytes().all(|c| c.is_ascii_digit()) => {
+            b.parse::<u8>().ok().filter(|&b| b <= max)?
+        }
+        Some(_) => return None,
+    };
+    // Host bits are cleared, as cidr-utils does.
+    match addr {
+        IpAddr::V4(ip) => Ipv4Cidr::from_prefix_and_bits(ip, bits).ok().map(Net::V4),
+        IpAddr::V6(ip) => Ipv6Cidr::from_prefix_and_bits(ip, bits).ok().map(Net::V6),
+    }
+}
+
+/// E5: the allowed-networks dialog's text checked line by line (`LEAPGATE.md` §10.13).
+#[derive(Debug, PartialEq, serde::Serialize)]
+pub struct AllowNetsCheck {
+    pub valid: bool,
+    pub count: usize,
+    pub lines: Vec<LineIssue>,
+    /// What to store in `leapgate-exit-allow-nets`.
+    pub value: String,
+}
+
+#[derive(Debug, PartialEq, serde::Serialize)]
+pub struct LineIssue {
+    /// From 1, as in the dialog's text.
+    pub line: usize,
+    /// `invalid`, or `blocked`: the whole network is always refused, so allowing it does
+    /// nothing; still saved.
+    pub state: &'static str,
+}
+
+pub fn check_allow_nets(text: &str) -> AllowNetsCheck {
+    let mut lines = Vec::new();
+    let mut nets = Vec::new();
+    for (i, line) in text.split('\n').enumerate() {
+        let (mut invalid, mut blocked) = (false, false);
+        for item in items(line) {
+            match parse_net(item) {
+                Some(net) => {
+                    blocked |= always_refused(&net);
+                    nets.push(item);
+                }
+                None => invalid = true,
+            }
+        }
+        let state = match (invalid, blocked) {
+            (true, _) => "invalid",
+            (false, true) => "blocked",
+            (false, false) => continue,
+        };
+        lines.push(LineIssue { line: i + 1, state });
+    }
+    AllowNetsCheck {
+        valid: !lines.iter().any(|l| l.state == "invalid"),
+        count: nets.len(),
+        lines,
+        value: nets.join(","),
+    }
+}
+
+/// IPv4 networks no rule opens, as `classify_v4` refuses them.
+const HARD_V4: [(Ipv4Addr, u8); 3] = [
+    (Ipv4Addr::new(127, 0, 0, 0), 8),
+    (Ipv4Addr::new(169, 254, 0, 0), 16),
+    (Ipv4Addr::new(100, 100, 100, 200), 32),
+];
+
+/// IPv6 networks no rule opens, as `classify_v6` refuses them: the metadata addresses, the
+/// reserved ranges inside 2000::/3, and everything outside 2000::/3 but `fc00::/7` (soft) and
+/// `::/3` (checked apart, for the IPv4 inside).
+const HARD_V6: [(Ipv6Addr, u8); 13] = [
+    (Ipv6Addr::new(0xfd00, 0xec2, 0, 0, 0, 0, 0, 0x254), 128),
+    (Ipv6Addr::new(0xfd20, 0xce, 0, 0, 0, 0, 0, 0x254), 128),
+    (Ipv6Addr::new(0x2001, 0, 0, 0, 0, 0, 0, 0), 23),
+    (Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0), 32),
+    (Ipv6Addr::new(0x3fff, 0, 0, 0, 0, 0, 0, 0), 20),
+    (Ipv6Addr::new(0x2002, 0, 0, 0, 0, 0, 0, 0), 16),
+    (Ipv6Addr::new(0x4000, 0, 0, 0, 0, 0, 0, 0), 2),
+    (Ipv6Addr::new(0x8000, 0, 0, 0, 0, 0, 0, 0), 2),
+    (Ipv6Addr::new(0xc000, 0, 0, 0, 0, 0, 0, 0), 3),
+    (Ipv6Addr::new(0xe000, 0, 0, 0, 0, 0, 0, 0), 4),
+    (Ipv6Addr::new(0xf000, 0, 0, 0, 0, 0, 0, 0), 5),
+    (Ipv6Addr::new(0xf800, 0, 0, 0, 0, 0, 0, 0), 6),
+    (Ipv6Addr::new(0xfe00, 0, 0, 0, 0, 0, 0, 0), 7),
+];
+
+/// Within `::/3`, these are judged by the IPv4 address inside (`embedded_v4`).
+const EMBEDDED_V4: [(Ipv6Addr, u8); 2] = [
+    (Ipv6Addr::new(0, 0, 0, 0, 0, 0xffff, 0, 0), 96),
+    (Ipv6Addr::new(0x64, 0xff9b, 0, 0, 0, 0, 0, 0), 96),
+];
+
+/// Whether every address of `net` is refused whatever the owner allows. Judged on the whole
+/// network, not its first address: `0.0.0.0/0` starts in a reserved range but opens the LAN.
+/// This device's own addresses change, so they are not reported.
+fn always_refused(net: &Net) -> bool {
+    match net {
+        Net::V4(n) => {
+            let (ip, bits) = (u128::from(n.get_prefix()), n.get_bits());
+            HARD_V4
+                .iter()
+                .chain(RESERVED_V4.iter())
+                .any(|&(r, rb)| inside(ip, bits, u128::from(u32::from(r)), rb, 32))
+        }
+        Net::V6(n) => {
+            let (ip, bits) = (n.get_prefix(), n.get_bits());
+            let within = |&(r, rb): &(Ipv6Addr, u8)| inside(ip, bits, u128::from(r), rb, 128);
+            let overlaps = |&(r, rb): &(Ipv6Addr, u8)| {
+                within(&(r, rb)) || inside(u128::from(r), rb, ip, bits, 128)
+            };
+            HARD_V6.iter().any(within)
+                || (within(&(Ipv6Addr::UNSPECIFIED, 3)) && !EMBEDDED_V4.iter().any(overlaps))
+        }
+    }
+}
+
+/// Whether the network `net/bits` lies inside `range/range_bits`, for addresses `width` bits
+/// long.
+fn inside(net: u128, bits: u8, range: u128, range_bits: u8, width: u32) -> bool {
+    bits >= range_bits
+        && (net ^ range)
+            .checked_shr(width - u32::from(range_bits))
+            .unwrap_or(0)
+            == 0
 }
 
 /// Whether an exit may connect to `ip`. `literal`: the controller sent it as an address, not a
@@ -667,6 +791,74 @@ mod tests {
         ] {
             assert!(parse_allow_nets(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn allowed_networks_dialog_check() {
+        let issue = |line, state| LineIssue { line, state };
+        let c = check_allow_nets("10.0.0.0/24\n\n10.0.0.5, 198.18.0.0/15\r\n0.0.0.0/0\n::/0\n");
+        assert_eq!(
+            c,
+            AllowNetsCheck {
+                valid: true,
+                count: 5,
+                lines: vec![],
+                value: "10.0.0.0/24,10.0.0.5,198.18.0.0/15,0.0.0.0/0,::/0".to_owned(),
+            }
+        );
+        assert!(parse_allow_nets(&c.value).is_ok());
+
+        let c = check_allow_nets("192.168.1.0/24\nnope\n10.0.0.1 10.0.0.0/33\n127.0.0.1");
+        assert!(!c.valid);
+        assert_eq!(c.count, 3);
+        assert_eq!(c.lines, vec![issue(2, "invalid"), issue(3, "invalid"), issue(4, "blocked")]);
+
+        // Always refused only when the whole network is: by range, not by first address.
+        for blocked in [
+            "127.0.0.0/8",
+            "127.1.0.0/16",
+            "169.254.169.254",
+            "100.100.100.200",
+            "0.0.0.0/8",
+            "192.0.2.0/24",
+            "203.0.113.7",
+            "224.0.0.0/4",
+            "255.255.255.255",
+            "::1",
+            "::",
+            "fe80::/10",
+            "fd00:ec2::254",
+            "ff02::1",
+            "2001:db8::/32",
+            "2002::/16",
+            "3fff::/20",
+            "4000::/2",
+        ] {
+            assert_eq!(check_allow_nets(blocked).lines, vec![issue(1, "blocked")], "{blocked}");
+        }
+        for open in [
+            "0.0.0.0/0",
+            "0.0.0.0/7",
+            "100.64.0.0/10",
+            "198.18.0.0/15",
+            "10.0.0.0/8",
+            "93.184.216.0/24",
+            "::/0",
+            "::/3",
+            "fc00::/7",
+            "fd00:ec2::/64",
+            "2000::/3",
+            "2001:db8::/31",
+            "::ffff:0:0/96",
+            "64:ff9b::/96",
+        ] {
+            assert_eq!(check_allow_nets(open).lines, vec![], "{open}");
+        }
+        // One always-refused item flags its line.
+        assert_eq!(
+            check_allow_nets("10.0.0.1 192.0.2.1").lines,
+            vec![issue(1, "blocked")]
+        );
     }
 
     #[test]

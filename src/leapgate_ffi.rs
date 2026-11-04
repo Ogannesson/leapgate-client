@@ -270,3 +270,77 @@ pub fn leapgate_exit_set_port(id: String, port: i32) -> SyncReturn<bool> {
         SyncReturn(false)
     }
 }
+
+// ---- Settings (M6) ----
+// `LEAPGATE.md` §10.13. Server addresses and capabilities are read from the UI's option cache,
+// not from this process's `Config` (09 §4.1).
+
+/// S9: `changes` is a JSON object `{key: value}`, an empty value removes the option.
+/// `saved`, `saved_local` (no service runs; it takes them when it starts) or `failed`.
+pub fn leapgate_set_options(changes: String) -> String {
+    let saved = match serde_json::from_str(&changes) {
+        Ok(changes) => crate::leapgate_hooks::settings::set_options(changes),
+        Err(_) => leapgate::settings::Saved::Failed,
+    };
+    saved.as_str().to_owned()
+}
+
+/// S9 for the proxy; an empty `proxy` removes it. `true` when it was saved.
+pub fn leapgate_set_socks(
+    proxy: String,
+    username: String,
+    password: String,
+) -> bool {
+    crate::leapgate_hooks::settings::set_socks(proxy, username, password)
+}
+
+/// E5: `{"valid","count","lines":[{"line","state"}],"value"}` (`LEAPGATE.md` §10.13).
+pub fn leapgate_exit_allow_nets_check(text: String) -> SyncReturn<String> {
+    let check = leapgate::exit::check_allow_nets(&text);
+    SyncReturn(serde_json::to_string(&check).unwrap_or_default())
+}
+
+/// S1: `{"id":{"value","source"},"api":{"value","source"},"key":{"source"},"relay":{"value"}}`.
+pub fn leapgate_server_summary() -> String {
+    crate::leapgate_hooks::settings::server_summary()
+}
+
+/// S2: `{"kind":"leapgate"|"compat"|"checking","features":[…]}`.
+pub fn leapgate_server_kind() -> SyncReturn<String> {
+    SyncReturn(crate::leapgate_hooks::settings::server_kind())
+}
+
+/// S3: `empty`, `valid` or `invalid`.
+pub fn leapgate_key_check(
+    key: String,
+) -> SyncReturn<String> {
+    SyncReturn(leapgate::sign::key_check(&key).to_owned())
+}
+
+/// S4: `[{"name","ipv4":[…],"ipv6":[…]}]` for the physical adapters, without temporary IPv6
+/// addresses.
+pub fn leapgate_local_addresses() -> String {
+    serde_json::to_string(&leapgate::lan::local_addresses()).unwrap_or_else(|_| "[]".to_owned())
+}
+
+/// S5: the service's direct IP access listener, `{"state":"listening","port":N}`,
+/// `{"state":"failed","port":N,"error":"in_use"|"denied"|"other"}`, or `{}` without a result.
+pub fn leapgate_direct_listen() -> String {
+    crate::leapgate_hooks::ipc::query_direct_listen()
+        .and_then(|listen| serde_json::to_string(&listen).ok())
+        .unwrap_or_else(|| "{}".to_owned())
+}
+
+/// S10: `{"result":"ok"|"network"|"invalid_token"|"no_chat"|"other","text":…}`; `text` is
+/// upstream's error text, without the token.
+pub fn leapgate_verify_bot(
+    token: String,
+) -> String {
+    let (result, text) = crate::leapgate_hooks::settings::verify_bot(&token);
+    serde_json::json!({ "result": result, "text": text }).to_string()
+}
+
+/// `ok`, `wrong_code`, or `not_saved` (the code was right but the service does not have it).
+pub fn leapgate_verify_2fa(code: String) -> String {
+    crate::leapgate_hooks::settings::verify_2fa(code).to_owned()
+}

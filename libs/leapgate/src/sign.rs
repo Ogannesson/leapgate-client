@@ -102,6 +102,16 @@ pub fn server_pk() -> Result<Option<sign::PublicKey>, ()> {
     pk
 }
 
+/// S3, for the server dialog's Key field: `empty`, `valid` or `invalid` (not a public key, so
+/// every signed API response would fail verification).
+pub fn key_check(key: &str) -> &'static str {
+    match parse_server_pk(key) {
+        Ok(None) => "empty",
+        Ok(Some(_)) => "valid",
+        Err(()) => "invalid",
+    }
+}
+
 fn parse_server_pk(key: &str) -> Result<Option<sign::PublicKey>, ()> {
     if key.is_empty() {
         return Ok(None);
@@ -217,5 +227,13 @@ pub(crate) mod tests {
         assert_eq!(parse_server_pk(""), Ok(None));
         assert_eq!(parse_server_pk("not base64!"), Err(()));
         assert_eq!(parse_server_pk(&STANDARD.encode([1u8; 31])), Err(()));
+    }
+
+    #[test]
+    fn key_check_for_the_dialog() {
+        assert_eq!(key_check(""), "empty");
+        assert_eq!(key_check(&STANDARD.encode(server_keys().0 .0)), "valid");
+        assert_eq!(key_check("not base64!"), "invalid");
+        assert_eq!(key_check(&STANDARD.encode([1u8; 31])), "invalid");
     }
 }

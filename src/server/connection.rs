@@ -1876,12 +1876,8 @@ impl Connection {
                 };
                 let code = totp.generate_current();
                 if let Ok(code) = code {
-                    let text = format!(
-                        "2FA code: {}\n\nA new connection has been established to your device with ID {}. The source IP address is {}.",
-                        code,
-                        Config::get_id(),
-                        self.ip,
-                    );
+                    // leapgate: the text follows the UI language (S11)
+                    let text = leapgate::lang::telegram_2fa(&code, &Config::get_id(), &self.ip);
                     tokio::spawn(async move {
                         if let Err(err) =
                             crate::auth_2fa::send_2fa_code_to_telegram(&text, bot).await

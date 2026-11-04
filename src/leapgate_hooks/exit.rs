@@ -37,7 +37,7 @@ pub(crate) fn get_common(key: &str) -> Option<String> {
 #[cfg(feature = "flutter")]
 #[hbb_common::tokio::main(flavor = "current_thread", crate = "hbb_common::tokio")]
 async fn directory_json() -> String {
-    leapgate::exit::directory::fetch().await
+    leapgate::exit::directory::fetch(|k| crate::ui_interface::get_option(k)).await
 }
 
 /// Hook at the top of `start_one_port_forward`, for the mapping whose target is the sentinel.
