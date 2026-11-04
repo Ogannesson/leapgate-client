@@ -15,29 +15,42 @@ import '../../../widgets/lg_text_field.dart';
 import '../net_rows.dart';
 
 /// "服务器" (02 §1.6.8) over the home tab, filled with [initial] (the options, or what "导入"
-/// found); true when it saved.
+/// found); true when it saved. While it checks and saves, neither "取消" nor Esc closes it: the
+/// save runs on, signing out included.
 Future<bool> showServerDialog(TabOverlays overlays, AppLocalizations l10n,
-        {required ServerSummary summary, required ServerConfig initial}) async =>
-    await overlays.show<bool>(
-      null,
-      (context, close) => LgDialogScrim(
-        onEscape: () => close(false),
-        child: _ServerDialog(
-            l10n: l10n, summary: summary, initial: initial, close: close),
-      ),
-    ) ??
-    false;
+    {required ServerSummary summary, required ServerConfig initial}) async {
+  final busy = ValueNotifier(false);
+  return await overlays.show<bool>(
+        null,
+        (context, close) => LgDialogScrim(
+          onEscape: () {
+            if (!busy.value) close(false);
+          },
+          child: _ServerDialog(
+              l10n: l10n,
+              summary: summary,
+              initial: initial,
+              busy: busy,
+              close: close),
+        ),
+      ) ??
+      false;
+}
 
 class _ServerDialog extends StatefulWidget {
   const _ServerDialog(
       {required this.l10n,
       required this.summary,
       required this.initial,
+      required this.busy,
       required this.close});
 
   final AppLocalizations l10n;
   final ServerSummary summary;
   final ServerConfig initial;
+
+  /// Checking and saving; the scrim reads it for Esc.
+  final ValueNotifier<bool> busy;
   final void Function(bool?) close;
 
   @override
@@ -49,7 +62,8 @@ class _ServerDialogState extends State<_ServerDialog> {
   late final _api = TextEditingController(text: widget.initial.apiServer);
   late final _key = TextEditingController(text: widget.initial.key);
   late final _relay = TextEditingController(text: widget.initial.relayServer);
-  bool _busy = false;
+  bool get _busy => widget.busy.value;
+  set _busy(bool value) => widget.busy.value = value;
   bool _failed = false;
   Map<String, ({ServerFieldError error, String detail})> _errors = const {};
 
@@ -156,7 +170,8 @@ class _ServerDialogState extends State<_ServerDialog> {
             label: l10n.settingsNetResetAll,
             onPressed: _busy ? null : _resetAll),
         LgDialogAction(
-            label: l10n.homeCancel, onPressed: () => widget.close(false)),
+            label: l10n.homeCancel,
+            onPressed: _busy ? null : () => widget.close(false)),
         LgDialogAction(
           label: _busy ? l10n.settingsNetVerifying : l10n.homeOk,
           kind: LgButtonKind.primary,

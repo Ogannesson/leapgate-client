@@ -4,6 +4,7 @@ import 'package:flutter/material.dart' show Locale, ThemeMode;
 
 import '../../consts.dart';
 import '../../models/platform_model.dart';
+import '../bridge.dart';
 import '../options.dart';
 import 'settings_api.dart';
 
@@ -57,10 +58,16 @@ Future<bool> setUiLang(OptionScope local, OptionScope config, String lang,
 }
 
 /// At startup and after a change of language: the language shown, through S9, when it differs
-/// from what the service has.
+/// from what the service has. A failure is only logged: the next start finds the value still
+/// different and writes it again.
 Future<void> syncUiLang(
     OptionScope local, OptionScope config, Locale system) async {
   final lang = resolveUiLang(local.get(kCommConfKeyLang), system);
   if (config.get(kOptionLeapgateUiLang) == lang) return;
-  await settingsApi.setOptions({kOptionLeapgateUiLang: lang});
+  try {
+    await settingsApi.setOptions({kOptionLeapgateUiLang: lang});
+  } catch (e) {
+    lgBind.leapgateLog(
+        level: 2, msg: 'leapgate ui: $kOptionLeapgateUiLang not written: $e');
+  }
 }

@@ -46,6 +46,9 @@ class _ExitBody extends StatefulWidget {
 class _ExitBodyState extends State<_ExitBody> {
   ExitPrerequisites? _prerequisites;
 
+  /// Asking the service how many sessions use the exit node.
+  bool _counting = false;
+
   @override
   void initState() {
     super.initState();
@@ -69,7 +72,12 @@ class _ExitBodyState extends State<_ExitBody> {
     final config = appCore.options.config;
     if (!on) {
       // Nothing to warn about when no session uses the exit node; unknown counts are warned.
+      // The service may take up to 2 s to answer: the switch waits, so a second click can't
+      // stack a second question.
+      setState(() => _counting = true);
       final count = await exitSessionCount();
+      if (!mounted) return;
+      setState(() => _counting = false);
       if (count != 0) {
         final ok = await confirmInSettings(
           ctx.overlays,
@@ -122,7 +130,8 @@ class _ExitBodyState extends State<_ExitBody> {
           control: LgSwitch(
             value: on,
             semanticLabel: l10n.settingsExitAllow,
-            onChanged: ctx.locked ? null : (v) => _toggle(l10n, v),
+            onChanged:
+                ctx.locked || _counting ? null : (v) => _toggle(l10n, v),
           ),
         ),
         if (on && p != null) ...[

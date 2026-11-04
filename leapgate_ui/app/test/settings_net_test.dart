@@ -6,6 +6,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/leapgate/account_api.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
+import 'package:flutter_hbb/leapgate/settings/server_config.dart'
+    show ServerConfig, kOptionRelayServer;
 import 'package:flutter_hbb/leapgate/settings/settings_api.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -41,6 +43,9 @@ class _Bind extends FakeBind {
   final unresolvable = <String, String>{};
   bool fixedSet = false;
 
+  /// Holds every server check until completed.
+  Completer<String>? held;
+
   @override
   dynamic noSuchMethod(Invocation invocation) {
     final args = invocation.namedArguments;
@@ -69,7 +74,7 @@ class _Bind extends FakeBind {
         return jsonEncode({'url': url});
       case #mainTestIfValidServer:
         calls.add(invocation);
-        return Future.value(unresolvable[args[#server]] ?? '');
+        return held?.future ?? Future.value(unresolvable[args[#server]] ?? '');
       case #mainChangeTheme:
       case #mainChangeLanguage:
         calls.add(invocation);
@@ -558,6 +563,7 @@ void main() {
 
     testWidgets('export copies the configuration in effect; import fills the dialog', (tester) async {
       final clipboard = _mockClipboard(tester);
+      _bind.config[kOptionRelayServer] = 'relay-2.example.com';
       await _pump(tester, networkSection);
       await tester.tap(_button('导入'));
       await _settle(tester);
@@ -566,7 +572,12 @@ void main() {
       await tester.tap(_button('导出'));
       await _settle(tester);
       expect(appCore.toasts.current?.key, 'settingsNetExported');
-      expect(clipboard.text, isNotEmpty);
+      // The servers in effect, though the user typed none; the relay as typed.
+      final exported = ServerConfig.tryDecode(clipboard.text!)!;
+      expect(exported.idServer, 'leapgate.example.com');
+      expect(exported.apiServer, 'https://leapgate.example.com');
+      expect(exported.relayServer, 'relay-2.example.com');
+      expect(exported.key, '');
 
       clipboard.text = 'something else';
       await tester.tap(_button('导入'));
@@ -623,14 +634,17 @@ void main() {
       expect(find.text('API 服务器地址须以 http:// 或 https:// 开头'), findsOneWidget);
       expect(find.text('Key 格式不正确'), findsOneWidget);
       expect(find.text('No such host is known.'), findsNothing);
-      await tester.tap(_button('详细信息'));
+      await tester.tap(_button('技术细节'));
       await tester.pump();
       expect(find.text('No such host is known.'), findsOneWidget);
       expect(_api.saved, isEmpty);
     });
 
     testWidgets('server dialog: signed in, a new API server signs out first, then saves', (tester) async {
-      _account.loginResult = const ApiResult.ok(AccountUser(name: 'zhangsan'));
+      final order = <String>[];
+      accountApi = _account = _OrderedAccount(order)
+        ..loginResult = const ApiResult.ok(AccountUser(name: 'zhangsan'));
+      settingsApi = _api = _OrderedSettings(order)..summary = _defaultSummary;
       await appCore.account.login('zhangsan', 'x');
       await _pump(tester, networkSection);
       await tester.tap(_button('修改'));
@@ -642,7 +656,8 @@ void main() {
 
       await tester.tap(_button('确定'));
       await _settle(tester);
-      expect(_account.callsTo('logout'), hasLength(1));
+      // Signed out of the old server before the new one is stored (09 §4.5).
+      expect(order, ['logout', 'save']);
       expect(_api.saved.single, {
         'custom-rendezvous-server': 'home.example.com',
         'relay-server': '',
@@ -651,6 +666,44 @@ void main() {
       });
       expect(find.text('全部恢复默认'), findsNothing);
       expect(appCore.toasts.current?.key, 'settingsNetSaved');
+      await tester.pump(const Duration(seconds: 3));
+    });
+
+    testWidgets('server dialog: signed in, an address that fails does not sign out', (tester) async {
+      _bind.unresolvable['nowhere.example.com'] = 'No such host is known.';
+      _account.loginResult = const ApiResult.ok(AccountUser(name: 'zhangsan'));
+      await appCore.account.login('zhangsan', 'x');
+      await _pump(tester, networkSection);
+      await tester.tap(_button('修改'));
+      await _settle(tester);
+      await tester.enterText(find.byType(EditableText).first, 'nowhere.example.com');
+      await tester.tap(_button('确定'));
+      await _settle(tester);
+      expect(find.text('无法解析此地址'), findsOneWidget);
+      expect(_account.callsTo('logout'), isEmpty);
+      expect(_api.saved, isEmpty);
+      expect(appCore.account.loggedIn, isTrue);
+    });
+
+    testWidgets('server dialog: while it checks, "取消" and Esc do not close it', (tester) async {
+      final check = Completer<String>();
+      _bind.held = check;
+      await _pump(tester, networkSection);
+      await tester.tap(_button('修改'));
+      await _settle(tester);
+      await tester.enterText(find.byType(EditableText).first, 'home.example.com');
+      await tester.tap(_button('确定'));
+      await tester.pump();
+      expect(find.text('正在验证服务器地址…'), findsOneWidget);
+      expect(tester.widget<LgButton>(_button('取消')).onPressed, isNull);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
+      expect(find.text('全部恢复默认'), findsOneWidget);
+
+      check.complete('');
+      await _settle(tester);
+      expect(_api.saved, hasLength(1));
+      expect(find.text('全部恢复默认'), findsNothing);
       await tester.pump(const Duration(seconds: 3));
     });
 
@@ -687,6 +740,27 @@ void main() {
       await _settle(tester);
       expect(_api.socks.single.proxy, 'socks5://198.51.100.20:1080');
       expect(_api.socks.single.username, 'zhangsan');
+    });
+
+    testWidgets('proxy dialog: while it checks, "取消" and Esc do not close it', (tester) async {
+      final check = Completer<String>();
+      _bind.held = check;
+      await _pump(tester, networkSection);
+      await tester.tap(_button('设置'));
+      await _settle(tester);
+      await tester.enterText(
+          find.byType(EditableText).first, 'socks5://198.51.100.20:1080');
+      await tester.tap(_button('确定'));
+      await tester.pump();
+      expect(tester.widget<LgButton>(_button('取消')).onPressed, isNull);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
+      expect(find.text('未写协议时按 SOCKS5，端口默认 1080'), findsOneWidget);
+
+      check.complete('');
+      await _settle(tester);
+      expect(_api.socks.single.proxy, 'socks5://198.51.100.20:1080');
+      expect(find.text('未写协议时按 SOCKS5，端口默认 1080'), findsNothing);
     });
 
     testWidgets('proxy dialog: removing a proxy, too long a secret', (tester) async {
@@ -756,6 +830,32 @@ String _shared(String host) => base64Url
     .split('')
     .reversed
     .join();
+
+/// Writes "logout" into the shared [order].
+class _OrderedAccount extends FakeAccountApi {
+  _OrderedAccount(this.order);
+
+  final List<String> order;
+
+  @override
+  Future<void> logout() async {
+    order.add('logout');
+    await super.logout();
+  }
+}
+
+/// Writes "save" into the shared [order].
+class _OrderedSettings extends FakeSettingsApi {
+  _OrderedSettings(this.order);
+
+  final List<String> order;
+
+  @override
+  Future<SaveResult> setOptions(Map<String, String> changes) {
+    order.add('save');
+    return super.setOptions(changes);
+  }
+}
 
 /// Holds the sign-out request until [done].
 class _SlowLogout extends FakeAccountApi {

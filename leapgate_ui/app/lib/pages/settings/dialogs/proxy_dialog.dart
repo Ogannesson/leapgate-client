@@ -15,24 +15,36 @@ import '../../../widgets/lg_text_field.dart';
 import 'server_dialog.dart' show ServerErrorDetail;
 
 /// "代理" (02 §1.6.9, upstream `changeSocks5Proxy`) over the home tab, filled with [socks];
-/// true when it saved or removed the proxy.
+/// true when it saved or removed the proxy. While it checks and saves, neither "取消" nor Esc
+/// closes it: the save runs on.
 Future<bool> showProxyDialog(TabOverlays overlays, AppLocalizations l10n,
-        {required Socks socks}) async =>
-    await overlays.show<bool>(
-      null,
-      (context, close) => LgDialogScrim(
-        onEscape: () => close(false),
-        child: _ProxyDialog(l10n: l10n, socks: socks, close: close),
-      ),
-    ) ??
-    false;
+    {required Socks socks}) async {
+  final busy = ValueNotifier(false);
+  return await overlays.show<bool>(
+        null,
+        (context, close) => LgDialogScrim(
+          onEscape: () {
+            if (!busy.value) close(false);
+          },
+          child: _ProxyDialog(
+              l10n: l10n, socks: socks, busy: busy, close: close),
+        ),
+      ) ??
+      false;
+}
 
 class _ProxyDialog extends StatefulWidget {
   const _ProxyDialog(
-      {required this.l10n, required this.socks, required this.close});
+      {required this.l10n,
+      required this.socks,
+      required this.busy,
+      required this.close});
 
   final AppLocalizations l10n;
   final Socks socks;
+
+  /// Checking and saving; the scrim reads it for Esc.
+  final ValueNotifier<bool> busy;
   final void Function(bool?) close;
 
   @override
@@ -43,7 +55,8 @@ class _ProxyDialogState extends State<_ProxyDialog> {
   late final _proxy = TextEditingController(text: widget.socks.proxy);
   late final _username = TextEditingController(text: widget.socks.username);
   late final _hidden = TextEditingController(text: widget.socks.password);
-  bool _busy = false;
+  bool get _busy => widget.busy.value;
+  set _busy(bool value) => widget.busy.value = value;
   bool _failed = false;
   String? _proxyDetail;
   bool _tooLong = false;
@@ -123,7 +136,8 @@ class _ProxyDialogState extends State<_ProxyDialog> {
               label: l10n.settingsNetProxyRemove,
               onPressed: _busy ? null : _remove),
         LgDialogAction(
-            label: l10n.homeCancel, onPressed: () => widget.close(false)),
+            label: l10n.homeCancel,
+            onPressed: _busy ? null : () => widget.close(false)),
         LgDialogAction(
           label: _busy ? l10n.settingsNetVerifying : l10n.homeOk,
           kind: LgButtonKind.primary,

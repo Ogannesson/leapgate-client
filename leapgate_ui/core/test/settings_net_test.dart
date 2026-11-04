@@ -114,6 +114,24 @@ void main() {
       expect(d.toOptions(), c.toOptions());
     });
 
+    // Worked out by hand from upstream `common.dart` `ServerConfig.encode`: the JSON in the order
+    // host, relay, api, key, URL-safe base64 with padding, reversed.
+    const upstream =
+        '9JiI6ISeltmIsISbvNmLlxGctFGel5SZt9Gav8iOzBHd0hmI6ISawFmIsISbvNmLlxGctFGel5iMtkXYsVmciojI5FGblJnIsISbvNmLlxGctFGel5SZt9GaiojI0N3boJye';
+
+    test('the same string as upstream both ways', () {
+      final c = ServerConfig(
+          idServer: 'home.example.com',
+          relayServer: 'relay-2.example.com',
+          apiServer: 'https://home.example.com');
+      expect(c.encode(), upstream);
+      final d = ServerConfig.tryDecode(upstream)!;
+      expect(d.idServer, 'home.example.com');
+      expect(d.relayServer, 'relay-2.example.com');
+      expect(d.apiServer, 'https://home.example.com');
+      expect(d.key, '');
+    });
+
     test('the shared form is reversed base64 of JSON; plain JSON is read too', () {
       final json = jsonEncode({'host': 'home.example.com', 'key': 'k'});
       final shared = base64Url.encode(utf8.encode(json)).split('').reversed.join();
