@@ -5,6 +5,7 @@ import 'package:flutter_hbb/leapgate/identity_color.dart';
 import 'package:flutter_hbb/leapgate/local_status.dart';
 import 'package:flutter_hbb/leapgate/recent_peers.dart';
 import 'package:flutter_hbb/leapgate/session.dart';
+import 'package:flutter_hbb/leapgate/settings/unlock.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/models/state_model.dart';
 import 'package:get/get.dart';
@@ -91,6 +92,12 @@ class _MainWindowState extends State<MainWindow>
   @override
   void onWindowLeaveFullScreen() => stateGlobal.setFullscreen(false);
 
+  // Hidden to the tray or to run in the background: the settings lock again (02 §1.2.6).
+  @override
+  void onWindowEvent(String eventName) {
+    if (eventName == 'hide') settingsUnlock.lock();
+  }
+
   // Alt+F4 and the taskbar: the window does not close by itself (prevent close is on).
   @override
   void onWindowClose() => _close();
@@ -127,6 +134,8 @@ class _MainWindowState extends State<MainWindow>
       return;
     }
     if (stateGlobal.fullscreen.isTrue) stateGlobal.setFullscreen(false);
+    // Leaving the home tab leaves the settings page (02 §1.2.6).
+    if (device != null) settingsUnlock.lock();
     _dropComposition();
     if (mounted) setState(() => _selected = device);
   }

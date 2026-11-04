@@ -507,3 +507,20 @@ const String kCommConfKeyTheme = 'theme';
 /// LocalConfig, shared with the old UI: Rust's language code (`zh-cn`, `en`), empty follows the
 /// system.
 const String kCommConfKeyLang = 'lang';
+
+// M6a access (upstream `flutter/lib/consts.dart`).
+
+const String kOptionTemporaryPasswordLength = 'temporary-password-length';
+const String kOptionAllowNumericOneTimePassword =
+    'allow-numeric-one-time-password';
+const String kOptionEnableKeyboard = 'enable-keyboard';
+const String kOptionEnableRemotePrinter = 'enable-remote-printer';
+const String kOptionEnableClipboard = 'enable-clipboard';
+const String kOptionEnableFileTransfer = 'enable-file-transfer';
+const String kOptionEnableAudio = 'enable-audio';
+const String kOptionEnableCamera = 'enable-camera';
+const String kOptionEnableTerminal = 'enable-terminal';
+const String kOptionEnableRemoteRestart = 'enable-remote-restart';
+const String kOptionEnableRecordSession = 'enable-record-session';
+const String kOptionEnableBlockInput = 'enable-block-input';
+const String kOptionEnablePrivacyMode = 'enable-privacy-mode';

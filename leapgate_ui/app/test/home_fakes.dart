@@ -6,6 +6,7 @@ import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/app_window.dart';
 import 'package:flutter_hbb/leapgate/bridge.dart';
 import 'package:flutter_hbb/leapgate/local_status.dart';
+import 'package:flutter_hbb/leapgate/settings/unlock.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:leapgate_ui/l10n/app_localizations.dart';
@@ -44,6 +45,14 @@ class FakeBind implements RustdeskImpl {
   /// `#isDisableAccount`, `#isDisableAb`, `#isDisableGroupPanel` that answer true.
   final disabledOptions = <Symbol>{};
 
+  /// Config, as `mainGetOptionSync` reads it; `mainSetOption` writes it ('' removes).
+  final config = <String, String>{};
+
+  /// The unlock PIN, whether UAC lets the user through, and what saving a PIN answers (M6a).
+  String unlockPin = '';
+  bool superUser = true;
+  String setPinError = '';
+
   List<Invocation> callsTo(Symbol name) =>
       calls.where((c) => c.memberName == name).toList();
 
@@ -52,6 +61,22 @@ class FakeBind implements RustdeskImpl {
     calls.add(invocation);
     final args = invocation.namedArguments;
     switch (invocation.memberName) {
+      case #mainSetOption:
+        final key = args[#key] as String;
+        final value = args[#value] as String;
+        value.isEmpty ? config.remove(key) : config[key] = value;
+        return Future<void>.value();
+      case #mainGetOptionSync:
+        return config[args[#key]] ?? '';
+      case #mainGetUnlockPin:
+        return unlockPin;
+      case #mainCheckSuperUserPermission:
+        return Future.value(superUser);
+      case #mainSetUnlockPin:
+        if (setPinError.isEmpty) unlockPin = (args[#pin] as String).trim();
+        return setPinError;
+      case #mainSupportedPrivacyModeImpls:
+        return '[]';
       case #mainLoadRecentPeers:
       case #mainLoadFavPeers:
       case #mainLoadLanPeers:
@@ -64,7 +89,6 @@ class FakeBind implements RustdeskImpl {
       case #mainWol:
       case #mainCreateShortcut:
       case #mainUpdateTemporaryPassword:
-      case #mainSetOption:
       case #mainCheckMouseTime:
         return Future<void>.value();
       case #mainGetLocalOption:
@@ -113,7 +137,7 @@ class FakeBind implements RustdeskImpl {
         return Future.value(passwordSaves);
       case #mainGetOption:
         return Future.value(
-            args[#key] == 'access-mode' ? accessMode : '');
+            args[#key] == 'access-mode' ? accessMode : config[args[#key]] ?? '');
       case #mainGetMouseTime:
         return Future.value(lastRemoteInput.millisecondsSinceEpoch.toDouble());
     }
@@ -161,6 +185,8 @@ class FakeNavigation implements MainNavigation {
   final leapgate = FakeLeapgate();
   setLgBindForTesting(leapgate);
   appCore = AppCore(window: FakeWindow());
+  // The settings lock is one for the app; a test unlocking it leaves it to the next.
+  addTearDown(settingsUnlock.lock);
   // Their event handlers are registered by name; the next test's AppCore needs the names free.
   addTearDown(appCore.recentPeers.dispose);
   addTearDown(appCore.favPeers.dispose);
