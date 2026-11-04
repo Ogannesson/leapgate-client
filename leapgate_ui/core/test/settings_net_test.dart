@@ -83,10 +83,12 @@ void main() {
       expect(keyState(ServerSource.none), KeyState.notSet);
     });
 
-    test('the built-in ID server only when the summary shows it', () {
+    test('the built-in ID server, also while the user typed another', () {
       expect(
           defaultIdServer(const ServerSummary(
-              id: 'leapgate.example.com', idSource: ServerSource.byDefault)),
+              id: 'home.example.com',
+              idSource: ServerSource.user,
+              idDefault: 'leapgate.example.com')),
           'leapgate.example.com');
       expect(
           defaultIdServer(const ServerSummary(

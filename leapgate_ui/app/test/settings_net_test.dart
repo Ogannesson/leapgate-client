@@ -86,6 +86,7 @@ class _Bind extends FakeBind {
 const _defaultSummary = ServerSummary(
   id: 'leapgate.example.com',
   idSource: ServerSource.byDefault,
+  idDefault: 'leapgate.example.com',
   api: 'https://leapgate.example.com',
   apiSource: ServerSource.byDefault,
   keySource: ServerSource.byDefault,
@@ -176,7 +177,9 @@ void main() {
     _lg = fakes.lg;
     _bind = _Bind();
     platformFFI.setBindingForTesting(_bind);
-    settingsApi = _api = FakeSettingsApi()..summary = _defaultSummary;
+    settingsApi = _api = FakeSettingsApi()
+      ..summary = _defaultSummary
+      ..writeThrough = true;
     accountApi = _account = FakeAccountApi();
   });
 
@@ -643,7 +646,9 @@ void main() {
       final order = <String>[];
       accountApi = _account = _OrderedAccount(order)
         ..loginResult = const ApiResult.ok(AccountUser(name: 'zhangsan'));
-      settingsApi = _api = _OrderedSettings(order)..summary = _defaultSummary;
+      settingsApi = _api = _OrderedSettings(order)
+        ..summary = _defaultSummary
+        ..writeThrough = true;
       await appCore.account.login('zhangsan', 'x');
       await _pump(tester, networkSection);
       await tester.tap(_button('修改'));

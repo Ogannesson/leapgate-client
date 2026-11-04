@@ -3,6 +3,8 @@
 // The calls the page makes to block 1 (`bind.main*`) stay where they are used.
 import 'dart:convert';
 
+import '../bridge.dart';
+
 /// `leapgate_set_options` (S9): saved by the service process and copied locally; saved locally
 /// only (portable, or the user stopped the service, which imports it at its next start); or not
 /// saved (installed, the service should be running and did not answer).
@@ -55,11 +57,13 @@ ServerSource _source(String? s) => switch (s) {
     };
 
 /// `leapgate_server_summary` (S1): the values in use. [keySource] has no value: the page only
-/// says whether a key is set. [relay] is what the user typed, empty when not.
+/// says whether a key is set. [relay] is what the user typed, empty when not. [idDefault] is the
+/// build's first built-in ID server, empty without one, for the server dialog's "留空时使用默认值".
 class ServerSummary {
   const ServerSummary(
       {this.id = '',
       this.idSource = ServerSource.none,
+      this.idDefault = '',
       this.api = '',
       this.apiSource = ServerSource.none,
       this.keySource = ServerSource.none,
@@ -71,6 +75,7 @@ class ServerSummary {
     return ServerSummary(
       id: part('id')['value'] as String? ?? '',
       idSource: _source(part('id')['source'] as String?),
+      idDefault: part('id')['default'] as String? ?? '',
       api: part('api')['value'] as String? ?? '',
       apiSource: _source(part('api')['source'] as String?),
       keySource: _source(part('key')['source'] as String?),
@@ -80,6 +85,7 @@ class ServerSummary {
 
   final String id;
   final ServerSource idSource;
+  final String idDefault;
   final String api;
   final ServerSource apiSource;
   final ServerSource keySource;
@@ -164,50 +170,70 @@ abstract interface class SettingsApi {
 /// Set by tests; the app keeps the default.
 SettingsApi settingsApi = const RustSettingsApi();
 
-/// Block 2. The exports don't exist until the Rust lane is merged and the bridge regenerated
-/// (`LEAPGATE.md` §10.13): every method throws until then.
-// TODO(M6 整合): call the block 2 exports and parse with the fromJson constructors above.
+/// Block 2.
 class RustSettingsApi implements SettingsApi {
   const RustSettingsApi();
 
-  static Map<String, dynamic> decode(String json) =>
+  static Map<String, dynamic> _decode(String json) =>
       jsonDecode(json) as Map<String, dynamic>;
 
   @override
-  Future<SaveResult> setOptions(Map<String, String> changes) =>
-      throw UnimplementedError('leapgate_set_options');
+  Future<SaveResult> setOptions(Map<String, String> changes) async =>
+      switch (await lgBind.leapgateSetOptions(changes: jsonEncode(changes))) {
+        'saved' => SaveResult.saved,
+        'saved_local' => SaveResult.savedLocal,
+        _ => SaveResult.failed,
+      };
 
   @override
   Future<bool> setSocks(String proxy, String username, String password) =>
-      throw UnimplementedError('leapgate_set_socks');
+      lgBind.leapgateSetSocks(
+          proxy: proxy, username: username, password: password);
 
   @override
-  AllowNetsCheck allowNetsCheck(String text) =>
-      throw UnimplementedError('leapgate_exit_allow_nets_check');
+  AllowNetsCheck allowNetsCheck(String text) => AllowNetsCheck.fromJson(
+      _decode(lgBind.leapgateExitAllowNetsCheck(text: text)));
 
   @override
-  Future<ServerSummary> serverSummary() =>
-      throw UnimplementedError('leapgate_server_summary');
+  Future<ServerSummary> serverSummary() async =>
+      ServerSummary.fromJson(_decode(await lgBind.leapgateServerSummary()));
 
   @override
-  ServerKind serverKind() => throw UnimplementedError('leapgate_server_kind');
+  ServerKind serverKind() =>
+      switch (_decode(lgBind.leapgateServerKind())['kind']) {
+        'leapgate' => ServerKind.leapgate,
+        'compat' => ServerKind.compat,
+        _ => ServerKind.checking,
+      };
 
   @override
-  KeyCheck keyCheck(String key) => throw UnimplementedError('leapgate_key_check');
+  KeyCheck keyCheck(String key) => switch (lgBind.leapgateKeyCheck(key: key)) {
+        'empty' => KeyCheck.empty,
+        'valid' => KeyCheck.valid,
+        _ => KeyCheck.invalid,
+      };
 
   @override
-  Future<List<LocalAdapter>> localAddresses() =>
-      throw UnimplementedError('leapgate_local_addresses');
+  Future<List<LocalAdapter>> localAddresses() async => [
+        for (final a
+            in jsonDecode(await lgBind.leapgateLocalAddresses()) as List)
+          LocalAdapter.fromJson(a as Map<String, dynamic>),
+      ];
 
   @override
-  Future<DirectListen> directListen() =>
-      throw UnimplementedError('leapgate_direct_listen');
+  Future<DirectListen> directListen() async =>
+      DirectListen.fromJson(_decode(await lgBind.leapgateDirectListen()));
 
   @override
-  Future<BotCheck> verifyBot(String token) =>
-      throw UnimplementedError('leapgate_verify_bot');
+  Future<BotCheck> verifyBot(String token) async {
+    final m = _decode(await lgBind.leapgateVerifyBot(token: token));
+    return (
+      result: m['result'] as String? ?? 'other',
+      text: m['text'] as String? ?? ''
+    );
+  }
 
   @override
   Future<TwoFactorCheck> verify2fa(String code) =>
-      throw UnimplementedError('leapgate_verify_2fa');
+      lgBind.leapgateVerify2Fa(code: code);
 }

@@ -66,15 +66,20 @@ class SettingsSectionState extends ChangeNotifier
     notifyListeners();
   }
 
+  /// A [write] that throws counts as not saved; the error still goes on to the app's log.
   @override
   Future<bool> save(String item, Future<bool> Function() write) async {
-    final ok = await write();
-    if (ok) {
-      _errors.remove(item);
-    } else {
-      _errors[item] = saveFailedText;
+    var ok = false;
+    try {
+      ok = await write();
+    } finally {
+      if (ok) {
+        _errors.remove(item);
+      } else {
+        _errors[item] = saveFailedText;
+      }
+      notifyListeners();
     }
-    notifyListeners();
     return ok;
   }
 

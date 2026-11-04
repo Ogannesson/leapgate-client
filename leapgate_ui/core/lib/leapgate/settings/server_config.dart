@@ -149,11 +149,8 @@ KeyState keyState(ServerSource source) => switch (source) {
       _ => KeyState.set,
     };
 
-/// The built-in ID server when the summary shows it; empty otherwise.
-// TODO(M6 整合): S1 gives only the value in use, so with a server the user typed the dialog
-// cannot say which default an empty field falls back to.
-String defaultIdServer(ServerSummary summary) =>
-    idServerMark(summary.idSource) == ServerMark.byDefault ? summary.id : '';
+/// The build's first built-in ID server, what an empty field falls back to; empty without one.
+String defaultIdServer(ServerSummary summary) => summary.idDefault;
 
 /// The API server Rust uses for [api] and [idServer] as typed (upstream
 /// `api_server_warning.dart` `_resolveApiServer`); empty when there is none.

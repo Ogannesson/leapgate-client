@@ -106,7 +106,7 @@ Future<void> unlockWithAdmin(WidgetTester tester) async {
 void main() {
   setUp(() {
     bind = installHomeFakes().bind;
-    settingsApi = FakeSettingsApi();
+    settingsApi = FakeSettingsApi()..writeThrough = true;
   });
 
   group('frame (02 §1.2.1~§1.2.3)', () {

@@ -6,6 +6,7 @@ import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/app_window.dart';
 import 'package:flutter_hbb/leapgate/bridge.dart';
 import 'package:flutter_hbb/leapgate/local_status.dart';
+import 'package:flutter_hbb/leapgate/settings/settings_api.dart';
 import 'package:flutter_hbb/leapgate/settings/unlock.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -17,6 +18,7 @@ import 'package:leapgate_ui/theme/lg_theme.dart';
 import 'package:leapgate_ui/theme/lg_tokens.dart';
 
 import '../../core/test/fakes.dart' show FakeLeapgate;
+import 'settings_fakes.dart';
 
 export '../../core/test/fakes.dart' show FakeLeapgate;
 
@@ -185,6 +187,8 @@ class FakeNavigation implements MainNavigation {
   final leapgate = FakeLeapgate();
   setLgBindForTesting(leapgate);
   appCore = AppCore(window: FakeWindow());
+  // Config saves go through S9 (`LEAPGATE.md` §10.13); this one hands them to the fake bridge.
+  settingsApi = FakeSettingsApi()..writeThrough = true;
   // The settings lock is one for the app; a test unlocking it leaves it to the next.
   addTearDown(settingsUnlock.lock);
   // Their event handlers are registered by name; the next test's AppCore needs the names free.

@@ -1,7 +1,9 @@
 import 'package:flutter/foundation.dart';
 
 import '../common.dart';
+import '../consts.dart';
 import '../models/platform_model.dart';
+import 'settings/settings_api.dart';
 
 class _KeyNotifier extends ChangeNotifier {
   void fire() => notifyListeners();
@@ -30,9 +32,9 @@ abstract class OptionScope with _KeyNotifiers {
 
   bool getBool(String key) => option2bool(key, get(key));
 
-  /// Returns whether the value was saved. Until S9 (03 §6.1) Rust reports no result, so this is
-  /// true once the bridge call returns; an exception from the bridge propagates. After S9 it
-  /// returns Rust's answer.
+  /// Returns whether the value was saved. Config answers through S9; the other scopes have no
+  /// result from Rust, so true once the bridge call returns. An exception from the bridge
+  /// propagates.
   Future<bool> set(String key, String value) async {
     await _write(key, value);
     _changed(key);
@@ -46,8 +48,6 @@ abstract class OptionScope with _KeyNotifiers {
 /// Config: this device's settings (`Leapgate2.toml` options). On the installed version the
 /// service process owns them; the UI process reads its copy, which Rust refreshes over IPC, and a
 /// write goes to the service over IPC.
-// TODO(M6 整合): write through `settingsApi.setOptions` (S9, `LEAPGATE.md` §10.13) except
-// `stop-service`, and return false from [set] when it answers `failed`.
 class _ConfigScope extends OptionScope {
   @override
   String get(String key) => bind.mainGetOptionSync(key: key);
@@ -55,6 +55,17 @@ class _ConfigScope extends OptionScope {
   @override
   Future<void> _write(String key, String value) =>
       bind.mainSetOption(key: key, value: value);
+
+  /// Through S9 (`LEAPGATE.md` §10.13), which says whether the service took it. `stop-service`
+  /// asks for administrator permission and stays on upstream's call.
+  @override
+  Future<bool> set(String key, String value) async {
+    if (key == kOptionStopService) return super.set(key, value);
+    final saved =
+        await settingsApi.setOptions({key: value}) != SaveResult.failed;
+    if (saved) _changed(key);
+    return saved;
+  }
 }
 
 /// LocalConfig: this user's UI preferences (`Leapgate_local.toml`).
