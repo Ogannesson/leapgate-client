@@ -64,30 +64,29 @@ void main() {
   });
 
   testWidgets(
-    'the installed version unlocks before "Change", for that change only (R2-Q31)',
-    (tester) async {
-      bind
-        ..installed = true
-        ..unlockPin = '2468';
-      await pumpWith(tester, method: kUsePermanentPassword);
-      await tapText(tester, '修改');
-      expect(find.text('输入解锁 PIN'), findsWidgets);
-      expect(find.text('设置固定密码'), findsNothing);
+      'the installed version unlocks before "Change", for that change only (R2-Q31)',
+      (tester) async {
+    bind
+      ..installed = true
+      ..unlockPin = '2468';
+    await pumpWith(tester, method: kUsePermanentPassword);
+    await tapText(tester, '修改');
+    expect(find.text('输入解锁 PIN'), findsWidgets);
+    expect(find.text('设置固定密码'), findsNothing);
 
-      await tester.enterText(find.byType(EditableText).last, '1111');
-      await tapText(tester, '解锁');
-      expect(find.text('PIN 错误'), findsOneWidget);
-      await tester.enterText(find.byType(EditableText).last, '2468');
-      await tapText(tester, '解锁');
-      expect(find.text('设置固定密码'), findsOneWidget);
-      expect(settingsUnlock.locked, isFalse);
+    await tester.enterText(find.byType(EditableText).last, '1111');
+    await tapText(tester, '解锁');
+    expect(find.text('PIN 错误'), findsOneWidget);
+    await tester.enterText(find.byType(EditableText).last, '2468');
+    await tapText(tester, '解锁');
+    expect(find.text('设置固定密码'), findsOneWidget);
+    expect(settingsUnlock.locked, isFalse);
 
-      await tapText(tester, '取消');
-      expect(find.text('设置固定密码'), findsNothing);
-      expect(settingsUnlock.locked, isTrue);
-      await unmount(tester);
-    },
-  );
+    await tapText(tester, '取消');
+    expect(find.text('设置固定密码'), findsNothing);
+    expect(settingsUnlock.locked, isTrue);
+    await unmount(tester);
+  });
 
   testWidgets('"Change" with no PIN asks for administrator permission', (
     tester,
