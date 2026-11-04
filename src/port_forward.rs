@@ -448,6 +448,12 @@ pub(crate) async fn connect_and_login_mux(
 
     let _keep_it = hc_connection(feedback, rendezvous_server, token).await;
 
+    // leapgate: closed while connecting (an exit card's cancel): end before the peer is asked anything.
+    if ui_receiver.is_closed() {
+        drop(stream);
+        release_kcp(kcp).await;
+        return Ok(None);
+    }
     loop {
         tokio::select! {
             res = timeout(READ_TIMEOUT, stream.next()) => match res {
@@ -501,6 +507,13 @@ pub(crate) async fn connect_and_login_mux(
                     },
                     Some(Data::Message(msg)) => {
                         allow_err!(stream.send(&msg).await);
+                    }
+                    // leapgate: the session is gone (an exit card's cancel): close here, keeping
+                    // the KCP guard until the FIN is out, so the peer drops its prompt at once.
+                    None => {
+                        drop(stream);
+                        release_kcp(kcp).await;
+                        return Ok(None);
                     }
                     _ => {}
                 }
