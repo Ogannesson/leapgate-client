@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/connection.dart';
 import 'package:flutter_hbb/leapgate/identity_color.dart';
@@ -28,6 +29,10 @@ import 'tab_overlays.dart';
 import 'tab_shortcuts.dart';
 import 'toast_view.dart';
 import 'window_close.dart';
+
+/// Keeps the screen on or lets it sleep; tests watch it.
+@visibleForTesting
+void Function(bool on) displayKeeper = keepDisplayOn;
 
 /// The main window: the custom title bar with the in-app tabs and the content of the selected
 /// tab (01 §2.1). One tab per device, following the session registry; each tab's content has
@@ -63,12 +68,18 @@ class _MainWindowState extends State<MainWindow>
     appCore.prompter = ShellPrompter(_overlays);
     _devices = appCore.sessions.devices;
     appCore.sessions.addListener(_onSessions);
+    appCore.options.local
+        .listenable(kOptionKeepAwakeDuringOutgoingSessions)
+        .addListener(_keepDisplayOn);
   }
 
   @override
   void dispose() {
     windowManager.removeListener(this);
     appCore.sessions.removeListener(_onSessions);
+    appCore.options.local
+        .listenable(kOptionKeepAwakeDuringOutgoingSessions)
+        .removeListener(_keepDisplayOn);
     super.dispose();
   }
 
@@ -122,9 +133,22 @@ class _MainWindowState extends State<MainWindow>
     for (final d in _devices) {
       if (!devices.contains(d)) _overlays.forget(d);
     }
-    if (devices.isEmpty != _devices.isEmpty) keepDisplayOn(devices.isNotEmpty);
     _devices = devices;
+    _keepDisplayOn();
     _select(selected);
+  }
+
+  /// Whether the screen is kept on now.
+  bool _displayKeptOn = false;
+
+  /// While a session tab is open, unless "传出会话期间保持屏幕常亮" is off (02 §1.4.3); a change of
+  /// the setting applies to the open sessions at once.
+  void _keepDisplayOn() {
+    final on = _devices.isNotEmpty &&
+        appCore.options.local.getBool(kOptionKeepAwakeDuringOutgoingSessions);
+    if (on == _displayKeptOn) return;
+    _displayKeptOn = on;
+    displayKeeper(on);
   }
 
   /// Full screen belongs to the session it was entered in; another tab shows the title bar.

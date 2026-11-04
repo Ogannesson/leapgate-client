@@ -37,5 +37,7 @@ String? toastText(AppLocalizations l10n, String? key) => switch (key) {
       'settingsNetExported' => l10n.settingsNetExported,
       'settingsNetClipboardEmpty' => l10n.settingsNetClipboardEmpty,
       'settingsNetInvalidConfig' => l10n.settingsNetInvalidConfig,
+      // The two-factor authentication section's.
+      'settingsTwoFactorEnabled' => l10n.settingsTwoFactorEnabled,
       _ => translate(key),
     };
