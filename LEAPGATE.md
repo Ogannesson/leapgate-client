@@ -1823,4 +1823,36 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 - 已登录时改 API 服务器，按 09 §4.5 先退出登录再保存；保存返回 `failed`（安装版、服务没应答）时，账号已退出、服务器没改。
 - 搜索结果或链接指向的行要等异步读值才出现时（出口的"放行的网段"、网络小节的服务器摘要），第一帧找不到这一行，不会滚过去，只在数据到了以后显示标记。这几个小节都短、行在顶部。
 - S9 是"读整表、合并、写回"，读和写之间（毫秒级）服务进程自己写的键（`leapgate-api-caps`、`leapgate-api-nocaps`）可能被冲掉；上游 `set_option` 用最多旧 1 秒的缓存整表写回，窗口更大。上游每秒用服务进程的整表覆盖界面的选项缓存，和 S9 的 `refresh_options()` 之间也有约 1 秒的竞争。
-- S10 `verify_bot` 在整个 Telegram 请求期间持有保存锁（上游把查询和保存放在一个函数里），这期间别的 Config 保存要排队。M6a 不调用它，M6b 前再定要不要拆开。
+- S10 `verify_bot` 在整个 Telegram 请求期间持有保存锁（上游把查询和保存放在一个函数里），这期间别的 Config 保存要排队。M6a 不调用它，M6b 前再定要不要拆开。（M6b 定：不拆。调用它的 Telegram 对话框是模态的，请求期间用户改不了别的设置；只有服务进程自己写的键会排队，见 §10.14。）
+
+### 10.14 M6b 的分工约定
+
+依据：09（§1.1 M6b 几行、§2.3、§3 第 5 步、§5.4），界面行为以 02 §1.3.3~§1.3.5、§1.3.7、§1.4.2~§1.4.7、§1.5.4、§1.5.5、§1.6.3~§1.6.5、§1.10、§3.3 为准，02 §4.3 第 1、7 条的实测结果已回填在 02（第 6、10 条没验成，按 02 现写）；样稿同 §10.13。框架、组件、Rust 导出都是 M6a 做好的（§10.13），M6b 只有两个 coder 写页面：没有占位阶段，直接用 designer 的组件和真实导出。
+
+**分支和文件边界**（都从 `ui/m6b` 切，做完合回 `ui/m6b`；整合 worktree 仍是 `.wt/ui-m4`）
+
+| 分支 | 谁 | 只改这些 |
+|---|---|---|
+| `ui/m6b-in` | coder C（传入其余） | core `leapgate/settings/` 下 C 需要的新文件（受信设备的解析、声音来源（照上游 `audio_input.dart`）、白名单的校验、二次验证和 Telegram 的状态）；`consts.dart`（只在"M6b incoming"下追加）；app `pages/settings/sections/two_factor.dart`、`restrictions.dart`、`sessions.dart`、`remote_printing.dart`、`during_sessions.dart`（换掉占位），`dialogs/` 下新文件（开启二次验证、Telegram 机器人、IP / ID 白名单）；`shell/main_window.dart` 只改 `keepDisplayOn` 那一处（照 `keep-awake-during-outgoing-sessions`，`待调.md` 2026-10-31 那条）；ARB；测试 |
+| `ui/m6b-out` | coder D（传出其余和通用） | core `leapgate/settings/` 下 D 需要的新文件（快捷键的绑定读写和录制校验，从上游 `page_body.dart`、`recording_dialog.dart` 去界面化后搬进来，约 250 行）；`consts.dart`（只在"M6b outgoing"下追加）；app `pages/settings/sections/new_device_defaults.dart`、`toolbar.dart`、`rendering.dart`、`shortcuts.dart`、`print_jobs.dart`、`other.dart`、`about.dart`（换掉占位）；`pages/session/toolbar/monitor_menu.dart`（默认值改经选项 model，09 §2.1）和会话里读工具栏、显示器、渲染这几项设置的文件，只为让已开的会话当场跟着变（02 §3.3），改了哪些列进提交说明；ARB；测试 |
+
+- 第 0 步（`ui/m6b` 第一个提交）已把十二个小节的占位文件登记进 `settings_registry.dart`，都是 `visible: () => false`。各自做完时按 02 设 `visible`（例如远程打印、收到的打印任务只在 Windows）。`settings_registry.dart`、`settings_ids.dart`、`settings_page.dart`、`settings_section_state.dart`、`settings_flow.dart`、`settings_status.dart`、`shell/navigation.dart`、core `settings_api.dart`、两份 `settings_fakes.dart`、`app/lib/widgets/` 两个 coder 都不改；确实要改先报主会话（组件缺什么由主会话转给 designer）。小节文件彼此不引用。
+- 锁：C 的四个传入小节 `locked: true`（占位已设），用 `ctx.locked` 灰显；自己弹 UAC 的（RDP 会话共享、安装打印机）不受锁约束，结果照 09 §1.2 拿：RDP 调用返回后再读一次 `mainIsShareRdp`，打印机看全局事件 `install-printer-res`。
+- ARB 键以 `settings` 开头，C 用 `settingsTwoFactor*`、`settingsRestrict*`、`settingsSessions*`、`settingsRemotePrint*`、`settingsDuring*`，D 用 `settingsDefaults*`、`settingsToolbar*`、`settingsRender*`、`settingsShortcut*`、`settingsPrintJobs*`、`settingsOther*`、`settingsAbout*`；加在两个 ARB 文件末尾，中英文同时加，文案照 02 逐字照抄，英文照 02 §5.5，没有的新写并列进提交说明。改完 ARB 跑 `flutter gen-l10n`。
+- 写选项一律经选项 model（`config.set` 走 S9，`ctx.save` 管"无法保存设置"），页面不直接调 `bind`；第一块的 `bind.main*` 调用包在 core 的 model 里。新设备的默认设置用 `userDefault` 作用域（§10.7）。
+
+**用到的 M6a 导出和组件**
+- C：`settingsApi.localAddresses`（S4，直接 IP 访问的本机地址）、`directListen`（S5，端口和"端口 ‹端口› 已被其他应用占用"；先读 `direct-server` 选项，记录在关掉以后还在）、`verifyBot`（S10）、`verify2fa`（验证码对了再确认密钥存上了，`not_saved` 照 02 §1.6.10 写）；组件 `LgTrustedDevices`、`LgQrCode`、`LgQrKeyRow`、`LgSettingsStatusRow`、`LgSettingsNumberField`、`LgSettingsSubtitle`。
+- D：组件 `LgShortcutGroup`、`LgShortcutRow`、`LgShortcutRecordDialog`、`LgSettingsInfoRow`（关于页的行，带复制）、`LgSettingsNumberField`；关于页的版本用 `leapgate_version`（S12）。
+
+**几处约定**
+- 二次验证：开启对话框把密钥显示在二维码下（上游的做法，02 §1.6.3）。测试和画廊里只用写死的假密钥，验收时不截这个对话框（09 §5.4）。
+- S10 不拆（见 §10.13 已知限制末尾）：Telegram 对话框在请求期间显示进行中、不能重复点。
+- 声音来源改了以后由 S9 照上游重启音频服务（§10.13"Rust 的做法和约束"），页面不另做。
+- 录制位置：会话（传入的录制）和会话期间（传出的录制）共用同一个目录项，都在 C；选文件夹用 app 已有的 `file_picker`。
+- 快捷键：总开关打开时写入默认绑定，录制的五种状态、冲突替换、恢复默认照 02 §1.4.6；"发送到远程设备"打开时快捷键不生效，判断沿用 M2b 的快捷键 model。
+- 关于：版本、源代码链接、上游版权行和"基于 RustDesk"照 02 §1.5.5；行内复制用 `LgSettingsInfoRow`。
+
+**测试**
+- core：受信设备的解析；声音来源列表；白名单的逐行校验；快捷键绑定读写和录制校验（五种状态、冲突）。
+- app：02 §1.10 里这十二个小节和三个对话框的每个状态一个行为测试，用 `FakeSettingsApi` 喂数据；已开会话在工具栏、渲染改了以后当场跟着变（D）；有出站会话时按 `keep-awake-during-outgoing-sessions` 决定是否阻止熄屏（C）。

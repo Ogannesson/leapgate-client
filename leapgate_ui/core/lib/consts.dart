@@ -537,3 +537,7 @@ const String kOptionRelayFallbackDelay = "relay-fallback-delay";
 const String kOptionAllowWebSocket = "allow-websocket";
 const String kOptionAllowInsecureTLSFallback = "allow-insecure-tls-fallback";
 const String kOptionDisableUdp = "disable-udp";
+
+// M6b incoming (coder C, `LEAPGATE.md` §10.14): upstream's names and values.
+
+// M6b outgoing (coder D, `LEAPGATE.md` §10.14): upstream's names and values.
