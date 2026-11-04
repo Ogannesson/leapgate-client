@@ -26,20 +26,24 @@ class _Hit {
   const _Hit(this.section, this.item, this.detail);
 
   final SettingsSection section;
-  final SettingsItem item;
+
+  /// Null when the section's own title matched: the hit opens the section and marks nothing.
+  final SettingsItem? item;
 
   /// The description, or the option names when one of those matched.
   final String detail;
 }
 
-/// Items of the [sections] whose name, description or option names contain [query], ignoring
-/// case; in the sections' order, which is the groups' order.
+/// Sections whose title, and items whose name, description or option names contain [query],
+/// ignoring case; in the sections' order, which is the groups' order, each section before its
+/// items.
 List<_Hit> _search(List<SettingsSection> sections, String query) {
   final q = query.trim().toLowerCase();
   if (q.isEmpty) return const [];
   bool has(String s) => s.toLowerCase().contains(q);
   return [
-    for (final section in sections)
+    for (final section in sections) ...[
+      if (has(section.title)) _Hit(section, null, ''),
       for (final item in section.items())
         if (has(item.name) || has(item.description) || item.options.any(has))
           _Hit(
@@ -47,6 +51,7 @@ List<_Hit> _search(List<SettingsSection> sections, String query) {
             item,
             item.options.any(has) ? item.options.join(' · ') : item.description,
           ),
+    ],
   ];
 }
 
@@ -156,7 +161,7 @@ class _SettingsPageState extends State<SettingsPage>
     setState(() => _hit = (_hit + by).clamp(0, count - 1));
   }
 
-  void _openHit(_Hit hit) => _open(hit.section.id, item: hit.item.id);
+  void _openHit(_Hit hit) => _open(hit.section.id, item: hit.item?.id);
 
   @override
   Widget build(BuildContext context) {
@@ -211,12 +216,20 @@ class _SettingsPageState extends State<SettingsPage>
                   LgSettingsSearchResults(
                     results: [
                       for (final h in hits)
-                        LgSettingsSearchResult(
-                          path:
-                              '${settingsGroupTitle(l10n, h.section.id.group)} › ${h.section.title}',
-                          name: h.item.name,
-                          description: h.detail.isEmpty ? null : h.detail,
-                        ),
+                        if (h.item case final item?)
+                          LgSettingsSearchResult(
+                            path:
+                                '${settingsGroupTitle(l10n, h.section.id.group)} › ${h.section.title}',
+                            name: item.name,
+                            description: h.detail.isEmpty ? null : h.detail,
+                          )
+                        else
+                          // The section itself: its group above its name (the component has no
+                          // row with the path alone).
+                          LgSettingsSearchResult(
+                            path: settingsGroupTitle(l10n, h.section.id.group),
+                            name: h.section.title,
+                          ),
                     ],
                     query: _query.text,
                     selectedIndex: hits.isEmpty
@@ -239,6 +252,8 @@ class _SettingsPageState extends State<SettingsPage>
       saveFailedText: l10n.settingsSaveFailed,
       locked: locked,
     );
+    // The language may have changed since the section was opened.
+    state.saveFailedText = l10n.settingsSaveFailed;
     return LgSettingsContent(
       controller: _scroll,
       title: section.title,

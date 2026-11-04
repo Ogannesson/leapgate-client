@@ -965,9 +965,12 @@
   "settingsAccountSignedOut": "未登录",
   "settingsAccountServer": "服务器：{server}",
   "settingsSearchClear": "清除搜索",
-  "settingsSearchSections": "设置分区",
+  "settingsSearchSections": "设置小节",
   "settingsUnlockLockedMark": "已锁定",
   "settingsServiceWarnProxy": "已设置代理，其他设备无法连接本机",
   "settingsServiceWarnWebSocket": "已使用 WebSocket，其他设备无法连接本机",
-  "settingsServiceWarnUdp": "已禁用 UDP，其他设备无法连接本机"
+  "settingsServiceWarnUdp": "已禁用 UDP，其他设备无法连接本机",
+  "settingsServiceChangePinLabel": "修改解锁 PIN",
+  "settingsServiceRemovePinLabel": "移除解锁 PIN",
+  "settingsUnlockPasswordNotChanged": "未获得管理员权限，固定密码未修改"
 }

@@ -38,8 +38,14 @@ class _StatusBind implements RustdeskImpl {
   /// The proxy, user and password; empty when none is set.
   List<String> socks = const [];
 
+  /// The service did not answer the proxy question.
+  bool socksFails = false;
+
   @override
-  Future<List<String>> mainGetSocks({dynamic hint}) async => socks;
+  Future<List<String>> mainGetSocks({dynamic hint}) async {
+    if (socksFails) throw StateError('no service');
+    return socks;
+  }
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
@@ -135,6 +141,18 @@ void main() {
       expect(await poll(), NetworkWarning.webSocket);
       bind.socks = const ['socks5://198.51.100.20:1080', '', ''];
       expect(await poll(), NetworkWarning.proxy);
+    });
+
+    test('a failed proxy question leaves the ID and the service line alone', () async {
+      bind
+        ..socksFails = true
+        ..options[kOptionDisableUdp] = 'Y';
+      final model = LocalStatusModel()..start();
+      await settle();
+      model.dispose();
+      expect(model.id, '135792468');
+      expect(model.status, ServiceStatus.ready);
+      expect(model.networkWarning, isNull);
     });
   });
 

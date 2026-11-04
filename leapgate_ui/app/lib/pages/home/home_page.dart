@@ -125,11 +125,18 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   /// it stays so.
   Future<void> _changePassword(AppLocalizations l10n) async {
     final wasLocked = settingsUnlock.locked;
-    if (await unlockSettings(widget.overlays, l10n)) {
-      await showPermanentPasswordDialog(widget.overlays, l10n);
+    final unlocked = await unlockSettings(widget.overlays, l10n);
+    // UAC cancelled or failed says so under the row until an unlock goes through; a PIN dialog
+    // the user closed says nothing (01 P1 block A).
+    if (mounted && (unlocked || settingsUnlock.denied)) {
+      setState(() => _passwordDenied = !unlocked);
     }
+    if (unlocked) await showPermanentPasswordDialog(widget.overlays, l10n);
     if (wasLocked) settingsUnlock.lock();
   }
+
+  /// "修改" got no administrator permission the last time.
+  bool _passwordDenied = false;
 
   @override
   Widget build(BuildContext context) {
@@ -149,6 +156,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             section: _section,
             onSection: _show,
             onChangePassword: () => _changePassword(l10n),
+            passwordError: _passwordDenied
+                ? l10n.settingsUnlockPasswordNotChanged
+                : null,
             overlays: widget.overlays,
           ),
         ),
@@ -227,6 +237,7 @@ class _SideColumn extends StatelessWidget {
     required this.section,
     required this.onSection,
     required this.onChangePassword,
+    required this.passwordError,
     required this.overlays,
   });
 
@@ -234,6 +245,7 @@ class _SideColumn extends StatelessWidget {
   final HomeSection section;
   final ValueChanged<HomeSection> onSection;
   final VoidCallback? onChangePassword;
+  final String? passwordError;
   final TabOverlays overlays;
 
   @override
@@ -304,6 +316,7 @@ class _SideColumn extends StatelessWidget {
                     PasswordRowView(
                       status: status,
                       onChange: onChangePassword,
+                      error: passwordError,
                     ),
                     SizedBox(height: short ? LgSpace.s2 : LgSpace.s5),
                     DefaultTextStyle(
