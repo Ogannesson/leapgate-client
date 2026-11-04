@@ -93,6 +93,13 @@ class _NetworkBodyState extends State<_NetworkBody> {
         _summary = summary;
         _socks = socks;
       });
+      // S2 settles with no event, and the page reads again only on open, refocus and save
+      // (09 §4.2): while it is still checking, read again a second later.
+      if (settingsApi.serverKind() == ServerKind.checking) {
+        Future.delayed(const Duration(seconds: 1), () {
+          if (mounted) _read();
+        });
+      }
     }
   }
 

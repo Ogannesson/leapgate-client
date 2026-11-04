@@ -582,6 +582,23 @@ void main() {
       _api.kind = ServerKind.checking;
       await _pump(tester, networkSection);
       expect(find.text('正在确认…'), findsOneWidget);
+
+      // S2 settles while the section stays open: the row follows, either way.
+      _api.kind = ServerKind.compat;
+      await tester.pump(const Duration(seconds: 1));
+      await _settle(tester);
+      expect(find.text('兼容服务器：出口目录和部分直连方式不可用'), findsOneWidget);
+      expect(find.text('正在确认…'), findsNothing);
+    });
+
+    testWidgets('connection methods: the compatible server note comes once S2 settles', (tester) async {
+      _api.kind = ServerKind.checking;
+      await _pump(tester, connectionSection);
+      expect(find.text('当前服务器不支持部分直连方式'), findsNothing);
+      _api.kind = ServerKind.compat;
+      await tester.pump(const Duration(seconds: 1));
+      await _settle(tester);
+      expect(find.text('当前服务器不支持部分直连方式'), findsOneWidget);
     });
 
     testWidgets('a proxy in use', (tester) async {

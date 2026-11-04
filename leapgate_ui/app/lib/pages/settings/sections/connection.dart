@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/settings/connection_settings.dart';
+import 'package:flutter_hbb/leapgate/settings/settings_api.dart';
 
 import '../../../l10n/app_localizations.dart';
 import '../../../shell/navigation.dart';
@@ -55,7 +56,15 @@ class _ConnectionBodyState extends State<_ConnectionBody> {
 
   Future<void> _read() async {
     final notes = await readConnectionNotes(appCore.options.config);
-    if (mounted) setState(() => _notes = notes);
+    if (!mounted) return;
+    setState(() => _notes = notes);
+    // S2 settles with no event, and the page reads again only on open, refocus and save
+    // (09 §4.2): while it is still checking, read again a second later.
+    if (settingsApi.serverKind() == ServerKind.checking) {
+      Future.delayed(const Duration(seconds: 1), () {
+        if (mounted) _read();
+      });
+    }
   }
 
   /// Enter or leaving the box saves; a wrong value is not saved and says so (02 §1.2.5).
