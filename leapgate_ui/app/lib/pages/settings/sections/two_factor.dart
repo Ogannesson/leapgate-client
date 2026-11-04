@@ -216,7 +216,8 @@ class _TwoFactorBodyState extends State<_TwoFactorBody> {
                 devices: [
                   for (final d in _list)
                     LgTrustedDevice(
-                      id: d.hwidHex,
+                      id: d.id,
+                      pickKey: d.hwidHex,
                       name: d.name,
                       formattedId: formatPeerId(d.id),
                       platform: lgPlatformOf(d.platform),
