@@ -1728,7 +1728,7 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 | `leapgate_set_options`（S9） | `changes: String`（JSON 对象 `{键: 值}`，空值删除） | `String`：`saved` / `saved_local` / `failed` |
 | `leapgate_set_socks`（S9） | `proxy`、`username`、`password: String` | `bool`：服务进程收下了 |
 | `leapgate_exit_allow_nets_check`（E5） | `text: String`（对话框原文，每行一条） | `SyncReturn<String>`：`{"valid":bool,"count":N,"lines":[{"line":行号,"state":"invalid"\|"blocked"}],"value":要存的值}`；行号从 1 起、按原文；`blocked` 是"始终禁止"的警告，仍可保存 |
-| `leapgate_server_summary`（S1） | — | `String`：`{"id":{"value","source"},"api":{"value","source"},"key":{"source"},"relay":{"value"}}`；`id` 的来源 `exe` / `user` / `custom` / `cache_default` / `cache_last` / `default` / `none`，`api` 的 `exe` / `user` / `derived` / `default` / `none`，`key` 的 `exe` / `user` / `default` / `none` |
+| `leapgate_server_summary`（S1） | — | `String`：`{"id":{"value","source","default"},"api":{"value","source"},"key":{"source"},"relay":{"value"}}`；`id.default` 是本构建内置默认列表的第一台 ID 服务器（写法同 `value`，不带补上的默认端口），没有内置默认值时为空串，服务器对话框"留空时使用默认值"用它；`id` 的来源 `exe` / `user` / `custom` / `cache_default` / `cache_last` / `default` / `none`，`api` 的 `exe` / `user` / `derived` / `default` / `none`，`key` 的 `exe` / `user` / `default` / `none` |
 | `leapgate_server_kind`（S2） | — | `SyncReturn<String>`：`{"kind":"leapgate"\|"compat"\|"checking","features":[…]}` |
 | `leapgate_key_check`（S3） | `key: String` | `SyncReturn<String>`：`empty` / `valid` / `invalid` |
 | `leapgate_local_addresses`（S4） | — | `String`：`[{"name","ipv4":[…],"ipv6":[…]}]`，不列临时 IPv6 地址 |

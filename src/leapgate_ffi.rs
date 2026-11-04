@@ -300,7 +300,8 @@ pub fn leapgate_exit_allow_nets_check(text: String) -> SyncReturn<String> {
     SyncReturn(serde_json::to_string(&check).unwrap_or_default())
 }
 
-/// S1: `{"id":{"value","source"},"api":{"value","source"},"key":{"source"},"relay":{"value"}}`.
+/// S1: `{"id":{"value","source","default"},"api":{"value","source"},"key":{"source"},
+/// "relay":{"value"}}`; `id.default` is the first built-in ID server, empty without one.
 pub fn leapgate_server_summary() -> String {
     crate::leapgate_hooks::settings::server_summary()
 }

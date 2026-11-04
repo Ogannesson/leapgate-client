@@ -62,10 +62,17 @@ impl Item {
     }
 }
 
-/// `{"id":{"value","source"},"api":{"value","source"},"key":{"source"},"relay":{"value"}}`.
+/// `{"id":{"value","source","default"},"api":{"value","source"},"key":{"source"},
+/// "relay":{"value"}}`. `id.default` is the build's first built-in ID server, empty without
+/// one: the server dialog shows it for an empty field.
 pub fn summary(s: &Servers) -> Value {
+    let id = id(s);
     json!({
-        "id": id(s),
+        "id": {
+            "value": id.value,
+            "source": id.source,
+            "default": s.builtin.first().copied().unwrap_or_default(),
+        },
         "api": api(s),
         "key": {"source": key_source(s)},
         "relay": {"value": s.relay},
@@ -316,12 +323,37 @@ mod tests {
         assert_eq!(
             summary(&s),
             json!({
-                "id": {"value": "rs.example.net", "source": "default"},
+                "id": {"value": "rs.example.net", "source": "default", "default": "rs.example.net"},
                 "api": {"value": "https://api.example.net", "source": "default"},
                 "key": {"source": "default"},
                 "relay": {"value": "relay.example.org"},
             })
         );
+    }
+
+    #[test]
+    fn id_default_is_shown_whatever_is_in_use() {
+        let custom = Servers {
+            custom: "home.example.org:31116",
+            current: "home.example.org:31116",
+            ..base()
+        };
+        assert_eq!(
+            summary(&custom)["id"],
+            json!({"value": "home.example.org:31116", "source": "user", "default": "rs.example.net"})
+        );
+        let cached = Servers {
+            current: "old.example.org:21116",
+            ..base()
+        };
+        assert_eq!(summary(&cached)["id"]["default"], "rs.example.net");
+        let none = Servers {
+            custom: "home.example.org",
+            builtin: &[""],
+            ..Default::default()
+        };
+        assert_eq!(summary(&none)["id"]["default"], "");
+        assert_eq!(summary(&Servers::default())["id"]["default"], "");
     }
 
     #[test]
