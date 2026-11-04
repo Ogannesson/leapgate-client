@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 
 import '../consts.dart';
 import '../models/platform_model.dart';
+import 'app_core.dart';
 import 'bridge.dart';
 
 enum ServiceStatus { ready, connecting, notReady, stopped }
@@ -134,13 +135,28 @@ class LocalStatusModel extends ChangeNotifier {
     }
   }
 
-  /// "Refresh" on the one-time password; the next poll shows the new one.
+  /// "Refresh" on the one-time password, and after its length or "仅使用数字" changed (02
+  /// §1.3.1); the next poll shows the new one.
   Future<void> refreshOneTimePassword() => bind.mainUpdateTemporaryPassword();
 
-  /// "Start service" (upstream `common.dart` `start_service(true)`; the superuser check there
-  /// is macOS only). Rust starts the service when `stop-service` is cleared.
-  Future<void> startService() =>
-      bind.mainSetOption(key: kOptionStopService, value: '');
+  /// Whether "停止服务" / "启动服务" asks first (02 §1.3.8, §3.5): stopping always; starting on
+  /// the installed version while sessions or exit nodes are in use, since Leapgate closes and
+  /// reopens.
+  bool serviceAsksFirst({required bool stop}) =>
+      stop ||
+      bind.mainIsInstalled() &&
+          (appCore.sessions.devices.isNotEmpty ||
+              appCore.exitNodes.runningCount > 0);
+
+  /// Stops or starts the service: Rust stops or starts it when `stop-service` is set or cleared
+  /// (upstream `common.dart` `start_service`; the superuser check there is macOS only). Not
+  /// through S9. On the installed version Rust removes or installs the Windows service under UAC
+  /// and Leapgate restarts, so a call that returns did not do it, cancelled and failed alike
+  /// (09 §4.4): false then.
+  Future<bool> toggleService({required bool stop}) async {
+    await bind.mainSetOption(key: kOptionStopService, value: stop ? 'Y' : '');
+    return !bind.mainIsInstalled();
+  }
 
   Future<void> _poll() async {
     final id = await bind.mainGetMyId();

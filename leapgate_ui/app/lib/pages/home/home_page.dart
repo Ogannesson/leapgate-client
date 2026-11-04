@@ -3,6 +3,7 @@ import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/local_status.dart';
 import 'package:flutter_hbb/leapgate/recent_peers.dart' show formatPeerId;
 import 'package:flutter_hbb/leapgate/remote_block.dart';
+import 'package:flutter_hbb/leapgate/settings/unlock.dart';
 
 import '../../icons/lg_icon.dart';
 import '../../l10n/app_localizations.dart';
@@ -14,6 +15,8 @@ import '../../widgets/lg_button.dart';
 import '../../widgets/lg_list_chrome.dart';
 import '../../widgets/lg_pressable.dart';
 import '../../widgets/lg_status.dart';
+import '../settings/dialogs/service.dart';
+import '../settings/dialogs/unlock_pin.dart';
 import '../settings/settings_page.dart';
 import 'account/account.dart';
 import 'devices_page.dart';
@@ -106,6 +109,17 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   /// section and item itself.
   void _onSettingsRequest() => setState(() => _section = HomeSection.settings);
 
+  /// The password row's "修改": the installed version unlocks first, with the settings page's
+  /// lock, for this change only (01 P1 block A, R2-Q31). Already unlocked on the settings page,
+  /// it stays so.
+  Future<void> _changePassword(AppLocalizations l10n) async {
+    final wasLocked = settingsUnlock.locked;
+    if (await unlockSettings(widget.overlays, l10n)) {
+      await showPermanentPasswordDialog(widget.overlays, l10n);
+    }
+    if (wasLocked) settingsUnlock.lock();
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
@@ -123,11 +137,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             status: widget.status,
             section: _section,
             onSection: (s) => setState(() => _section = s),
-            // The installed version unlocks first (01 P1 block A, R2-Q31), with the settings
-            // page (M6).
-            onChangePassword: appCore.options.isInstalled
-                ? null
-                : () => showPermanentPasswordDialog(widget.overlays, l10n),
+            onChangePassword: () => _changePassword(l10n),
             overlays: widget.overlays,
           ),
         ),
@@ -171,7 +181,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 ],
                 if (_section == HomeSection.settings) ...[
                   const SizedBox(height: LgSpace.s3),
-                  Expanded(child: SettingsPage(overlays: widget.overlays)),
+                  Expanded(
+                    child: SettingsPage(
+                        overlays: widget.overlays, status: widget.status),
+                  ),
                 ],
               ],
             ),
@@ -308,11 +321,7 @@ class _SideColumn extends StatelessWidget {
                       },
                     ),
                     if (status.status == ServiceStatus.stopped)
-                      LgButton(
-                        label: l10n.homeStartService,
-                        kind: LgButtonKind.text,
-                        onPressed: status.startService,
-                      ),
+                      _StartService(status: status, overlays: overlays),
                     if (status.incoming.total > 0) ...[
                       const SizedBox(height: LgSpace.s2),
                       LgControlledNote(
@@ -383,6 +392,58 @@ class _SideColumn extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// "启动服务" while the service is stopped: the settings page's way (02 §1.3.8, §3.3), with the
+/// red line under it when administrator permission was not granted.
+class _StartService extends StatefulWidget {
+  const _StartService({required this.status, required this.overlays});
+
+  final LocalStatusModel status;
+  final TabOverlays overlays;
+
+  @override
+  State<_StartService> createState() => _StartServiceState();
+}
+
+class _StartServiceState extends State<_StartService> {
+  bool _busy = false;
+  String? _error;
+
+  Future<void> _start(AppLocalizations l10n) async {
+    setState(() => _busy = true);
+    final result = await toggleService(
+      widget.overlays,
+      l10n,
+      widget.status,
+      stop: false,
+    );
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      if (result != null) _error = result.error;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = LgTokens.of(context);
+    final l10n = AppLocalizations.of(context)!;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        LgButton(
+          label: l10n.homeStartService,
+          icon: appCore.options.isInstalled ? LgIcons.uac : null,
+          kind: LgButtonKind.text,
+          busy: _busy,
+          onPressed: _busy ? null : () => _start(l10n),
+        ),
+        if (_error != null)
+          Text(_error!, style: t.textS.copyWith(color: t.colors.error)),
+      ],
     );
   }
 }

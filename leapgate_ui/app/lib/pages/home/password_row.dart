@@ -5,13 +5,14 @@ import 'package:flutter_hbb/leapgate/local_status.dart';
 
 import '../../icons/lg_icon.dart';
 import '../../l10n/app_localizations.dart';
+import '../../shell/navigation.dart';
 import '../../widgets/lg_button.dart';
 import '../../widgets/lg_password_row.dart';
 
 /// The password row of this device (01 P1 block A): label, content, the note when both
 /// passwords work, "Copy" and "Refresh" while there is a one-time password, "Change" for the
-/// permanent one on the portable version ([onChange] null hides it: the installed version
-/// unlocks first, M6).
+/// permanent one ([onChange] null hides it), and under it the link "更多访问设置" to 传入连接 ›
+/// 访问与密码 (02 §1.2.1).
 class PasswordRowView extends StatelessWidget {
   const PasswordRowView({super.key, required this.status, this.onChange});
 
@@ -21,6 +22,21 @@ class PasswordRowView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _row(l10n),
+        // A text button until designer's link (`.lnk-row` in A-P1.html).
+        LgButton(
+          label: l10n.settingsAccessMore,
+          kind: LgButtonKind.text,
+          onPressed: () => mainNavigation.showSettings(SettingsSectionId.access),
+        ),
+      ],
+    );
+  }
+
+  Widget _row(AppLocalizations l10n) {
     final password = status.oneTimePassword;
     final row = status.passwordRow;
     if ((row == PasswordRow.oneTime || row == PasswordRow.both) &&

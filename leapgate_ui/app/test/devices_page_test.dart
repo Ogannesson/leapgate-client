@@ -372,7 +372,9 @@ void main() {
       // From another page of the home tab.
       await tester.tap(find.text('设置'));
       await tester.pump();
-      expect(find.byType(EditableText), findsNothing);
+      // Only the settings page's search box.
+      expect(find.byType(EditableText), findsOneWidget);
+      expect(find.text('搜索设置'), findsOneWidget);
 
       connectBoxFocusRequests.request(text: '987654321');
       await tester.pump();
