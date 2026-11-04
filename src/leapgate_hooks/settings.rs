@@ -189,23 +189,46 @@ pub(crate) fn server_kind() -> String {
     server_info::kind_with(&|k| crate::ui_interface::get_option(k)).to_string()
 }
 
-/// S10: checks the token with Telegram and saves the bot as upstream does, then confirms the
-/// service has it (upstream's save fails silently). The token is left out of the text.
-pub(crate) fn verify_bot(token: &str) -> (&'static str, String) {
-    // Upstream checks with Telegram and saves in one call, so the lock spans both.
-    let _saving = SAVING.lock().unwrap();
-    let result = crate::auth_2fa::get_chatid_telegram(token).map_err(|e| e.to_string());
-    let mut kind = settings::bot_result(&result);
-    if kind == "ok" && !saved_in_service("bot") {
-        kind = "other";
+/// S10's first step: the chat the codes would go to, saving nothing. The error is a
+/// `settings::bot_result` kind and the text without the token.
+pub(crate) fn bot_lookup(token: &str) -> Result<settings::BotChat, (&'static str, String)> {
+    let url = format!("https://api.telegram.org/bot{}/getUpdates", token);
+    // As upstream's `get_chatid_telegram`: the caller may be in a tokio runtime.
+    let result = std::thread::spawn(move || crate::post_request_sync(url, "".to_owned(), ""))
+        .join()
+        .map_err(|_| "Thread panicked".to_owned())
+        .and_then(|resp| resp.map_err(|e| e.to_string()))
+        .and_then(|resp| settings::bot_chat(&resp));
+    let kind = settings::bot_result(&result);
+    match result {
+        Ok(Some(chat)) => Ok(chat),
+        Ok(None) => Err((kind, String::new())),
+        Err(text) if token.is_empty() => Err((kind, text)),
+        Err(text) => Err((kind, text.replace(token, "<token>"))),
     }
-    let text = result.err().unwrap_or_default();
-    let text = if token.is_empty() {
-        text
-    } else {
-        text.replace(token, "<token>")
+}
+
+/// S10's second step: saves the bot as upstream's private `TelegramBot::save` does, then
+/// confirms the service has it (upstream's save fails silently): `ok` or `other`.
+pub(crate) fn bot_save(token: &str, chat_id: String) -> &'static str {
+    let _saving = SAVING.lock().unwrap();
+    let bot = crate::auth_2fa::TelegramBot {
+        token: hbb_common::password_security::encrypt_vec_or_original(token.as_bytes(), "00", 1024),
+        chat_id,
+        ..Default::default()
     };
-    (kind, text)
+    let Ok(s) = serde_json::to_string(&bot) else {
+        return "other";
+    };
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    ipc::set_option("bot", &s);
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    Config::set_option("bot".to_owned(), s);
+    if saved_in_service("bot") {
+        "ok"
+    } else {
+        "other"
+    }
 }
 
 /// `ok`, `wrong_code`, or `not_saved` when the code was right but the service does not have the

@@ -1796,7 +1796,8 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 | `leapgate_key_check`（S3） | `key: String` | `SyncReturn<String>`：`empty` / `valid` / `invalid` |
 | `leapgate_local_addresses`（S4） | — | `String`：`[{"name","ipv4":[…],"ipv6":[…]}]`，不列临时 IPv6 地址 |
 | `leapgate_direct_listen`（S5） | — | `String`：`{"state":"listening","port":N}` / `{"state":"failed","port":N,"error":"in_use"\|"denied"\|"other"}` / `{}`（服务不在或还没有结果） |
-| `leapgate_verify_bot`（S10） | `token: String` | `String`：`{"result":"ok"\|"network"\|"invalid_token"\|"no_chat"\|"other","text":…}` |
+| `leapgate_bot_lookup`（S10 第一步） | `token: String` | `String`：`{"result":"ok","chat":{"id":…,"type":"private"\|"group"\|"supergroup"\|"channel","label":…}}` / `{"result":"network"\|"invalid_token"\|"no_chat","text":…}`。只查、不存 |
+| `leapgate_bot_save`（S10 第二步） | `token: String`，`chat_id: String` | `String`：`ok` / `other`（服务进程没存上） |
 | `leapgate_verify_2fa` | `code: String` | `String`：`ok` / `wrong_code` / `not_saved` |
 | `leapgate_lang_changed` | `lang: String`（解析后的实际语言，`zh-cn` 或 `en`） | 无。经 `send_to_cm` 发 `Msg::Lang`，CM 推 `{"name":"lang","lang":…}` 给 `leapgate_cm_events`，CM 直接切换、不写盘。代替上游 `mainChangeLanguage`：上游的 `Data::Language` 让 CM 把内存里整份旧的 LocalConfig 写回文件（`src/ui_cm_interface.rs` 收到语言消息那一处），会盖掉主窗口之后写的主题、界面模式、出口端口表等 |
 
@@ -1807,7 +1808,7 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 - S1、S2 和 `exit/directory.rs`：服务器地址和能力从界面进程的选项缓存（`ui_interface::get_option`）取，交给 `libs/leapgate` 的纯函数；不在界面进程里直接读 `Config`（安装版界面进程的 `Config` 可能是旧的，09 §4.1）。S1 的来源推导写成纯函数，`report::root_from` 也改调它，不出第三份复刻。
 - S2：确认不支持时写 `leapgate-api-nocaps = <api 根>`，确认支持时清掉；三态 = 有对得上的 caps → `leapgate`，有对得上的 nocaps → `compat`，都没有 → `checking`。
 - S5：`leapgate::direct::noted(port, result)` 原样返回 `result` 并记下结果，上游那一行只多这一层包装；查询走 `leapgate::ipc::Msg` 末尾新加的变体，服务端分支在 `src/leapgate_hooks/ipc.rs`。`denied` 对应 Windows 10013。
-- S10：按上游错误原文的格式（`Telegram API error: … (error_code: N)`）归类：401、404 → `invalid_token`，空值 → `no_chat`，其余错误 → `network`；成功后再读一次服务进程的配置，`bot` 没存上就回 `other`。`leapgate_verify_2fa` 同理：验证码对了再确认密钥存上了。用上游原文写单测钉住。
+- S10 分两步（2026-11-05 改，02 §1.6.4"确认收件对话"）：上游 `get_chatid_telegram` 取 getUpdates 里**最早**一条消息的对话、不给人看就保存，机器人的用户名谁都能搜到，有人先给它发过消息，验证码就会发到那个人那里。所以不再调它：`leapgate_bot_lookup` 照上游在新线程里调 `post_request_sync` 发 getUpdates，由 `libs/leapgate` 的 `settings::bot_chat` 取**最近**一条带 `message` 的更新里的对话（id 数字或字符串都转成字符串；显示名私聊是 `@username`，没有就是"名 姓"，群组、频道是 `title`），什么都不存、不拿保存锁；Telegram 的错误照上游原文的格式（`Telegram API error: … (error_code: N)`）写，再由 `bot_result` 归类：401、404 → `invalid_token`，没有对话 → `no_chat`，其余错误 → `network`；`text` 里的 Token 换成 `<token>`。用户确认后 `leapgate_bot_save` 在保存锁下照上游私有的 `TelegramBot::save` 存（用上游公开的 `TelegramBot` 结构序列化，`into_string`、`save` 那几行抄进 `src/leapgate_hooks/settings.rs`，`src/auth_2fa.rs` 不改），再读一次服务进程的配置，`bot` 没存上就回 `other`。`leapgate_verify_2fa` 同理：验证码对了再确认密钥存上了。解析和归类用写死的 getUpdates 响应和 Telegram 错误原文写单测钉住。
 - S11：`leapgate-ui-lang` 为 `zh-cn` 时中文正文，其余（含没设）照现在的英文；正文放 `libs/leapgate/src/lang.rs`。
 - E5：从 `parse_allow_nets` 拆出逐项解析；"始终禁止"按网段整个落在回环、链路本地、保留段或元数据地址里判断，不拿首地址判断（`0.0.0.0/0` 不能报）；198.18.0.0/15 不算；"本机地址"是动态的，不报。`value` 是 `parse_allow_nets` 读得懂的存储格式。
 - 状态类型和 JSON 放 `libs/leapgate`，带单测；上游两处挂钩之外不碰上游文件。
@@ -1823,7 +1824,7 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 - 已登录时改 API 服务器，按 09 §4.5 先退出登录再保存；保存返回 `failed`（安装版、服务没应答）时，账号已退出、服务器没改。
 - 搜索结果或链接指向的行要等异步读值才出现时（出口的"放行的网段"、网络小节的服务器摘要），第一帧找不到这一行，不会滚过去，只在数据到了以后显示标记。这几个小节都短、行在顶部。
 - S9 是"读整表、合并、写回"，读和写之间（毫秒级）服务进程自己写的键（`leapgate-api-caps`、`leapgate-api-nocaps`）可能被冲掉；上游 `set_option` 用最多旧 1 秒的缓存整表写回，窗口更大。上游每秒用服务进程的整表覆盖界面的选项缓存，和 S9 的 `refresh_options()` 之间也有约 1 秒的竞争。
-- S10 `verify_bot` 在整个 Telegram 请求期间持有保存锁（上游把查询和保存放在一个函数里），这期间别的 Config 保存要排队。M6a 不调用它，M6b 前再定要不要拆开。（M6b 定：不拆。调用它的 Telegram 对话框是模态的，请求期间用户改不了别的设置；只有服务进程自己写的键会排队，见 §10.14。）
+- S10 原来的 `verify_bot` 在整个 Telegram 请求期间持有保存锁（上游把查询和保存放在一个函数里）。已拆开（2026-11-05，见上面"Rust 的做法和约束"S10 那条）：查询 `leapgate_bot_lookup` 不拿锁，只有确认后的 `leapgate_bot_save` 在锁下写一次。
 
 ### 10.14 M6b 的分工约定
 
@@ -1847,7 +1848,7 @@ Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcode
 
 **几处约定**
 - 二次验证：开启对话框把密钥显示在二维码下（上游的做法，02 §1.6.3）。测试和画廊里只用写死的假密钥，验收时不截这个对话框（09 §5.4）。
-- S10 不拆（见 §10.13 已知限制末尾）：Telegram 对话框在请求期间显示进行中、不能重复点。
+- S10 拆成查询和保存两步（2026-11-05，§10.13"Rust 的做法和约束"S10 那条）：Telegram 对话框先调 `leapgate_bot_lookup`，显示确认态（"验证码将发送给：‹对话›"），用户点"确认"才调 `leapgate_bot_save`；两次请求期间都显示进行中、不能重复点。
 - 声音来源改了以后由 S9 照上游重启音频服务（§10.13"Rust 的做法和约束"），页面不另做。
 - 录制位置：会话（传入的录制）和会话期间（传出的录制）共用同一个目录项，都在 C；选文件夹用 app 已有的 `file_picker`。
 - 快捷键：总开关打开时写入默认绑定，录制的五种状态、冲突替换、恢复默认照 02 §1.4.6；"发送到远程设备"打开时快捷键不生效，判断沿用 M2b 的快捷键 model。
