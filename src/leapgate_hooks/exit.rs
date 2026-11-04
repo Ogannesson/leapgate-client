@@ -666,7 +666,11 @@ pub(crate) mod cards {
         }
         *listener = None;
         drop(tx);
-        let _ = login.await;
+        // A login that finished as the close came still holds its KCP guard: as K0.
+        if let (Ok(Some(o)), _) = login.await {
+            drop(o.stream);
+            release_kcp(o.kcp).await;
+        }
         None
     }
 
