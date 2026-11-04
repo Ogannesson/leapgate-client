@@ -39,6 +39,12 @@ class _Bind extends FakeBind {
   bool twoFactor = false;
   bool bot = false;
   List<Map<String, dynamic>> trusted = const [];
+
+  /// The trusted devices stay as they were: the service did not take the change.
+  bool serviceDown = false;
+
+  /// Empty when Rust could not make a secret.
+  String twoFactorLink = _link;
   bool loopback = true;
   List<String> inputs = const ['Microphone'];
   String privacyImpls = '[]';
@@ -59,11 +65,26 @@ class _Bind extends FakeBind {
       case #mainHasValidBotSync:
         return bot;
       case #mainGenerate2Fa:
-        return Future.value(_link);
+        return Future.value(twoFactorLink);
       case #mainGetTrustedDevices:
         return Future.value(jsonEncode(trusted));
       case #mainRemoveTrustedDevices:
+        calls.add(invocation);
+        final gone = {
+          for (final h in jsonDecode(args[#json] as String) as List)
+            jsonEncode(h),
+        };
+        if (!serviceDown) {
+          trusted = [
+            for (final d in trusted)
+              if (!gone.contains(jsonEncode(d['hwid']))) d,
+          ];
+        }
+        return Future<void>.value();
       case #mainClearTrustedDevices:
+        calls.add(invocation);
+        if (!serviceDown) trusted = const [];
+        return Future<void>.value();
       case #mainTestWallpaper:
       case #mainSetCommon:
         calls.add(invocation);
@@ -101,6 +122,10 @@ Finder _switch(String label) => find.byWidgetPredicate(
     (w) => w is LgSwitch && w.semanticLabel == label);
 
 Finder _button(String label) => find.widgetWithText(LgButton, label);
+
+/// The trusted devices list's two delete buttons, by what a screen reader hears.
+final _deletePicked = find.bySemanticsLabel('删除所选受信设备');
+final _deleteAll = find.bySemanticsLabel('删除全部受信设备');
 
 Future<void> _settle(WidgetTester tester) async {
   for (var i = 0; i < 5; i++) {
@@ -245,7 +270,7 @@ void main() {
       await tester.tap(find.text('备用手机'));
       await tester.pump();
       expect(find.text('已选择 2 台'), findsOneWidget);
-      await tester.tap(_button('删除'));
+      await tester.tap(_deletePicked);
       await _settle(tester);
       expect(find.text('删除所选的 2 台受信设备？'), findsOneWidget);
       await tester.tap(_button('删除').last);
@@ -270,7 +295,7 @@ void main() {
       await tester.tap(find.text('李四的笔记本'));
       await tester.pump();
       expect(find.text('已选择 1 台'), findsOneWidget);
-      await tester.tap(_button('删除'));
+      await tester.tap(_deletePicked);
       await _settle(tester);
       expect(find.text('删除所选的 1 台受信设备？'), findsOneWidget);
       await tester.tap(_button('删除').last);
@@ -281,15 +306,44 @@ void main() {
       ]);
     });
 
+    testWidgets('no secret from Rust: no dialog, the row says so',
+        (tester) async {
+      _bind.twoFactorLink = '';
+      await _pump(tester, twoFactorSection);
+      await tester.tap(_button('开启'));
+      await _settle(tester);
+      expect(find.text('开启二次验证'), findsNothing);
+      expect(find.text('无法开启二次验证'), findsOneWidget);
+    });
+
+    testWidgets('a delete the service did not take says so', (tester) async {
+      _bind
+        ..twoFactor = true
+        ..serviceDown = true
+        ..trusted = [
+          _device('912345678', '李四的台式机', 3, 1),
+          _device('147258369', '王五的笔记本', 9, 2),
+        ];
+      await _pump(tester, twoFactorSection);
+      await tester.tap(find.text('李四的台式机'));
+      await tester.pump();
+      await tester.tap(_deletePicked);
+      await _settle(tester);
+      await tester.tap(_button('删除').last);
+      await _settle(tester);
+      expect(find.text('无法保存设置'), findsOneWidget);
+      expect(find.text('李四的台式机'), findsOneWidget);
+    });
+
     testWidgets('none trusted; deleting all asks first', (tester) async {
       _bind.twoFactor = true;
       await _pump(tester, twoFactorSection);
       expect(find.text('暂无受信设备'), findsOneWidget);
-      expect(_button('全部删除'), findsNothing);
+      expect(_deleteAll, findsNothing);
 
       _bind.trusted = [_device('912345678', '李四的台式机', 1, 1)];
       await _pump(tester, twoFactorSection);
-      await tester.tap(_button('全部删除'));
+      await tester.tap(_deleteAll);
       await _settle(tester);
       expect(find.text('删除全部受信设备？'), findsOneWidget);
       await tester.tap(_button('删除'));
@@ -618,6 +672,7 @@ void main() {
       await tester.tap(_button('安装打印机'));
       await tester.pump();
       expect(find.text('正在安装…'), findsOneWidget);
+      expect(find.byType(LgButton), findsNothing);
       expect(_bind.callsTo(#mainSetCommon).single.namedArguments[#key],
           'install-printer');
 

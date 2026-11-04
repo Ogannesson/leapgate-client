@@ -94,23 +94,27 @@ class _RemotePrintingBodyState extends State<_RemotePrintingBody> {
                 ],
               ),
               control: switch (state) {
-                PrinterState.notInstalled ||
-                PrinterState.installing ||
-                PrinterState.failed =>
+                PrinterState.notInstalled =>
                   LgSettingsValueActions(actions: [
                     LgSettingsAction(
-                      label: state == PrinterState.failed
-                          ? l10n.settingsRemotePrintRetry
-                          : l10n.settingsRemotePrintInstall,
+                      label: l10n.settingsRemotePrintInstall,
                       icon: LgIcons.uac,
-                      busy: state == PrinterState.installing,
-                      onPressed: state == PrinterState.installing
-                          ? null
-                          : _model.install,
+                      onPressed: _model.install,
+                    ),
+                  ]),
+                PrinterState.failed => LgSettingsValueActions(actions: [
+                    LgSettingsAction(
+                      label: l10n.settingsRemotePrintRetry,
+                      semanticLabel: l10n.settingsRemotePrintRetryLabel,
+                      icon: LgIcons.uac,
+                      onPressed: _model.install,
                     ),
                   ]),
                 // No install page in the new UI yet (03 §5.2, the third round).
-                PrinterState.portable || PrinterState.ready => null,
+                PrinterState.portable ||
+                PrinterState.installing ||
+                PrinterState.ready =>
+                  null,
               },
             ),
           ]),

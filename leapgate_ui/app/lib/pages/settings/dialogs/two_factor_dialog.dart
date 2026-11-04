@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
-import 'package:flutter_hbb/leapgate/bridge.dart';
 import 'package:flutter_hbb/leapgate/settings/two_factor.dart';
 
 import '../../../icons/lg_icon.dart';
@@ -15,16 +14,11 @@ import '../../../widgets/lg_form_dialog.dart';
 import '../../../widgets/lg_qr_code.dart';
 import '../../../widgets/lg_text_field.dart';
 
-/// "开启二次验证" (02 §1.6.3, upstream `change2fa`) over the home tab, with a new secret from
-/// Rust; true when the code checked out and the service kept the secret. While it checks,
-/// neither "取消" nor Esc closes it.
-Future<bool> showTwoFactorDialog(
-    TabOverlays overlays, AppLocalizations l10n) async {
-  final link = await newTwoFactorLink();
-  if (link.isEmpty) {
-    lgBind.leapgateLog(level: 2, msg: 'leapgate ui: no 2FA secret from Rust');
-    return false;
-  }
+/// "开启二次验证" (02 §1.6.3, upstream `change2fa`) over the home tab, for the new secret in
+/// [link] (`newTwoFactorLink`); true when the code checked out and the service kept the
+/// secret. While it checks, neither "取消" nor Esc closes it.
+Future<bool> showTwoFactorDialog(TabOverlays overlays, AppLocalizations l10n,
+    {required String link}) async {
   final busy = ValueNotifier(false);
   return await overlays.show<bool>(
         null,

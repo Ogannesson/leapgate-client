@@ -5,6 +5,7 @@ import 'package:flutter_hbb/leapgate/recent_peers.dart' show formatPeerId;
 import 'package:flutter_hbb/leapgate/settings/two_factor.dart';
 
 import '../../../l10n/app_localizations.dart';
+import '../../../widgets/lg_banner.dart';
 import '../../../widgets/lg_button.dart';
 import '../../../widgets/lg_feedback.dart';
 import '../../../widgets/lg_settings_rows.dart';
@@ -104,7 +105,14 @@ class _TwoFactorBodyState extends State<_TwoFactorBody> {
   }
 
   Future<void> _turnOn(AppLocalizations l10n) async {
-    if (!await showTwoFactorDialog(widget.ctx.overlays, l10n)) return;
+    final link = await newTwoFactorLink();
+    if (link.isEmpty) {
+      widget.ctx.setError(_twoFactor, l10n.settingsTwoFactorCantTurnOn);
+      return;
+    }
+    if (!await showTwoFactorDialog(widget.ctx.overlays, l10n, link: link)) {
+      return;
+    }
     appCore.toasts.show('settingsTwoFactorEnabled');
     widget.ctx.setError(_twoFactor, null);
     await _read();
@@ -126,8 +134,9 @@ class _TwoFactorBodyState extends State<_TwoFactorBody> {
         action: l10n.settingsTwoFactorDelete)) {
       return;
     }
-    await removeTrustedDevices(picked, _list.length);
-    await _read();
+    // Saving builds the section again, which reads the list again.
+    await widget.ctx
+        .save(_devices, () => removeTrustedDevices(picked, _list.length));
   }
 
   Future<void> _deleteAll(AppLocalizations l10n) async {
@@ -135,8 +144,7 @@ class _TwoFactorBodyState extends State<_TwoFactorBody> {
         action: l10n.settingsTwoFactorDelete)) {
       return;
     }
-    await clearTrustedDevices();
-    await _read();
+    await widget.ctx.save(_devices, clearTrustedDevices);
   }
 
   Future<void> _setUpBot(AppLocalizations l10n) async {
@@ -238,9 +246,18 @@ class _TwoFactorBodyState extends State<_TwoFactorBody> {
                 onDeleteAll: open ? () => _deleteAll(l10n) : null,
                 pickedCountLabel: l10n.settingsTwoFactorPicked(_picked.length),
                 deleteLabel: l10n.settingsTwoFactorDelete,
+                deleteSemanticLabel: l10n.settingsTwoFactorDeleteLabel,
+                deleteAllSemanticLabel: l10n.settingsTwoFactorDeleteAllLabel,
                 onDeleteSelected: open ? () => _deletePicked(l10n) : null,
               ),
             ),
+            // The list has no error line of its own.
+            if (ctx.errorOf(_devices) case final error?)
+              LgSettingsRowFrame(
+                indented: true,
+                child: LgBanner(
+                    tone: LgTone.error, slim: true, dense: true, text: error),
+              ),
             LgSettingsRow(
               key: ctx.keyOf(_bot),
               name: l10n.settingsTwoFactorBot,
