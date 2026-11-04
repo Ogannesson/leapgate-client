@@ -262,14 +262,13 @@ class RustSettingsApi implements SettingsApi {
   Future<DirectListen> directListen() async =>
       DirectListen.fromJson(_decode(await lgBind.leapgateDirectListen()));
 
-  // TODO(M6b 整合): `leapgate_bot_lookup` once block 2's bridge is generated again.
   @override
-  Future<BotLookup> lookupBot(String token) => throw UnimplementedError();
+  Future<BotLookup> lookupBot(String token) async =>
+      BotLookup.fromJson(_decode(await lgBind.leapgateBotLookup(token: token)));
 
-  // TODO(M6b 整合): `leapgate_bot_save`, `ok` or `other`.
   @override
-  Future<bool> saveBot(String token, String chatId) =>
-      throw UnimplementedError();
+  Future<bool> saveBot(String token, String chatId) async =>
+      await lgBind.leapgateBotSave(token: token, chatId: chatId) == 'ok';
 
   @override
   Future<TwoFactorCheck> verify2fa(String code) =>
