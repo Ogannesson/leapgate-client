@@ -540,4 +540,32 @@ const String kOptionDisableUdp = "disable-udp";
 
 // M6b incoming (coder C, `LEAPGATE.md` §10.14): upstream's names and values.
 
+/// Config.
+const String kOptionWhitelist = "whitelist";
+const String kOptionIdWhitelist = "id-whitelist";
+const String kOptionDirectServer = "direct-server";
+const String kOptionDirectAccessPort = "direct-access-port";
+const String kOptionEnableLanDiscovery = "enable-lan-discovery";
+const String kOptionAllowOnlyConnWindowOpen = "allow-only-conn-window-open";
+const String kOptionEnableTrustedDevices = "enable-trusted-devices";
+const String kOptionAllowAutoDisconnect = "allow-auto-disconnect";
+const String kOptionAutoDisconnectTimeout = "auto-disconnect-timeout";
+const String kOptionKeepAwakeDuringIncomingSessions =
+    "keep-awake-during-incoming-sessions";
+const String kOptionAllowRemoveWallpaper = "allow-remove-wallpaper";
+const String kOptionAudioInput = "audio-input";
+const String kOptionEnableAbr = "enable-abr";
+const String kOptionDirectxCapture = "enable-directx-capture";
+const String kOptionPrivacyModeImpl = "privacy-mode-impl-key";
+const String kOptionAllowAutoRecordIncoming = "allow-auto-record-incoming";
+
+/// LocalConfig.
+const String kOptionAllowSyncClipboardBetweenSessions =
+    "allow-sync-clipboard-between-sessions";
+const String kOptionKeepAwakeDuringOutgoingSessions =
+    "keep-awake-during-outgoing-sessions";
+const String kOptionAllowTerminalClipboardWrite =
+    "allow-terminal-clipboard-write";
+const String kOptionVideoSaveDirectory = "video-save-directory";
+
 // M6b outgoing (coder D, `LEAPGATE.md` §10.14): upstream's names and values.
