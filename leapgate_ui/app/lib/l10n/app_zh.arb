@@ -1188,5 +1188,6 @@
   "settingsAboutSource": "源代码",
   "settingsAboutCopyVersion": "复制版本",
   "settingsAboutCopyFingerprint": "复制指纹",
-  "settingsAboutCopyId": "复制本机 ID"
+  "settingsAboutCopyId": "复制本机 ID",
+  "settingsShortcutResetLabel": "恢复默认快捷键"
 }

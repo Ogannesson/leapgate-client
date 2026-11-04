@@ -454,7 +454,8 @@ void main() {
     testWidgets('reset asks first, then puts the defaults back', (tester) async {
       bindings([binding(kShortcutActionRefresh, 'r')]);
       await _pump(tester, shortcutsSection);
-      await _tap(tester, _button('恢复默认'));
+      // Named for what it resets.
+      await _tap(tester, find.bySemanticsLabel('恢复默认快捷键'));
       expect(find.text('恢复默认快捷键？'), findsOneWidget);
       expect(find.text('当前的全部快捷键设置将被默认设置替换。'), findsOneWidget);
       await _tap(tester, _button('取消'));
