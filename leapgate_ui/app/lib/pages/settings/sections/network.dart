@@ -9,10 +9,11 @@ import '../../../l10n/app_localizations.dart';
 import '../../../theme/lg_tokens.dart';
 import '../../../widgets/lg_banner.dart';
 import '../../../widgets/lg_button.dart';
-import '../../../widgets/lg_selection.dart';
+import '../../../widgets/lg_feedback.dart';
+import '../../../widgets/lg_settings_rows.dart';
 import '../dialogs/proxy_dialog.dart';
 import '../dialogs/server_dialog.dart';
-import '../net_rows.dart';
+import '../settings_flow.dart';
 import '../settings_registry.dart';
 
 /// Item ids of this section.
@@ -144,8 +145,27 @@ class _NetworkBodyState extends State<_NetworkBody> {
       {String? title, String? body, String? action}) async {
     final l10n = AppLocalizations.of(context)!;
     if (on && title != null) {
-      final ok = await confirmInSettings(widget.ctx.overlays,
-          title: title, body: body, action: action!, cancel: l10n.homeCancel);
+      final ok = await widget.ctx.overlays.show<bool>(
+            null,
+            (context, close) => LgDialogScrim(
+              onEscape: () => close(false),
+              child: LgConfirmDialog(
+                title: title,
+                body: body,
+                actions: [
+                  LgDialogAction(
+                      label: l10n.homeCancel, onPressed: () => close(false)),
+                  LgDialogAction(
+                    label: action!,
+                    kind: LgButtonKind.primary,
+                    isDefault: true,
+                    onPressed: () => close(true),
+                  ),
+                ],
+              ),
+            ),
+          ) ??
+          false;
       if (!ok) return;
     }
     await widget.ctx
@@ -161,95 +181,104 @@ class _NetworkBodyState extends State<_NetworkBody> {
     final summary = _summary;
     final socks = _socks;
     final locked = ctx.locked;
-    Widget value(String text, {bool warning = false}) => Text(text,
-        style: t.text.copyWith(color: warning ? t.colors.warning : t.colors.text));
     final noId = summary != null && summary.idSource == ServerSource.none;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        NetSubheading(l10n.settingsNetServer),
-        if (summary != null) ...[
-          NetRow(
-            ctx: ctx,
-            item: kNetItemIdServer,
-            name: l10n.settingsNetIdServer,
-            control: noId
-                ? value(l10n.settingsNetNoIdServer, warning: true)
-                : value(markedServer(
-                    l10n, summary.id, idServerMark(summary.idSource))),
-          ),
-          NetRow(
-            ctx: ctx,
-            item: kNetItemApiServer,
-            name: l10n.settingsNetApiServer,
-            control: value(summary.api.isEmpty
-                ? l10n.settingsNetNotSet
-                : markedServer(
-                    l10n, summary.api, apiServerMark(summary.apiSource))),
-          ),
-          NetRow(
-            ctx: ctx,
-            item: kNetItemKey,
-            name: l10n.settingsNetKey,
-            control: value(switch (keyState(summary.keySource)) {
-              KeyState.setByDefault => l10n.settingsNetKeySetDefault,
-              KeyState.set => l10n.settingsNetKeySet,
-              KeyState.notSet => l10n.settingsNetNotSet,
-            }),
-          ),
+    LgSettingsInfoRow info(String item, String label, String value,
+            {bool warning = false}) =>
+        LgSettingsInfoRow(
+          key: ctx.keyOf(item),
+          label: label,
+          marked: ctx.isMarked(item),
+          value: warning ? null : value,
+          child: warning
+              ? Text(value, style: t.textM.copyWith(color: t.colors.warning))
+              : null,
+        );
+    LgSettingsRow toggle(String item, String name, String description,
+            bool value, ValueChanged<bool> onChanged) =>
+        LgSettingsRow.toggle(
+          key: ctx.keyOf(item),
+          name: name,
+          description: description,
+          value: value,
+          onChanged: locked ? null : onChanged,
+          marked: ctx.isMarked(item),
+          error: ctx.errorOf(item),
+        );
+    return SettingsFlow([
+      LgSettingsSubtitle(l10n.settingsNetServer),
+      if (summary != null) ...[
+        LgSettingsBlock(children: [
+          noId
+              ? info(kNetItemIdServer, l10n.settingsNetIdServer,
+                  l10n.settingsNetNoIdServer,
+                  warning: true)
+              : info(kNetItemIdServer, l10n.settingsNetIdServer,
+                  markedServer(l10n, summary.id, idServerMark(summary.idSource))),
+          info(
+              kNetItemApiServer,
+              l10n.settingsNetApiServer,
+              summary.api.isEmpty
+                  ? l10n.settingsNetNotSet
+                  : markedServer(
+                      l10n, summary.api, apiServerMark(summary.apiSource))),
+          info(
+              kNetItemKey,
+              l10n.settingsNetKey,
+              switch (keyState(summary.keySource)) {
+                KeyState.setByDefault => l10n.settingsNetKeySetDefault,
+                KeyState.set => l10n.settingsNetKeySet,
+                KeyState.notSet => l10n.settingsNetNotSet,
+              }),
           if (summary.relay.isNotEmpty)
-            NetRow(
-              ctx: ctx,
-              item: kNetItemRelayServer,
-              name: l10n.settingsNetRelayServer,
-              control: value(summary.relay),
-            ),
-          NetRow(
-            ctx: ctx,
-            item: kNetItemKind,
-            name: l10n.settingsNetKind,
-            control: value(switch (settingsApi.serverKind()) {
-              ServerKind.leapgate => l10n.settingsNetKindLeapgate,
-              ServerKind.compat => l10n.settingsNetKindCompat,
-              ServerKind.checking => l10n.settingsNetKindChecking,
-            }),
+            info(kNetItemRelayServer, l10n.settingsNetRelayServer,
+                summary.relay),
+          info(
+              kNetItemKind,
+              l10n.settingsNetKind,
+              switch (settingsApi.serverKind()) {
+                ServerKind.leapgate => l10n.settingsNetKindLeapgate,
+                ServerKind.compat => l10n.settingsNetKindCompat,
+                ServerKind.checking => l10n.settingsNetKindChecking,
+              }),
+          LgSettingsRowFrame(
+            child: LgSettingsValueActions(actions: [
+              LgSettingsAction(
+                label: l10n.settingsNetChange,
+                kind: noId ? LgButtonKind.primary : LgButtonKind.secondary,
+                onPressed: locked ? null : _editServer,
+              ),
+              LgSettingsAction(
+                  label: l10n.settingsNetImport,
+                  onPressed: locked ? null : _import),
+              LgSettingsAction(
+                  label: l10n.settingsNetExport, onPressed: _export),
+            ]),
           ),
-          if (isPlainHttpApi(summary.api))
-            LgBanner(
-                tone: LgTone.warning, text: l10n.settingsNetPlainHttp, slim: true),
-          Padding(
-            padding: const EdgeInsets.only(top: LgSpace.s2),
-            child: Wrap(
-              spacing: LgSpace.s3,
-              children: [
-                LgButton(
-                  label: l10n.settingsNetChange,
-                  kind: noId ? LgButtonKind.primary : LgButtonKind.secondary,
-                  onPressed: locked ? null : _editServer,
-                ),
-                LgButton(
-                    label: l10n.settingsNetImport,
-                    onPressed: locked ? null : _import),
-                LgButton(label: l10n.settingsNetExport, onPressed: _export),
-              ],
-            ),
-          ),
-        ],
-        NetRow(
-          ctx: ctx,
-          item: kNetItemProxy,
+        ]),
+        if (isPlainHttpApi(summary.api))
+          LgBanner(
+              tone: LgTone.warning,
+              slim: true,
+              dense: true,
+              text: l10n.settingsNetPlainHttp),
+      ],
+      LgSettingsSubtitle(l10n.settingsNetProxy),
+      LgSettingsBlock(children: [
+        LgSettingsRow(
+          key: ctx.keyOf(kNetItemProxy),
           name: l10n.settingsNetProxy,
           description: l10n.settingsNetProxyNote,
+          wide: true,
+          marked: ctx.isMarked(kNetItemProxy),
           control: socks == null
               ? null
-              : Wrap(
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  spacing: LgSpace.s3,
-                  children: [
-                    value(socks.proxy.isEmpty
-                        ? l10n.settingsNetProxyNone
-                        : socks.proxy),
-                    LgButton(
+              : LgSettingsValueActions(
+                  value: socks.proxy.isEmpty
+                      ? l10n.settingsNetProxyNone
+                      : socks.proxy,
+                  emphasized: socks.proxy.isNotEmpty,
+                  actions: [
+                    LgSettingsAction(
                       label: socks.proxy.isEmpty
                           ? l10n.settingsNetProxySet
                           : l10n.settingsNetChange,
@@ -258,54 +287,35 @@ class _NetworkBodyState extends State<_NetworkBody> {
                   ],
                 ),
         ),
-        NetSubheading(l10n.settingsNetAdvanced),
-        NetRow(
-          ctx: ctx,
-          item: kNetItemWebSocket,
-          name: l10n.settingsNetWebSocket,
-          description: l10n.settingsNetWebSocketNote,
-          control: LgSwitch(
-            value: config.getBool(kOptionAllowWebSocket),
-            semanticLabel: l10n.settingsNetWebSocket,
-            onChanged: locked
-                ? null
-                : (v) => _switch(kOptionAllowWebSocket, v,
-                    title: l10n.settingsNetWebSocketTitle,
-                    body: l10n.settingsNetWebSocketBody,
-                    action: l10n.settingsNetWebSocketUse),
-          ),
-        ),
-        NetRow(
-          ctx: ctx,
-          item: kNetItemUdp,
-          name: l10n.settingsNetUdp,
-          description: l10n.settingsNetUdpNote,
-          control: LgSwitch(
+      ]),
+      LgSettingsSubtitle(l10n.settingsNetAdvanced),
+      LgSettingsBlock(children: [
+        toggle(
+            kNetItemWebSocket,
+            l10n.settingsNetWebSocket,
+            l10n.settingsNetWebSocketNote,
+            config.getBool(kOptionAllowWebSocket),
+            (v) => _switch(kOptionAllowWebSocket, v,
+                title: l10n.settingsNetWebSocketTitle,
+                body: l10n.settingsNetWebSocketBody,
+                action: l10n.settingsNetWebSocketUse)),
+        toggle(
+            kNetItemUdp,
+            l10n.settingsNetUdp,
+            l10n.settingsNetUdpNote,
             // Only "Y" disables it; `getBool` takes an unset key for on.
-            value: config.get(kOptionDisableUdp) == 'Y',
-            semanticLabel: l10n.settingsNetUdp,
-            onChanged: locked
-                ? null
-                : (v) => _switch(kOptionDisableUdp, v,
-                    title: l10n.settingsNetUdpTitle,
-                    body: l10n.settingsNetUdpBody,
-                    action: l10n.settingsNetUdpDisable),
-          ),
-        ),
-        NetRow(
-          ctx: ctx,
-          item: kNetItemTls,
-          name: l10n.settingsNetTls,
-          description: l10n.settingsNetTlsNote,
-          control: LgSwitch(
-            value: config.getBool(kOptionAllowInsecureTLSFallback),
-            semanticLabel: l10n.settingsNetTls,
-            onChanged: locked
-                ? null
-                : (v) => _switch(kOptionAllowInsecureTLSFallback, v),
-          ),
-        ),
-      ],
-    );
+            config.get(kOptionDisableUdp) == 'Y',
+            (v) => _switch(kOptionDisableUdp, v,
+                title: l10n.settingsNetUdpTitle,
+                body: l10n.settingsNetUdpBody,
+                action: l10n.settingsNetUdpDisable)),
+        toggle(
+            kNetItemTls,
+            l10n.settingsNetTls,
+            l10n.settingsNetTlsNote,
+            config.getBool(kOptionAllowInsecureTLSFallback),
+            (v) => _switch(kOptionAllowInsecureTLSFallback, v)),
+      ]),
+    ]);
   }
 }

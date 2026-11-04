@@ -144,7 +144,7 @@ class _Access extends StatelessWidget {
         ctx.save(_approve, () => _config.set(kOptionApproveMode, v));
 
     return SettingsFlow(
-      children: [
+      [
         LgSettingsBlock(
           children: [
             _keyed(

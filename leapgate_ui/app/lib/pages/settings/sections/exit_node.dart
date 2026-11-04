@@ -6,12 +6,13 @@ import 'package:flutter_hbb/leapgate/settings/exit_settings.dart';
 
 import '../../../l10n/app_localizations.dart';
 import '../../../shell/navigation.dart';
-import '../../../theme/lg_tokens.dart';
+import '../../../widgets/lg_banner.dart';
 import '../../../widgets/lg_button.dart';
-import '../../../widgets/lg_selection.dart';
+import '../../../widgets/lg_feedback.dart';
+import '../../../widgets/lg_settings_rows.dart';
 import '../../home/home_dialogs.dart' show showPermanentPasswordDialog;
 import '../dialogs/allow_nets_dialog.dart';
-import '../net_rows.dart';
+import '../settings_flow.dart';
 import '../settings_registry.dart';
 
 /// Item ids of this section.
@@ -79,15 +80,29 @@ class _ExitBodyState extends State<_ExitBody> {
       if (!mounted) return;
       setState(() => _counting = false);
       if (count != 0) {
-        final ok = await confirmInSettings(
-          ctx.overlays,
-          title: l10n.settingsExitOffTitle,
-          body: count == null
-              ? l10n.settingsExitOffBodyUnknown
-              : l10n.settingsExitOffBody(count),
-          action: l10n.settingsExitOff,
-          cancel: l10n.homeCancel,
-        );
+        final ok = await ctx.overlays.show<bool>(
+              null,
+              (context, close) => LgDialogScrim(
+                onEscape: () => close(false),
+                child: LgConfirmDialog(
+                  title: l10n.settingsExitOffTitle,
+                  body: count == null
+                      ? l10n.settingsExitOffBodyUnknown
+                      : l10n.settingsExitOffBody(count),
+                  actions: [
+                    LgDialogAction(
+                        label: l10n.homeCancel, onPressed: () => close(false)),
+                    LgDialogAction(
+                      label: l10n.settingsExitOff,
+                      kind: LgButtonKind.primary,
+                      isDefault: true,
+                      onPressed: () => close(true),
+                    ),
+                  ],
+                ),
+              ),
+            ) ??
+            false;
         if (!ok) return;
       }
     }
@@ -117,85 +132,88 @@ class _ExitBodyState extends State<_ExitBody> {
     final on = exitAllowed(config);
     final p = _prerequisites;
     final nets = allowedNetCount(config.get(kOptionLeapgateExitAllowNets));
-    void link(SettingsSectionId section, String item) =>
-        mainNavigation.showSettings(section, item: item);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        NetRow(
-          ctx: ctx,
-          item: kExitItemAllow,
+    LgSettingsAction link(SettingsSectionId section, String item) =>
+        LgSettingsAction(
+          label: l10n.settingsExitChange,
+          onPressed: () => mainNavigation.showSettings(section, item: item),
+        );
+    LgSettingsStatusRow status(bool ok, String text,
+            {String? description,
+            List<LgSettingsAction> actions = const [],
+            String? item}) =>
+        LgSettingsStatusRow(
+          key: item == null ? null : ctx.keyOf(item),
+          tone: ok ? LgTone.success : LgTone.warning,
+          toneLabel: ok ? l10n.settingsExitMet : l10n.settingsExitAttention,
+          text: text,
+          description: description,
+          actions: actions,
+          marked: item != null && ctx.isMarked(item),
+        );
+    return SettingsFlow([
+      LgSettingsBlock(children: [
+        LgSettingsRow.toggle(
+          key: ctx.keyOf(kExitItemAllow),
           name: l10n.settingsExitAllow,
           description: l10n.settingsExitAllowNote,
-          control: LgSwitch(
-            value: on,
-            semanticLabel: l10n.settingsExitAllow,
-            onChanged:
-                ctx.locked || _counting ? null : (v) => _toggle(l10n, v),
-          ),
+          value: on,
+          onChanged: ctx.locked || _counting ? null : (v) => _toggle(l10n, v),
+          marked: ctx.isMarked(kExitItemAllow),
+          error: ctx.errorOf(kExitItemAllow),
         ),
-        if (on && p != null) ...[
-          NetSubheading(l10n.settingsExitUnattended),
+      ]),
+      if (on && p != null) ...[
+        LgSettingsSubtitle(l10n.settingsExitUnattended),
+        LgSettingsBlock(children: [
           switch (p.fixedPassword) {
-            FixedPassword.set =>
-              NetStatusLine(ok: true, text: l10n.settingsExitPasswordSet),
-            FixedPassword.notSet => NetStatusLine(
-                ok: false,
-                text: l10n.settingsExitPasswordNotSet,
-                action: l10n.settingsExitSet,
-                onAction: ctx.locked ? null : () => _setPassword(l10n),
-              ),
-            FixedPassword.oneTimeOnly => NetStatusLine(
-                ok: false,
-                text: l10n.settingsExitPasswordOneTimeOnly,
-                action: l10n.settingsExitChange,
-                onAction: () =>
-                    link(SettingsSectionId.access, 'verification-method'),
-              ),
+            FixedPassword.set => status(true, l10n.settingsExitPasswordSet),
+            FixedPassword.notSet =>
+              status(false, l10n.settingsExitPasswordNotSet, actions: [
+                LgSettingsAction(
+                  label: l10n.settingsExitSet,
+                  onPressed: ctx.locked ? null : () => _setPassword(l10n),
+                ),
+              ]),
+            FixedPassword.oneTimeOnly => status(
+                false, l10n.settingsExitPasswordOneTimeOnly,
+                actions: [link(SettingsSectionId.access, 'verification-method')]),
           },
           switch (p.approval) {
             Approval.password =>
-              NetStatusLine(ok: true, text: l10n.settingsExitApprovalPassword),
-            Approval.both =>
-              NetStatusLine(ok: true, text: l10n.settingsExitApprovalBoth),
-            Approval.click => NetStatusLine(
-                ok: false,
-                text: l10n.settingsExitApprovalClick,
-                action: l10n.settingsExitChange,
-                onAction: () => link(SettingsSectionId.access, 'approve-mode'),
-              ),
+              status(true, l10n.settingsExitApprovalPassword),
+            Approval.both => status(true, l10n.settingsExitApprovalBoth),
+            Approval.click => status(false, l10n.settingsExitApprovalClick,
+                actions: [link(SettingsSectionId.access, 'approve-mode')]),
           },
-          NetSubheading(l10n.settingsExitLanProtection),
-          NetRow(
-            ctx: ctx,
-            item: kExitItemNets,
-            name: l10n.settingsExitNets,
+        ]),
+        LgSettingsSubtitle(l10n.settingsExitLanProtection),
+        LgSettingsBlock(children: [
+          // Allowing none is the safe default; what is allowed is said, not warned about.
+          LgSettingsStatusRow(
+            key: ctx.keyOf(kExitItemNets),
+            tone: nets == 0 ? LgTone.success : LgTone.info,
+            toneLabel: nets == 0 ? l10n.settingsExitMet : null,
+            text: nets == 0
+                ? l10n.settingsExitNetsNone
+                : l10n.settingsExitNetsCount(nets),
             description: l10n.settingsExitNetsNote,
-            control: Wrap(
-              crossAxisAlignment: WrapCrossAlignment.center,
-              spacing: LgSpace.s3,
-              children: [
-                Text(nets == 0
-                    ? l10n.settingsExitNetsNone
-                    : l10n.settingsExitNetsCount(nets)),
-                LgButton(
-                  label: l10n.settingsExitEdit,
-                  onPressed: ctx.locked ? null : () => _editNets(l10n),
-                ),
-              ],
-            ),
+            marked: ctx.isMarked(kExitItemNets),
+            actions: [
+              LgSettingsAction(
+                label: l10n.settingsExitEdit,
+                onPressed: ctx.locked ? null : () => _editNets(l10n),
+              ),
+            ],
           ),
           p.tunnelAllowed
-              ? NetStatusLine(
-                  ok: false,
-                  text: l10n.settingsExitTunnelOn,
-                  action: l10n.settingsExitChange,
-                  onAction: () =>
-                      link(SettingsSectionId.permissions, kOptionEnableTunnel),
-                )
-              : NetStatusLine(ok: true, text: l10n.settingsExitTunnelOff),
-        ],
+              ? status(false, l10n.settingsExitTunnelOn,
+                  actions: [link(SettingsSectionId.permissions, kOptionEnableTunnel)])
+              : status(true, l10n.settingsExitTunnelOff),
+        ]),
+        // A status row has no error line of its own.
+        if (ctx.errorOf(kExitItemNets) case final error?)
+          LgBanner(tone: LgTone.error, slim: true, dense: true, text: error),
       ],
-    );
+    ]);
   }
 }

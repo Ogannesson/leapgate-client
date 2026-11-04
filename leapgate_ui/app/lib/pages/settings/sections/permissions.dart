@@ -109,7 +109,7 @@ class _Permissions extends StatelessWidget {
     }
 
     return SettingsFlow(
-      children: [
+      [
         LgSettingsBlock(
           children: [
             KeyedSubtree(

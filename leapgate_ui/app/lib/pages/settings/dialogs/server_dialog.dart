@@ -12,7 +12,7 @@ import '../../../widgets/lg_button.dart';
 import '../../../widgets/lg_feedback.dart';
 import '../../../widgets/lg_form_dialog.dart';
 import '../../../widgets/lg_text_field.dart';
-import '../net_rows.dart';
+import '../../../widgets/lg_settings_rows.dart';
 
 /// "服务器" (02 §1.6.8) over the home tab, filled with [initial] (the options, or what "导入"
 /// found); true when it saved. While it checks and saves, neither "取消" nor Esc closes it: the
@@ -163,12 +163,18 @@ class _ServerDialogState extends State<_ServerDialog> {
       title: l10n.settingsNetServer,
       icon: LgIcons.server,
       banner: _failed
-          ? LgBanner(tone: LgTone.error, text: l10n.settingsSaveFailed, slim: true)
+          ? LgBanner(
+              tone: LgTone.error,
+              text: l10n.settingsSaveFailed,
+              slim: true,
+              dense: true)
           : null,
+      leading: LgButton(
+        label: l10n.settingsNetResetAll,
+        kind: LgButtonKind.text,
+        onPressed: _busy ? null : _resetAll,
+      ),
       actions: [
-        LgDialogAction(
-            label: l10n.settingsNetResetAll,
-            onPressed: _busy ? null : _resetAll),
         LgDialogAction(
             label: l10n.homeCancel,
             onPressed: _busy ? null : () => widget.close(false)),
@@ -202,7 +208,10 @@ class _ServerDialogState extends State<_ServerDialog> {
         ),
         _field(kOptionKey, l10n.settingsNetKey, _key,
             hint: id.isEmpty ? l10n.settingsNetKeyHint : l10n.settingsNetKeyHintCustom),
-        NetSubheading(l10n.settingsNetAdvanced),
+        Padding(
+          padding: const EdgeInsets.only(top: LgSpace.s6),
+          child: LgSettingsSubtitle(l10n.settingsNetAdvanced),
+        ),
         _field(kOptionRelayServer, l10n.settingsNetRelayServer, _relay,
             hint: l10n.settingsNetRelayHint),
         if (signsOut)

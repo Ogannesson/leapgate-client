@@ -23,7 +23,9 @@ import 'package:leapgate_ui/pages/settings/settings_section_state.dart';
 import 'package:leapgate_ui/shell/tab_overlays.dart';
 import 'package:leapgate_ui/theme/lg_theme.dart';
 import 'package:leapgate_ui/theme/lg_tokens.dart';
+import 'package:leapgate_ui/widgets/lg_banner.dart';
 import 'package:leapgate_ui/widgets/lg_button.dart';
+import 'package:leapgate_ui/widgets/lg_settings_rows.dart';
 import 'package:leapgate_ui/widgets/lg_selection.dart';
 
 import '../../core/test/account_fakes.dart';
@@ -103,10 +105,11 @@ Finder _switch(String label) => find.byWidgetPredicate(
 
 Finder _button(String label) => find.widgetWithText(LgButton, label);
 
-/// A status line: the label after its mark.
-Finder _status(String label) => find.textContaining(
-    RegExp('^￼+${RegExp.escape(label)}\$'),
-    findRichText: true);
+/// A status row saying [label], met ([ok]) or needing a look.
+Finder _status(String label, {required bool ok}) => find.byWidgetPredicate((w) =>
+    w is LgSettingsStatusRow &&
+    w.text == label &&
+    w.tone == (ok ? LgTone.success : LgTone.warning));
 
 Future<void> _settle(WidgetTester tester) async {
   for (var i = 0; i < 5; i++) {
@@ -203,10 +206,10 @@ void main() {
         ..config['approve-mode'] = 'password'
         ..config[kOptionEnableTunnel] = 'N';
       await _pump(tester, exitNodeSection);
-      expect(_status('固定密码：已设置'), findsOneWidget);
-      expect(_status('审批方式：输入密码'), findsOneWidget);
-      expect(_status('TCP 隧道：已禁止'), findsOneWidget);
-      expect(find.text('未放行任何网段'), findsOneWidget);
+      expect(_status('固定密码：已设置', ok: true), findsOneWidget);
+      expect(_status('审批方式：输入密码', ok: true), findsOneWidget);
+      expect(_status('TCP 隧道：已禁止', ok: true), findsOneWidget);
+      expect(_status('放行的网段：未放行任何网段', ok: true), findsOneWidget);
       expect(_button('修改'), findsNothing);
     });
 
@@ -214,10 +217,12 @@ void main() {
       exitOn();
       _bind.config['approve-mode'] = 'click';
       await _pump(tester, exitNodeSection);
-      expect(_status('固定密码：未设置'), findsOneWidget);
+      expect(_status('固定密码：未设置', ok: false), findsOneWidget);
       expect(_button('设置'), findsOneWidget);
-      expect(_status('审批方式：在本机接受，需有人在本机接受连接'), findsOneWidget);
-      expect(_status('TCP 隧道：已允许，知道访问密码的人可通过 TCP 隧道访问本机所在局域网中的设备'),
+      expect(_status('审批方式：在本机接受，需有人在本机接受连接', ok: false), findsOneWidget);
+      expect(
+          _status('TCP 隧道：已允许，知道访问密码的人可通过 TCP 隧道访问本机所在局域网中的设备',
+              ok: false),
           findsOneWidget);
       await tester.tap(_button('修改').first);
       await tester.tap(_button('修改').last);
@@ -233,7 +238,8 @@ void main() {
         ..fixedSet = true
         ..config['verification-method'] = 'use-temporary-password';
       await _pump(tester, exitNodeSection);
-      expect(_status('固定密码：已设置，但密码方式为“仅一次性密码”'), findsOneWidget);
+      expect(_status('固定密码：已设置，但密码方式为“仅一次性密码”', ok: false),
+          findsOneWidget);
       await tester.tap(_button('修改').first);
       expect(_nav.settings.single,
           (section: SettingsSectionId.access, item: 'verification-method'));
@@ -246,7 +252,7 @@ void main() {
       _api.onAllowNets = (text) => AllowNetsCheck(
           valid: true, count: text.split('\n').length, value: text);
       await _pump(tester, exitNodeSection);
-      expect(find.text('已放行 3 个网段'), findsOneWidget);
+      expect(find.text('放行的网段：已放行 3 个网段'), findsOneWidget);
     });
 
     testWidgets('turning it off asks with the number of exit sessions', (tester) async {

@@ -2,12 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/settings/settings_api.dart';
 
+import '../../../icons/lg_icon.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../theme/lg_tokens.dart';
 import '../../../widgets/lg_account.dart';
 import '../../../widgets/lg_button.dart';
+import '../../../widgets/lg_feedback.dart';
+import '../../../widgets/lg_settings_rows.dart';
 import '../../home/account/account.dart' show accountLetter, showLoginDialog;
-import '../net_rows.dart';
+import '../settings_flow.dart';
 import '../settings_registry.dart';
 
 /// Item ids of this section.
@@ -58,14 +61,27 @@ class _AccountBodyState extends State<_AccountBody> {
   }
 
   Future<void> _signOut(AppLocalizations l10n) async {
-    final ok = await confirmInSettings(
-      widget.ctx.overlays,
-      title: l10n.accountSignOutTitle,
-      body: l10n.accountSignOutBody,
-      action: l10n.accountSignOut,
-      cancel: l10n.homeCancel,
-      danger: true,
-    );
+    final ok = await widget.ctx.overlays.show<bool>(
+          null,
+          (context, close) => LgDialogScrim(
+            onEscape: () => close(false),
+            child: LgConfirmDialog(
+              title: l10n.accountSignOutTitle,
+              body: l10n.accountSignOutBody,
+              actions: [
+                LgDialogAction(
+                    label: l10n.homeCancel, onPressed: () => close(false)),
+                LgDialogAction(
+                  label: l10n.accountSignOut,
+                  kind: LgButtonKind.dangerSolid,
+                  isDefault: true,
+                  onPressed: () => close(true),
+                ),
+              ],
+            ),
+          ),
+        ) ??
+        false;
     if (ok) await appCore.account.logout();
   }
 
@@ -73,53 +89,99 @@ class _AccountBodyState extends State<_AccountBody> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final t = LgTokens.of(context);
+    final c = t.colors;
     final ctx = widget.ctx;
     final account = appCore.account;
     return ListenableBuilder(
       listenable: account,
       builder: (context, _) {
         final user = account.user;
+        final item = user == null ? kAccountItemSignIn : kAccountItemSignOut;
+        final Widget lead;
+        final List<Widget> lines;
+        LgButton? action;
         if (account.signingOut) {
-          return Text(l10n.accountSigningOut,
-              style: t.text.copyWith(color: t.colors.text2));
-        }
-        if (user == null) {
-          return NetRow(
-            ctx: ctx,
-            item: kAccountItemSignIn,
-            name: l10n.settingsAccountSignedOut,
-            description: l10n.accountSignedOutNote,
-            control: LgButton(
-              label: l10n.accountSignIn,
-              kind: LgButtonKind.primary,
-              onPressed: () => showLoginDialog(ctx.overlays),
-            ),
+          lead = const _Tile();
+          lines = [
+            Text(l10n.accountSigningOut,
+                style: t.text.copyWith(color: c.text2)),
+          ];
+        } else if (user == null) {
+          lead = const _Tile();
+          lines = [
+            Text(l10n.settingsAccountSignedOut,
+                style: t.text.copyWith(color: c.text)),
+            Text(l10n.accountSignedOutNote,
+                style: t.textS.copyWith(color: c.text2)),
+          ];
+          action = LgButton(
+            label: l10n.accountSignIn,
+            kind: LgButtonKind.primary,
+            onPressed: () => showLoginDialog(ctx.overlays),
           );
-        }
-        final name = user.displayNameOrName;
-        return NetRow(
-          ctx: ctx,
-          item: kAccountItemSignOut,
-          name: name,
-          control: LgButton(
-            label: l10n.accountSignOut,
-            onPressed: () => _signOut(l10n),
-          ),
-          children: [
-            Row(
-              children: [
-                LgPersonAvatar(initial: accountLetter(name)),
-                const SizedBox(width: LgSpace.s3),
-                Text('@${user.name}',
-                    style: t.textS.copyWith(color: t.colors.text2)),
-              ],
-            ),
+        } else {
+          final name = user.displayNameOrName;
+          lead = LgPersonAvatar(initial: accountLetter(name), size: 40);
+          lines = [
+            Text(name,
+                style: t.text
+                    .copyWith(color: c.text, fontWeight: FontWeight.w700)),
+            Text('@${user.name}', style: t.textS.copyWith(color: c.text2)),
             if (_api.isNotEmpty)
               Text(l10n.settingsAccountServer(_api),
-                  style: t.textS.copyWith(color: t.colors.text2)),
-          ],
-        );
+                  style: t.textS.copyWith(color: c.text2)),
+          ];
+          action = LgButton(
+            label: l10n.accountSignOut,
+            onPressed: () => _signOut(l10n),
+          );
+        }
+        return SettingsFlow([
+          LgSettingsBlock(children: [
+            LgSettingsRowFrame(
+              key: ctx.keyOf(item),
+              marked: ctx.isMarked(item),
+              child: Row(
+                children: [
+                  lead,
+                  const SizedBox(width: LgSpace.s3),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: lines,
+                    ),
+                  ),
+                  if (action != null) ...[
+                    const SizedBox(width: LgSpace.s4),
+                    action,
+                  ],
+                ],
+              ),
+            ),
+          ]),
+        ]);
       },
+    );
+  }
+}
+
+/// The square with the person icon where a signed-in account has its avatar (`.s-acc .tile`).
+class _Tile extends StatelessWidget {
+  const _Tile();
+
+  @override
+  Widget build(BuildContext context) {
+    final c = LgTokens.of(context).colors;
+    return Container(
+      width: 40,
+      height: 40,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: c.bg,
+        borderRadius: BorderRadius.circular(LgRadius.r12),
+      ),
+      child: LgIcon(LgIcons.user, size: 22, color: c.text2),
     );
   }
 }

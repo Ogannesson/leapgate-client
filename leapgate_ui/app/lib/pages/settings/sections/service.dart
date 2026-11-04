@@ -120,7 +120,7 @@ class _ServiceState extends State<_Service> {
         final pinSet = settingsUnlock.pinSet;
         final locked = ctx.locked;
         return SettingsFlow(
-          children: [
+          [
             // Outside the lock (02 §1.2.6): the page leaves this section usable and the
             // blocks under the lock grey themselves.
             LgSettingsBlock(
