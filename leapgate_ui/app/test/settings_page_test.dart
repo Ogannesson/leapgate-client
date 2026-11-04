@@ -5,9 +5,12 @@ import 'package:flutter_hbb/leapgate/local_status.dart';
 import 'package:flutter_hbb/leapgate/settings/settings_api.dart';
 import 'package:flutter_hbb/leapgate/settings/unlock.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:leapgate_ui/pages/settings/settings_section_state.dart';
 import 'package:leapgate_ui/shell/navigation.dart';
+import 'package:leapgate_ui/shell/tab_overlays.dart';
 import 'package:leapgate_ui/widgets/lg_button.dart';
 import 'package:leapgate_ui/widgets/lg_selection.dart';
+import 'package:leapgate_ui/widgets/lg_settings_layout.dart';
 import 'package:leapgate_ui/widgets/lg_settings_rows.dart';
 
 import 'home_fakes.dart';
@@ -214,6 +217,31 @@ void main() {
       expect(find.text('服务'), findsOneWidget);
       await done(tester);
     });
+
+    testWidgets(
+      'a section\'s name finds the section; it opens with nothing marked',
+      (tester) async {
+        await pumpSettings(tester, section: SettingsSectionId.access);
+        await tester.enterText(find.byType(EditableText).first, '外观');
+        await tester.pump();
+        final hit = find.bySemanticsLabel('通用, 外观');
+        expect(hit, findsOneWidget);
+        await tapOn(tester, hit);
+        expect(
+          tester
+              .widget<LgSettingsNavItem>(
+                find.widgetWithText(LgSettingsNavItem, '外观'),
+              )
+              .selected,
+          isTrue,
+        );
+        expect(
+          find.byWidgetPredicate((w) => w is LgSettingsRow && w.marked),
+          findsNothing,
+        );
+        await done(tester);
+      },
+    );
   });
 
   group('lock (02 §1.2.6)', () {
@@ -299,7 +327,67 @@ void main() {
     });
   });
 
+  testWidgets('a "无法保存设置" on the page turns English with the language', (
+    tester,
+  ) async {
+    (settingsApi as FakeSettingsApi).saveResult = SaveResult.failed;
+    final overlays = TabOverlays();
+    await pumpHome(tester, id: '135792468', overlays: overlays);
+    settingsPageRequests.request(SettingsSectionId.access);
+    await settle(tester);
+    await tapText(tester, '在本机接受');
+    expect(find.text('无法保存设置'), findsOneWidget);
+
+    // The same page, the app's language switched.
+    await pumpHome(
+      tester,
+      id: '135792468',
+      overlays: overlays,
+      locale: const Locale('en'),
+    );
+    await settle(tester);
+    expect(find.text('无法保存设置'), findsNothing);
+    expect(find.text("Couldn't save the setting"), findsOneWidget);
+    await done(tester);
+  });
+
+  test('"无法保存设置" already shown follows a change of language', () async {
+    final state = SettingsSectionState(
+      overlays: TabOverlays(),
+      saveFailedText: '无法保存设置',
+    );
+    addTearDown(state.dispose);
+    await state.save('x', () async => false);
+    expect(state.errorOf('x'), '无法保存设置');
+    state.saveFailedText = "Couldn't save the setting";
+    expect(state.errorOf('x'), "Couldn't save the setting");
+    await state.save('x', () async => true);
+    expect(state.errorOf('x'), isNull);
+  });
+
   group('访问与密码 (02 §1.3.1)', () {
+    testWidgets('a save the service refuses: "无法保存设置", the value stays', (
+      tester,
+    ) async {
+      (settingsApi as FakeSettingsApi).saveResult = SaveResult.failed;
+      await pumpSettings(tester, section: SettingsSectionId.access);
+      await tapText(tester, '在本机接受');
+      expect(find.text('无法保存设置'), findsOneWidget);
+      expect(bind.config.containsKey(kOptionApproveMode), isFalse);
+      final click = tester.widget<LgRadio<String>>(
+        find.byWidgetPredicate(
+          (w) => w is LgRadio<String> && w.label == '在本机接受',
+        ),
+      );
+      expect(click.groupValue == click.value, isFalse);
+      expect(find.text('审批方式为“在本机接受”时不使用密码'), findsNothing);
+
+      (settingsApi as FakeSettingsApi).saveResult = SaveResult.saved;
+      await tapText(tester, '在本机接受');
+      expect(find.text('无法保存设置'), findsNothing);
+      await done(tester);
+    });
+
     testWidgets('"在本机接受" greys the passwords and says why', (tester) async {
       await pumpSettings(tester, section: SettingsSectionId.access);
       expect(find.text('审批方式为“在本机接受”时不使用密码'), findsNothing);
@@ -551,12 +639,15 @@ void main() {
     testWidgets('unlock PIN: set, two that differ, remove', (tester) async {
       bind.installed = true;
       await pumpSettings(tester, section: SettingsSectionId.service);
-      // Not read while locked (09 §4.3): the row says nothing about it.
+      // Not read while locked (09 §4.3): the name and description alone (02 §1.3.8).
+      expect(find.text('解锁 PIN'), findsOneWidget);
       expect(find.text('未设置'), findsNothing);
+      expect(find.text('设置 PIN'), findsNothing);
       expect(bind.callsTo(#mainGetUnlockPin), isEmpty);
-      expect(enabled(tester, '设置 PIN'), isFalse);
       await unlockWithAdmin(tester);
       expect(find.text('未设置'), findsOneWidget);
+      // The verbs carry the setting's name for a reader.
+      expect(find.bySemanticsLabel('设置解锁 PIN'), findsOneWidget);
 
       await tapText(tester, '设置 PIN');
       expect(find.text('设置解锁 PIN'), findsOneWidget);

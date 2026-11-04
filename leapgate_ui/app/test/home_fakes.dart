@@ -223,6 +223,7 @@ Future<LocalStatusModel> pumpHome(
   Size size = const Size(1280, 760),
   TabOverlays? overlays,
   void Function(LocalStatusModel model)? setUp,
+  Locale locale = const Locale('zh'),
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
@@ -235,7 +236,7 @@ Future<LocalStatusModel> pumpHome(
   overlays ??= TabOverlays();
   await tester.pumpWidget(
     MaterialApp(
-      locale: const Locale('zh'),
+      locale: locale,
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
       theme: buildLgTheme(brightness: Brightness.light, mode: LgMode.compact),

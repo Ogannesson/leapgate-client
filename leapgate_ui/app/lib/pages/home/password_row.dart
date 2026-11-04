@@ -14,20 +14,38 @@ import '../../widgets/lg_password_row.dart';
 /// The password row of this device (01 P1 block A): label, content, the note when both
 /// passwords work, "Copy" and "Refresh" while there is a one-time password, "Change" for the
 /// permanent one ([onChange] null hides it), and under it the link "更多访问设置" to 传入连接 ›
-/// 访问与密码 (02 §1.2.1).
+/// 访问与密码 (02 §1.2.1). [error] is the red line under the row ("未获得管理员权限，固定密码未修改").
 class PasswordRowView extends StatelessWidget {
-  const PasswordRowView({super.key, required this.status, this.onChange});
+  const PasswordRowView({
+    super.key,
+    required this.status,
+    this.onChange,
+    this.error,
+  });
 
   final LocalStatusModel status;
   final VoidCallback? onChange;
+  final String? error;
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
+    final t = LgTokens.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _row(l10n),
+        if (error != null)
+          Padding(
+            padding: const EdgeInsets.only(top: LgSpace.s1),
+            child: Semantics(
+              liveRegion: true,
+              child: Text(
+                error!,
+                style: t.textS.copyWith(color: t.colors.error),
+              ),
+            ),
+          ),
         // `.lnk-row` in A-P1.html.
         Padding(
           padding: const EdgeInsets.only(top: LgSpace.s2),

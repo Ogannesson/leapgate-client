@@ -67,6 +67,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     connectBoxFocusRequests.addListener(_onFocusRequest);
     exitPageRequests.addListener(_onExitRequest);
     settingsPageRequests.addListener(_onSettingsRequest);
+    settingsUnlock.addListener(_onUnlock);
     WidgetsBinding.instance.addObserver(this);
   }
 
@@ -75,6 +76,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     connectBoxFocusRequests.removeListener(_onFocusRequest);
     exitPageRequests.removeListener(_onExitRequest);
     settingsPageRequests.removeListener(_onSettingsRequest);
+    settingsUnlock.removeListener(_onUnlock);
     WidgetsBinding.instance.removeObserver(this);
     _connectBox.dispose();
     _connectBoxFocus.dispose();
@@ -125,10 +127,25 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   /// it stays so.
   Future<void> _changePassword(AppLocalizations l10n) async {
     final wasLocked = settingsUnlock.locked;
-    if (await unlockSettings(widget.overlays, l10n)) {
-      await showPermanentPasswordDialog(widget.overlays, l10n);
+    final unlocked = await unlockSettings(widget.overlays, l10n);
+    // UAC cancelled or failed says so under the row; a PIN dialog the user closed says nothing
+    // (01 P1 block A).
+    if (mounted && !unlocked && settingsUnlock.denied) {
+      setState(() => _passwordDenied = true);
     }
+    if (unlocked) await showPermanentPasswordDialog(widget.overlays, l10n);
     if (wasLocked) settingsUnlock.lock();
+  }
+
+  /// "修改" got no administrator permission the last time.
+  bool _passwordDenied = false;
+
+  /// The red line goes with the next unlock that goes through, here or on the settings page
+  /// (01 P1 block A: "下次操作成功后消失"); the password can't be changed without one.
+  void _onUnlock() {
+    if (_passwordDenied && !settingsUnlock.locked) {
+      setState(() => _passwordDenied = false);
+    }
   }
 
   @override
@@ -149,6 +166,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             section: _section,
             onSection: _show,
             onChangePassword: () => _changePassword(l10n),
+            passwordError: _passwordDenied
+                ? l10n.settingsUnlockPasswordNotChanged
+                : null,
             overlays: widget.overlays,
           ),
         ),
@@ -227,6 +247,7 @@ class _SideColumn extends StatelessWidget {
     required this.section,
     required this.onSection,
     required this.onChangePassword,
+    required this.passwordError,
     required this.overlays,
   });
 
@@ -234,6 +255,7 @@ class _SideColumn extends StatelessWidget {
   final HomeSection section;
   final ValueChanged<HomeSection> onSection;
   final VoidCallback? onChangePassword;
+  final String? passwordError;
   final TabOverlays overlays;
 
   @override
@@ -304,6 +326,7 @@ class _SideColumn extends StatelessWidget {
                     PasswordRowView(
                       status: status,
                       onChange: onChangePassword,
+                      error: passwordError,
                     ),
                     SizedBox(height: short ? LgSpace.s2 : LgSpace.s5),
                     DefaultTextStyle(

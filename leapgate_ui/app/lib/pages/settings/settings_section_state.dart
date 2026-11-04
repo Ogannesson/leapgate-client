@@ -17,12 +17,16 @@ class SettingsSectionState extends ChangeNotifier
   @override
   final TabOverlays overlays;
 
-  /// "无法保存设置" in the current language.
-  final String saveFailedText;
+  /// "无法保存设置" in the current language; the page sets it again on every build, so a line
+  /// already shown follows a change of language.
+  String saveFailedText;
 
   bool _locked;
   final _keys = <String, GlobalKey>{};
   final _errors = <String, String>{};
+
+  /// Items whose last save failed: their line is [saveFailedText] as it is now.
+  final _saveFailed = <String>{};
   String? _marked;
   Timer? _markTimer;
 
@@ -54,12 +58,14 @@ class SettingsSectionState extends ChangeNotifier
   }
 
   @override
-  String? errorOf(String item) => _errors[item];
+  String? errorOf(String item) =>
+      _saveFailed.contains(item) ? saveFailedText : _errors[item];
 
   @override
   void setError(String item, String? error) {
+    final hadSaveFailed = _saveFailed.remove(item);
     if (error == null) {
-      if (_errors.remove(item) == null) return;
+      if (_errors.remove(item) == null && !hadSaveFailed) return;
     } else {
       _errors[item] = error;
     }
@@ -73,10 +79,11 @@ class SettingsSectionState extends ChangeNotifier
     try {
       ok = await write();
     } finally {
+      _errors.remove(item);
       if (ok) {
-        _errors.remove(item);
+        _saveFailed.remove(item);
       } else {
-        _errors[item] = saveFailedText;
+        _saveFailed.add(item);
       }
       notifyListeners();
     }

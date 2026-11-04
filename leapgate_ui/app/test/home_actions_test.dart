@@ -98,6 +98,45 @@ void main() {
     await tapText(tester, '修改');
     expect(bind.callsTo(#mainCheckSuperUserPermission), hasLength(1));
     expect(find.text('设置固定密码'), findsNothing);
+    // Refused: the red line under the row, until an unlock goes through (01 P1 block A).
+    expect(find.text('未获得管理员权限，固定密码未修改'), findsOneWidget);
+    bind.superUser = true;
+    await tapText(tester, '修改');
+    expect(find.text('未获得管理员权限，固定密码未修改'), findsNothing);
+    await tapText(tester, '取消');
+    await unmount(tester);
+  });
+
+  testWidgets('the refused line goes with an unlock on the settings page', (
+    tester,
+  ) async {
+    bind
+      ..installed = true
+      ..superUser = false;
+    await pumpWith(tester, method: kUsePermanentPassword);
+    await tapText(tester, '修改');
+    expect(find.text('未获得管理员权限，固定密码未修改'), findsOneWidget);
+
+    bind.superUser = true;
+    await tapText(tester, '设置');
+    await tapText(tester, '解锁');
+    expect(find.text('已锁定。修改这些设置需要管理员权限。'), findsNothing);
+    expect(find.text('未获得管理员权限，固定密码未修改'), findsNothing);
+    await tester.pump(const Duration(seconds: 3));
+    await unmount(tester);
+  });
+
+  testWidgets('"Change" with a PIN: closing its dialog says nothing', (
+    tester,
+  ) async {
+    bind
+      ..installed = true
+      ..unlockPin = '2468';
+    await pumpWith(tester, method: kUsePermanentPassword);
+    await tapText(tester, '修改');
+    await tapText(tester, '取消');
+    expect(find.text('输入解锁 PIN'), findsNothing);
+    expect(find.text('未获得管理员权限，固定密码未修改'), findsNothing);
     await unmount(tester);
   });
 

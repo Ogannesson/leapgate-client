@@ -7,7 +7,7 @@ import '../consts.dart';
 import '../models/platform_model.dart';
 import 'app_core.dart';
 import 'bridge.dart';
-import 'settings/connection_settings.dart';
+import 'settings/server_config.dart' show readSocks;
 
 enum ServiceStatus { ready, connecting, notReady, stopped }
 
@@ -167,6 +167,29 @@ class LocalStatusModel extends ChangeNotifier {
     return !bind.mainIsInstalled();
   }
 
+  /// Polls since [start]; the proxy is read on the first and every tenth.
+  int _polls = 0;
+  bool _proxy = false;
+
+  /// The three of [NetworkWarning] only, not the whole of `readConnectionNotes`: WebSocket and
+  /// UDP from the options cache on every poll, the proxy (`mainGetSocks`, a new connection to
+  /// the service each time) every 10 polls. A failure keeps the last warning and leaves the rest
+  /// of the poll alone.
+  Future<NetworkWarning?> _readNetworkWarning() async {
+    try {
+      if (_polls++ % 10 == 0) _proxy = (await readSocks()).proxy.isNotEmpty;
+      final config = appCore.options.config;
+      if (_proxy) return NetworkWarning.proxy;
+      if (config.getBool(kOptionAllowWebSocket)) return NetworkWarning.webSocket;
+      if (config.get(kOptionDisableUdp) == 'Y') return NetworkWarning.udpDisabled;
+      return null;
+    } catch (e) {
+      lgBind.leapgateLog(
+          level: 2, msg: 'leapgate ui: network warning not read: ${e.runtimeType}');
+      return networkWarning;
+    }
+  }
+
   Future<void> _poll() async {
     final id = await bind.mainGetMyId();
     final connect =
@@ -177,14 +200,7 @@ class LocalStatusModel extends ChangeNotifier {
     final verificationMethod =
         await bind.mainGetOption(key: kOptionVerificationMethod);
     final systemError = await bind.mainGetError();
-    final notes = await readConnectionNotes(appCore.options.config);
-    final networkWarning = notes.proxy
-        ? NetworkWarning.proxy
-        : notes.webSocket
-        ? NetworkWarning.webSocket
-        : notes.udpDisabled
-        ? NetworkWarning.udpDisabled
-        : null;
+    final networkWarning = await _readNetworkWarning();
     final status = stopped
         ? ServiceStatus.stopped
         : switch (connect['status_num']) {

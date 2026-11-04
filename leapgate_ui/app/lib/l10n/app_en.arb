@@ -889,7 +889,7 @@
   "settingsUnlockDenied": "Administrator permission wasn't granted. The settings are still locked.",
   "settingsUnlockPinTitle": "Enter unlock PIN",
   "settingsUnlockPin": "PIN",
-  "settingsUnlockPinWrong": "Wrong PIN",
+  "settingsUnlockPinWrong": "Incorrect PIN",
   "settingsUnlockUseAdmin": "Unlock with administrator permission instead",
   "settingsUnlockSetPinTitle": "Set unlock PIN",
   "settingsUnlockPinConfirm": "Confirm PIN",
@@ -909,7 +909,7 @@
   "settingsAccessApproveClick": "Accept on this device",
   "settingsAccessApproveBoth": "Password or accept on this device",
   "settingsAccessClickNoPassword": "Passwords aren't used while the approval mode is \"Accept on this device\"",
-  "settingsAccessVerification": "Passwords accepted",
+  "settingsAccessVerification": "Password method",
   "settingsAccessOneTimeOnly": "One-time password only",
   "settingsAccessPermanentOnly": "Permanent password only",
   "settingsAccessBothPasswords": "One-time or permanent password",
@@ -1112,5 +1112,8 @@
   "settingsUnlockLockedMark": "Locked",
   "settingsServiceWarnProxy": "A proxy is set. Other devices can't connect to this device.",
   "settingsServiceWarnWebSocket": "WebSocket is in use. Other devices can't connect to this device.",
-  "settingsServiceWarnUdp": "UDP is disabled. Other devices can't connect to this device."
+  "settingsServiceWarnUdp": "UDP is disabled. Other devices can't connect to this device.",
+  "settingsServiceChangePinLabel": "Change unlock PIN",
+  "settingsServiceRemovePinLabel": "Remove unlock PIN",
+  "settingsUnlockPasswordNotChanged": "Administrator permission wasn't granted. The permanent password wasn't changed."
 }
