@@ -4,14 +4,18 @@ import 'package:flutter_hbb/leapgate/settings/settings_api.dart';
 import '../../../icons/lg_icon.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../shell/tab_overlays.dart';
+import '../../../theme/lg_tokens.dart';
+import '../../../widgets/lg_banner.dart';
 import '../../../widgets/lg_button.dart';
 import '../../../widgets/lg_feedback.dart';
 import '../../../widgets/lg_form_dialog.dart';
 import '../../../widgets/lg_text_field.dart';
+import 'server_dialog.dart' show ServerErrorDetail;
 
-/// "设置 Telegram 机器人" (02 §1.6.4, upstream `changeBot`) over the home tab; true when Rust
-/// reached the bot and the service kept it (S10). The request holds Rust's save lock, so the
-/// dialog stays up and can't be sent twice until it answers (`LEAPGATE.md` §10.14).
+/// "设置 Telegram 机器人" (02 §1.6.4, upstream `changeBot`) over the home tab; true when the bot
+/// and the chat the user confirmed were saved. Rust looks the bot up first and saves nothing:
+/// the chat its latest message came from is shown to confirm, since anyone can message a bot
+/// whose name they find. While a request is on its way the dialog can't be closed or sent again.
 Future<bool> showTelegramDialog(
     TabOverlays overlays, AppLocalizations l10n) async {
   final busy = ValueNotifier(false);
@@ -44,8 +48,9 @@ class _TelegramDialogState extends State<_TelegramDialog> {
   bool get _busy => widget.busy.value;
   set _busy(bool value) => widget.busy.value = value;
 
-  /// S10's result when it was not `ok`.
-  String? _failed;
+  /// The lookup's answer: not `ok` shows its error, `ok` the chat to confirm.
+  BotLookup? _lookup;
+  bool _notSaved = false;
 
   @override
   void initState() {
@@ -64,30 +69,57 @@ class _TelegramDialogState extends State<_TelegramDialog> {
     if (_busy || typed.isEmpty) return;
     setState(() {
       _busy = true;
-      _failed = null;
+      _lookup = null;
     });
-    final check = await settingsApi.verifyBot(typed);
+    final lookup = await settingsApi.lookupBot(typed);
     if (!mounted) return;
-    if (check.result == 'ok') {
+    setState(() {
+      _busy = false;
+      _lookup = lookup;
+    });
+  }
+
+  Future<void> _confirm(BotLookup lookup) async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _notSaved = false;
+    });
+    final saved = await settingsApi.saveBot(_token.text.trim(), lookup.chatId);
+    if (!mounted) return;
+    if (saved) {
       widget.close(true);
       return;
     }
     setState(() {
       _busy = false;
-      _failed = check.result;
+      _notSaved = true;
     });
+  }
+
+  /// "@zhangsan", "家里（群组）".
+  String _chat(BotLookup lookup) {
+    final l10n = widget.l10n;
+    return switch (lookup.chatType) {
+      'group' || 'supergroup' => l10n.settingsTwoFactorBotGroup(lookup.chatLabel),
+      'channel' => l10n.settingsTwoFactorBotChannel(lookup.chatLabel),
+      _ => lookup.chatLabel,
+    };
   }
 
   @override
   Widget build(BuildContext context) {
     final l10n = widget.l10n;
-    // `other` is a token Rust took but the service did not keep (§10.13 S10).
-    final error = switch (_failed) {
+    final lookup = _lookup;
+    if (lookup != null && lookup.result == 'ok') {
+      return _confirmation(context, lookup);
+    }
+    final error = switch (lookup?.result) {
       null => null,
       'network' => l10n.settingsTwoFactorBotNetwork,
       'no_chat' => l10n.settingsTwoFactorBotNoChat,
       'invalid_token' => l10n.settingsTwoFactorBotInvalid,
-      _ => l10n.settingsSaveFailed,
+      _ => l10n.settingsTwoFactorBotFailed,
     };
     return LgFormDialog(
       title: l10n.settingsTwoFactorBotTitle,
@@ -108,13 +140,65 @@ class _TelegramDialogState extends State<_TelegramDialog> {
       children: [
         LgFormField(
           label: l10n.settingsTwoFactorBotToken,
-          child: LgTextField(
-            controller: _token,
-            placeholder: l10n.settingsTwoFactorBotTokenPlaceholder,
-            errorText: error,
-            enabled: !_busy,
-            autofocus: true,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              LgTextField(
+                controller: _token,
+                placeholder: l10n.settingsTwoFactorBotTokenPlaceholder,
+                errorText: error,
+                enabled: !_busy,
+                autofocus: true,
+              ),
+              // A lookup that failed otherwise carries Rust's words.
+              if (lookup != null &&
+                  lookup.result == 'other' &&
+                  lookup.text.isNotEmpty)
+                ServerErrorDetail(
+                    label: l10n.settingsNetDetails, detail: lookup.text),
+            ],
           ),
+        ),
+      ],
+    );
+  }
+
+  /// Nothing is saved until "确认" (02 §1.6.4).
+  Widget _confirmation(BuildContext context, BotLookup lookup) {
+    final l10n = widget.l10n;
+    final t = LgTokens.of(context);
+    return LgFormDialog(
+      title: l10n.settingsTwoFactorBotTitle,
+      icon: LgIcons.send,
+      banner: _notSaved
+          ? LgBanner(
+              tone: LgTone.error,
+              text: l10n.settingsSaveFailed,
+              slim: true,
+              dense: true)
+          : null,
+      actions: [
+        LgDialogAction(
+            label: l10n.homeCancel,
+            onPressed: _busy ? null : () => widget.close(false)),
+        LgDialogAction(
+          label: l10n.settingsTwoFactorBotConfirm,
+          kind: LgButtonKind.primary,
+          isDefault: true,
+          busy: _busy,
+          onPressed: () => _confirm(lookup),
+        ),
+      ],
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: LgSpace.s4),
+          child: Text(l10n.settingsTwoFactorBotSendTo(_chat(lookup)),
+              style: t.text.copyWith(color: t.colors.text)),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(top: LgSpace.s2),
+          child: Text(l10n.settingsTwoFactorBotNotYours,
+              style: t.textS.copyWith(color: t.colors.text2)),
         ),
       ],
     );

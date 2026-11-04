@@ -137,9 +137,38 @@ class DirectListen {
   final String error;
 }
 
-/// `leapgate_verify_bot` (S10): `ok`, `network`, `invalid_token`, `no_chat` or `other` (also when
-/// the service did not keep the token) with Rust's [text].
-typedef BotCheck = ({String result, String text});
+/// `leapgate_bot_lookup`: the chat a bot's latest message came from, to confirm before saving
+/// (02 §1.6.4). [result] is `ok` (with the chat), `network`, `invalid_token`, `no_chat` or
+/// `other` (the lookup failed otherwise, with Rust's [text]).
+class BotLookup {
+  const BotLookup(
+      {required this.result,
+      this.text = '',
+      this.chatId = '',
+      this.chatType = '',
+      this.chatLabel = ''});
+
+  factory BotLookup.fromJson(Map<String, dynamic> m) {
+    final chat = (m['chat'] as Map?)?.cast<String, dynamic>() ?? const {};
+    return BotLookup(
+      result: m['result'] as String? ?? 'other',
+      text: m['text'] as String? ?? '',
+      chatId: chat['id'] as String? ?? '',
+      chatType: chat['type'] as String? ?? '',
+      chatLabel: chat['label'] as String? ?? '',
+    );
+  }
+
+  final String result;
+  final String text;
+  final String chatId;
+
+  /// `private`, `group`, `supergroup` or `channel`.
+  final String chatType;
+
+  /// "@username", or "First Last" without one; the name of a group or channel.
+  final String chatLabel;
+}
 
 /// `leapgate_verify_2fa`: `ok`, `wrong_code`, or `not_saved` (the code was right but the service
 /// did not keep the secret).
@@ -167,7 +196,11 @@ abstract interface class SettingsApi {
 
   Future<DirectListen> directListen();
 
-  Future<BotCheck> verifyBot(String token);
+  /// Looks the bot up; saves nothing.
+  Future<BotLookup> lookupBot(String token);
+
+  /// Saves the bot and the confirmed chat; whether the service kept them.
+  Future<bool> saveBot(String token, String chatId);
 
   Future<TwoFactorCheck> verify2fa(String code);
 }
@@ -229,14 +262,14 @@ class RustSettingsApi implements SettingsApi {
   Future<DirectListen> directListen() async =>
       DirectListen.fromJson(_decode(await lgBind.leapgateDirectListen()));
 
+  // TODO(M6b 整合): `leapgate_bot_lookup` once block 2's bridge is generated again.
   @override
-  Future<BotCheck> verifyBot(String token) async {
-    final m = _decode(await lgBind.leapgateVerifyBot(token: token));
-    return (
-      result: m['result'] as String? ?? 'other',
-      text: m['text'] as String? ?? ''
-    );
-  }
+  Future<BotLookup> lookupBot(String token) => throw UnimplementedError();
+
+  // TODO(M6b 整合): `leapgate_bot_save`, `ok` or `other`.
+  @override
+  Future<bool> saveBot(String token, String chatId) =>
+      throw UnimplementedError();
 
   @override
   Future<TwoFactorCheck> verify2fa(String code) =>
