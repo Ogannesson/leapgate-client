@@ -13,7 +13,7 @@ mod heartbeat;
 
 use crate::{
     api::{self, Resp},
-    brand, route, sign,
+    brand, route, server_info, sign,
 };
 use base::config::keys;
 use hbb_common::{
@@ -29,7 +29,10 @@ use std::{
 
 /// `<API root>\n<feature,feature,...>`, written by the service process only. A Config option
 /// rather than LocalConfig so the UI process gets it through the option sync.
-const CAPS_KEY: &str = "leapgate-api-caps";
+pub(crate) const CAPS_KEY: &str = "leapgate-api-caps";
+/// The API root confirmed to have no Leapgate API, cleared once one is confirmed (S2). Written by
+/// the service process only, like `CAPS_KEY`.
+pub(crate) const NOCAPS_KEY: &str = "leapgate-api-nocaps";
 const RECHECK: Duration = Duration::from_secs(600);
 const LOG_INTERVAL: Duration = Duration::from_secs(60);
 /// A 2xx's `time` moves the clock only when it is this far off (seconds).
@@ -92,26 +95,37 @@ pub fn server_is_leapgate() -> bool {
 
 /// The current API root is a confirmed Leapgate server that announced `name`.
 pub fn has_feature(name: &str) -> bool {
-    feature_in(&api_root(), &Config::get_option(CAPS_KEY), name)
+    has_feature_with(&Config::get_option, name)
+}
+
+/// `has_feature` over the given options. In the installed UI process `Config` can lag behind the
+/// service's, so the UI passes its option cache (09 §4.1).
+pub fn has_feature_with(option: &dyn Fn(&str) -> String, name: &str) -> bool {
+    feature_in(&api_root_with(option), &option(CAPS_KEY), name)
 }
 
 /// Upstream `get_api_server(api-server, custom-rendezvous-server)` recomputed, since this crate
 /// cannot call it; without the Windows license-in-exe-name branch. Keep the two in step.
 pub(crate) fn api_root() -> String {
+    api_root_with(&Config::get_option)
+}
+
+/// `api_root` over the given options, as `has_feature_with`.
+pub fn api_root_with(option: &dyn Fn(&str) -> String) -> String {
     if Config::no_register_device() {
         return String::new();
     }
     let prod = config::PROD_RENDEZVOUS_SERVER.read().unwrap().clone();
     root_from(
-        &Config::get_option("api-server"),
-        &Config::get_option("custom-rendezvous-server"),
+        &option("api-server"),
+        &option("custom-rendezvous-server"),
         &prod,
         brand::default_api_server(),
         allow_https_21114(),
     )
 }
 
-fn allow_https_21114() -> bool {
+pub(crate) fn allow_https_21114() -> bool {
     config::BUILTIN_SETTINGS
         .read()
         .unwrap()
@@ -120,20 +134,18 @@ fn allow_https_21114() -> bool {
 }
 
 fn root_from(api: &str, custom: &str, prod: &str, default: String, allow_21114: bool) -> String {
-    let res = if !api.is_empty() {
-        api.to_owned()
-    } else {
-        let s0 = if custom.is_empty() { prod } else { custom };
-        if s0.is_empty() {
-            default
-        } else {
-            brand::api_from_rendezvous(s0)
-        }
-    };
-    normalize(res, allow_21114)
+    server_info::api(&server_info::Servers {
+        api,
+        custom,
+        prod,
+        default_api: &default,
+        allow_21114,
+        ..Default::default()
+    })
+    .value
 }
 
-fn normalize(mut res: String, allow_21114: bool) -> String {
+pub(crate) fn normalize(mut res: String, allow_21114: bool) -> String {
     if res.ends_with('/') {
         res.pop();
     }
@@ -173,7 +185,7 @@ fn checked_root<'a>(root: &'a str, api_root: &str) -> Option<&'a str> {
     Some(root)
 }
 
-fn parse_caps(v: &str) -> Option<(&str, Vec<&str>)> {
+pub(crate) fn parse_caps(v: &str) -> Option<(&str, Vec<&str>)> {
     let (root, features) = v.split_once('\n')?;
     Some((
         root,
@@ -200,6 +212,7 @@ trait Env {
     fn server_pk(&self) -> Result<Option<PublicKey>, ()>;
     fn caps(&self) -> String;
     fn set_caps(&self, v: String);
+    fn set_nocaps(&self, v: String);
     fn default_root(&self) -> String;
     fn route_reset(&self);
     fn route_heartbeat_ok(&self, routing: Option<&Value>);
@@ -228,6 +241,10 @@ impl Env for Live<'_> {
 
     fn set_caps(&self, v: String) {
         Config::set_option(CAPS_KEY.to_owned(), v);
+    }
+
+    fn set_nocaps(&self, v: String) {
+        Config::set_option(NOCAPS_KEY.to_owned(), v);
     }
 
     fn default_root(&self) -> String {
@@ -301,6 +318,7 @@ fn mark_supported<E: Env>(env: &E, cap: &CapSlot, root: &str, features: Option<V
     if v != caps {
         env.set_caps(v);
     }
+    env.set_nocaps(String::new());
     if was != Cap::Supported {
         throttled_log!(
             LOG_INTERVAL,
@@ -322,6 +340,7 @@ fn mark_unsupported<E: Env>(env: &E, cap: &CapSlot, root: &str, status: u16) {
             recheck_at: Instant::now() + RECHECK,
         };
     }
+    env.set_nocaps(root.to_owned());
     env.route_reset();
     throttled_log!(
         LOG_INTERVAL,
@@ -449,6 +468,7 @@ mod tests {
         /// A key is configured but is not a valid public key.
         pub bad_key: bool,
         pub caps: Mutex<String>,
+        pub nocaps: Mutex<String>,
         pub default_root: String,
         pub resets: Mutex<usize>,
         pub heartbeat_ok: Mutex<Vec<Option<Value>>>,
@@ -489,6 +509,9 @@ mod tests {
         }
         fn set_caps(&self, v: String) {
             *self.caps.lock().unwrap() = v;
+        }
+        fn set_nocaps(&self, v: String) {
+            *self.nocaps.lock().unwrap() = v;
         }
         fn default_root(&self) -> String {
             self.default_root.clone()

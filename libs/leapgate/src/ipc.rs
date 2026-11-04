@@ -15,6 +15,9 @@ pub enum Msg {
     ShowCm,
     /// Main window to CM: the UI mode changed (S7).
     UiMode { mode: String },
+    /// Main window to service: `None` asks; the reply carries the direct IP access listener's
+    /// last result, `None` when there is none yet (S5).
+    DirectListen { listen: Option<crate::direct::Listen> },
 }
 
 /// Authorized incoming connections by type. Exits are not counted in `port_forward`.
@@ -90,6 +93,13 @@ mod tests {
             Msg::ShowCm,
             Msg::UiMode {
                 mode: "detailed".to_owned(),
+            },
+            Msg::DirectListen { listen: None },
+            Msg::DirectListen {
+                listen: Some(crate::direct::Listen::Failed {
+                    port: 21118,
+                    error: crate::direct::ListenError::Denied,
+                }),
             },
         ] {
             let s = serde_json::to_string(&msg).unwrap();

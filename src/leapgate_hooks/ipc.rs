@@ -17,9 +17,16 @@ static CM_EVENTS: std::sync::Mutex<Option<StreamSink<String>>> = std::sync::Mute
 
 /// Service end, from upstream's `ipc::handle`.
 pub(crate) async fn handle(msg: Msg, stream: &mut ipc::Connection) {
-    if let Msg::IncomingCounts { counts: None } = msg {
-        let counts = Some(incoming_counts());
-        allow_err!(stream.send(&Data::Leapgate(Msg::IncomingCounts { counts })).await);
+    match msg {
+        Msg::IncomingCounts { counts: None } => {
+            let counts = Some(incoming_counts());
+            allow_err!(stream.send(&Data::Leapgate(Msg::IncomingCounts { counts })).await);
+        }
+        Msg::DirectListen { listen: None } => {
+            let listen = leapgate::direct::last();
+            allow_err!(stream.send(&Data::Leapgate(Msg::DirectListen { listen })).await);
+        }
+        _ => {}
     }
 }
 
@@ -57,6 +64,21 @@ pub(crate) async fn query_incoming_counts() -> Option<Counts> {
         .ok()?;
     match c.next_timeout(1000).await {
         Ok(Some(Data::Leapgate(Msg::IncomingCounts { counts }))) => counts,
+        _ => None,
+    }
+}
+
+/// Main window end of S5: the direct IP access listener's last result in the service. `None`
+/// when the service does not answer or has no result yet.
+#[cfg(any(target_os = "android", target_os = "ios", feature = "flutter"))]
+#[tokio::main(flavor = "current_thread")]
+pub(crate) async fn query_direct_listen() -> Option<leapgate::direct::Listen> {
+    let mut c = ipc::connect(1000, "").await.ok()?;
+    c.send(&Data::Leapgate(Msg::DirectListen { listen: None }))
+        .await
+        .ok()?;
+    match c.next_timeout(1000).await {
+        Ok(Some(Data::Leapgate(Msg::DirectListen { listen }))) => listen,
         _ => None,
     }
 }
