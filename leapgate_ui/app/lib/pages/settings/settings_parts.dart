@@ -3,25 +3,11 @@
 // Plain, but found by their text and semantics.
 
 import 'package:flutter/material.dart';
-import 'package:flutter_hbb/leapgate/local_status.dart';
 
 import '../../icons/lg_icon.dart';
 import '../../theme/lg_tokens.dart';
 import '../../widgets/lg_pressable.dart';
 import 'settings_registry.dart';
-
-/// This device's status for the sections that show it (the service line, 02 §1.3.8); the
-/// settings page puts the home page's model here.
-class SettingsStatus extends InheritedNotifier<LocalStatusModel> {
-  const SettingsStatus({
-    super.key,
-    required LocalStatusModel status,
-    required super.child,
-  }) : super(notifier: status);
-
-  static LocalStatusModel of(BuildContext context) =>
-      context.dependOnInheritedWidgetOfExactType<SettingsStatus>()!.notifier!;
-}
 
 /// One item (02 §1.2.2): name, description, the control beside or [below] them, then the red
 /// line of [SettingsSectionContext.errorOf]. Drawn at 60 % when not [enabled]; marked for a

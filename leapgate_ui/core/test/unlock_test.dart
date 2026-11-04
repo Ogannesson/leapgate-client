@@ -87,6 +87,9 @@ void main() {
         await lock.unlock((pin) async => PinAnswer.useAdministrator), isTrue);
     expect(bind.adminAsked, 1);
     expect(lock.pinSet, isTrue);
+    // Locked again, it is not known until the next unlock reads it.
+    lock.lock();
+    expect(lock.pinSet, isNull);
   });
 
   test('the typed PIN is trimmed, as Rust stores it', () {

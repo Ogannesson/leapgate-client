@@ -127,4 +127,49 @@ void main() {
       expect(row(method: 'something-else'), PasswordRow.both);
     });
   });
+
+  group('LocalStatusModel.toggleService (02 §1.3.8)', () {
+    late _ServiceBind bind;
+    setUp(() {
+      bind = _ServiceBind();
+      platformFFI.setBindingForTesting(bind);
+    });
+
+    test('portable: the option alone, and it is done', () async {
+      final model = LocalStatusModel();
+      expect(await model.toggleService(stop: true), isTrue);
+      expect(bind.options[kOptionStopService], 'Y');
+      expect(await model.toggleService(stop: false), isTrue);
+      expect(bind.options[kOptionStopService], '');
+    });
+
+    test('installed: a call that returns did not happen', () async {
+      bind.installed = true;
+      final model = LocalStatusModel();
+      expect(await model.toggleService(stop: true), isFalse);
+      expect(await model.toggleService(stop: false), isFalse);
+    });
+
+    test('stopping always asks first', () {
+      expect(LocalStatusModel().serviceAsksFirst(stop: true), isTrue);
+    });
+  });
+}
+
+/// `stop-service` as Rust receives it, on the portable or installed version.
+class _ServiceBind implements RustdeskImpl {
+  final options = <String, String>{};
+  bool installed = false;
+
+  @override
+  Future<void> mainSetOption(
+      {required String key, required String value, dynamic hint}) async {
+    options[key] = value;
+  }
+
+  @override
+  bool mainIsInstalled({dynamic hint}) => installed;
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

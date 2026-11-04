@@ -42,7 +42,8 @@ class SettingsUnlock extends ChangeNotifier {
   /// can't be told apart, 09 §4.4).
   bool get denied => _denied;
 
-  /// Whether an unlock PIN is set, as last read; null before the first read.
+  /// Whether an unlock PIN is set, as [unlock] read it; null while locked, so it is never read
+  /// just to show the row (09 §4.3).
   bool? get pinSet => _pinSet;
 
   /// "解锁": with a PIN set, [askPin] shows the PIN dialog; otherwise, or when the user picks
@@ -69,15 +70,10 @@ class SettingsUnlock extends ChangeNotifier {
 
   /// Leaving the settings page: another home page, a session tab, the window hidden.
   void lock() {
-    if (!_unlocked && !_denied) return;
+    if (!_unlocked && !_denied && _pinSet == null) return;
     _unlocked = false;
     _denied = false;
-    notifyListeners();
-  }
-
-  /// Reads [pinSet] for the unlock PIN row; an IPC round trip, see [unlock].
-  void readPinSet() {
-    _pinSet = bind.mainGetUnlockPin().isNotEmpty;
+    _pinSet = null;
     notifyListeners();
   }
 

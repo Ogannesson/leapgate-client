@@ -1,6 +1,5 @@
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
-import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/local_status.dart';
 import 'package:flutter_hbb/leapgate/recent_peers.dart' show formatPeerId;
@@ -8,13 +7,14 @@ import 'package:flutter_hbb/leapgate/settings/unlock.dart';
 
 import '../../../icons/lg_icon.dart';
 import '../../../l10n/app_localizations.dart';
-import '../../../shell/tab_overlays.dart';
 import '../../../widgets/lg_button.dart';
 import '../../../widgets/lg_feedback.dart';
 import '../../../widgets/lg_status.dart';
+import '../dialogs/service.dart';
 import '../dialogs/unlock_pin.dart';
 import '../settings_parts.dart';
 import '../settings_registry.dart';
+import '../settings_status.dart';
 
 const _service = 'service';
 const _id = 'id';
@@ -38,39 +38,6 @@ SettingsSection serviceSection(AppLocalizations l10n) => SettingsSection(
   build: (context, ctx) => _Service(l10n: l10n, ctx: ctx),
 );
 
-/// A question over the home tab; true when [action] was pressed.
-Future<bool> _confirm(
-  TabOverlays overlays,
-  AppLocalizations l10n, {
-  required String title,
-  String? body,
-  required String action,
-  bool danger = false,
-}) async =>
-    await overlays.show<bool>(
-      null,
-      (context, close) => LgDialogScrim(
-        onEscape: () => close(false),
-        child: LgConfirmDialog(
-          title: title,
-          body: body,
-          actions: [
-            LgDialogAction(
-              label: l10n.homeCancel,
-              onPressed: () => close(false),
-            ),
-            LgDialogAction(
-              label: action,
-              kind: danger ? LgButtonKind.dangerSolid : LgButtonKind.primary,
-              isDefault: true,
-              onPressed: () => close(true),
-            ),
-          ],
-        ),
-      ),
-    ) ??
-    false;
-
 class _Service extends StatefulWidget {
   const _Service({required this.l10n, required this.ctx});
 
@@ -84,73 +51,49 @@ class _Service extends StatefulWidget {
 class _ServiceState extends State<_Service> {
   bool _busy = false;
 
-  @override
-  void initState() {
-    super.initState();
-    // Whether a PIN is set takes an IPC round trip (up to 1 s): once when the section opens,
-    // after the first frame, not on every build.
-    if (appCore.options.isInstalled) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) settingsUnlock.readPinSet();
-      });
-    }
-  }
-
-  /// "停止服务" / "启动服务" (02 §1.3.8), not under the lock: it asks for administrator permission
-  /// itself on the installed version. There it removes or installs the Windows service and
-  /// Leapgate restarts; the call returns only when that did not happen, cancelled or failed
-  /// alike (09 §4.4).
-  Future<void> _toggle(bool stop) async {
-    final l10n = widget.l10n;
-    final ctx = widget.ctx;
-    final installed = appCore.options.isInstalled;
-    final inUse =
-        appCore.sessions.devices.isNotEmpty ||
-        appCore.exitNodes.runningCount > 0;
-    if (stop || (installed && inUse)) {
-      final ok = await _confirm(
-        ctx.overlays,
-        l10n,
-        title: stop
-            ? l10n.settingsServiceStopTitle
-            : l10n.settingsServiceStartTitle,
-        body: !stop
-            ? l10n.settingsServiceStartBody
-            : installed
-            ? l10n.settingsServiceStopBodyInstalled
-            // TODO(M6a): 02 §4.3 item 3 (R2-Q7) may change this once measured.
-            : l10n.settingsServiceStopBodyPortable,
-        action: stop ? l10n.settingsServiceStop : l10n.homeStartService,
-        danger: stop,
-      );
-      if (!ok) return;
-    }
+  /// "停止服务" / "启动服务", not under the lock: on the installed version it asks for
+  /// administrator permission itself (02 §1.2.6).
+  Future<void> _toggle(LocalStatusModel status, bool stop) async {
     setState(() => _busy = true);
-    await appCore.options.config.set(kOptionStopService, stop ? 'Y' : '');
-    if (!mounted) return;
-    ctx.setError(
-      _service,
-      !installed
-          ? null
-          : stop
-          ? l10n.settingsServiceNotStopped
-          : l10n.settingsServiceNotStarted,
+    final result = await toggleService(
+      widget.ctx.overlays,
+      widget.l10n,
+      status,
+      stop: stop,
     );
+    if (!mounted) return;
+    if (result != null) widget.ctx.setError(_service, result.error);
     setState(() => _busy = false);
   }
 
   Future<void> _removePin() async {
     final l10n = widget.l10n;
-    if (!await _confirm(
-      widget.ctx.overlays,
-      l10n,
-      title: l10n.settingsServiceRemovePinTitle,
-      action: l10n.settingsServiceRemove,
-      danger: true,
-    )) {
-      return;
-    }
-    widget.ctx.setError(
+    final ctx = widget.ctx;
+    final ok =
+        await ctx.overlays.show<bool>(
+          null,
+          (context, close) => LgDialogScrim(
+            onEscape: () => close(false),
+            child: LgConfirmDialog(
+              title: l10n.settingsServiceRemovePinTitle,
+              actions: [
+                LgDialogAction(
+                  label: l10n.homeCancel,
+                  onPressed: () => close(false),
+                ),
+                LgDialogAction(
+                  label: l10n.settingsServiceRemove,
+                  kind: LgButtonKind.dangerSolid,
+                  isDefault: true,
+                  onPressed: () => close(true),
+                ),
+              ],
+            ),
+          ),
+        ) ??
+        false;
+    if (!ok) return;
+    ctx.setError(
       _pin,
       settingsUnlock.savePin('') ? null : l10n.settingsSaveFailed,
     );
@@ -171,7 +114,9 @@ class _ServiceState extends State<_Service> {
     return ListenableBuilder(
       listenable: settingsUnlock,
       builder: (context, _) {
-        final pinSet = settingsUnlock.pinSet ?? false;
+        // Known once unlocked (`SettingsUnlock.unlock` reads it); locked, the row is grey and
+        // says nothing about it.
+        final pinSet = settingsUnlock.pinSet;
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -205,7 +150,7 @@ class _ServiceState extends State<_Service> {
                 icon: installed ? LgIcons.uac : null,
                 kind: LgButtonKind.secondary,
                 busy: _busy,
-                onPressed: _busy ? null : () => _toggle(!stopped),
+                onPressed: _busy ? null : () => _toggle(status, !stopped),
               ),
             ),
             SettingsRow(
@@ -232,13 +177,14 @@ class _ServiceState extends State<_Service> {
                   spacing: 12,
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    Text(
-                      pinSet
-                          ? l10n.settingsAccessSet
-                          : l10n.settingsAccessNotSet,
-                    ),
+                    if (pinSet != null)
+                      Text(
+                        pinSet
+                            ? l10n.settingsAccessSet
+                            : l10n.settingsAccessNotSet,
+                      ),
                     LgButton(
-                      label: pinSet
+                      label: pinSet == true
                           ? l10n.settingsServiceChangePin
                           : l10n.settingsServiceSetPin,
                       kind: LgButtonKind.text,
@@ -253,7 +199,7 @@ class _ServiceState extends State<_Service> {
                               }
                             },
                     ),
-                    if (pinSet)
+                    if (pinSet == true)
                       LgButton(
                         label: l10n.settingsServiceRemovePin,
                         kind: LgButtonKind.text,

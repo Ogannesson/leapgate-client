@@ -12,7 +12,7 @@ import '../../widgets/lg_button.dart';
 import '../../widgets/lg_pressable.dart';
 import '../../widgets/lg_text_field.dart';
 import 'dialogs/unlock_pin.dart';
-import 'settings_parts.dart';
+import 'settings_status.dart';
 import 'settings_registry.dart';
 import 'settings_section_state.dart';
 

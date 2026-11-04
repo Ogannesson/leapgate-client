@@ -69,6 +69,29 @@ bool enabled(WidgetTester tester, String label) =>
         .onPressed !=
     null;
 
+LgButtonKind kindOf(WidgetTester tester, String label) =>
+    tester.widget<LgButton>(find.widgetWithText(LgButton, label).last).kind;
+
+/// Whether the row of [name] is drawn marked: the placeholder row's accent frame.
+// TODO(M6 整合): read the designer's settings row instead.
+bool isMarked(WidgetTester tester, String name) {
+  final frame = tester.widget<Container>(
+    find
+        .ancestor(
+          of: find.text(name),
+          matching: find.byWidgetPredicate(
+            (w) =>
+                w is Container &&
+                w.decoration is BoxDecoration &&
+                (w.decoration as BoxDecoration).border != null,
+          ),
+        )
+        .first,
+  );
+  final border = (frame.decoration as BoxDecoration).border as Border;
+  return border.top.color != Colors.transparent;
+}
+
 /// Ends the 2-second mark and takes the page down.
 Future<void> done(WidgetTester tester) async {
   await tester.pump(const Duration(seconds: 3));
@@ -116,6 +139,11 @@ void main() {
       final row = tester.getRect(find.text('允许建立 TCP 隧道'));
       expect(row.bottom, lessThan(600));
       expect(row.top, greaterThan(0));
+      // Marked for about 2 seconds (02 §1.2.4), and only that item.
+      expect(isMarked(tester, '允许建立 TCP 隧道'), isTrue);
+      expect(isMarked(tester, '允许远程重启'), isFalse);
+      await tester.pump(const Duration(seconds: 2));
+      expect(isMarked(tester, '允许建立 TCP 隧道'), isFalse);
       await done(tester);
     });
   });
@@ -400,6 +428,7 @@ void main() {
           find.text('本机将无法接受远程连接。Leapgate 将关闭并重新打开，所有会话和正在使用的出口都将断开。'),
           findsOneWidget,
         );
+        expect(kindOf(tester, '停止服务'), LgButtonKind.dangerSolid);
         await tapText(tester, '停止服务');
         expect(bind.config[kOptionStopService], 'Y');
         expect(find.text('未获得管理员权限，服务未停止'), findsOneWidget);
@@ -411,6 +440,8 @@ void main() {
       await pumpSettings(tester, section: SettingsSectionId.service);
       await tapText(tester, '停止服务');
       expect(find.text('本机将无法接受新的远程连接。'), findsOneWidget);
+      // Only the installed version's stop takes everything down (02 §3.5).
+      expect(kindOf(tester, '停止服务'), LgButtonKind.primary);
       await tapText(tester, '取消');
       expect(bind.config, isEmpty);
 
@@ -440,12 +471,27 @@ void main() {
       await done(tester);
     });
 
+    testWidgets('the home page\'s "启动服务" takes the same way', (tester) async {
+      bind
+        ..installed = true
+        ..config[kOptionStopService] = 'Y';
+      await pumpHome(tester, id: '135792468', status: ServiceStatus.stopped);
+      await tapText(tester, '启动服务');
+      expect(find.text('启动服务？'), findsNothing);
+      expect(bind.config.containsKey(kOptionStopService), isFalse);
+      expect(find.text('未获得管理员权限，服务未启动'), findsOneWidget);
+      await done(tester);
+    });
+
     testWidgets('unlock PIN: set, two that differ, remove', (tester) async {
       bind.installed = true;
       await pumpSettings(tester, section: SettingsSectionId.service);
-      expect(find.text('未设置'), findsOneWidget);
+      // Not read while locked (09 §4.3): the row says nothing about it.
+      expect(find.text('未设置'), findsNothing);
+      expect(bind.callsTo(#mainGetUnlockPin), isEmpty);
       expect(enabled(tester, '设置 PIN'), isFalse);
       await unlockWithAdmin(tester);
+      expect(find.text('未设置'), findsOneWidget);
 
       await tapText(tester, '设置 PIN');
       expect(find.text('设置解锁 PIN'), findsOneWidget);

@@ -4,7 +4,6 @@ import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/local_status.dart';
 import 'package:flutter_hbb/leapgate/options.dart';
 import 'package:flutter_hbb/leapgate/permanent_password.dart';
-import 'package:flutter_hbb/leapgate/settings/access.dart';
 
 import '../../../l10n/app_localizations.dart';
 import '../../../widgets/lg_button.dart';
@@ -12,6 +11,7 @@ import '../../../widgets/lg_selection.dart';
 import '../../home/home_dialogs.dart' show showPermanentPasswordDialog;
 import '../settings_parts.dart';
 import '../settings_registry.dart';
+import '../settings_status.dart';
 
 // Item ids. `approve-mode`, `verification-method` and `permanent-password` are fixed: the exit
 // node section links to them (`LEAPGATE.md` §10.13).
@@ -87,12 +87,17 @@ class _Access extends StatelessWidget {
   }
 
   /// Length and "仅使用数字" make a new one-time password at once (02 §1.3.1).
-  Future<void> _setOneTime(String item, Future<bool> Function() write) async {
-    if (await ctx.save(item, write)) await refreshOneTimePassword();
+  Future<void> _setOneTime(
+    LocalStatusModel status,
+    String item,
+    Future<bool> Function() write,
+  ) async {
+    if (await ctx.save(item, write)) await status.refreshOneTimePassword();
   }
 
   @override
   Widget build(BuildContext context) {
+    final status = SettingsStatus.of(context);
     final approve = switch (_config.get(kOptionApproveMode)) {
       _approvePassword => _approvePassword,
       _approveClick => _approveClick,
@@ -167,6 +172,7 @@ class _Access extends StatelessWidget {
             value: length,
             onChanged: oneTime
                 ? (v) => _setOneTime(
+                    status,
                     _length,
                     () => _config.set(kOptionTemporaryPasswordLength, v),
                   )
@@ -183,6 +189,7 @@ class _Access extends StatelessWidget {
             semanticLabel: l10n.settingsAccessNumeric,
             onChanged: oneTime
                 ? (v) => _setOneTime(
+                    status,
                     _numeric,
                     () =>
                         _config.setBool(kOptionAllowNumericOneTimePassword, v),
