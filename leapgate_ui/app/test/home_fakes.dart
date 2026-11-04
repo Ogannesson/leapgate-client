@@ -79,6 +79,9 @@ class FakeBind implements RustdeskImpl {
         return setPinError;
       case #mainSupportedPrivacyModeImpls:
         return '[]';
+      // No proxy (the connection notes, M6-4).
+      case #mainGetSocks:
+        return Future.value(const <String>[]);
       case #mainLoadRecentPeers:
       case #mainLoadFavPeers:
       case #mainLoadLanPeers:

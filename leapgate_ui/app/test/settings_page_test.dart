@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:leapgate_ui/shell/navigation.dart';
 import 'package:leapgate_ui/widgets/lg_button.dart';
 import 'package:leapgate_ui/widgets/lg_selection.dart';
+import 'package:leapgate_ui/widgets/lg_settings_rows.dart';
 
 import 'home_fakes.dart';
 import 'settings_fakes.dart';
@@ -72,25 +73,14 @@ bool enabled(WidgetTester tester, String label) =>
 LgButtonKind kindOf(WidgetTester tester, String label) =>
     tester.widget<LgButton>(find.widgetWithText(LgButton, label).last).kind;
 
-/// Whether the row of [name] is drawn marked: the placeholder row's accent frame.
-// TODO(M6 整合): read the designer's settings row instead.
-bool isMarked(WidgetTester tester, String name) {
-  final frame = tester.widget<Container>(
-    find
-        .ancestor(
-          of: find.text(name),
-          matching: find.byWidgetPredicate(
-            (w) =>
-                w is Container &&
-                w.decoration is BoxDecoration &&
-                (w.decoration as BoxDecoration).border != null,
-          ),
-        )
-        .first,
-  );
-  final border = (frame.decoration as BoxDecoration).border as Border;
-  return border.top.color != Colors.transparent;
-}
+/// Whether the row of [name] is marked.
+bool isMarked(WidgetTester tester, String name) => tester
+    .widget<LgSettingsRow>(
+      find
+          .ancestor(of: find.text(name), matching: find.byType(LgSettingsRow))
+          .first,
+    )
+    .marked;
 
 /// Ends the 2-second mark and takes the page down.
 Future<void> done(WidgetTester tester) async {
@@ -195,7 +185,7 @@ void main() {
       // second result and back up to the first.
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.testTextInput.receiveAction(TextInputAction.done);
       await settle(tester);
       expect(find.text('传入连接 › 权限'), findsNothing);
       expect(find.text('访问模式'), findsOneWidget);
@@ -408,6 +398,78 @@ void main() {
     );
   });
 
+  group('what is typed is saved before the content changes', () {
+    // The box of "等待直连的时间" (coder B's section) saves when it loses the focus.
+    Future<void> typeWait(WidgetTester tester, String text) async {
+      await pumpSettings(tester, section: SettingsSectionId.connection);
+      await tester.enterText(find.byType(EditableText).at(1), text);
+      await tester.pump();
+    }
+
+    testWidgets('a link to another section', (tester) async {
+      await typeWait(tester, '5');
+      settingsPageRequests.request(SettingsSectionId.access);
+      await settle(tester);
+      expect(find.text('审批方式'), findsOneWidget);
+      expect(bind.local[kOptionRelayFallbackDelay], '5');
+      await done(tester);
+    });
+
+    testWidgets('another page of the home tab', (tester) async {
+      await typeWait(tester, '7.5');
+      connectBoxFocusRequests.request();
+      await settle(tester);
+      expect(find.text('搜索设置'), findsNothing);
+      expect(bind.local[kOptionRelayFallbackDelay], '7.5');
+      await done(tester);
+    });
+  });
+
+  group('home page: why no one can connect (M6-4)', () {
+    Future<void> pumpWarning(
+      WidgetTester tester,
+      NetworkWarning? warning, {
+      ServiceStatus status = ServiceStatus.connecting,
+    }) => pumpHome(
+      tester,
+      id: '135792468',
+      status: status,
+      setUp: (m) => m.networkWarning = warning,
+    );
+
+    testWidgets('one line for the first that is on, with the link', (
+      tester,
+    ) async {
+      final nav = mainNavigation as FakeNavigation;
+      await pumpWarning(tester, NetworkWarning.webSocket);
+      expect(find.text('已使用 WebSocket，其他设备无法连接本机'), findsOneWidget);
+      await tapText(tester, '网络和服务器');
+      expect(nav.settings.single.section, SettingsSectionId.network);
+      await done(tester);
+
+      await pumpWarning(tester, NetworkWarning.proxy);
+      expect(find.text('已设置代理，其他设备无法连接本机'), findsOneWidget);
+      expect(find.text('已使用 WebSocket，其他设备无法连接本机'), findsNothing);
+      await done(tester);
+    });
+
+    testWidgets('none when nothing is on or the service is stopped', (
+      tester,
+    ) async {
+      await pumpWarning(tester, null);
+      expect(find.text('网络和服务器'), findsNothing);
+      await done(tester);
+
+      await pumpWarning(
+        tester,
+        NetworkWarning.udpDisabled,
+        status: ServiceStatus.stopped,
+      );
+      expect(find.text('已禁用 UDP，其他设备无法连接本机'), findsNothing);
+      await done(tester);
+    });
+  });
+
   group('服务与 ID (02 §1.3.8)', () {
     testWidgets('the service line is the home page\'s, and the ID', (
       tester,
@@ -442,7 +504,7 @@ void main() {
     testWidgets('portable, stop: its own warning, no red line', (tester) async {
       await pumpSettings(tester, section: SettingsSectionId.service);
       await tapText(tester, '停止服务');
-      expect(find.text('本机将无法接受新的远程连接。'), findsOneWidget);
+      expect(find.text('本机将无法接受远程连接，正在进行的传入会话将断开。'), findsOneWidget);
       // Only the installed version's stop takes everything down (02 §3.5).
       expect(kindOf(tester, '停止服务'), LgButtonKind.primary);
       await tapText(tester, '取消');

@@ -14,9 +14,11 @@ import '../../widgets/lg_banner.dart';
 import '../../widgets/lg_button.dart';
 import '../../widgets/lg_list_chrome.dart';
 import '../../widgets/lg_pressable.dart';
+import '../../widgets/lg_settings_rows.dart' show LgTextLink;
 import '../../widgets/lg_status.dart';
 import '../settings/dialogs/service.dart';
 import '../settings/dialogs/unlock_pin.dart';
+import '../settings/settings_flow.dart' show commitSettingsInput;
 import '../settings/settings_page.dart';
 import 'account/account.dart';
 import 'devices_page.dart';
@@ -96,14 +98,23 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       );
     }
     // The box exists only on the devices page; focus it once that is built.
-    setState(() => _section = HomeSection.devices);
+    _show(HomeSection.devices);
     WidgetsBinding.instance.addPostFrameCallback(
       (_) => _connectBoxFocus.requestFocus(),
     );
   }
 
   /// "Use as exit node" ([useAsExit]): the exit page scrolls to the card itself.
-  void _onExitRequest() => setState(() => _section = HomeSection.exitNodes);
+  void _onExitRequest() => _show(HomeSection.exitNodes);
+
+  /// Leaving the settings page hands over what was typed into it first: its number fields save
+  /// when they lose the focus, which they don't once they are gone (`commitSettingsInput`).
+  void _show(HomeSection section) {
+    if (_section == HomeSection.settings && section != _section) {
+      commitSettingsInput();
+    }
+    setState(() => _section = section);
+  }
 
   /// A link to a settings section ([MainNavigation.showSettings]): the settings page takes the
   /// section and item itself.
@@ -136,7 +147,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           child: _SideColumn(
             status: widget.status,
             section: _section,
-            onSection: (s) => setState(() => _section = s),
+            onSection: _show,
             onChangePassword: () => _changePassword(l10n),
             overlays: widget.overlays,
           ),
@@ -321,7 +332,22 @@ class _SideColumn extends StatelessWidget {
                       },
                     ),
                     if (status.status == ServiceStatus.stopped)
-                      _StartService(status: status, overlays: overlays),
+                      _StartService(status: status, overlays: overlays)
+                    // M6-4: with these the line keeps reading "正在连接服务器…" (02 §4.3 item 4)
+                    // while no one can connect. A stopped service says so already.
+                    else if (status.networkWarning case final warning?) ...[
+                      const SizedBox(height: LgSpace.s1),
+                      _NetworkWarning(
+                        text: switch (warning) {
+                          NetworkWarning.proxy => l10n.settingsServiceWarnProxy,
+                          NetworkWarning.webSocket =>
+                            l10n.settingsServiceWarnWebSocket,
+                          NetworkWarning.udpDisabled =>
+                            l10n.settingsServiceWarnUdp,
+                        },
+                        link: l10n.settingsSectionNetwork,
+                      ),
+                    ],
                     if (status.incoming.total > 0) ...[
                       const SizedBox(height: LgSpace.s2),
                       LgControlledNote(
@@ -443,6 +469,47 @@ class _StartServiceState extends State<_StartService> {
         ),
         if (_error != null)
           Text(_error!, style: t.textS.copyWith(color: t.colors.error)),
+      ],
+    );
+  }
+}
+
+/// The warning under the service line (M6-4, 01 P1 block A): why other devices can't connect,
+/// and the link to 通用 › 网络和服务器.
+class _NetworkWarning extends StatelessWidget {
+  const _NetworkWarning({required this.text, required this.link});
+
+  final String text;
+  final String link;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = LgTokens.of(context);
+    final c = t.colors;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 1),
+              child: LgIcon(LgIcons.warn, size: 16, color: c.warning),
+            ),
+            const SizedBox(width: LgSpace.s2),
+            Expanded(
+              child: Text(text, style: t.textS.copyWith(color: c.text)),
+            ),
+          ],
+        ),
+        Padding(
+          padding: const EdgeInsets.only(left: 16 + LgSpace.s2, top: 2),
+          child: LgTextLink(
+            label: link,
+            onPressed: () =>
+                mainNavigation.showSettings(SettingsSectionId.network),
+          ),
+        ),
       ],
     );
   }

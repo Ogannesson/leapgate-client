@@ -954,7 +954,7 @@
   "settingsServiceStop": "Stop service",
   "settingsServiceStopTitle": "Stop the service?",
   "settingsServiceStopBodyInstalled": "This device won't accept remote connections. Leapgate will close and reopen, and all sessions and exit nodes in use will be disconnected.",
-  "settingsServiceStopBodyPortable": "This device won't accept new remote connections.",
+  "settingsServiceStopBodyPortable": "This device will stop accepting remote connections, and incoming sessions in progress will be disconnected.",
   "settingsServiceStartTitle": "Start the service?",
   "settingsServiceStartBody": "Leapgate will close and reopen, and all sessions and exit nodes in use will be disconnected.",
   "settingsServiceNotStopped": "Administrator permission wasn't granted. The service wasn't stopped.",
@@ -1092,5 +1092,11 @@
   "settingsNetOpenSettings": "Open network settings",
   "settingsAccountSignedOut": "Not signed in",
   "settingsAccountServer": "Server: {server}",
-  "@settingsAccountServer": {"placeholders": {"server": {"type": "String"}}}
+  "@settingsAccountServer": {"placeholders": {"server": {"type": "String"}}},
+  "settingsSearchClear": "Clear search",
+  "settingsSearchSections": "Settings sections",
+  "settingsUnlockLockedMark": "Locked",
+  "settingsServiceWarnProxy": "A proxy is set. Other devices can't connect to this device.",
+  "settingsServiceWarnWebSocket": "WebSocket is in use. Other devices can't connect to this device.",
+  "settingsServiceWarnUdp": "UDP is disabled. Other devices can't connect to this device."
 }

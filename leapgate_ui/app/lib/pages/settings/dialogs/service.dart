@@ -31,7 +31,7 @@ Future<({String? error})?> toggleService(
                   ? l10n.settingsServiceStartBody
                   : installed
                   ? l10n.settingsServiceStopBodyInstalled
-                  // 02 §4.3 item 3 (R2-Q7) may change this once measured.
+                  // Sessions in progress end too (02 §4.3 item 3, R2-Q7, measured).
                   : l10n.settingsServiceStopBodyPortable,
               actions: [
                 LgDialogAction(

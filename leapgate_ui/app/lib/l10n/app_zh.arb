@@ -832,7 +832,7 @@
   "settingsServiceStop": "停止服务",
   "settingsServiceStopTitle": "停止服务？",
   "settingsServiceStopBodyInstalled": "本机将无法接受远程连接。Leapgate 将关闭并重新打开，所有会话和正在使用的出口都将断开。",
-  "settingsServiceStopBodyPortable": "本机将无法接受新的远程连接。",
+  "settingsServiceStopBodyPortable": "本机将无法接受远程连接，正在进行的传入会话将断开。",
   "settingsServiceStartTitle": "启动服务？",
   "settingsServiceStartBody": "Leapgate 将关闭并重新打开，所有会话和正在使用的出口都将断开。",
   "settingsServiceNotStopped": "未获得管理员权限，服务未停止",
@@ -960,5 +960,11 @@
   "settingsNetProxyTooLong": "密码过长",
   "settingsNetOpenSettings": "打开网络设置",
   "settingsAccountSignedOut": "未登录",
-  "settingsAccountServer": "服务器：{server}"
+  "settingsAccountServer": "服务器：{server}",
+  "settingsSearchClear": "清除搜索",
+  "settingsSearchSections": "设置分区",
+  "settingsUnlockLockedMark": "已锁定",
+  "settingsServiceWarnProxy": "已设置代理，其他设备无法连接本机",
+  "settingsServiceWarnWebSocket": "已使用 WebSocket，其他设备无法连接本机",
+  "settingsServiceWarnUdp": "已禁用 UDP，其他设备无法连接本机"
 }

@@ -7,8 +7,13 @@ import '../consts.dart';
 import '../models/platform_model.dart';
 import 'app_core.dart';
 import 'bridge.dart';
+import 'settings/connection_settings.dart';
 
 enum ServiceStatus { ready, connecting, notReady, stopped }
+
+/// A proxy, WebSocket or UDP turned off: other devices can't connect to this one (M6-4,
+/// measured with 02 §4.3 item 4). In the order the home page picks the first.
+enum NetworkWarning { proxy, webSocket, udpDisabled }
 
 // Values of kOptionVerificationMethod, as upstream `models/server_model.dart:22-24` names them.
 // That file comes into core with the connection manager (M3); these move there then.
@@ -90,6 +95,10 @@ class LocalStatusModel extends ChangeNotifier {
   /// 会话）" while one of them is a remote desktop or a terminal, "‹N› 个传入会话进行中"
   /// otherwise (01 P1 block A).
   IncomingSessions incoming = IncomingSessions.none;
+
+  /// What keeps other devices from connecting to this one while the service line still reads
+  /// "正在连接服务器…" (M6-4, 01 P1 block A); the first one that is on, null for none.
+  NetworkWarning? networkWarning;
   Timer? _timer;
   Timer? _incomingTimer;
 
@@ -168,6 +177,14 @@ class LocalStatusModel extends ChangeNotifier {
     final verificationMethod =
         await bind.mainGetOption(key: kOptionVerificationMethod);
     final systemError = await bind.mainGetError();
+    final notes = await readConnectionNotes(appCore.options.config);
+    final networkWarning = notes.proxy
+        ? NetworkWarning.proxy
+        : notes.webSocket
+        ? NetworkWarning.webSocket
+        : notes.udpDisabled
+        ? NetworkWarning.udpDisabled
+        : null;
     final status = stopped
         ? ServiceStatus.stopped
         : switch (connect['status_num']) {
@@ -183,13 +200,15 @@ class LocalStatusModel extends ChangeNotifier {
         oneTimePassword != this.oneTimePassword ||
         approveMode != this.approveMode ||
         verificationMethod != this.verificationMethod ||
-        systemError != this.systemError) {
+        systemError != this.systemError ||
+        networkWarning != this.networkWarning) {
       this.id = id;
       this.status = status;
       this.oneTimePassword = oneTimePassword;
       this.approveMode = approveMode;
       this.verificationMethod = verificationMethod;
       this.systemError = systemError;
+      this.networkWarning = networkWarning;
       notifyListeners();
     }
   }
