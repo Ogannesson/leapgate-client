@@ -103,10 +103,10 @@ String _keyDisplay(String key) {
     case 'enter':      return 'Enter';
     case 'tab':        return 'Tab';
     case 'space':      return 'Space';
-    case 'arrow_left': return 'Left';
-    case 'arrow_right':return 'Right';
-    case 'arrow_up':   return 'Up';
-    case 'arrow_down': return 'Down';
+    case 'arrow_left': return '←';
+    case 'arrow_right':return '→';
+    case 'arrow_up':   return '↑';
+    case 'arrow_down': return '↓';
     case 'home':       return 'Home';
     case 'end':        return 'End';
     case 'page_up':    return 'PgUp';

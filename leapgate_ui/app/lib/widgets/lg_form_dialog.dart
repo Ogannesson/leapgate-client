@@ -139,10 +139,11 @@ class LgFormDialog extends StatelessWidget {
                       _buttons()
                     else
                       Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           Flexible(child: leading!),
                           const SizedBox(width: LgSpace.s3),
-                          Expanded(child: _buttons()),
+                          _buttons(),
                         ],
                       ),
                   ],

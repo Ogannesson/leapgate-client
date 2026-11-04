@@ -362,7 +362,7 @@ void main() {
           .widgetList<LgShortcutGroup>(find.byType(LgShortcutGroup))
           .map((g) => g.title);
       expect(groups, ['显示器', '画面', '输入', '操作', '会话', '聊天', '窗口和标签']);
-      expect(row(tester, '下一个显示器').keys, ['Ctrl', 'Alt', 'Shift', 'Right']);
+      expect(row(tester, '下一个显示器').keys, ['Ctrl', 'Alt', 'Shift', '→']);
       expect(row(tester, '截图').keys, ['Ctrl', 'Alt', 'Shift', 'P']);
       expect(row(tester, '刷新画面').keys, isEmpty);
       expect(find.text('编码：VP9'), findsOneWidget);

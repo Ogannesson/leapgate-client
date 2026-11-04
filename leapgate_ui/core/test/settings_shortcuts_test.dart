@@ -85,7 +85,7 @@ void main() {
       expect(actions, isNot(contains('refresh')));
       expect(bindingKeyLabels(shortcutBindings()
               .firstWhere((b) => b['action'] == kShortcutActionSwitchDisplayNext)),
-          ['Ctrl', 'Alt', 'Shift', 'Right']);
+          ['Ctrl', 'Alt', 'Shift', '→']);
     });
   });
 
