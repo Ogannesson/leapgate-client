@@ -66,8 +66,9 @@ class _RestrictionsBodyState extends State<_RestrictionsBody> {
   @override
   void didUpdateWidget(_RestrictionsBody old) {
     super.didUpdateWidget(old);
-    // The page builds the section again when it reads the values again.
-    _readListen();
+    // The page builds the section again when it reads the values again; a read already due
+    // reads then.
+    if (!(_again?.isActive ?? false)) _readListen();
   }
 
   @override
@@ -200,10 +201,16 @@ class _RestrictionsBodyState extends State<_RestrictionsBody> {
             description: l10n.settingsRestrictDirectNote,
             value: direct,
             onChanged: open
-                ? (v) async {
-                    await ctx.save(kOptionDirectServer,
+                ? (v) {
+                    // The service listens again about a second later; until then it still
+                    // answers with the record from before it stopped.
+                    if (v) {
+                      _listen = const DirectListen();
+                      _again?.cancel();
+                      _again = Timer(const Duration(seconds: 1), _readListen);
+                    }
+                    ctx.save(kOptionDirectServer,
                         () => config.setBool(kOptionDirectServer, v));
-                    if (v) _readListen();
                   }
                 : null,
             marked: ctx.isMarked(kOptionDirectServer),

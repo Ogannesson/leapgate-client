@@ -89,5 +89,9 @@ String? parseDirectPort(String text) {
   return int.parse(t) <= 65535 ? t : null;
 }
 
-/// The port direct IP access listens on for the stored value.
-int directPort(String stored) => int.tryParse(stored) ?? kDefaultDirectPort;
+/// The port direct IP access listens on for the stored value: Rust's `get_direct_port` takes
+/// anything not above 0 for the default (an old '0' included).
+int directPort(String stored) {
+  final p = int.tryParse(stored) ?? 0;
+  return p > 0 ? p : kDefaultDirectPort;
+}

@@ -67,8 +67,13 @@ class TrustedDevice {
         platform: m['platform'] as String? ?? '',
       );
 
-  /// What Rust removes it by.
+  /// What Rust removes it by; one ID can have more than one (`add_trusted_device` keeps one
+  /// per hwid).
   final List<int> hwid;
+
+  /// [hwid] in hex, to tell the rows apart.
+  String get hwidHex =>
+      hwid.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
 
   /// When it was trusted.
   final DateTime time;

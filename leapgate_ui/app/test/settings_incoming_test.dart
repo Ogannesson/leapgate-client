@@ -257,6 +257,30 @@ void main() {
       ]);
     });
 
+    testWidgets('one ID trusted on two machines: each row is its own',
+        (tester) async {
+      _bind
+        ..twoFactor = true
+        ..trusted = [
+          _device('912345678', '李四的台式机', 3, 1),
+          _device('912345678', '李四的笔记本', 5, 2),
+          _device('147258369', '王五的笔记本', 9, 3),
+        ];
+      await _pump(tester, twoFactorSection);
+      await tester.tap(find.text('李四的笔记本'));
+      await tester.pump();
+      expect(find.text('已选择 1 台'), findsOneWidget);
+      await tester.tap(_button('删除'));
+      await _settle(tester);
+      expect(find.text('删除所选的 1 台受信设备？'), findsOneWidget);
+      await tester.tap(_button('删除').last);
+      await _settle(tester);
+      final removed = _bind.callsTo(#mainRemoveTrustedDevices).single;
+      expect(jsonDecode(removed.namedArguments[#json] as String), [
+        [2],
+      ]);
+    });
+
     testWidgets('none trusted; deleting all asks first', (tester) async {
       _bind.twoFactor = true;
       await _pump(tester, twoFactorSection);
@@ -440,6 +464,7 @@ void main() {
         ..adapters = const [
           LocalAdapter(name: 'Ethernet', ipv4: ['192.0.2.10'], ipv6: ['2001:db8::10']),
         ]
+        // The record from before it was switched off.
         ..listen = const DirectListen(state: 'listening', port: 21118);
       await _pump(tester, restrictionsSection);
       expect(find.text('端口'), findsNothing);
@@ -447,6 +472,15 @@ void main() {
       await _settle(tester);
       expect(_bind.config[kOptionDirectServer], 'Y');
       expect(find.text('本机地址：192.0.2.10、2001:db8::10'), findsOneWidget);
+      // The service listens again a second later, and fails.
+      _api.listen =
+          const DirectListen(state: 'failed', port: 21118, error: 'in_use');
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump();
+      expect(find.text('端口 21118 已被其他应用占用'), findsOneWidget);
+
+      _api.listen = const DirectListen(state: 'listening', port: 21118);
+      await _pump(tester, restrictionsSection);
       expect(find.text('端口 21118 已被其他应用占用'), findsNothing);
 
       _api.listen = const DirectListen(state: 'failed', port: 21118, error: 'in_use');

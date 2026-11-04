@@ -52,7 +52,7 @@ class _TwoFactorBody extends StatefulWidget {
 class _TwoFactorBodyState extends State<_TwoFactorBody> {
   List<TrustedDevice> _list = const [];
 
-  /// The IDs of the picked rows.
+  /// The picked rows by [TrustedDevice.hwidHex]: one ID can be trusted on two machines.
   final _picked = <String>{};
 
   @override
@@ -73,7 +73,7 @@ class _TwoFactorBodyState extends State<_TwoFactorBody> {
     if (!mounted) return;
     setState(() {
       _list = list;
-      _picked.retainWhere((id) => list.any((d) => d.id == id));
+      _picked.retainWhere((hwid) => list.any((d) => d.hwidHex == hwid));
     });
   }
 
@@ -121,7 +121,7 @@ class _TwoFactorBodyState extends State<_TwoFactorBody> {
   }
 
   Future<void> _deletePicked(AppLocalizations l10n) async {
-    final picked = _list.where((d) => _picked.contains(d.id)).toList();
+    final picked = _list.where((d) => _picked.contains(d.hwidHex)).toList();
     if (!await _confirm(l10n.settingsTwoFactorDeletePickedTitle(picked.length),
         action: l10n.settingsTwoFactorDelete)) {
       return;
@@ -216,7 +216,7 @@ class _TwoFactorBodyState extends State<_TwoFactorBody> {
                 devices: [
                   for (final d in _list)
                     LgTrustedDevice(
-                      id: d.id,
+                      id: d.hwidHex,
                       name: d.name,
                       formattedId: formatPeerId(d.id),
                       platform: lgPlatformOf(d.platform),

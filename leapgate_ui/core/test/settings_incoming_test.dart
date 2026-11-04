@@ -153,6 +153,8 @@ void main() {
       expect(parseDirectPort('65536'), isNull);
       expect(directPort(''), kDefaultDirectPort);
       expect(directPort('21119'), 21119);
+      // Upstream took 0 for the default; Rust still does.
+      expect(directPort('0'), kDefaultDirectPort);
       expect(parseAutoDisconnectMinutes(''), '');
       expect(parseAutoDisconnectMinutes('30'), '30');
       expect(parseAutoDisconnectMinutes('0'), isNull);
