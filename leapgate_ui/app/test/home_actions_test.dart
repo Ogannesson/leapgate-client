@@ -64,29 +64,30 @@ void main() {
   });
 
   testWidgets(
-      'the installed version unlocks before "Change", for that change only (R2-Q31)',
-      (tester) async {
-    bind
-      ..installed = true
-      ..unlockPin = '2468';
-    await pumpWith(tester, method: kUsePermanentPassword);
-    await tapText(tester, '修改');
-    expect(find.text('输入解锁 PIN'), findsWidgets);
-    expect(find.text('设置固定密码'), findsNothing);
+    'the installed version unlocks before "Change", for that change only (R2-Q31)',
+    (tester) async {
+      bind
+        ..installed = true
+        ..unlockPin = '2468';
+      await pumpWith(tester, method: kUsePermanentPassword);
+      await tapText(tester, '修改');
+      expect(find.text('输入解锁 PIN'), findsWidgets);
+      expect(find.text('设置固定密码'), findsNothing);
 
-    await tester.enterText(find.byType(EditableText).last, '1111');
-    await tapText(tester, '解锁');
-    expect(find.text('PIN 错误'), findsOneWidget);
-    await tester.enterText(find.byType(EditableText).last, '2468');
-    await tapText(tester, '解锁');
-    expect(find.text('设置固定密码'), findsOneWidget);
-    expect(settingsUnlock.locked, isFalse);
+      await tester.enterText(find.byType(EditableText).last, '1111');
+      await tapText(tester, '解锁');
+      expect(find.text('PIN 错误'), findsOneWidget);
+      await tester.enterText(find.byType(EditableText).last, '2468');
+      await tapText(tester, '解锁');
+      expect(find.text('设置固定密码'), findsOneWidget);
+      expect(settingsUnlock.locked, isFalse);
 
-    await tapText(tester, '取消');
-    expect(find.text('设置固定密码'), findsNothing);
-    expect(settingsUnlock.locked, isTrue);
-    await unmount(tester);
-  });
+      await tapText(tester, '取消');
+      expect(find.text('设置固定密码'), findsNothing);
+      expect(settingsUnlock.locked, isTrue);
+      await unmount(tester);
+    },
+  );
 
   testWidgets('"Change" with no PIN asks for administrator permission', (
     tester,
@@ -104,6 +105,25 @@ void main() {
     await tapText(tester, '修改');
     expect(find.text('未获得管理员权限，固定密码未修改'), findsNothing);
     await tapText(tester, '取消');
+    await unmount(tester);
+  });
+
+  testWidgets('the refused line goes with an unlock on the settings page', (
+    tester,
+  ) async {
+    bind
+      ..installed = true
+      ..superUser = false;
+    await pumpWith(tester, method: kUsePermanentPassword);
+    await tapText(tester, '修改');
+    expect(find.text('未获得管理员权限，固定密码未修改'), findsOneWidget);
+
+    bind.superUser = true;
+    await tapText(tester, '设置');
+    await tapText(tester, '解锁');
+    expect(find.text('已锁定。修改这些设置需要管理员权限。'), findsNothing);
+    expect(find.text('未获得管理员权限，固定密码未修改'), findsNothing);
+    await tester.pump(const Duration(seconds: 3));
     await unmount(tester);
   });
 

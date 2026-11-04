@@ -327,6 +327,30 @@ void main() {
     });
   });
 
+  testWidgets('a "无法保存设置" on the page turns English with the language', (
+    tester,
+  ) async {
+    (settingsApi as FakeSettingsApi).saveResult = SaveResult.failed;
+    final overlays = TabOverlays();
+    await pumpHome(tester, id: '135792468', overlays: overlays);
+    settingsPageRequests.request(SettingsSectionId.access);
+    await settle(tester);
+    await tapText(tester, '在本机接受');
+    expect(find.text('无法保存设置'), findsOneWidget);
+
+    // The same page, the app's language switched.
+    await pumpHome(
+      tester,
+      id: '135792468',
+      overlays: overlays,
+      locale: const Locale('en'),
+    );
+    await settle(tester);
+    expect(find.text('无法保存设置'), findsNothing);
+    expect(find.text("Couldn't save the setting"), findsOneWidget);
+    await done(tester);
+  });
+
   test('"无法保存设置" already shown follows a change of language', () async {
     final state = SettingsSectionState(
       overlays: TabOverlays(),
