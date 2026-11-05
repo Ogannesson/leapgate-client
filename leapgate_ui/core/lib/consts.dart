@@ -605,3 +605,9 @@ const String kOptionEnableHwcodec = "enable-hwcodec";
 // M7a shell (coder B): the queue panel.
 
 // M7a panes (coder C): column widths, the divider between the panes.
+
+/// The widths of the date, type and size columns, "136,110,80"; both panes share them.
+const String kOptionFtColumns = "leapgate-ft-columns";
+
+/// Where the divider between the panes is, the local pane's share of the width ("0.5").
+const String kOptionFtDivider = "leapgate-ft-divider";
