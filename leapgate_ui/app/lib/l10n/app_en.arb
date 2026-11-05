@@ -1426,7 +1426,6 @@
   "@filesCantOpenReason": {"placeholders": {"folder": {"type": "String"}, "reason": {"type": "String"}}},
   "filesReasonPathTooLong": "The path is too long.",
   "filesReasonInvalidName": "The name isn't valid.",
-  "filesDropRefused": "Can't drop here",
   "filesCantOpenText": "Couldn't open \"{folder}\": {text}.",
   "@filesCantOpenText": {"placeholders": {"folder": {"type": "String"}, "text": {"type": "String"}}},
   "filesDrivesFailed": "Couldn't read the list of drives.",
@@ -1568,5 +1567,8 @@
   "@queueBytes": {"placeholders": {"count": {"type": "int"}}},
   "queueResizeHandle": "Resize the transfers panel",
   "connCloseRemoteDesktop": "Close remote desktop",
-  "tabCloseTitle": "Close the tab?"
+  "tabCloseTitle": "Close the tab?",
+  "filesSearchFiltering": "Search this folder, filtering",
+  "filesSortAscending": "ascending",
+  "filesSortDescending": "descending"
 }

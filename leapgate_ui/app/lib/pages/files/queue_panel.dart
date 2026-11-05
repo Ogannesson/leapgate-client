@@ -13,6 +13,7 @@ import '../../theme/lg_tokens.dart';
 import '../../widgets/lg_button.dart';
 import '../../widgets/lg_tooltip.dart';
 import 'file_dialogs.dart';
+import 'formats.dart';
 
 /// The expanded panel's height when none is saved, and its bounds.
 const kQueueDefaultHeight = 200.0;
@@ -296,7 +297,7 @@ class _Row extends StatelessWidget {
   /// What the row says, and the text behind it on hover (the original error text).
   (String, String?) _status(AppLocalizations l10n) {
     final r = row;
-    String size(int b) => ftSize(l10n, b);
+    String size(int b) => formatFileSize(l10n, b);
     switch (r.status) {
       case FileJobStatus.queued:
         return (l10n.queueStatusQueued, null);

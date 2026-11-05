@@ -7,15 +7,22 @@ import 'package:flutter_hbb/leapgate/session.dart';
 
 import '../../l10n/app_localizations.dart';
 import '../../theme/lg_tokens.dart';
-import '../../widgets/lg_button.dart';
+import '../../widgets/lg_view_bar.dart';
 import '../session/connection_panel.dart';
 import 'drag_drop.dart';
 import 'pane.dart';
 import 'queue_panel.dart';
 
-/// The divider between the panes, and how far it goes to either side.
-const kFileDividerWidth = 7.0;
+/// The gap between the panes, which is the divider that drags (`.cols` gap in the mockup), and
+/// how far it goes to either side.
+const kFileDividerWidth = LgSpace.s3;
+const kFileDividerWidthCompact = LgSpace.s2;
 const kFileSplitMin = 0.35;
+const kFileDividerKey = ValueKey('file pane divider');
+
+/// Lower windows get the smallest window's rows, a step lower (`.frame.mn` of the mockup, drawn
+/// at 960 × 600); the same line as the home page's short window.
+const kFileCompactBelowHeight = 700.0;
 
 /// The file transfer view in its session tab (02 §2.2): the view title bar, the two panes and
 /// the queue panel (`queue_panel.dart`), the connection panel over them while not connected.
@@ -71,10 +78,17 @@ class _FileViewState extends State<FileView> {
   /// The local pane's share of the width (02 §2.2 "布局": remembered on this device).
   late double _split = _savedSplit();
 
+  /// The connection was up at the last look: the list takes the keys when it comes up.
+  late bool _connected = _isConnected;
+
+  bool get _isConnected => widget.ffi.connection.stage == ConnStage.connected;
+
   @override
   void initState() {
     super.initState();
     _areas();
+    widget.ffi.connection.addListener(_onConnection);
+    if (_connected) _focusLocal();
   }
 
   @override
@@ -85,24 +99,37 @@ class _FileViewState extends State<FileView> {
       _remote.dispose();
       _areas();
     }
+    if (!identical(old.ffi.connection, widget.ffi.connection)) {
+      old.ffi.connection.removeListener(_onConnection);
+      widget.ffi.connection.addListener(_onConnection);
+      _connected = _isConnected;
+    }
     // Shown again: the keys work without a click first. Not while the connection panel is up,
     // which takes the focus for its own field.
-    if (widget.active &&
-        !old.active &&
-        widget.ffi.connection.stage == ConnStage.connected) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && widget.active) _localFocus.requestFocus();
-      });
-    }
+    if (widget.active && !old.active && _isConnected) _focusLocal();
   }
 
   @override
   void dispose() {
+    widget.ffi.connection.removeListener(_onConnection);
     _local.dispose();
     _remote.dispose();
     _localFocus.dispose();
     _remoteFocus.dispose();
     super.dispose();
+  }
+
+  /// Connected (the first time, or again after the panel): the local list has the keys.
+  void _onConnection() {
+    final connected = _isConnected;
+    if (connected && !_connected) _focusLocal();
+    _connected = connected;
+  }
+
+  void _focusLocal() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && widget.active) _localFocus.requestFocus();
+    });
   }
 
   void _areas() {
@@ -115,27 +142,11 @@ class _FileViewState extends State<FileView> {
     return v == null ? 0.5 : v.clamp(kFileSplitMin, 1 - kFileSplitMin);
   }
 
-  Widget _titleBar(AppLocalizations l10n, LgTokens t) => Container(
-    height: t.sizes.bar,
-    padding: const EdgeInsets.symmetric(horizontal: LgSpace.s2),
-    decoration: BoxDecoration(
-      border: Border(bottom: BorderSide(color: t.colors.border)),
-    ),
-    child: Row(
-      children: [
-        widget.viewSwitch,
-        const SizedBox(width: LgSpace.s2),
-        widget.route,
-        const Spacer(),
-        LgButton(label: l10n.filesDisconnect, onPressed: widget.onDisconnect),
-      ],
-    ),
-  );
-
-  Widget _panes(LgTokens t) => LayoutBuilder(
+  Widget _panes(bool compact) => LayoutBuilder(
     builder: (context, constraints) {
+      final divider = compact ? kFileDividerWidthCompact : kFileDividerWidth;
       final width = constraints.maxWidth;
-      final left = (width - kFileDividerWidth) * _split;
+      final left = (width - divider) * _split;
       return Row(
         children: [
           SizedBox(
@@ -145,28 +156,28 @@ class _FileViewState extends State<FileView> {
               pane: widget.model.local,
               other: widget.model.remote,
               area: _local,
+              otherArea: _remote,
               listFocus: _localFocus,
               otherListFocus: _remoteFocus,
+              compact: compact,
             ),
           ),
           MouseRegion(
+            key: kFileDividerKey,
             cursor: SystemMouseCursors.resizeColumn,
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
               onHorizontalDragUpdate: (d) => setState(() {
-                _split = ((left + d.delta.dx) / (width - kFileDividerWidth))
-                    .clamp(kFileSplitMin, 1 - kFileSplitMin);
+                _split = ((left + d.delta.dx) / (width - divider)).clamp(
+                  kFileSplitMin,
+                  1 - kFileSplitMin,
+                );
               }),
               onHorizontalDragEnd: (_) => appCore.options.local.set(
                 kOptionFtDivider,
                 _split.toStringAsFixed(3),
               ),
-              child: SizedBox(
-                width: kFileDividerWidth,
-                child: Center(
-                  child: Container(width: 1, color: t.colors.border),
-                ),
-              ),
+              child: SizedBox(width: divider, height: double.infinity),
             ),
           ),
           Expanded(
@@ -175,8 +186,10 @@ class _FileViewState extends State<FileView> {
               pane: widget.model.remote,
               other: widget.model.local,
               area: _remote,
+              otherArea: _local,
               listFocus: _remoteFocus,
               otherListFocus: _localFocus,
+              compact: compact,
             ),
           ),
         ],
@@ -189,6 +202,22 @@ class _FileViewState extends State<FileView> {
     final l10n = AppLocalizations.of(context)!;
     final t = LgTokens.of(context);
     final conn = widget.ffi.connection;
+    final compact = MediaQuery.sizeOf(context).height < kFileCompactBelowHeight;
+    // The page's padding and the gap above the queue (`.vb`, `.frame.mn .vb`).
+    final gap = compact ? LgSpace.s1 : LgSpace.s3;
+    final padding = compact
+        ? const EdgeInsets.fromLTRB(
+            LgSpace.s2,
+            LgSpace.s1,
+            LgSpace.s2,
+            LgSpace.s2,
+          )
+        : const EdgeInsets.fromLTRB(
+            LgSpace.s4,
+            LgSpace.s3,
+            LgSpace.s4,
+            LgSpace.s4,
+          );
     return SystemDropTarget(
       enabled: widget.active,
       areas: [_local, _remote],
@@ -196,20 +225,33 @@ class _FileViewState extends State<FileView> {
       child: ExcludeFocus(
         excluding: !widget.active,
         child: ColoredBox(
-          color: t.colors.surface,
+          color: t.colors.bg,
           child: Column(
             children: [
-              _titleBar(l10n, t),
+              LgViewBar(
+                viewSwitch: widget.viewSwitch,
+                route: widget.route,
+                disconnectLabel: l10n.filesDisconnect,
+                onDisconnect: widget.onDisconnect,
+                compact: compact,
+              ),
               Expanded(
                 child: ListenableBuilder(
                   listenable: conn,
                   builder: (context, _) => Stack(
                     children: [
-                      Column(
-                        children: [
-                          Expanded(child: _panes(t)),
-                          FileQueuePanel(jobs: widget.model.jobs),
-                        ],
+                      Padding(
+                        padding: padding,
+                        child: Column(
+                          children: [
+                            Expanded(child: _panes(compact)),
+                            SizedBox(height: gap),
+                            FileQueuePanel(
+                              jobs: widget.model.jobs,
+                              connection: conn,
+                            ),
+                          ],
+                        ),
                       ),
                       if (conn.stage != ConnStage.connected) ...[
                         const ModalBarrier(dismissible: false),

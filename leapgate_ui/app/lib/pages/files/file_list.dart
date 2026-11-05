@@ -9,11 +9,11 @@ import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/file_transfer/pane.dart';
 import 'package:flutter_hbb/models/file_model.dart';
 
-import '../../icons/lg_icon.dart';
 import '../../l10n/app_localizations.dart';
 import '../../theme/lg_tokens.dart';
+import '../../widgets/lg_file_list.dart';
+import '../../widgets/lg_file_pane.dart';
 import '../../widgets/lg_menu_items.dart';
-import '../../widgets/lg_tooltip.dart';
 import 'drag_drop.dart';
 import 'formats.dart';
 import 'pane_menus.dart';
@@ -27,8 +27,20 @@ const kTypeAheadWindow = Duration(milliseconds: 1500);
 /// "名称" keeps at least this much when the other columns are wide.
 const kFileNameColumnMin = 120.0;
 
-/// The icon in front of the name.
-const _kLeading = LgSpace.s2 + 20;
+/// A row besides its columns: the list's and the row's side padding, the icon and the gap after
+/// it (`LgFileRow`).
+const _kRowChrome = LgSpace.s2 * 4 + 20 + LgSpace.s3;
+
+/// The gap in front of each column after the name.
+const _kColumnGap = LgSpace.s3;
+
+/// The least width of the date, type and size columns, and the most of any.
+const _kColumnMins = [
+  LgFileColumns.minModified,
+  LgFileColumns.minType,
+  LgFileColumns.minSize,
+];
+const _kColumnMax = 400.0;
 
 /// [widths] as they show in a list [width] wide: the date, type (when shown) and size columns
 /// shrink together so that "名称" keeps [kFileNameColumnMin]. What is saved stays as it was.
@@ -38,7 +50,11 @@ List<double> fitColumns(
   required bool withType,
 }) {
   final fixed = widths[0] + (withType ? widths[1] : 0) + widths[2];
-  final room = width - _kLeading - kFileNameColumnMin;
+  final room =
+      width -
+      _kRowChrome -
+      _kColumnGap * (withType ? 3 : 2) -
+      kFileNameColumnMin;
   if (fixed <= room) return widths;
   final scale = room <= 0 ? 0.0 : room / fixed;
   return [for (final w in widths) w * scale];
@@ -46,15 +62,33 @@ List<double> fitColumns(
 
 /// The date, type and size columns' widths, from LocalConfig or the defaults.
 List<double> _columnWidths() {
-  const fallback = [136.0, 110.0, 80.0];
+  const fallback = LgFileColumns();
   final saved = appCore.options.local
       .get(kOptionFtColumns)
       .split(',')
       .map(double.tryParse)
       .toList();
-  if (saved.length != 3 || saved.contains(null)) return fallback;
-  return [for (final w in saved) w!.clamp(48.0, 400.0)];
+  if (saved.length != 3 || saved.contains(null)) {
+    return [fallback.modified, fallback.type, fallback.size];
+  }
+  return [
+    for (final (i, w) in saved.indexed) w!.clamp(_kColumnMins[i], _kColumnMax),
+  ];
 }
+
+LgFileColumn _columnOf(FileSortField field) => switch (field) {
+  FileSortField.name => LgFileColumn.name,
+  FileSortField.modified => LgFileColumn.modified,
+  FileSortField.type => LgFileColumn.type,
+  FileSortField.size => LgFileColumn.size,
+};
+
+FileSortField _fieldOf(LgFileColumn column) => switch (column) {
+  LgFileColumn.name => FileSortField.name,
+  LgFileColumn.modified => FileSortField.modified,
+  LgFileColumn.type => FileSortField.type,
+  LgFileColumn.size => FileSortField.size,
+};
 
 class FileList extends StatefulWidget {
   const FileList({
@@ -64,6 +98,7 @@ class FileList extends StatefulWidget {
     required this.entries,
     required this.focusNode,
     required this.area,
+    required this.otherArea,
     required this.onEditPath,
     required this.onFocusSearch,
     required this.onSwitchPane,
@@ -77,6 +112,9 @@ class FileList extends StatefulWidget {
   final List<Entry> entries;
   final FocusNode focusNode;
   final PaneDropArea area;
+
+  /// The other pane's: where rows dragged out of this list would land, for their label.
+  final PaneDropArea otherArea;
   final VoidCallback onEditPath;
   final VoidCallback onFocusSearch;
 
@@ -106,6 +144,9 @@ class _FileListState extends State<FileList> {
   var _typed = '';
   DateTime _typedAt = DateTime(0);
   late List<double> _widths = _columnWidths();
+
+  /// A column's width was dragged since the press on the header: saved on its release.
+  var _resized = false;
 
   FilePane get _pane => widget.pane;
   List<Entry> get _entries => widget.entries;
@@ -394,17 +435,30 @@ class _FileListState extends State<FileList> {
     return KeyEventResult.handled;
   }
 
-  void _resize(int column, double dx) {
+  /// [delta] is how far the column's left edge moved to the left: it grows by that much.
+  void _resize(LgFileColumn column, double delta) {
+    final i = switch (column) {
+      LgFileColumn.modified => 0,
+      LgFileColumn.type => 1,
+      LgFileColumn.size => 2,
+      LgFileColumn.name => -1,
+    };
+    if (i < 0) return;
+    _resized = true;
     setState(() {
       _widths = [..._widths];
-      _widths[column] = (_widths[column] - dx).clamp(48.0, 400.0);
+      _widths[i] = (_widths[i] + delta).clamp(_kColumnMins[i], _kColumnMax);
     });
   }
 
-  void _saveWidths() => appCore.options.local.set(
-    kOptionFtColumns,
-    _widths.map((w) => w.round()).join(','),
-  );
+  void _saveWidths() {
+    if (!_resized) return;
+    _resized = false;
+    appCore.options.local.set(
+      kOptionFtColumns,
+      _widths.map((w) => w.round()).join(','),
+    );
+  }
 
   void _sortBy(FileSortField field) {
     final s = _pane.sort;
@@ -427,21 +481,38 @@ class _FileListState extends State<FileList> {
           constraints.maxWidth,
           withType: withType,
         );
+        final columns = LgFileColumns(
+          modified: widths[0],
+          type: widths[1],
+          size: widths[2],
+        );
         final names = {for (final e in _pane.entries) e.name};
         return Focus(
           focusNode: widget.focusNode,
           onKeyEvent: _onKey,
           child: Column(
             children: [
-              _Header(
-                sort: _pane.sort,
-                widths: widths,
-                withType: withType,
-                onSort: _sortBy,
-                onResize: _resize,
-                onResizeEnd: _saveWidths,
+              // The header has no end of a drag: the width is saved when the button goes up.
+              Listener(
+                onPointerUp: (_) => _saveWidths(),
+                onPointerCancel: (_) => _saveWidths(),
+                child: LgFileListHeader(
+                  labels: LgFileHeaderLabels(
+                    name: l10n.filesColName,
+                    modified: l10n.filesColModified,
+                    type: l10n.filesColType,
+                    size: l10n.filesColSize,
+                    ascending: l10n.filesSortAscending,
+                    descending: l10n.filesSortDescending,
+                  ),
+                  sortColumn: _columnOf(_pane.sort.field),
+                  ascending: _pane.sort.ascending,
+                  onSort: (c) => _sortBy(_fieldOf(c)),
+                  columns: columns,
+                  showType: withType,
+                  onResize: _resize,
+                ),
               ),
-              Container(height: 1, color: t.colors.border),
               Expanded(
                 child: Listener(
                   onPointerDown: _onPointerDown,
@@ -457,10 +528,15 @@ class _FileListState extends State<FileList> {
                             valueListenable: widget.area.hover,
                             builder: (context, hover, _) => ListView.builder(
                               controller: _scroll,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: LgSpace.s2,
+                              ),
                               itemExtent: t.sizes.tableRow,
                               itemCount: _entries.length,
                               itemBuilder: (context, i) {
                                 final e = _entries[i];
+                                bool tinted(Entry x) =>
+                                    _selected(x) || hover?.to == x.path;
                                 return _row(
                                   l10n,
                                   e,
@@ -470,7 +546,11 @@ class _FileListState extends State<FileList> {
                                       widget.focusNode.hasFocus,
                                   target: hover?.to == e.path,
                                   partial: isPartialTransfer(e, names),
-                                  widths: widths,
+                                  divider:
+                                      i > 0 &&
+                                      !tinted(e) &&
+                                      !tinted(_entries[i - 1]),
+                                  columns: columns,
                                   withType: withType,
                                 );
                               },
@@ -494,234 +574,66 @@ class _FileListState extends State<FileList> {
     required bool lead,
     required bool target,
     required bool partial,
-    required List<double> widths,
+    required bool divider,
+    required LgFileColumns columns,
     required bool withType,
   }) {
-    final t = LgTokens.of(context);
-    final c = t.colors;
-    final row = _FileRow(
-      entry: e,
-      selected: selected,
-      lead: lead,
-      target: target,
+    final row = LgFileRow(
+      key: e.isDrive ? ValueKey(e.path) : null,
+      kind: e.isDrive
+          ? LgFileKind.drive
+          : e.isDirectory
+          ? LgFileKind.folder
+          : LgFileKind.file,
+      name: e.name,
+      modified: e.isDrive ? '' : formatFileDate(e),
       type: fileTypeText(l10n, e, partial: partial),
-      date: e.isDrive ? '' : formatFileDate(e),
       size: e.isFile && !e.isLink ? formatFileSize(l10n, e.size) : '',
-      widths: widths,
-      withType: withType,
+      columns: columns,
+      showType: withType,
+      link: e.isLink,
+      hidden: e.isHidden,
+      selected: selected,
+      focused: lead,
+      dropTarget: target,
+      topDivider: divider,
+      // What a click does: this row alone is selected.
+      onSemanticTap: () {
+        _pane.select([e]);
+        _anchor = _lead = e.path;
+        setState(() {});
+      },
     );
     if (e.isDrive) return row;
     final items = selected ? _pane.selection : [e];
+    final upload = _pane.isLocal;
     return Draggable<FileDrag>(
+      key: ValueKey(e.path),
       data: FileDrag(_pane, items),
       dragAnchorStrategy: pointerDragAnchorStrategy,
       onDragStarted: () => _dragging = true,
-      feedback: Container(
-        padding: const EdgeInsets.symmetric(
-          horizontal: LgSpace.s3,
-          vertical: LgSpace.s1,
-        ),
-        decoration: BoxDecoration(
-          color: c.float,
-          border: Border.all(color: c.border),
-          borderRadius: BorderRadius.circular(LgRadius.r6),
-        ),
-        child: Text(
-          items.length == 1 ? items.single.name : l10n.filesItems(items.length),
-          style: t.textS.copyWith(color: c.text),
-        ),
+      // The first item's name, the folder it would go into over a folder row, crossed out where
+      // it can't land (this pane, "此电脑").
+      feedback: ListenableBuilder(
+        listenable: Listenable.merge([
+          widget.area.hover,
+          widget.otherArea.hover,
+        ]),
+        builder: (context, _) {
+          final spot = widget.otherArea.hover.value ?? widget.area.hover.value;
+          final into = spot != null && spot.accepted && spot.to != null;
+          return LgDragChip(
+            label: !into
+                ? items.first.name
+                : upload
+                ? l10n.filesUploadTo(spot.folder)
+                : l10n.filesDownloadTo(spot.folder),
+            count: items.length,
+            rejected: spot != null && !spot.accepted,
+          );
+        },
       ),
       child: row,
-    );
-  }
-}
-
-class _Header extends StatelessWidget {
-  const _Header({
-    required this.sort,
-    required this.widths,
-    required this.withType,
-    required this.onSort,
-    required this.onResize,
-    required this.onResizeEnd,
-  });
-
-  final FileSort sort;
-  final List<double> widths;
-  final bool withType;
-  final ValueChanged<FileSortField> onSort;
-  final void Function(int column, double dx) onResize;
-  final VoidCallback onResizeEnd;
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context)!;
-    final t = LgTokens.of(context);
-    Widget cell(String label, FileSortField field, {int? column}) {
-      final on = sort.field == field;
-      final head = Semantics(
-        button: true,
-        label: label,
-        excludeSemantics: true,
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: () => onSort(field),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: LgSpace.s2),
-            child: Row(
-              children: [
-                Flexible(
-                  child: Text(
-                    label,
-                    style: t.textS.copyWith(color: t.colors.text2),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                if (on)
-                  LgIcon(
-                    sort.ascending ? LgIcons.chevU : LgIcons.chevD,
-                    size: 14,
-                    color: t.colors.text2,
-                  ),
-              ],
-            ),
-          ),
-        ),
-      );
-      if (column == null) return Expanded(child: head);
-      return SizedBox(
-        width: widths[column],
-        child: Stack(
-          children: [
-            Positioned.fill(child: head),
-            // Drag to the left to widen the column.
-            Positioned(
-              left: 0,
-              top: 0,
-              bottom: 0,
-              width: 6,
-              child: MouseRegion(
-                cursor: SystemMouseCursors.resizeColumn,
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onHorizontalDragUpdate: (d) => onResize(column, d.delta.dx),
-                  onHorizontalDragEnd: (_) => onResizeEnd(),
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return SizedBox(
-      height: t.sizes.tableRow,
-      child: Row(
-        children: [
-          const SizedBox(width: LgSpace.s2 + 20),
-          cell(l10n.filesColName, FileSortField.name),
-          cell(l10n.filesColModified, FileSortField.modified, column: 0),
-          if (withType) cell(l10n.filesColType, FileSortField.type, column: 1),
-          cell(l10n.filesColSize, FileSortField.size, column: 2),
-        ],
-      ),
-    );
-  }
-}
-
-class _FileRow extends StatelessWidget {
-  const _FileRow({
-    required this.entry,
-    required this.selected,
-    required this.lead,
-    required this.target,
-    required this.type,
-    required this.date,
-    required this.size,
-    required this.widths,
-    required this.withType,
-  });
-
-  final Entry entry;
-  final bool selected;
-
-  /// The row the keys move from, while the list has the focus.
-  final bool lead;
-
-  /// Items dragged onto it go into it.
-  final bool target;
-  final String type;
-  final String date;
-  final String size;
-  final List<double> widths;
-  final bool withType;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = LgTokens.of(context);
-    final c = t.colors;
-    final icon = entry.isDrive
-        ? LgIcons.drive
-        : entry.isDirectory
-        ? LgIcons.folder
-        : LgIcons.file;
-    Widget text(String s, double width, {bool end = false}) => SizedBox(
-      width: width,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: LgSpace.s2),
-        child: Text(
-          s,
-          style: t.text.copyWith(color: c.text2),
-          maxLines: 1,
-          textAlign: end ? TextAlign.end : TextAlign.start,
-          overflow: TextOverflow.ellipsis,
-        ),
-      ),
-    );
-    final content = Row(
-      children: [
-        const SizedBox(width: LgSpace.s2),
-        SizedBox(
-          width: 20,
-          height: 20,
-          child: Stack(
-            clipBehavior: Clip.none,
-            children: [
-              LgIcon(icon, size: 20),
-              if (entry.isLink)
-                Positioned(
-                  right: -2,
-                  bottom: -2,
-                  child: LgIcon(LgIcons.link, size: 10, color: c.text2),
-                ),
-            ],
-          ),
-        ),
-        Expanded(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: LgSpace.s2),
-            child: LgEllipsisText(entry.name, style: t.text),
-          ),
-        ),
-        text(date, widths[0]),
-        if (withType) text(type, widths[1]),
-        text(size, widths[2], end: true),
-      ],
-    );
-    return Semantics(
-      label: entry.name,
-      selected: selected,
-      excludeSemantics: true,
-      child: Container(
-        decoration: BoxDecoration(
-          color: target || selected ? c.active : null,
-          border: lead || target
-              ? Border.all(color: c.accent)
-              : const Border.fromBorderSide(BorderSide.none),
-        ),
-        child: Opacity(opacity: entry.isHidden ? 0.5 : 1, child: content),
-      ),
     );
   }
 }
