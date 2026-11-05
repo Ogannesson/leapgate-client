@@ -13,6 +13,7 @@ import 'package:leapgate_ui/widgets/lg_breadcrumb.dart';
 import 'package:leapgate_ui/widgets/lg_button.dart';
 import 'package:leapgate_ui/widgets/lg_device.dart';
 import 'package:leapgate_ui/widgets/lg_file_pane.dart';
+import 'package:leapgate_ui/widgets/lg_list_chrome.dart';
 import 'package:leapgate_ui/widgets/lg_menu.dart';
 import 'package:leapgate_ui/widgets/lg_status.dart';
 import 'package:leapgate_ui/widgets/lg_text_field.dart';
@@ -155,6 +156,102 @@ class _OpsHostState extends State<_OpsHost> {
     ),
   );
 }
+
+/// The row of actions as the page makes it: the transfer button, two tools with a word, the menu
+/// button. The width is the pane's, changed from outside.
+class _ToolsHost extends StatefulWidget {
+  const _ToolsHost({super.key, required this.width});
+
+  final double width;
+
+  @override
+  State<_ToolsHost> createState() => _ToolsHostState();
+}
+
+class _ToolsHostState extends State<_ToolsHost> {
+  late double _width = widget.width;
+  final _controller = TextEditingController();
+  final _focus = FocusNode();
+  bool _open = false;
+
+  void setWidth(double width) => setState(() => _width = width);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _focus.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    width: _width,
+    child: LgFileOpRow(
+      actions: [
+        LgButton(
+          label: '上传',
+          kind: LgButtonKind.primary,
+          trailingIcon: LgIcons.arrowR,
+          onPressed: () {},
+        ),
+        LgListToolButton(
+          icon: LgIcons.folderPlus,
+          label: '新建文件夹',
+          onPressed: () {},
+        ),
+        LgListToolButton(icon: LgIcons.trash, label: '删除', onPressed: () {}),
+        LgMenuAnchor(
+          items: [LgMenuItem(label: '全选', onPressed: () {})],
+          builder: (context, controller) => LgIconButton(
+            icon: LgIcons.more,
+            label: '更多',
+            onPressed: () =>
+                controller.isOpen ? controller.close() : controller.open(),
+          ),
+        ),
+      ],
+      searchController: _controller,
+      searchFocusNode: _focus,
+      searchPlaceholder: '搜索当前文件夹',
+      searchClearLabel: '清除搜索',
+      searchOpenLabel: '搜索',
+      searchOpen: _open,
+      onSearchOpenChanged: (open) => setState(() => _open = open),
+    ),
+  );
+}
+
+/// The path row of a pane as the page makes it: the four buttons and the breadcrumb between.
+Widget _navWith(
+  double width,
+  List<String> segments, {
+  VoidCallback? onEdit,
+  String? editLabel,
+}) => SizedBox(
+  width: width,
+  child: LgFileNavRow(
+    back: LgFileNavButton(icon: LgIcons.arrowL, label: '后退', onPressed: () {}),
+    up: LgFileNavButton(icon: LgIcons.arrowU, label: '上一级', onPressed: () {}),
+    home: LgFileNavButton(icon: LgIcons.home, label: '主文件夹', onPressed: () {}),
+    refresh: LgFileNavButton(
+      icon: LgIcons.refresh,
+      label: '刷新',
+      onPressed: () {},
+    ),
+    path: LgBreadcrumb(
+      rootLabel: '此电脑',
+      rootTip: '此电脑',
+      segments: segments,
+      rootMenu: const [
+        LgMenuItem(label: 'C:', checked: true, onPressed: _noop),
+      ],
+      onRoot: () {},
+      onSegment: (_) {},
+      onEdit: onEdit ?? () {},
+      editLabel: editLabel,
+    ),
+  ),
+);
 
 void main() {
   group('header', () {
@@ -447,6 +544,139 @@ void main() {
       expect(alone, isEmpty);
       handle.dispose();
     });
+
+    testWidgets(
+      'in the narrowest pane (327.6 wide, the room 127.6) the root is its icon and the path does not overflow',
+      (tester) async {
+        final handle = tester.ensureSemantics();
+        await pumpLg(
+          tester,
+          _navWith(327.6, ['C:', 'Users', 'zhangsan', 'Documents']),
+        );
+        await tester.pump();
+        expect(tester.takeException(), isNull);
+        // The name is the tooltip and the screen reader's name, not text.
+        expect(find.text('此电脑'), findsNothing);
+        expect(find.byTooltip('此电脑'), findsNWidgets(2));
+        expect(find.bySemanticsLabel('此电脑'), findsNWidgets(2));
+        expect(_icon(LgIcons.monitor), findsOneWidget);
+        // The open folder keeps what room is left; the path is in its tooltip.
+        expect(find.text('Documents'), findsOneWidget);
+        expect(find.text('…'), findsNothing);
+        expect(
+          find.byTooltip('此电脑 › C: › Users › zhangsan › Documents'),
+          findsOneWidget,
+        );
+        handle.dispose();
+      },
+    );
+
+    testWidgets(
+      'a little wider, the root is still its icon and the … comes back',
+      (tester) async {
+        // 185 of room: too little for the name with the … and some of the open folder (198), enough
+        // for the icon in its place (176).
+        await pumpLg(
+          tester,
+          _navWith(385, ['C:', 'Users', 'zhangsan', 'Documents']),
+        );
+        expect(tester.takeException(), isNull);
+        expect(find.text('此电脑'), findsNothing);
+        expect(find.text('…'), findsOneWidget);
+        expect(find.text('Documents'), findsOneWidget);
+      },
+    );
+
+    testWidgets('no width overflows, down to nothing', (tester) async {
+      for (final segments in [
+        <String>[],
+        ['C:'],
+        ['C:', 'Documents'],
+        ['C:', 'Users', 'zhangsan', 'Documents'],
+        ['D:', '备份', '2026', '十月', '家庭', '照片', '原图'],
+      ]) {
+        for (var w = 0.0; w <= 700; w += 11) {
+          await pumpLg(
+            tester,
+            KeyedSubtree(
+              key: ValueKey('$w ${segments.length}'),
+              child: _crumb(segments, width: w),
+            ),
+          );
+          expect(
+            tester.takeException(),
+            isNull,
+            reason: 'width $w, ${segments.length} folders',
+          );
+        }
+      }
+    });
+
+    testWidgets('a path without a root menu does not overflow either', (
+      tester,
+    ) async {
+      for (var w = 0.0; w <= 300; w += 13) {
+        await pumpLg(
+          tester,
+          KeyedSubtree(
+            key: ValueKey(w),
+            child: _crumb(['usr', 'local', 'share'], width: w, menu: const []),
+          ),
+        );
+        expect(tester.takeException(), isNull, reason: 'width $w');
+      }
+    });
+
+    testWidgets(
+      'half a window (468 wide) keeps the drive: 此电脑 › C: › … › Documents',
+      (tester) async {
+        await pumpLg(
+          tester,
+          _navWith(468, ['C:', 'Users', 'zhangsan', 'Documents']),
+        );
+        expect(tester.takeException(), isNull);
+        expect(find.text('此电脑'), findsOneWidget);
+        expect(find.text('C:'), findsOneWidget);
+        expect(find.text('…'), findsOneWidget);
+        expect(find.text('Documents'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'the empty part of the row is a button of its own when it is given a name',
+      (tester) async {
+        final handle = tester.ensureSemantics();
+        var edit = 0;
+        await pumpLg(tester, _crumb(['C:', 'Documents'], onEdit: () => edit++));
+        expect(find.bySemanticsLabel('编辑路径'), findsNothing);
+        await pumpLg(
+          tester,
+          SizedBox(
+            width: 600,
+            child: LgBreadcrumb(
+              rootLabel: '此电脑',
+              rootTip: '此电脑',
+              segments: const ['C:', 'Documents'],
+              onRoot: () {},
+              onSegment: (_) {},
+              onEdit: () => edit++,
+              editLabel: '编辑路径',
+            ),
+          ),
+        );
+        expect(find.bySemanticsLabel('编辑路径'), findsOneWidget);
+        tester.semantics.performAction(
+          find.semantics.byLabel('编辑路径'),
+          SemanticsAction.tap,
+        );
+        expect(edit, 1);
+        // The folders are still buttons of their own, and the pointer does what it did.
+        expect(find.bySemanticsLabel('C:'), findsOneWidget);
+        await tester.tap(find.text('Documents'));
+        expect(edit, 2);
+        handle.dispose();
+      },
+    );
 
     testWidgets('narrower still, the drive folds too and the last is kept', (
       tester,
@@ -802,6 +1032,89 @@ void main() {
       },
     );
 
+    testWidgets(
+      'a narrow pane too narrow for the tools\' words (303.6 wide) draws them as icons, no overflow',
+      (tester) async {
+        final handle = tester.ensureSemantics();
+        await pumpLg(tester, const _ToolsHost(width: 303.6));
+        await settle(tester);
+        await tester.pump();
+        expect(tester.takeException(), isNull);
+        expect(find.text('新建文件夹'), findsNothing);
+        expect(find.text('删除'), findsNothing);
+        // The word is the tooltip, and the name to a screen reader stays.
+        expect(find.byTooltip('新建文件夹'), findsOneWidget);
+        expect(find.byTooltip('删除'), findsOneWidget);
+        expect(find.bySemanticsLabel('新建文件夹'), findsOneWidget);
+        expect(find.bySemanticsLabel('删除'), findsOneWidget);
+        // The transfer button keeps its word, the menu button and the search are there.
+        expect(find.text('上传'), findsOneWidget);
+        expect(find.byTooltip('更多'), findsOneWidget);
+        expect(find.byTooltip('搜索'), findsOneWidget);
+        handle.dispose();
+      },
+    );
+
+    testWidgets('the words come back when the room does, and go again', (
+      tester,
+    ) async {
+      final key = GlobalKey<_ToolsHostState>();
+      await pumpLg(tester, _ToolsHost(key: key, width: 303.6));
+      await settle(tester);
+      await tester.pump();
+      expect(find.text('新建文件夹'), findsNothing);
+      key.currentState!.setWidth(530);
+      await settle(tester);
+      await tester.pump();
+      expect(find.text('新建文件夹'), findsOneWidget);
+      expect(find.text('删除'), findsOneWidget);
+      expect(find.byTooltip('新建文件夹'), findsNothing);
+      key.currentState!.setWidth(303.6);
+      await settle(tester);
+      await tester.pump();
+      expect(find.text('新建文件夹'), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a wide pane keeps the words', (tester) async {
+      await pumpLg(tester, const _ToolsHost(width: 618));
+      await settle(tester);
+      await tester.pump();
+      expect(find.text('新建文件夹'), findsOneWidget);
+      expect(find.text('删除'), findsOneWidget);
+      expect(find.byTooltip('新建文件夹'), findsNothing);
+    });
+
+    testWidgets(
+      'narrower than the icons need, the end of the row is cut, not overflowed',
+      (tester) async {
+        for (var w = 60.0; w < 540; w += 17) {
+          await pumpLg(
+            tester,
+            KeyedSubtree(
+              key: ValueKey(w),
+              child: _ToolsHost(width: w),
+            ),
+          );
+          await settle(tester);
+          await tester.pump();
+          expect(tester.takeException(), isNull, reason: 'width $w');
+        }
+      },
+    );
+
+    testWidgets(
+      'in a wide pane that is short of room the tools give up their words too',
+      (tester) async {
+        // 560 is wide (540 and over), and the search must keep 96 of its own.
+        await pumpLg(tester, const _ToolsHost(width: 560));
+        await settle(tester);
+        await tester.pump();
+        expect(tester.takeException(), isNull);
+        expect(find.byType(TextField), findsOneWidget);
+      },
+    );
+
     testWidgets('in a wide pane the open flag means nothing', (tester) async {
       final (c, f) = holders();
       await pumpLg(tester, host(c, f, open: true));
@@ -947,6 +1260,87 @@ void main() {
       },
     );
 
+    testWidgets('without dim the old content stays undimmed and pressable', (
+      tester,
+    ) async {
+      var taps = 0;
+      final handle = tester.ensureSemantics();
+      await pumpLg(
+        tester,
+        SizedBox(
+          width: 300,
+          height: 200,
+          child: LgReadingOverlay(
+            reading: true,
+            dim: false,
+            label: '正在读取…',
+            child: GestureDetector(
+              onTap: () => taps++,
+              child: const SizedBox.expand(child: Text('内容')),
+            ),
+          ),
+        ),
+      );
+      // The hint is there, at the top and not over everything.
+      expect(find.text('正在读取…'), findsOneWidget);
+      expect(find.byType(LgSpinner), findsOneWidget);
+      await tester.tapAt(
+        tester.getTopLeft(find.byType(LgReadingOverlay)) +
+            const Offset(20, 150),
+      );
+      expect(taps, 1);
+      final opacity = tester.widget<Opacity>(
+        find.ancestor(of: find.text('内容'), matching: find.byType(Opacity)),
+      );
+      expect(opacity.opacity, 1);
+      // What is shown is read as before, and the hint is announced.
+      expect(find.bySemanticsLabel('内容'), findsOneWidget);
+      expect(find.bySemanticsLabel('正在读取…'), findsOneWidget);
+      handle.dispose();
+    });
+
+    testWidgets('dim and the wait can change without rebuilding the list', (
+      tester,
+    ) async {
+      final scroll = ScrollController();
+      addTearDown(scroll.dispose);
+      final probe = _ProbeLog();
+      Widget view(bool reading, bool dim) => SizedBox(
+        width: 300,
+        height: 200,
+        child: LgReadingOverlay(
+          reading: reading,
+          dim: dim,
+          label: '正在读取…',
+          child: _Probe(
+            log: probe,
+            child: ListView(
+              controller: scroll,
+              children: [
+                for (var i = 0; i < 40; i++)
+                  SizedBox(height: 40, child: Text('项 $i')),
+              ],
+            ),
+          ),
+        ),
+      );
+      await pumpLg(tester, view(false, true));
+      scroll.jumpTo(360);
+      await tester.pump();
+      for (final (reading, dim) in [
+        (true, false),
+        (true, true),
+        (true, false),
+        (false, false),
+        (false, true),
+      ]) {
+        await pumpLg(tester, view(reading, dim));
+        expect(scroll.offset, 360, reason: '$reading $dim');
+      }
+      expect(probe.created, 1);
+      expect(probe.disposed, 0);
+    });
+
     testWidgets(
       'while it reads, a screen reader finds the label and not the list',
       (tester) async {
@@ -1082,6 +1476,40 @@ void main() {
         expect(probe.disposed, 0);
       },
     );
+
+    testWidgets('not framed: the message at the middle and no frame or tint', (
+      tester,
+    ) async {
+      Finder frame() => find.byWidgetPredicate(
+        (w) =>
+            w is CustomPaint &&
+            w.painter != null &&
+            w.painter.runtimeType.toString() == '_DashedFrame',
+      );
+      await pumpLg(tester, zone(LgDropState.accept, message: '上传到“备份”'));
+      expect(frame(), findsOneWidget);
+      expect(find.text('上传到“备份”'), findsOneWidget);
+      await pumpLg(
+        tester,
+        const SizedBox(
+          width: 400,
+          height: 300,
+          child: LgDropZone(
+            state: LgDropState.accept,
+            framed: false,
+            message: '上传到“备份”',
+            child: ColoredBox(
+              color: Colors.white,
+              child: Center(child: Text('栏')),
+            ),
+          ),
+        ),
+      );
+      expect(frame(), findsNothing);
+      expect(find.text('上传到“备份”'), findsOneWidget);
+      expect(_icon(LgIcons.upload), findsOneWidget);
+      expect(find.text('栏'), findsOneWidget);
+    });
 
     testWidgets('the chip shows the number when there is more than one', (
       tester,

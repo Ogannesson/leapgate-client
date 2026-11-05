@@ -205,6 +205,8 @@ Widget _m7Pane({
   String? banner,
   LgDropState drop = LgDropState.none,
   String? dropMessage,
+  bool dropFramed = true,
+  bool readingDim = true,
   int? dropRow,
   bool transferEnabled = true,
   bool selection = true,
@@ -275,6 +277,7 @@ Widget _m7Pane({
     case _M7List.reading:
       listArea = LgReadingOverlay(
         reading: list == _M7List.reading,
+        dim: readingDim,
         label: _x(en, '正在读取…', 'Reading…'),
         child: Column(
           children: [
@@ -378,6 +381,7 @@ Widget _m7Pane({
     height: height,
     child: LgDropZone(
       state: drop,
+      framed: dropFramed,
       message: dropMessage,
       child: pane,
     ),
@@ -870,6 +874,9 @@ List<Specimen> _m7Specimens() {
   add('file-path', 'short', const Size(682, 76), (_) => navCard(() => _m7Crumb(false, ['C:', 'Users', 'zhangsan', 'Documents'])));
   add('file-path', 'root', const Size(682, 76), (_) => navCard(() => _m7Crumb(false, const []), canGoUp: false));
   add('file-path', 'folded', const Size(682, 76), (_) => navCard(() => _m7Crumb(false, ['D:', '备份', '2026', '十月', '家庭', '照片', '原图']), width: 520));
+  add('file-path', 'half-window', const Size(500, 76), (_) => navCard(() => _m7Crumb(false, ['C:', 'Users', 'zhangsan', 'Documents']), width: 468));
+  add('file-path', 'icon-root-folded', const Size(417, 76), (_) => navCard(() => _m7Crumb(false, ['C:', 'Users', 'zhangsan', 'Documents']), width: 385));
+  add('file-path', 'narrowest', const Size(360, 76), (_) => navCard(() => _m7Crumb(false, ['C:', 'Users', 'zhangsan', 'Documents']), width: 327.6));
   add('file-path', 'folded-narrow', const Size(682, 76), (_) => navCard(() => _m7Crumb(false, ['C:', 'Users', 'zhangsan', 'Documents', '工作文件夹']), width: 420));
   add('file-path', 'linux-root', const Size(682, 76), (_) => navCard(() => _m7Crumb(false, const [], root: '/', menu: const [LgMenuItem(label: '/', checked: true, onPressed: _noop)]), canGoUp: false));
   add('file-path', 'this-pc-english', const Size(682, 76), (_) => navCard(() => _m7Crumb(true, ['C:', 'Users', 'zhangsan', 'Documents']), en: true));
@@ -931,6 +938,8 @@ List<Specimen> _m7Specimens() {
   // Collapsed with something typed: the icon is in the accent colour on a tint.
   add('file-ops', 'collapsed-filtering', const Size(520, 76), (_) => opCard(const _M7Ops(local: true, en: false, search: '报告'), width: 468));
   add('file-ops', 'collapsed-open', const Size(520, 76), (_) => opCard(const _M7Ops(local: true, en: false, search: '报告', open: true), width: 468));
+  add('file-ops', 'collapsed-icon-tools', const Size(336, 76), (_) => opCard(const _M7Ops(local: true, en: false), width: 304));
+  add('file-ops', 'collapsed-english', const Size(520, 76), (_) => opCard(const _M7Ops(local: true, en: true), width: 468));
   add('file-ops', 'compact', const Size(650, 76), (_) => opCard(const _M7Ops(local: true, en: false, compact: true)));
   add('file-ops', 'new-folder-off', const Size(650, 76), (_) => opCard(const _M7Ops(local: true, en: false, newFolderEnabled: false, transferEnabled: false)));
 
@@ -1060,6 +1069,7 @@ List<Specimen> _m7Specimens() {
   }
   add('file-pane', 'remote-selected', paneSize, (_) => _m7Pane(local: false, files: [for (final f in _m7Remote(false)) f.name == '照片' ? const _M7File(LgFileKind.folder, '照片', '2026/10/12 09:30', '文件夹', '', selected: true) : f]));
   add('file-pane', 'reading', paneSize, (_) => _m7Pane(local: false, list: _M7List.reading, selection: false));
+  add('file-pane', 'reading-same-folder', paneSize, (_) => _m7Pane(local: false, list: _M7List.reading, readingDim: false, selection: false));
   add(
     'file-pane',
     'banner',
@@ -1111,7 +1121,7 @@ List<Specimen> _m7Specimens() {
     const Size(650, 612),
     (_) => Stack(
       children: [
-        _m7Pane(local: false, selection: false, dropRow: 0),
+        _m7Pane(local: false, selection: false, dropRow: 0, drop: LgDropState.accept, dropFramed: false, dropMessage: '上传到“照片”'),
         Positioned(left: 240, top: 232, child: _m7Chip('上传到“照片”', 2)),
       ],
     ),

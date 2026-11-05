@@ -7,11 +7,14 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/scheduler.dart';
 
 import '../icons/lg_icon.dart';
 import '../theme/lg_tokens.dart';
 import 'lg_button.dart';
 import 'lg_device.dart';
+import 'lg_list_chrome.dart';
 import 'lg_pressable.dart';
 import 'lg_status.dart';
 import 'lg_text_field.dart';
@@ -196,6 +199,12 @@ class LgFileNavRow extends StatelessWidget {
 /// is filtered, and opens on the same text. In a wide pane the field is always shown whatever the
 /// flag says. The field is one widget kept alive across the two layouts, so crossing the width
 /// loses neither the typing nor the keyboard.
+///
+/// The [actions] are never reported as overflowing. When they do not fit with their words, the
+/// tools among them that read [LgToolsIconOnly] ([LgListToolButton], [LgListToolMenu]) draw the
+/// icon alone (the word goes into a tooltip; the name for a screen reader stays), which takes one
+/// more frame to show; if they still do not fit, the end of the row is cut off. The words come back
+/// when the room is there again.
 class LgFileOpRow extends StatefulWidget {
   const LgFileOpRow({
     super.key,
@@ -246,6 +255,10 @@ class LgFileOpRow extends StatefulWidget {
 
 class _LgFileOpRowState extends State<LgFileOpRow> {
   final _fieldKey = GlobalKey();
+  final _fit = _FitMemo();
+
+  /// The least width of the search field in a wide pane before the actions give up their words.
+  static const double _minSearch = 96;
 
   @override
   void initState() {
@@ -270,6 +283,7 @@ class _LgFileOpRowState extends State<LgFileOpRow> {
   @override
   void dispose() {
     widget.searchFocusNode.removeListener(_onFocus);
+    _fit.iconOnly.dispose();
     super.dispose();
   }
 
@@ -342,12 +356,32 @@ class _LgFileOpRowState extends State<LgFileOpRow> {
         if (narrow && widget.searchOpen) {
           content = _field();
         } else {
+          // What the actions may take: the row less its padding and the room the search needs
+          // (the icon and a gap in a narrow pane, a field that can still be used in a wide one).
+          final room = math.max(
+            0.0,
+            constraints.maxWidth -
+                LgSpace.s3 * 2 -
+                (narrow ? t.sizes.button + LgSpace.s1 : _minSearch),
+          );
           content = Row(
             children: [
-              for (final (i, a) in widget.actions.indexed) ...[
-                if (i > 0) const SizedBox(width: LgSpace.s1),
-                a,
-              ],
+              _ActionsFit(
+                maxWidth: room,
+                memo: _fit,
+                child: LgToolsIconOnly(
+                  iconOnly: _fit.iconOnly,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      for (final (i, a) in widget.actions.indexed) ...[
+                        if (i > 0) const SizedBox(width: LgSpace.s1),
+                        a,
+                      ],
+                    ],
+                  ),
+                ),
+              ),
               Expanded(
                 child: Align(
                   alignment: Alignment.centerRight,
@@ -370,6 +404,148 @@ class _LgFileOpRowState extends State<LgFileOpRow> {
         );
       },
     );
+  }
+}
+
+/// What the row of actions remembers between layouts: whether its tools draw the icon alone, and
+/// how wide the actions were with their words (the last time they were drawn that way), which is
+/// what tells when the words fit again.
+class _FitMemo {
+  final iconOnly = ValueNotifier<bool>(false);
+  double? fullWidth;
+}
+
+/// Lays the actions out at the width they want and gives them [maxWidth] at most. When they want
+/// more with their words, the memo's flag is turned on after the frame (the tools below
+/// [LgToolsIconOnly] then draw the icon alone and the actions are laid out again); when even that is
+/// too wide the end is cut off, which is clipped and neither painted, hit nor reported as an
+/// overflow.
+class _ActionsFit extends SingleChildRenderObjectWidget {
+  const _ActionsFit({
+    required this.maxWidth,
+    required this.memo,
+    required super.child,
+  });
+
+  final double maxWidth;
+  final _FitMemo memo;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      _RenderActionsFit(maxWidth, memo);
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    _RenderActionsFit renderObject,
+  ) {
+    renderObject
+      ..maxWidth = maxWidth
+      ..memo = memo;
+  }
+}
+
+class _RenderActionsFit extends RenderShiftedBox {
+  _RenderActionsFit(this._maxWidth, this._memo) : super(null);
+
+  double _maxWidth;
+  _FitMemo _memo;
+  bool _overflow = false;
+  bool _want = false;
+  bool _scheduled = false;
+  bool _disposed = false;
+  final _clip = LayerHandle<ClipRectLayer>();
+
+  set maxWidth(double value) {
+    if (value == _maxWidth) return;
+    _maxWidth = value;
+    markNeedsLayout();
+  }
+
+  set memo(_FitMemo value) {
+    if (identical(value, _memo)) return;
+    _memo = value;
+    markNeedsLayout();
+  }
+
+  @override
+  Size computeDryLayout(BoxConstraints constraints) {
+    final child = this.child;
+    if (child == null) return constraints.smallest;
+    final size = child.getDryLayout(
+      BoxConstraints(
+        maxWidth: double.infinity,
+        maxHeight: constraints.maxHeight,
+      ),
+    );
+    return constraints.constrain(
+      Size(math.min(size.width, _maxWidth), size.height),
+    );
+  }
+
+  @override
+  void performLayout() {
+    final child = this.child;
+    if (child == null) {
+      size = constraints.smallest;
+      return;
+    }
+    child.layout(
+      BoxConstraints(
+        maxWidth: double.infinity,
+        maxHeight: constraints.maxHeight,
+      ),
+      parentUsesSize: true,
+    );
+    final natural = child.size.width;
+    if (!_memo.iconOnly.value) _memo.fullWidth = natural;
+    _sync((_memo.fullWidth ?? natural) > _maxWidth + .5);
+    size = constraints.constrain(
+      Size(math.min(natural, _maxWidth), child.size.height),
+    );
+    _overflow = natural > size.width + .5;
+    (child.parentData! as BoxParentData).offset = Offset.zero;
+  }
+
+  // Layout cannot rebuild what is below it: the flag is turned on or off once the frame is done.
+  void _sync(bool want) {
+    _want = want;
+    if (_scheduled || _memo.iconOnly.value == want) return;
+    _scheduled = true;
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      _scheduled = false;
+      if (_disposed || _memo.iconOnly.value == _want) return;
+      _memo.iconOnly.value = _want;
+    });
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    if (child == null) return;
+    if (_overflow) {
+      _clip.layer = context.pushClipRect(
+        needsCompositing,
+        offset,
+        Offset.zero & size,
+        super.paint,
+        clipBehavior: Clip.hardEdge,
+        oldLayer: _clip.layer,
+      );
+    } else {
+      _clip.layer = null;
+      super.paint(context, offset);
+    }
+  }
+
+  @override
+  Rect? describeApproximatePaintClip(RenderObject child) =>
+      _overflow ? Offset.zero & size : null;
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _clip.layer = null;
+    super.dispose();
   }
 }
 
@@ -461,15 +637,19 @@ class LgFileStatusRow extends StatelessWidget {
 /// caller allows for (about half a second, 02 §2.2 block E) it dims what is shown, takes away
 /// its clicks, and lays "正在读取…" with a turning arc over it.
 ///
-/// The child keeps its place in the tree whatever [reading] says (a scroll position, a State in
-/// the list below it must survive the wait): only the parameters of the wrappers around it
-/// change, and the cover is added after it in the stack (over it).
+/// With [dim] false (the same folder read again) what is shown stays as it is, in full colour, and
+/// can still be pressed; only a small card with the arc and "正在读取…" appears at the top.
+///
+/// The child keeps its place in the tree whatever [reading] and [dim] say (a scroll position, a
+/// State in the list below it must survive the wait): only the parameters of the wrappers around
+/// it change, and the cover is added after it in the stack (over it).
 class LgReadingOverlay extends StatelessWidget {
   const LgReadingOverlay({
     super.key,
     required this.reading,
     required this.label,
     required this.child,
+    this.dim = true,
   });
 
   final bool reading;
@@ -478,21 +658,25 @@ class LgReadingOverlay extends StatelessWidget {
   final String label;
   final Widget child;
 
+  /// False keeps the old content undimmed and pressable while it reads.
+  final bool dim;
+
   @override
   Widget build(BuildContext context) {
     final t = LgTokens.of(context);
     final c = t.colors;
+    final covered = reading && dim;
     return Stack(
       fit: StackFit.passthrough,
       children: [
         IgnorePointer(
-          ignoring: reading,
+          ignoring: covered,
           child: ExcludeSemantics(
-            excluding: reading,
-            child: Opacity(opacity: reading ? .45 : 1, child: child),
+            excluding: covered,
+            child: Opacity(opacity: covered ? .45 : 1, child: child),
           ),
         ),
-        if (reading)
+        if (covered)
           Positioned.fill(
             child: ColoredBox(
               color: c.surface.withValues(alpha: .4),
@@ -510,6 +694,42 @@ class LgReadingOverlay extends StatelessWidget {
                           const SizedBox(height: LgSpace.s3),
                           Text(label, style: t.text.copyWith(color: c.text)),
                         ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        if (reading && !dim)
+          Positioned.fill(
+            child: IgnorePointer(
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: Padding(
+                  padding: const EdgeInsets.only(top: LgSpace.s8),
+                  child: Semantics(
+                    liveRegion: true,
+                    label: label,
+                    child: ExcludeSemantics(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: LgSpace.s4,
+                          vertical: LgSpace.s2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: c.float,
+                          borderRadius: BorderRadius.circular(LgRadius.r12),
+                          boxShadow: c.shadow,
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            LgSpinner(size: 16, color: c.text),
+                            const SizedBox(width: LgSpace.s2),
+                            Text(label, style: t.textM.copyWith(color: c.text)),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -540,6 +760,9 @@ enum LgDropState {
 /// accepted, with [message] ("上传到“备份”") in a card at the middle. It lies over the content and
 /// lets every pointer event through.
 ///
+/// With [framed] false (files dragged over one folder row, which the row itself highlights) the pane
+/// gets no frame and no tint, only the card with [message] at the middle.
+///
 /// The child keeps its place in the tree whatever [state] says (the list under the pointer must
 /// keep its scroll position and its rows while files are dragged over it): the highlight is added
 /// after the child in the stack (over it), and removed again, without touching it.
@@ -550,10 +773,15 @@ class LgDropZone extends StatelessWidget {
     required this.child,
     this.message,
     this.messageIcon = LgIcons.upload,
+    this.framed = true,
   });
 
   final LgDropState state;
   final Widget child;
+
+  /// False leaves out the frame and the tint of the pane (the message of [LgDropState.accept]
+  /// stays).
+  final bool framed;
 
   /// The target, shown for [LgDropState.accept]: "上传到“备份”" / "下载到“文档”".
   final String? message;
@@ -568,7 +796,7 @@ class LgDropZone extends StatelessWidget {
       fit: StackFit.passthrough,
       children: [
         child,
-        if (state != LgDropState.none)
+        if (state != LgDropState.none && framed)
           Positioned.fill(
             child: IgnorePointer(
               child: Padding(
