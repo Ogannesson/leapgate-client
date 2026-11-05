@@ -1027,16 +1027,21 @@ class FileController extends ChangeNotifier implements FilePane {
     }
   }
 
-  /// Cancelled from its row, or removed.
+  /// Cancelled from its row, cut off by the connection (`FileTransferJobs.onConnectionChanged`),
+  /// or removed. A file that could not be deleted does not stop the rest, as upstream.
   bool _stopped(int id) {
     final i = jobController.getJob(id);
-    return i < 0 || jobController.jobTable[i].err == 'cancel';
+    if (i < 0) return true;
+    final err = jobController.jobTable[i].err;
+    return err == 'cancel' || err == 'disconnected';
   }
 
   /// The row fails and the item stops when there was no answer, or the request could not go
   /// out; a `job_error` (a [String]) the copied `jobError` has already put on the row.
   bool _requestFailed(int id, Object? error) {
     if (error == null || error is String) return false;
+    // Already ended by a cancel or the connection: keep that reason.
+    if (_stopped(id)) return true;
     if (error is TimeoutException) {
       jobController.updateJobStatus(id, error: 'timeout');
       model.jobs.setError(id, const FtError.timeout());

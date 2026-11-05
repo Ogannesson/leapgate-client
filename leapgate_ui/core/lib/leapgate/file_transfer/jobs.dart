@@ -154,6 +154,9 @@ const _kSpeedWindow = Duration(seconds: 10);
 /// No time left is given while the speed is measured over less than this.
 const _kSpeedSteady = Duration(seconds: 3);
 
+/// The `err` of a delete the connection cut off.
+const _kDisconnected = 'disconnected';
+
 /// What the job table does not keep about a transfer started from this view.
 class _JobInfo {
   _JobInfo(this.target, this.isFolder);
@@ -227,8 +230,19 @@ class FileTransferJobs extends ChangeNotifier implements FileJobs {
     }
   }
 
-  /// The session's connection changed: rows under way show interrupted or paused.
-  void onConnectionChanged() => notifyListeners();
+  /// The session's connection changed: transfers under way show interrupted or paused; deletes
+  /// under way fail for good (02 §2.4.7: deletes are not resumed), and their loops stop.
+  void onConnectionChanged() {
+    if (!_connected) {
+      for (final job in _jobs.jobTable.toList()) {
+        if (job.type != JobType.transfer &&
+            (job.state == JobState.none || job.state == JobState.inProgress)) {
+          _jobs.updateJobStatus(job.id, error: _kDisconnected);
+        }
+      }
+    }
+    notifyListeners();
+  }
 
   void _onTable() {
     final now = clock.now();
@@ -293,7 +307,7 @@ class FileTransferJobs extends ChangeNotifier implements FileJobs {
       remaining: rate?.remaining,
       error: status != FileJobStatus.failed
           ? null
-          : _deleteCut(job)
+          : job.err == _kDisconnected
               ? const FtError.disconnected()
               : _errorOf(job),
       notes: [
@@ -309,19 +323,9 @@ class FileTransferJobs extends ChangeNotifier implements FileJobs {
     return conn == null || conn.stage == ConnStage.connected;
   }
 
-  /// A delete under way, or whose wait ran out, while the connection is down: failed with
-  /// [FtError.disconnected] (02 §2.4.7). Deletes are not resumed.
-  bool _deleteCut(JobProgress job) =>
-      job.type != JobType.transfer &&
-      !_connected &&
-      (job.state == JobState.none ||
-          job.state == JobState.inProgress ||
-          (job.state == JobState.error && job.err == 'timeout'));
-
   FileJobStatus _status(List<JobProgress> table, int i) {
     final job = table[i];
     final transfer = job.type == JobType.transfer;
-    if (_deleteCut(job)) return FileJobStatus.failed;
     switch (job.state) {
       case JobState.done:
       // Upstream's own values in `err`: a `job_error` "cancel" is not a failure, and FT2 is not

@@ -383,10 +383,31 @@ void main() {
       expect(t.s.fileModel.jobs.rows.single.status, FileJobStatus.failed);
 
       t.bind.failing.clear();
-      unawaited(local.delete([_entry('C:\\g.txt')]));
+      appCore.prompter = TestPrompter((q) {
+        final state = (q as FtDeletePrompt).state;
+        final ready = Completer<bool>();
+        state.addListener(() {
+          if (state.value is FtDeleteReady) ready.complete(true);
+        });
+        return ready.future;
+      });
+      final done = local.delete([_entry('C:\\d', type: 0)]);
       await settle();
+      final count =
+          t.bind.callsTo(#sessionReadDirToRemoveRecursive).single.namedArguments;
+      _dir(t.s, 'C:\\d', [_json('a'), _json('b')], id: count[#actId] as int);
+      await settle();
+      expect(_args(t.bind, #sessionRemoveFile, #path), ['C:\\f.txt', 'C:\\d\\a']);
       expect(t.s.fileModel.jobs.rows.last.status, FileJobStatus.deleting);
+
       t.s.connection.reconnect(false);
+      t.s.connection.onPeerInfo();
+      // The answer to the file in flight comes after reconnecting; nothing more is sent.
+      final first = t.bind.callsTo(#sessionRemoveFile).last.namedArguments;
+      await t.s.fileModel
+          .onJobDone({'id': '${first[#actId]}', 'file_num': '0'});
+      await done;
+      expect(_args(t.bind, #sessionRemoveFile, #path), ['C:\\f.txt', 'C:\\d\\a']);
       final row = t.s.fileModel.jobs.rows.last;
       expect((row.status, row.error?.reason),
           (FileJobStatus.failed, FtReason.disconnected));
