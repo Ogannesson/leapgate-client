@@ -2074,7 +2074,7 @@ Telegram 机器人设置改成两步（`leapgate_bot_lookup` 只查、什么都�
 **Rust 的做法和约束**
 - `leapgate_ft_remove_link`（10 §4.2）：远程时由 Rust 从会话自己的对端信息取平台，不由 Dart 传。Windows 对端、目录链接 → 发 `FileRemoveDir { id: act_id, path, recursive: false }`（被控端只调 `std::fs::remove_dir`，只删链接或联接本身，各版本对端都认）；其余（文件链接，Linux、macOS 对端的目录链接）→ 发 `FileRemoveFile { id: act_id, path, file_num: 0 }`。本机：Windows 上按链接自身的属性（`symlink_metadata` 带目录属性 0x10）调 `std::fs::remove_dir`，不看 `is_dir_link`（目标已不存在的目录链接上游列成文件链接），其余调 `std::fs::remove_file`，结果照本机删文件那样推 `job_done` / `job_error`。上游删文件夹的导出（固定递归）不改。
 - `leapgate_ft_read_local_dir` 直接调 `fs::read_dir(&fs::get_path(&path), show_hidden)` 和 `crate::common::make_fd_to_json`，失败时把错误原文交给 FT2 的归类。
-- 上游文件只改 `src/common.rs` 一处；其余都在 `libs/leapgate` 和 `src/leapgate_*`。
+- 上游文件只改 `src/common.rs` 一处；其余都在 `libs/leapgate` 和 `src/leapgate_*`。2026-11-06 验收后加第二处：`src/client/io_loop.rs` 的 `sync_jobs_status_to_local` 开头，不是文件传输会话就返回（`// leapgate:` 注释、3 行）。上游每个会话结束时都把自己的未完成任务写进这台设备的配置，远程桌面会话没有任务、写的是空表；同一标签里两个视图同时断开时谁后退出谁说了算，未完成的传输有一半概率被冲掉（验收里断线较久后续传卡住、重开后任务消失就是这个，A 的日志能对上；上游旧界面同样会冲掉）。
 
 **core 的接口**（第 0 步已写，`core/lib/leapgate/file_transfer/`；A 实现，B、C 只认它们）
 - `file_transfer_api.dart`：`FileTransferApi`（`reason`、`readLocalDir`、`removeLink`）、全局 `fileTransferApi`、`RustFileTransferApi`（见上，整合时换）。

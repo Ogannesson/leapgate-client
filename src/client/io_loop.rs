@@ -1304,6 +1304,11 @@ impl<T: InvokeUiSession> Remote<T> {
         if !self.is_connected {
             return false;
         }
+        // leapgate: only a file transfer session has jobs; another view of the same peer
+        // ending later would overwrite them with an empty list.
+        if !self.handler.is_file_transfer() {
+            return false;
+        }
         let mut config: PeerConfig = self.handler.load_config();
         let mut transfer_metas = TransferSerde::default();
         for job in self.read_jobs.iter() {
