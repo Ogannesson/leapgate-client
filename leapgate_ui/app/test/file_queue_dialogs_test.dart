@@ -90,16 +90,16 @@ Future<void> _pumpQueue(
   WidgetTester tester,
   FileJobs jobs, {
   ConnectionModel? connection,
+  Widget Function(Widget panel)? child,
 }) async {
   tester.view.physicalSize = const Size(1280, 800);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
+  final panel = FileQueuePanel(jobs: jobs, connection: connection);
   await tester.pumpWidget(
     _app(
-      Align(
-        alignment: Alignment.bottomCenter,
-        child: FileQueuePanel(jobs: jobs, connection: connection),
-      ),
+      child?.call(panel) ??
+          Align(alignment: Alignment.bottomCenter, child: panel),
     ),
   );
 }
@@ -192,8 +192,9 @@ void main() {
               total: 2,
               remaining: const Duration(seconds: 3580),
             ),
+            for (var i = 2; i <= 12; i++) _row(i, FileJobStatus.queued),
           ]
-          ..summary = _summary(active: 1);
+          ..summary = _summary(active: 1, queued: 11);
         // A window 400 high, the panel below the panes as the file view lays it out: the
         // column leaves its height unbounded, so the window's counts.
         tester.view.physicalSize = const Size(1280, 400);
@@ -218,6 +219,55 @@ void main() {
         // 59 minutes 40 seconds is about an hour, not "60 分钟" or "1 小时 0 分钟".
         expect(find.textContaining('剩余约 1 小时'), findsOneWidget);
         expect(find.textContaining('0 分钟'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'a row or two: the list as high as they are; the saved height stays',
+      (tester) async {
+        fakes.bind.localOptions[kOptionLeapgateFtQueueHeight] = '250';
+        final jobs = _Jobs()
+          ..rows = [
+            _row(1, FileJobStatus.queued),
+            _row(
+              2,
+              FileJobStatus.paused,
+              total: 1024,
+              notes: const [ResumeUnsupported()],
+            ),
+          ]
+          ..summary = _summary(queued: 1, paused: 1);
+        for (final width in [1240.0, 900.0]) {
+          await _pumpQueue(
+            tester,
+            jobs,
+            child: (panel) => Align(
+              alignment: Alignment.bottomCenter,
+              child: SizedBox(width: width, child: panel),
+            ),
+          );
+          final list = find.byType(ListView);
+          final rows = tester
+              .widgetList(find.byType(LgQueueRow))
+              .map((w) => tester.getSize(find.byWidget(w)).height)
+              .fold(0.0, (a, b) => a + b);
+          // Every row shows and nothing is left under them (the list's padding is 4 + 4).
+          expect(
+            tester.getSize(list).height,
+            rows + 2 * LgSpace.s1,
+            reason: '$width',
+          );
+          expect(
+            tester
+                .state<ScrollableState>(find.byType(Scrollable))
+                .position
+                .maxScrollExtent,
+            0,
+            reason: '$width',
+          );
+          expect(tester.getSize(list).height, lessThan(200), reason: '$width');
+        }
+        expect(fakes.bind.localOptions[kOptionLeapgateFtQueueHeight], '250');
       },
     );
 
@@ -415,6 +465,13 @@ void main() {
       await tester.pump();
       expect(find.text(r'目标文件夹“D:\备份”中有上次未完成传输留下的临时文件。'), findsOneWidget);
       expect(find.text('取消传输'), findsOneWidget);
+      // `d-rp-normal`: "取消传输" is a text button, "替换" the main one.
+      LgButtonKind kind(String label) => tester
+          .widget<LgButton>(find.widgetWithText(LgButton, label))
+          .kind;
+      expect(kind('取消传输'), LgButtonKind.text);
+      expect(kind('跳过'), LgButtonKind.secondary);
+      expect(kind('替换'), LgButtonKind.primary);
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pump();
       expect(await answer, isNull);
