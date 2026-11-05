@@ -1955,3 +1955,132 @@ Telegram 机器人设置改成两步（`leapgate_bot_lookup` 只查、什么都�
 **测试**
 - core：受信设备的解析；声音来源列表；白名单的逐行校验；快捷键绑定读写和录制校验（五种状态、冲突）。
 - app：02 §1.10 里这十二个小节和三个对话框的每个状态一个行为测试，用 `FakeSettingsApi` 喂数据；已开会话在工具栏、渲染改了以后当场跟着变（D）；有出站会话时按 `keep-awake-during-outgoing-sessions` 决定是否阻止熄屏（C）。
+
+### 10.15 M7a 的分工约定
+
+依据：总仓库 `docs/新界面/10-M7a拆法.md`（下称"10"；维护者 2026-11-05 把 M7a-1~M7a-9 全部按推荐定，一段做完）。界面行为以 02 §2.1.1、§2.2、§2.4、§2.5、§3.1、§3.2 为准（M7a 的决定已回写），一个标签多个视图以 01 §2.1、§3.2 区块 A、G 为准；样稿 `A-P7-文件传输.html`、`A-P7-文件传输-菜单与其他状态.html`、`A-P7-文件传输-对话框.html`（替换确认的两文件对照表按 10 §1.2 去掉，外观检查不算差异）。10 §6 列的不做：M7b 的暂停、从失败处重试、个别文件跳过和汇总、"查看详情"，拖出到资源管理器，手机文件传输页。
+
+**分支和文件边界**（都从 `ui/m7a` 切，做完合回 `ui/m7a`；整合 worktree 是 `.wt/ui-m4`，块 2 的桥和 pub 缓存在它里面）
+
+| 分支 | 谁 | 只改这些 |
+|---|---|---|
+| `ui/rust-m7` | coder R | 新文件 `libs/leapgate/src/ft_reason.rs`（FT2 归类，纯函数加单测）、`libs/leapgate/src/lib.rs`（加 `pub mod ft_reason;`）、`libs/leapgate/src/reason.rs`（只把截断和日志去重改成能共用，C3 的行为不变）；新文件 `src/leapgate_hooks/file_transfer.rs`（本机读文件夹、删链接里要用会话和 `fs` 的部分）、`src/leapgate_hooks.rs`（加 `pub(crate) mod file_transfer;`）；`src/leapgate_ffi.rs`（末尾追加 M7a 一段）；上游只一处：`src/common.rs` 的 `_make_fd_to_json` 加 `is_hidden` 一行（FT1），带 `// leapgate:` 注释；本节的 Rust 部分 |
+| `ui/m7-ds` | designer | `app/lib/widgets/`（新组件；`LgTitleBar` 画出 `LgSessionTab` 的 `progress`、`alert`；`LgEmptyState` 这类现成组件只加参数、默认值不变）、`app/lib/icons/`（缺的图标）、`app/lib/gallery_m7.dart`（第 0 步已登记进 `gallery_main.dart`，designer 只改这个文件）、组件的测试 |
+| `ui/m7a-core` | coder A | core `leapgate/file_transfer/` 下：新文件 `file_model.dart`（改写的 `FileModel`、`FileController`）、`sort.dart`，`jobs.dart` 和 `errors.dart` 的分隔线以下，`pane.dart` 里 `fileTransferOf` 的函数体；`models/file_model.dart`（删掉 `FileModel`、`FileController` 两个类，其余照"只删界面调用"不动；来源行第 0 步已写成最终的样子）；`leapgate/session.dart`（事件登记、`FileModel` 的导入）、`leapgate/ffi_model.dart`（只在 `onReady` 那一处需要时改）；`leapgate/prompts.dart`（只删旧的三种提问，见下）；`consts.dart`（只在"M7a core"下追加）；core 的测试（`file_model_test.dart` 跟着改写） |
+| `ui/m7a-shell` | coder B | `app/lib/shell/`（新文件放标签里的视图容器；`main_window.dart`、`tab_menu.dart`、`window_close.dart`、`tab_overlays.dart` 的 `ShellPrompter`；`navigation.dart` 只写实现、接口不改）；`app/lib/pages/session/` 的 `session_toolbar.dart`（视图切换做成真的）、`session_page.dart`（`active` 的含义）、`connection_panel.dart`、`reasons.dart`（"关闭文件传输"）；`app/lib/pages/files/` 的 `queue_panel.dart`、`file_dialogs.dart`、新文件 `file_route_details.dart`；"文件传输"入口：core `leapgate/peer_list.dart`（`PeerAction.fileTransfer` 和条件）和它的测试、app `pages/home/peer_views.dart`、`devices_page.dart` 和地址簿里列设备菜单项的地方（只加这一项）；`consts.dart`（只在"M7a shell"下追加）；ARB；测试 |
+| `ui/m7a-panes` | coder C | `app/lib/pages/files/` 里 B 那三个以外的文件：`file_view.dart`（换掉占位），新文件 `pane.dart`、`breadcrumb.dart`、`file_list.dart`、`pane_menus.dart`、`drag_drop.dart`、`formats.dart` 等；`consts.dart`（只在"M7a panes"下追加）；ARB；测试 |
+
+- 第 0 步写好的接口谁都不改：core `leapgate/file_transfer/file_transfer_api.dart`、`pane.dart`（A 只填 `fileTransferOf` 的函数体）、`errors.dart` 和 `jobs.dart` 的分隔线以上、`prompts.dart` 里 `Ft` 开头的提问；app `FileView` 的构造参数、`FileQueuePanel(jobs:)`、`MainNavigation.openFileTransfer`、`LgSessionTab` 的 `progress` 和 `alert`、`ConnectionPanel.lastView`；core 和 app 的 `test/file_transfer_fakes.dart`（两份内容相同；要多的在自己的测试文件里继承）。确实要改先报主会话。
+- ARB：C 的键以 `files` 开头；B 的新键以 `ft`、`queue` 开头，外壳已有前缀（`tab`、`closing`、`conn`、`toolbar`）下新加的也归 B；A 不加（core 不带文案）。加在两个 ARB 文件末尾，中英文同时加，文案照 02 §2.2、§2.4、§2.5、§3.1、§3.2 逐字照抄，英文照 02 §5.5，没有的新写并列进提交说明。改完 ARB 跑 `flutter gen-l10n`。
+- coder 先用现成组件和简单的占位控件把逻辑写通，整合时换成 designer 的组件。占位不求好看，但行为测试要能按文字和语义标签找到它们。
+- 块 2 的新导出在 R 合入、重新生成桥之前不存在：`RustFileTransferApi` 每个方法都抛 `UnimplementedError`（`TODO(M7a 整合)`），整合时由主会话换成真实调用；测试一律用 `FakeFileTransferApi`。`fileTransferOf` 在 A 合入之前也抛 `UnimplementedError`，B、C 的测试给 `FileView` 传 `FakeFileTransferModel`。
+- 整合时要接的：`RustFileTransferApi`（主会话）；`fileTransferOf`（A）；`ShellPrompter.ask` 调 `showFilePrompt`（B）；视图容器挂上 `FileView`（B）；复制件的旧提问删掉以后 `ShellPrompter` 只画 `Ft` 开头的（A、B）。
+
+**Rust 导出（块 2）**
+
+| 导出 | 参数 | 返回 |
+|---|---|---|
+| `leapgate_ft_reason`（FT2） | `text: String`（`job_error` 的 `err` 原文）、`peer_platform: String`（对端信息的 `platform` 原样：`Windows`、`Linux`、`Mac OS`、`Android`；空或认不出时按 Windows 查）、`side: String`（`local` / `remote` / `unknown`） | `SyncReturn<String>`：`{"reason":码,"args":[…],"text":原文}`。`args` 一律是字符串：`invalid_name_windows` 是 `[名字]`，`too_many_files` 是 `[本次数, 上限]`（02 文案里的 ‹N› 是上限、‹M› 是本次数，取参时别弄反），其余 `[]`；`text` 截到 200 个字符（按字符边界，同 C3），每种码都带 |
+| `leapgate_ft_read_local_dir`（M7a-4） | `path: String`、`show_hidden: bool` | `SyncReturn<String>`：成功时和上游 `session_read_local_dir_sync` 一样（同样先过 `fs::get_path`，带 FT1 的 `is_hidden`）；失败时 `{"error":原文（截到 200 个字符）,"reason":码}`，码按 `side = local` 归 |
+| `leapgate_ft_remove_link`（M7a-3） | `session_id: SessionID`、`act_id: i32`、`path: String`、`is_remote: bool`、`is_dir_link: bool` | 异步、没有返回值。结果照常经会话事件 `job_done` / `job_error` 回，`id` 是 `act_id`、`file_num` 是 0；会话不在时什么也不做（和上游的 `session_*` 导出一样），Dart 自己有超时 |
+
+- M7a-7：空文件夹不加导出。本机读空文件夹失败照旧只拿到空串，附注写"未能读取"，和远程同一句。
+- FT1：上游 `_make_fd_to_json`（`src/common.rs`）每条加 `"is_hidden"`，三条读文件夹的路（本机、远程 `file_dir`、空文件夹）都带上；旧界面多一个字段、不读。Dart 半边（复制件 `Entry.isHidden`，缺省 false）第 0 步已加，来源行注明了例外。符号链接不加字段：`entry_type` 2 是目录链接（Windows 的目录联接也算），5 是文件链接。
+- 02 §4.3 第 22 条（远程错误原文是不是"‹文字› (os error N)"）和第 0 步同时实测，结果回填 02；R 按结果核对下面的表。
+
+**FT2 的归类**（10 §2.6、§4.3）
+- 码（snake_case，界面按它查表，改名等于改接口）：`permission_denied`、`in_use`、`not_found`、`disk_full`、`file_too_large`、`path_too_long`、`invalid_name`、`invalid_name_windows`、`symlink_in_path`、`one_way`、`too_many_files`、`android_scope`、`skipped`（不是错误）、`other`。`timeout` 只在 Dart 里有（`FtError.timeout()`），Rust 不返回。
+- 原文里有 `(os error N)` 的，取最后一次出现的 N（`validation failed: …`、`failed to validate path component '…': …` 这类前缀里，内层在末尾），只认错误码、不认文字（Windows 的文字随系统语言变）：
+
+| 码 | Windows（Win32） | Linux、Android（errno） | macOS（errno） |
+|---|---|---|---|
+| `permission_denied` | 5、1920、19（写保护） | 13、1、30（只读文件系统） | 13、1、30 |
+| `in_use` | 32、33 | 26、16 | 26、16 |
+| `not_found` | 2、3、15、21（盘不在） | 2、20 | 2、20 |
+| `disk_full` | 112、39 | 28、122 | 28、69 |
+| `file_too_large` | 223、665 | 27 | 27 |
+| `path_too_long` | 206 | 36 | 63 |
+| `invalid_name` | 123、161 | 22、84 | 22、92 |
+| `symlink_in_path` | — | 40 | 62 |
+
+- 没有错误码的，按上游自己拼的句子认：`symlink path component is not allowed` → `symlink_in_path`；以 `invalid Windows download file name: ` 开头 → `invalid_name_windows`（冒号后面是名字）；`invalid download file name`、`invalid file name component`、`invalid file name in remote directory listing: …`、`file name contains null bytes`、`path traversal detected in file name`、`absolute path detected in file name`、`empty file name in multi-file transfer`、`… cannot be empty`、`… contains null bytes`、`new file name cannot be empty`、`Invalid path` → `invalid_name`；`Not exists`、以 ` not exists` 结尾的（`"‹路径›" not exists`、`Parent directoy of … not exists`）→ `not_found`；正文等于 `one-way-file-transfer-tip`（是翻译键）→ `one_way`；以 `file transfer rejected: too many files (` 开头 → `too_many_files`，从括号里取两个数；正文等于 `Permission denied`（没有错误码，Android 的范围检查）→ `android_scope`；正文等于 `skipped` → `skipped`；其余 → `other`（续传临时文件异常、`Wrong id` 这类内部错误也是 `other`）。
+- `side`：`local` 按本机平台的表查（本机平台用 `cfg!` 取，不写死 Windows）；`remote` 按 `peer_platform` 的表查；`unknown`（传输任务）：对端也是 Windows 时两边同一张表；对端不是 Windows 时，看 `(os error N)` 前面的文字是不是那个 errno 的英文原句（Linux glibc、macOS 各一张小表，约 15 条），是就按对端平台查，否则按本机查。原因：上传时本机读出错，被控端会把同一句原文原样发回来（10 §4.3），"从远程回来的"不一定是远程设备的错误。
+- 没认出的同一段正文只在日志里写一次，和 C3 共用截断和去重。
+- FT2 是纯函数，不依赖任务状态；M7b 在 `io_loop.rs` 加 FT3~FT5 挂钩时调同一个函数。
+
+**Rust 的做法和约束**
+- `leapgate_ft_remove_link`（10 §4.2）：远程时由 Rust 从会话自己的对端信息取平台，不由 Dart 传。Windows 对端、目录链接 → 发 `FileRemoveDir { id: act_id, path, recursive: false }`（被控端只调 `std::fs::remove_dir`，只删链接或联接本身，各版本对端都认）；其余（文件链接，Linux、macOS 对端的目录链接）→ 发 `FileRemoveFile { id: act_id, path, file_num: 0 }`。本机同理：Windows 上目录链接调 `std::fs::remove_dir`，其余调 `std::fs::remove_file`，结果照本机删文件那样推 `job_done` / `job_error`。上游删文件夹的导出（固定递归）不改。
+- `leapgate_ft_read_local_dir` 直接调 `fs::read_dir(&fs::get_path(&path), show_hidden)` 和 `crate::common::make_fd_to_json`，失败时把错误原文交给 FT2 的归类。
+- 上游文件只改 `src/common.rs` 一处；其余都在 `libs/leapgate` 和 `src/leapgate_*`。
+
+**core 的接口**（第 0 步已写，`core/lib/leapgate/file_transfer/`；A 实现，B、C 只认它们）
+- `file_transfer_api.dart`：`FileTransferApi`（`reason`、`readLocalDir`、`removeLink`）、全局 `fileTransferApi`、`RustFileTransferApi`（见上，整合时换）。
+- `errors.dart`：`FtReason`（14 个码加 `timeout`；`code` 是 JSON 值，认不出的当 `other`）、`FtSide`、`FtError {reason, args, text}`（`fromJson`、`timeout()`）。文案由 app 映射成 02 §2.5 的句子：C 管栏顶横幅、路径框下和列表区，B 管队列行和对话框。"本机 / 远程设备的磁盘空间不足"这类按方向定：空间不足、文件过大、名称无效、路径过长、目标路径含符号链接只会发生在目标那一侧（上传是远程设备，下载是本机）。
+- `pane.dart`：
+  - `FilePane`（一栏，`Listenable`，下面每项变了都通知）：`isLocal`；`isWindows`（这一侧的路径规则，"此电脑"是 `/`）；`path`（还没打开过任何文件夹时为空）；`entries`（已按 `sort` 排好、带完整路径，"显示隐藏的项目"关着时不含隐藏项）；`isThisPc`；`canGoBack`、`canGoUp`；`reading`（在读的路径和开始时间，页面约 0.5 秒后才显示"正在读取…"，读的不是当前文件夹时旧内容变暗）；`openError`（打开失败的路径和原因：`path` 为空时显示在列表区、带"转到主文件夹""重试"，否则是栏顶横幅）和 `dismissOpenError()`；`openDirectory(path, showError:)`（返回失败原因；路径输入框传 `showError: false`，错误写在框下、不出横幅）；`goBack()`、`goUp()`、`goHome()`、`refresh()`（保留选择）；`drives()`（根下拉的盘符）；`showHidden` / `setShowHidden`；`sort` / `setSort`（`FileSort` 是列加方向，A 按两栏分别记在本机）；`selection` / `select`（打开别的文件夹时清空，盘符不进选择）；`canRename`（远程栏要求对端版本不低于 1.3.0）；`transfer(items, to:)`（每个顶层项目一个任务，传到另一栏当前文件夹，或放下的那个文件夹或盘符行）；`newFolder()`、`rename(entry)`、`delete(items)`。新建、重命名、删除和传输里的替换确认都由 A 在调用里经 `appCore.prompter` 提问，页面只调方法。
+  - `FileTransferModel`（一个文件传输会话）：`local`、`remote`、`jobs`、`uploadPaths(paths, to:)`（从资源管理器拖进来的本机路径，上传到远程栏当前文件夹或放下的那个文件夹行）。
+  - `fileTransferOf(FFI)`：A 合入后返回 `session.fileModel`。
+  - `Entry.isLink`（扩展：`entry_type` 2 或 5）；`Entry.isHidden` 在复制件里。
+- `jobs.dart`：`FileJobs`（`Listenable`）：`rows`（加入的顺序）；`summary`（`active` 含正在统计、进行中、正在删除，以及 `queued`、`waitingConfirm`、`failed`、`paused`、`interrupted`、`finished`（已完成、已跳过、已取消，"清除已完成"看它）、`progress`（进行中和排队里已知大小的合计 0~1，没有时为空））；`unfinished`（排队中、正在统计、进行中、等待确认，02 §3.1 那句的 ‹N›；已暂停、已中断不算）；`cancel`、`resume`、`resumeAll`、`remove`、`clearFinished`。`FileJobRow`：方向（上传、下载、删除）、名称、源、目标、`FileJobStatus`（排队中、正在统计、进行中、等待确认、正在删除、已暂停、已中断、已完成、已跳过、已取消、失败）、已传和总字节、第几个和共几个文件、只含空文件夹时建了几个文件夹、速度、剩余时间、`FtError`、附注（`EmptyFoldersNotCreated`、`ResumeUnsupported`）。
+- `prompts.dart` 里 `Ft` 开头的提问（A 问，B 画；对话框都只遮这个会话标签）：
+  - `FtOverwritePrompt`：`name`（文件名，标题用）、`folder`（目标文件夹，正文用）、`kind`（`existing`、`identical`（多一行、默认焦点"跳过"）、`tempOnly`、`existingOrTemp`（判断不了时合并的那句），M7a-5）；回 `OverwriteAnswer`（沿用：替换 / 跳过 / 取消传输，加"对此次传输中的其他冲突执行相同操作"），关掉不答等于"取消传输"。几个冲突由 A 排队，一次只问一个。
+  - `FtDeletePrompt`：`isRemote`（"远程设备 / 本机"）、`state`（`ValueListenable<FtDeleteState>`：`FtDeleteCounting`；`FtDeleteReady`（`kind` 文件、空文件夹、文件夹或几项、链接，名称、项数、文件数、字节数）；`FtDeleteCountFailed`（文件夹名、原因）；`FtDeleteOverLimit`（文件夹名、上限、文件数））、`retry`。回 true 才删；关掉、"取消"、"关闭"都是空。对话框跟着 `state` 变：A 有文件夹要统计时先以 `FtDeleteCounting` 问，统计完再改 `state`；统计途中被取消，A 停下（远程的 `ReadAllFiles` 收不回，只是丢掉结果）。
+  - `FtNewFolderPrompt`、`FtRenamePrompt`：`isWindows`（"名称不能包含下列字符："按目标系统写）、`check`（输入时就调，返回 `FtNameError`：非法字符、已有同名）、`submit`（点按钮时调，等 Rust 回结果：空是成功，对话框关掉并回名字；非空时对话框写"无法新建文件夹。‹原因›。"/"无法重命名。‹原因›。"、不关）。重命名另有 `name`、`isDirectory`（文件选中扩展名之前的部分），名字没变时"重命名"不可点。"新建"预填的"新建文件夹"是文案，由 B 填。
+  - `FtDisconnectPrompt(unfinished)`：回 true 才断开。
+  - 旧的 `OverwritePrompt`、`DeletePrompt`、`RenamePrompt`（连同 `DeleteKind`、`DeleteAnswer`、`RenameError`）只被复制件的 `FileModel`、`FileController` 和它们的测试用，A 改写后删掉；`OverwriteChoice`、`OverwriteAnswer` 留着。
+
+**外壳和文件视图的接口**（B、C）
+- 视图容器（B，`shell/` 下新文件）：一个标签里按打开的顺序放这台设备的视图，一个当前视图，新打开的视图成为当前视图。远程桌面视图是 `SessionPage(active: 标签选中且当前视图是它)`，不在前台时调 V1 `leapgate_session_set_visible(false)`，切回时设 `true` 再要一帧（§10.4 V1，第一帧之前被切走的处理同 §10.8）。文件视图挂成：
+
+  ```dart
+  FileView(
+    ffi: s,
+    model: fileTransferOf(s),
+    active: tabSelected && current == s, // 只有它能拿键盘
+    lastView: views.length == 1,         // 连接过程面板写"关闭标签"还是"关闭文件传输"
+    viewSwitch: …,                       // B：和远程桌面工具栏同一个控件，"文件传输"带进度
+    route: …,                            // B：连接方式标记，点开是 file_route_details.dart
+    onDisconnect: …,                     // B：有未完成传输时先 FtDisconnectPrompt，再关这个视图
+  )
+  ```
+
+- `FileView` 只是一个组件（C），不 import `shell/`。C 画视图标题栏（用 designer 的组件，把 `viewSwitch`、`route`、"断开"放进去）、两栏和分隔线；把 `ConnectionPanel(ffi:, active:, lastView:)` 盖在两栏和队列上（`ModalBarrier` 加面板，照 `session_page.dart` 末尾）；把 B 的 `FileQueuePanel(jobs: model.jobs)` 放在底部、占满宽度。
+- 键盘：只有当前视图拿键盘。文件视图的快捷键（02 §2.2"键盘"）只在 `active` 时生效，不发给远程设备；标签切换和"关闭标签"（`TabShortcuts`）照常。
+- 标签（B）：状态标记取几个视图里最差的连接方式；悬停每个视图一行；未读来自远程桌面视图；`LgSessionTab.progress` 取文件视图的 `jobs.summary.progress`（没有文件视图、没有进行中和排队的任务时为空），`alert` 是 `summary.waitingConfirm > 0`（画提醒标记、不画进度环）。
+- 确认（B，02 §3.1、01 §3.2 区块 G）：标签 × 和右键"关闭"同一套：一个视图时直接关（只有文件视图、而且有未完成传输时和视图的"断开"同样确认）；几个视图时"断开与此设备的 ‹N› 个会话？"，有未完成传输时多"‹N› 个传输尚未完成，下次打开文件传输时可继续。"；"关闭其他标签"只在有未完成传输时确认一次；关窗确认加传输那一句，勾过"不再提示"以后有未完成传输仍问（只含传输那句，标题"关闭窗口？"，按钮"关闭""取消"）。传输那句的 ‹N› 是有关标签 `jobs.unfinished` 的合计。
+- 入口（B）：`PeerAction.fileTransfer`（设备"⋯"菜单和连接按钮下拉，位置照 01 §3.1 区块 E、F）、标签右键"打开文件传输"、远程桌面工具栏的视图切换，都调 `mainNavigation.openFileTransfer`；已有标签时切到那个标签、显示文件视图；已有远程桌面时 `SessionRegistry.open` 复用连接令牌（现成）。
+- `ConnectionPanel.lastView`：第 0 步只加了参数；为假时按钮写"关闭文件传输"、只关这个视图（B）。
+
+**组件（designer）**：规则同 10.8"组件约定"（只管画、文字由调用方传、带语义标签、两套主题和两套尺寸、画廊里每种状态一项、有行为测试），加 10.8 新加的"合并语义的容器里不放带浮层的组件"。要做的和画框见 10 §2.5：视图标题栏和视图切换里带进度的一行、小进度环和提醒标记（标签、视图切换按钮、菜单行三处）、栏外框和栏头、导航行、面包屑和路径输入态、根下拉、操作行和栏内搜索框、文件列表的列头和行、状态行、列表空态和错误态（最多两个按钮）、"正在读取"时旧内容变暗、队列面板和各状态的行（"查看详情"展开是 M7b 用的，可以一起做）、拖放的高亮和提示、删除确认"正在统计"那一态。栏顶横幅先试 `LgBanner`；连接方式详情、菜单、表单对话框、断开确认用现成组件。
+
+**几处约定**
+- 远程读文件夹没有编号（10 §4.4）：A 让远程栏同一时刻只发一个读取，后来的排队；`drives()` 用最近一次读"此电脑"的结果，没有时等当前读取结束。远程读文件夹、删除前统计、读空文件夹的超时都是 30 秒，超时是 `FtError.timeout()`。
+- 新建、重命名、删除的请求编号由 A 生成、记下，Rust 回 `job_done` / `job_error` 用同一个编号，不改 Rust；新建、重命名等结果再关对话框，失败写在对话框里（`submit` 的返回值）。
+- 错误来自哪一侧（10 §4.3）：Dart 知道是哪一栏的（新建、重命名、删除、统计、读文件夹）直接传 `side`；传输任务传 `unknown`，由 Rust 消歧。`job_error` 的 `cancel` 由 A 先挡掉（行变已取消），`skipped` 当已跳过，都不调 FT2。
+- 替换确认的判法（M7a-5，只在 Dart，`io_loop.rs` 不加挂钩）：事件里"两个文件相同"为真 → `identical`；下载（目标在本机）：目标文件在 → `existing`，不在而旁边有 `‹名字›.download` 或 `.digest` → `tempOnly`；上传：目标文件夹正好是远程栏当前打开的文件夹时按已读到的列表同样判，否则 `existingOrTemp`。事件里的路径下载时是本机目标文件的完整路径，上传时是本机源文件的路径；上传的远程目标和正文里的"目标文件夹"由任务的目标文件夹加文件的相对路径拼（10 §4.5）。
+- 删除（R2-Q23、M7a-3）：选中项里有文件夹（不算链接）时先统计（可取消）、问一次、逐个删、删完再删空文件夹；链接（`isLink`）不统计、不递归，调 `removeLink`。
+- 传文件夹总带隐藏项（R2-Q22）；"此电脑"不能作目标（页面灰显按钮、拖放不接受，A 在 `transfer`、`newFolder` 里再拒一次）；上次打开的文件夹每次打开成功就存。
+- 排序方式、列宽、两栏分隔线的位置、队列面板高度存 LocalConfig 的新键，以 `leapgate-ft-` 开头，键名写在 `consts.dart` 各自那一节。
+- 日期用 app 已有的 `win32` 调系统的短日期和时间格式（跟着用户在系统里改过的格式），不是 Windows 时退回 `intl`。
+- 拖放用 `desktop_drop` 0.4.4（和上游同版本；第 0 步已加进 `app/pubspec.yaml` 并用同一个 `PUB_CACHE` 重新生成了 lock；插件注册由 `flutter pub get` 生成进被忽略的 `windows/flutter/generated_plugins.cmake`，不用手改任何文件）；整个窗口一个拖放目标，落在哪栏哪行由 C 按坐标判断；栏间拖放用 Flutter 自带的 `Draggable` / `DragTarget`。从资源管理器拖进来的按本机路径交给 `uploadPaths`（上游方向反了、文件夹被当成文件，10 §4.6，按 02 区块 G 重写）。
+- 右键"关闭"和 × 同一套确认；"关闭其他标签"只在有未完成的传输时确认一次。
+- 大小三位有效数字的新格式只用在文件视图（C 的 `formats.dart`）；`core/lib/common.dart` 的 `readableFileSize` 不改（连接管理小窗的文件记录在用）。
+- 复制件里还调 `translate` 的 `JobState.display`、`JobProgress.display` 和写死英文的 "files"，界面不调，留着不改。
+- 文件视图不用会话通知横条：复制件 `JobController.jobError` 里单向传输的会话通知照旧发出、没人画，单向传输由 FT2 的 `one_way` 在行里显示。
+
+**已知限制**
+- 拖入时做不出"不接受"的系统光标（插件不设置拖放效果），只在应用里画提示；超过 260 个字符的路径被插件截断（读码推断，验收时实测一次）（M7a-8）。
+- 文件夹任务中途一个文件出错时照上游：第一次收到 `job_error` 行就显示失败；下载停在失败，上传随后的 `job_done` 会把行改成已完成（读码推断）。M7b 的 FT5 再改（M7a-8）。
+- 文件视图里的提问照旧按设备遮整个标签，替换确认开着时远程桌面视图也拿不到键盘（和 02"只遮这个会话标签"一致）。
+- 打开文件传输时这台设备的远程桌面还在连接、还没拿到令牌，文件传输会再问一次密码（上游同样）。
+- 远程读文件夹串行：慢的网络盘上快速连点两层文件夹，后一个要等前一个。
+- 远程读空文件夹失败时被控端什么都不回，只能等到超时，附注写"未能读取"（M7a-7）。
+- Linux 被控端的系统文字被翻译成本地语言时，`unknown` 的消歧会退化：撞号时可能归错，查不到时显示原文。
+- FAT32 上超过 4 GB 的文件可能报 112（显示成空间不足），下载最后改名时目标正被占用可能报 5（显示成没有访问权限）；验收时在测试虚拟机上实测，归错再调表（10 §4.8）。
+
+**测试**
+- R：FT2 每条上游原文一个单测（注明源码位置，照 C3），每个码在 Windows、Linux、macOS 各一条，撞号消歧，截断；FT1 的 JSON 带 `is_hidden`；`leapgate_ft_read_local_dir` 的成功和失败；`leapgate_ft_remove_link` 在本机对目录符号链接、目录联接、文件链接只删链接、目标完好（Windows 上建一次性数据测）。
+- A：队列行的状态派生（排队中、进行中、正在统计、已中断）、速度和剩余时间、`unfinished`；排序（文件夹和盘符在前、盘符不丢）；删除流程（统计、一次确认、取消、链接不递归，用 `FakeFileTransferApi`）；错误按请求编号交回；远程读取串行；超时；替换确认四态的判法。
+- B：外壳的多视图（切换、键盘归属、远程桌面不在前台时 V1）、各种确认（标签 ×、右键关闭、关闭其他标签、关窗、视图断开）、标签上的进度环和提醒标记、各个入口；队列面板各状态和对话框各态，用 `FakeFileJobs` 和假的提问。
+- C：02 §2.2"P7 桌面要画的状态"里两栏那几组每组一个行为测试，用 `FakeFileTransferModel`；拖放按坐标判断落点。
+- 合入前：`git diff main -- flutter/` 为空；core `flutter analyze --no-fatal-infos` 在 3.44.9 下不超出 92 条 info 的基线，app 0 条；复制件不跑格式化；改已有文件时不对整个文件跑 `dart format`，只格式化新文件。远程桌面的冒烟照跑（改的是它每天都走的外壳，10 §4.1）。

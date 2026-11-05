@@ -75,6 +75,7 @@ part 'gallery_m2b.dart';
 part 'gallery_m4.dart';
 part 'gallery_m5.dart';
 part 'gallery_m6.dart';
+part 'gallery_m7.dart';
 
 const _exportDir = String.fromEnvironment('LG_GALLERY_EXPORT');
 
@@ -765,6 +766,7 @@ List<Specimen> buildSpecimens() {
   list.addAll(_m4Specimens());
   list.addAll(_m5Specimens());
   list.addAll(_m6Specimens());
+  list.addAll(_m7Specimens());
   return list;
 }
 

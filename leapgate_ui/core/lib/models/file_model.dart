@@ -1,4 +1,4 @@
-// 上游：flutter/lib/models/file_model.dart@bd9262397（只删界面调用，不格式化）
+// 上游：flutter/lib/models/file_model.dart@bd9262397（只删界面调用，不格式化；`FileModel`、`FileController` 改写到 `lib/leapgate/file_transfer/file_model.dart`；例外：`Entry` 读 `is_hidden` 的两行（FT1））
 import 'dart:async';
 import 'dart:convert';
 
@@ -1564,6 +1564,7 @@ class Entry {
   String name = "";
   String path = "";
   int size = 0;
+  bool isHidden = false;
 
   Entry();
 
@@ -1572,6 +1573,7 @@ class Entry {
     modifiedTime = json['modified_time'];
     name = json['name'];
     size = json['size'];
+    isHidden = json['is_hidden'] ?? false;
   }
 
   bool get isFile => entryType > 3;

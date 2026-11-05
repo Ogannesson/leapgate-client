@@ -36,6 +36,16 @@ class _Recorder implements MainNavigation {
   @override
   void showSettings(SettingsSectionId section, {String? item}) =>
       settings.add(section);
+
+  @override
+  void openFileTransfer(String id,
+          {String password = '',
+          bool isSharedPassword = false,
+          bool forceRelay = false}) =>
+      real.openFileTransfer(id,
+          password: password,
+          isSharedPassword: isSharedPassword,
+          forceRelay: forceRelay);
 }
 
 void main() {

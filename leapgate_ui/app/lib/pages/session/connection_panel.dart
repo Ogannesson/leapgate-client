@@ -35,12 +35,17 @@ const kWaitingImageHintAfter = 5;
 /// error has none (upstream's box has no default action, and "改用中继" would be saved for the
 /// device).
 class ConnectionPanel extends StatefulWidget {
-  const ConnectionPanel({super.key, required this.ffi, required this.active});
+  const ConnectionPanel(
+      {super.key, required this.ffi, required this.active, this.lastView = true});
 
   final FFI ffi;
 
   /// Its tab is the selected one.
   final bool active;
+
+  /// No other view is open in the tab. When false the close button closes this view and reads
+  /// "关闭文件传输" (02 §2.2 "连接过程和中断"). M7a step 0: coder B makes it so.
+  final bool lastView;
 
   @override
   State<ConnectionPanel> createState() => _ConnectionPanelState();

@@ -596,3 +596,12 @@ const String kOptionD3DRender = "allow-d3d-render";
 
 /// Config, read by both sides.
 const String kOptionEnableHwcodec = "enable-hwcodec";
+
+// M7a: the file transfer view's own LocalConfig keys start with `leapgate-ft-` (`LEAPGATE.md`
+// §10.15). Each lane appends its keys under its heading.
+
+// M7a core (coder A): the sort of each pane.
+
+// M7a shell (coder B): the queue panel.
+
+// M7a panes (coder C): column widths, the divider between the panes.

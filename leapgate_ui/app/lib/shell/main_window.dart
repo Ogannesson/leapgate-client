@@ -205,6 +205,13 @@ class _MainWindowState extends State<MainWindow>
     _select(id);
   }
 
+  // TODO(M7a shell): coder B opens the view (`LEAPGATE.md` §10.15).
+  @override
+  void openFileTransfer(String id,
+      {String password = '',
+      bool isSharedPassword = false,
+      bool forceRelay = false}) {}
+
   @override
   void showHome({bool focusConnectBox = false, String? connectBoxText}) {
     _select(null);

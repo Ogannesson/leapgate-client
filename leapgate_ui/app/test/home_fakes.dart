@@ -188,6 +188,15 @@ class FakeNavigation implements MainNavigation {
   @override
   void showSettings(SettingsSectionId section, {String? item}) =>
       settings.add((section: section, item: item));
+
+  final fileTransfers = <String>[];
+
+  @override
+  void openFileTransfer(String id,
+          {String password = '',
+          bool isSharedPassword = false,
+          bool forceRelay = false}) =>
+      fileTransfers.add(id);
 }
 
 /// Fresh fakes behind `bind`, `appCore` and `mainNavigation` for one test.

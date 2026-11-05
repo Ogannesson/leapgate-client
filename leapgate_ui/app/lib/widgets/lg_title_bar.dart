@@ -62,6 +62,8 @@ class LgSessionTab {
     this.unread = 0,
     this.disconnected = false,
     this.tooltip,
+    this.progress,
+    this.alert = false,
   });
 
   final String name;
@@ -80,6 +82,14 @@ class LgSessionTab {
 
   /// Hover content: full name, ID, connection method of each open view.
   final Widget? tooltip;
+
+  /// Overall progress 0..1 of the tab's file transfers, drawn as the small ring by the status
+  /// (02 §3.2); null draws none. M7a step 0: the designer draws it.
+  final double? progress;
+
+  /// A replace confirmation waits in the tab: the reminder mark replaces the ring (02 §3.2,
+  /// the exit page's `.rmd`).
+  final bool alert;
 }
 
 class LgTitleBar extends StatefulWidget {

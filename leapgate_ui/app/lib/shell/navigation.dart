@@ -20,6 +20,14 @@ abstract class MainNavigation {
       bool forceRelay = false,
       String switchUuid = ''});
 
+  /// Opens the file transfer view of [id] and shows it (02 §2.1.1): in its tab when the device
+  /// has one, logging in with the tab's connection token; otherwise in a new tab. [id] is
+  /// handled as in [connect].
+  void openFileTransfer(String id,
+      {String password = '',
+      bool isSharedPassword = false,
+      bool forceRelay = false});
+
   /// Switches to the home tab. With [focusConnectBox] the cursor goes into the connect box
   /// ("+" on the title bar, 01 §2.1); [connectBoxText], when given, replaces its text, all
   /// selected ("修改 ID" on the connection panel, `04-M2a拆法.md` §5.1).
