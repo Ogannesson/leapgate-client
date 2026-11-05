@@ -181,6 +181,10 @@ class FileTransferJobs extends ChangeNotifier implements FileJobs {
   final JobController _jobs;
   final _info = <int, _JobInfo>{};
 
+  /// A delete's files and their size, as counted before the confirmation: the job table has
+  /// none for a single file and the folder entry's own size for a folder.
+  final _deletes = <int, ({int files, int bytes})>{};
+
   /// Jobs a replace confirmation is open or queued for.
   final _confirming = <int>{};
 
@@ -204,6 +208,12 @@ class FileTransferJobs extends ChangeNotifier implements FileJobs {
     // `loadLastJob` keeps the remote path in `remote` and the local one in `to`.
     final target = job.isRemoteToLocal ? job.to : job.remote;
     return target.isEmpty ? null : target;
+  }
+
+  /// A delete started here: [files] files of [bytes] in all go (0 for a link or empty folders).
+  void addDelete(int id, {required int files, required int bytes}) {
+    _deletes[id] = (files: files, bytes: bytes);
+    notifyListeners();
   }
 
   void addFoldersMade(int id) {
@@ -282,6 +292,9 @@ class FileTransferJobs extends ChangeNotifier implements FileJobs {
     final done = status == FileJobStatus.done;
     final target = transfer ? targetOf(job.id) : null;
     final rate = status == FileJobStatus.inProgress ? _rate(job) : null;
+    final deleted = transfer ? null : _deletes[job.id];
+    final fileCount = deleted?.files ?? job.fileCount;
+    final totalBytes = deleted?.bytes ?? job.totalSize;
     return FileJobRow(
       id: job.id,
       direction: !transfer
@@ -295,13 +308,13 @@ class FileTransferJobs extends ChangeNotifier implements FileJobs {
           ? ''
           : PathUtil.dirname(target, _targetWindows(job.isRemoteToLocal)),
       status: status,
-      doneBytes: done ? job.totalSize : job.finishedSize,
-      totalBytes: job.totalSize,
+      doneBytes: done ? totalBytes : job.finishedSize,
+      totalBytes: totalBytes,
       fileIndex: done
-          ? job.fileCount
+          ? fileCount
           : (job.recvJobRes ? job.fileNum + 1 : job.fileNum)
-              .clamp(0, job.fileCount),
-      fileCount: job.fileCount,
+              .clamp(0, fileCount),
+      fileCount: fileCount,
       folderCount: info?.foldersMade ?? 0,
       bytesPerSecond: rate?.speed,
       remaining: rate?.remaining,
@@ -513,6 +526,7 @@ class FileTransferJobs extends ChangeNotifier implements FileJobs {
     if (gone.isEmpty) return;
     for (final id in gone) {
       _info.remove(id);
+      _deletes.remove(id);
       _errors.remove(id);
       _confirming.remove(id);
     }

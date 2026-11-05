@@ -16,16 +16,38 @@ class TabOverlays extends ChangeNotifier {
   final _keys = <Object?, GlobalKey<OverlayState>>{};
   final _open = <Object?, int>{};
 
+  /// The dialogs shown over each scope, the last on top.
+  final _shown = <Object?, List<_Shown>>{};
+
   GlobalKey<OverlayState> keyOf(Object? scope) =>
       _keys.putIfAbsent(scope, GlobalKey<OverlayState>.new);
 
   /// Whether a dialog covers [scope]; the session page then leaves the keyboard alone.
   bool isOpen(Object? scope) => (_open[scope] ?? 0) > 0;
 
-  /// The tab of [scope] closed.
+  /// The tab of [scope] closed: what it still asks is answered with null.
   void forget(Object? scope) {
+    for (final d in [...?_shown.remove(scope)]) {
+      d.close(null);
+    }
     _keys.remove(scope);
     _open.remove(scope);
+  }
+
+  /// The tab of [scope] is shown again: the top dialog takes the keyboard back, the button or
+  /// field it had. One shown while the tab was in the background never had it (its autofocus
+  /// failed under `ExcludeFocus`): it is built again, and takes it as on opening.
+  void refocus(Object? scope) {
+    final shown = _shown[scope]?.lastOrNull;
+    final context = shown?.content.currentContext;
+    if (shown == null || context == null) return;
+    final node = FocusScope.of(context);
+    if (node.hasFocus) return;
+    if (node.focusedChild != null) {
+      node.requestFocus();
+    } else {
+      shown.rebuild();
+    }
   }
 
   /// Shows [builder]'s layer (an `LgDialogScrim` with its dialog) over [scope] and completes
@@ -36,20 +58,44 @@ class TabOverlays extends ChangeNotifier {
     final overlay = _keys[scope]?.currentState;
     if (overlay == null) return Future.value(null);
     final done = Completer<T?>();
-    late final OverlayEntry entry;
+    late final _Shown shown;
     void close(T? result) {
       if (done.isCompleted) return;
-      entry.remove();
+      shown.entry.remove();
+      _shown[scope]?.remove(shown);
       _open[scope] = (_open[scope] ?? 1) - 1;
       notifyListeners();
       done.complete(result);
     }
 
-    entry = OverlayEntry(builder: (context) => builder(context, close));
-    overlay.insert(entry);
+    shown = _Shown((context) => builder(context, close),
+        (result) => close(result as T?));
+    overlay.insert(shown.entry);
+    (_shown[scope] ??= []).add(shown);
     _open[scope] = (_open[scope] ?? 0) + 1;
     notifyListeners();
     return done.future;
+  }
+}
+
+/// A dialog over a scope, in a focus scope of its own (what [TabOverlays.refocus] looks at).
+class _Shown {
+  _Shown(Widget Function(BuildContext context) builder, this.close) {
+    entry = OverlayEntry(
+        builder: (context) => FocusScope(
+            child: Builder(key: content, builder: builder)));
+  }
+
+  late final OverlayEntry entry;
+
+  /// Closes it unanswered.
+  final void Function(Object? result) close;
+  GlobalKey content = GlobalKey();
+
+  /// Builds the dialog anew under a new key.
+  void rebuild() {
+    content = GlobalKey();
+    entry.markNeedsBuild();
   }
 }
 

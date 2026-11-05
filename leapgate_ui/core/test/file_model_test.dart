@@ -29,9 +29,18 @@ class FtBind extends FakeBind {
   /// What reading this device's empty folders answers, as Rust's JSON.
   String emptyDirs = '[]';
 
+  /// This device's home folder and the peer options a session reads back.
+  String home = '';
+  final peerOptions = <String, String>{};
+
   @override
   dynamic noSuchMethod(Invocation invocation) {
     switch (invocation.memberName) {
+      case #mainGetHomeDir:
+        return Future<String>.value(home);
+      case #sessionGetPeerOption:
+        return Future<String>.value(
+            peerOptions[invocation.namedArguments[#name]] ?? '');
       case #sessionSendFiles:
       case #sessionCreateDir:
       case #sessionReadRemoteDir:
@@ -532,6 +541,51 @@ void main() {
       expect(local.selection, hasLength(2));
       expect(_args(t.bind, #sessionPeerOption, #value), ['C:\\ok']);
     });
+
+    test('the last folder is gone: the home folder opens and the banner says what was not '
+        'found (02 §2.5)', () async {
+      final t = _session();
+      t.bind
+        ..home = 'C:\\home'
+        ..peerOptions['local_dir'] = 'C:\\gone';
+      t.api.onReadLocalDir = (path, hidden) => path == 'C:\\home'
+          ? (
+              directory:
+                  FileDirectory.fromJson({'id': 0, 'path': path, 'entries': []}),
+              error: null
+            )
+          : (directory: null, error: const FtError(FtReason.notFound));
+      final local = t.s.fileModel.localController;
+      await local.onReady();
+      expect(local.path, 'C:\\home');
+      expect((local.openError?.path, local.openError?.error.reason),
+          ('C:\\gone', FtReason.notFound));
+    });
+
+    test('a remote read the reconnect ends is no error to show', () async {
+      final t = _session();
+      final remote = t.s.fileModel.remoteController;
+      final a = remote.openDirectory('/a');
+      await settle();
+      t.s.fileModel.fileFetcher.beginRemoteSession();
+      expect(await a, isNull);
+      expect(remote.openError, isNull);
+    });
+
+    test('"显示隐藏的项目" is saved at once, for the reconnect to read back', () async {
+      final t = _session();
+      t.s.fileModel.remoteController.setShowHidden(true);
+      final saved = t.bind.callsTo(#sessionPeerOption).single.namedArguments;
+      expect((saved[#name], saved[#value]), ('remote_show_hidden', 'Y'));
+    });
+
+    test('a whole drive dropped from the file manager is not sent', () async {
+      final t = _session(platform: 'Windows');
+      await t.s.fileModel
+          .uploadPaths([p.rootPrefix(io.Directory.systemTemp.path)], to: 'D:\\x');
+      expect(t.bind.callsTo(#sessionSendFiles), isEmpty);
+      expect(t.s.fileModel.jobs.rows, isEmpty);
+    });
   });
 
   group('new folder and rename', () {
@@ -685,6 +739,10 @@ void main() {
       expect((link.path, link.isDirLink, link.isRemote), ('C:\\l', true, false));
       expect(t.s.fileModel.jobs.rows.map((r) => (r.direction, r.status)),
           everyElement((FileJobDirection.delete, FileJobStatus.done)));
+      // Each row has the files the confirmation counted: the folder's two, the file, no file
+      // for the link.
+      expect(t.s.fileModel.jobs.rows.map((r) => (r.name, r.fileCount, r.totalBytes)),
+          [('d1', 2, 5), ('f.txt', 1, 5), ('l', 0, 0)]);
     });
 
     test('cancelled while counting: nothing is deleted', () async {

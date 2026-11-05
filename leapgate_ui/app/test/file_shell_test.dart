@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/exit_api.dart';
 import 'package:flutter_hbb/leapgate/file_transfer/pane.dart';
+import 'package:flutter_hbb/leapgate/prompts.dart';
 import 'package:flutter_hbb/leapgate/session.dart';
 import 'package:flutter_hbb/models/state_model.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -261,6 +265,44 @@ void main() {
       await tester.pump();
       expect(stateGlobal.fullscreen.value, false);
       expect(tester.widget<FileView>(find.byType(FileView)).active, true);
+    },
+  );
+
+  testMainWindow(
+    'a dialog of a tab in the background has the keyboard when the tab is shown: Enter is '
+    'the dialog\'s, not the file list\'s behind it',
+    (tester) async {
+      await pumpMainWindow(tester);
+      final files = await openFiles(tester);
+      models[files]!.local.path = r'C:\Users\u';
+      files.connection.onPeerInfo();
+      await settle(tester);
+      expect(FocusManager.instance.primaryFocus?.debugLabel, 'local files');
+
+      await open(tester, id: '400500600');
+      bool? answer;
+      unawaited(
+        appCore.prompter
+            .ask(const FtDisconnectPrompt(1), session: files)
+            .then((v) => answer = v),
+      );
+      await settle(tester);
+      titleBar(tester).onSelect(1);
+      await settle(tester);
+      expect(find.text('断开文件传输？'), findsOneWidget);
+      expect(
+        tester
+            .widget<FileView>(find.byType(FileView, skipOffstage: false))
+            .active,
+        false,
+      );
+      expect(FocusManager.instance.primaryFocus?.debugLabel, isNot('local files'));
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await settle(tester);
+      expect(answer, true);
+      // Closed, the list has the keys again.
+      expect(FocusManager.instance.primaryFocus?.debugLabel, 'local files');
     },
   );
 
