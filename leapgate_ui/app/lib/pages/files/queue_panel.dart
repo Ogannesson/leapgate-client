@@ -10,7 +10,7 @@ import 'package:flutter_hbb/leapgate/file_transfer/jobs.dart';
 import '../../icons/lg_icon.dart';
 import '../../l10n/app_localizations.dart';
 import '../../theme/lg_tokens.dart';
-import '../../widgets/lg_button.dart';
+import '../../widgets/lg_file_queue.dart';
 import '../../widgets/lg_tooltip.dart';
 import 'file_dialogs.dart';
 
@@ -43,6 +43,9 @@ class _FileQueuePanelState extends State<FileQueuePanel> {
   late Set<int> _seen;
   late bool _expanded;
   late double _height;
+
+  /// The grip moved since the pointer went down: the height is saved when it comes up.
+  var _dragged = false;
 
   @override
   void initState() {
@@ -83,17 +86,21 @@ class _FileQueuePanelState extends State<FileQueuePanel> {
 
   /// [limit] is the most the list gets in the space there is now; the drag starts from what
   /// shows.
-  void _drag(DragUpdateDetails d, double limit) => setState(
-    () => _height = (math.min(_height, limit) - d.delta.dy).clamp(
-      kQueueMinHeight,
-      limit,
-    ),
-  );
+  void _drag(double dy, double limit) => setState(() {
+    _dragged = true;
+    _height = (math.min(_height, limit) - dy).clamp(kQueueMinHeight, limit);
+  });
 
-  void _saveHeight() => appCore.options.local.set(
-    kOptionLeapgateFtQueueHeight,
-    _height.round().toString(),
-  );
+  /// The grip has no end-of-drag callback; the pointer that dragged it comes up inside the
+  /// panel's [Listener] (pointer events go where the pointer went down).
+  void _endDrag() {
+    if (!_dragged) return;
+    _dragged = false;
+    appCore.options.local.set(
+      kOptionLeapgateFtQueueHeight,
+      _height.round().toString(),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -109,169 +116,94 @@ class _FileQueuePanelState extends State<FileQueuePanel> {
           kQueueMinHeight,
           math.min(room * 0.6, kQueueMaxHeight),
         );
-        if (connection == null) return _build(context, true, limit);
+        final width = constraints.maxWidth;
+        if (connection == null) return _build(context, true, limit, width);
         return ListenableBuilder(
           listenable: connection,
-          builder: (context, _) =>
-              _build(context, connection.stage == ConnStage.connected, limit),
+          builder: (context, _) => _build(
+            context,
+            connection.stage == ConnStage.connected,
+            limit,
+            width,
+          ),
         );
       },
     );
   }
 
-  Widget _build(BuildContext context, bool connected, double limit) {
-    final t = LgTokens.of(context);
-    final c = t.colors;
+  /// [width] is the one the panel lays itself out in: the summary line's height follows it.
+  Widget _build(
+    BuildContext context,
+    bool connected,
+    double limit,
+    double width,
+  ) {
     final l10n = AppLocalizations.of(context)!;
-    final rows = widget.jobs.rows;
-    final open = _expanded && rows.isNotEmpty;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: c.surface,
-        border: Border(top: BorderSide(color: c.border)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (open)
-            Semantics(
-              label: l10n.queueResizeHandle,
-              child: MouseRegion(
-                cursor: SystemMouseCursors.resizeRow,
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onVerticalDragUpdate: (d) => _drag(d, limit),
-                  onVerticalDragEnd: (_) => _saveHeight(),
-                  child: const SizedBox(height: LgSpace.s2),
-                ),
-              ),
-            ),
-          _Summary(
-            jobs: widget.jobs,
-            connected: connected,
-            expanded: open,
-            onToggle: rows.isEmpty
-                ? null
-                : () => setState(() => _expanded = !_expanded),
-          ),
-          if (open)
-            SizedBox(
-              height: math.min(_height, limit),
-              child: ListView(
-                children: [
-                  for (final r in rows)
-                    _Row(row: r, jobs: widget.jobs, connected: connected),
-                ],
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-class _Summary extends StatelessWidget {
-  const _Summary({
-    required this.jobs,
-    required this.connected,
-    required this.expanded,
-    required this.onToggle,
-  });
-
-  final FileJobs jobs;
-  final bool connected;
-  final bool expanded;
-  final VoidCallback? onToggle;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = LgTokens.of(context);
-    final c = t.colors;
-    final l10n = AppLocalizations.of(context)!;
+    final jobs = widget.jobs;
+    final rows = jobs.rows;
     final s = jobs.summary;
-    final sep = l10n.queueSeparator;
-    // "‹n› 个进行中，‹m› 个排队"; paused and interrupted only once nothing else is left
-    // (02 block H "按样稿补的细节"). Failed and waiting go on in their colours.
-    final counts = <InlineSpan>[];
-    void add(String text, [Color? color]) {
-      if (counts.isNotEmpty) counts.add(TextSpan(text: sep));
-      counts.add(
-        TextSpan(
-          text: text,
-          style: color == null
+    final open = _expanded && rows.isNotEmpty;
+    final progress = rows.isEmpty ? null : s.progress;
+    final summary = LgQueuePanel.summaryHeight(LgTokens.of(context), width);
+    return Listener(
+      onPointerUp: (_) => _endDrag(),
+      onPointerCancel: (_) => _endDrag(),
+      child: SizedBox(
+        height: summary + (open ? math.min(_height, limit) : 0),
+        child: LgQueuePanel(
+          title: l10n.queueTitle,
+          expanded: open,
+          toggleLabel: open ? l10n.queueCollapse : l10n.queueExpand,
+          onToggle: rows.isEmpty
               ? null
-              : TextStyle(color: color, fontWeight: FontWeight.w700),
-        ),
-      );
-    }
-
-    if (jobs.rows.isEmpty) {
-      add(l10n.queueEmpty);
-    } else {
-      if (s.active > 0) add(l10n.queueActiveCount(s.active));
-      if (s.queued > 0) add(l10n.queueQueuedCount(s.queued));
-      if (s.active == 0 && s.queued == 0) {
-        if (s.paused > 0) add(l10n.queuePausedCount(s.paused));
-        if (s.interrupted > 0) add(l10n.queueInterruptedCount(s.interrupted));
-      }
-      if (s.failed > 0) add(l10n.queueFailedCount(s.failed), c.error);
-      if (s.waitingConfirm > 0) {
-        add(l10n.queueWaitingCount(s.waitingConfirm), c.warning);
-      }
-    }
-    final progress = s.progress;
-    return SizedBox(
-      height: t.sizes.row,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: LgSpace.s4),
-        child: Row(
-          children: [
-            Text(
-              l10n.queueTitle,
-              style: t.textM.copyWith(
-                color: c.text,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(width: LgSpace.s3),
-            Expanded(
-              child: Text.rich(
-                TextSpan(
-                  children: [
-                    ...counts,
-                    if (progress != null)
-                      TextSpan(text: ' · ${(progress * 100).floor()}%'),
-                  ],
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: t.textM.copyWith(color: c.text2),
-              ),
-            ),
+              : () => setState(() => _expanded = !_expanded),
+          spans: rows.isEmpty ? const [] : _counts(l10n, s),
+          emptyText: rows.isEmpty ? l10n.queueEmpty : null,
+          progress: progress,
+          percentText: progress == null ? null : '${(progress * 100).floor()}%',
+          actions: [
             if (s.paused > 0 && connected)
-              LgButton(
+              LgQueueSummaryAction(
                 label: l10n.queueResumeAll,
-                kind: LgButtonKind.text,
+                icon: LgIcons.play,
                 onPressed: jobs.resumeAll,
               ),
             if (s.finished > 0)
-              LgButton(
+              LgQueueSummaryAction(
                 label: l10n.queueClearFinished,
-                kind: LgButtonKind.text,
                 onPressed: jobs.clearFinished,
               ),
-            if (onToggle != null)
-              LgButton(
-                label: expanded ? l10n.queueCollapse : l10n.queueExpand,
-                kind: LgButtonKind.text,
-                trailingIcon: expanded ? LgIcons.chevD : LgIcons.chevU,
-                onPressed: onToggle,
-              ),
           ],
+          rows: [
+            for (final r in rows)
+              _Row(row: r, jobs: jobs, connected: connected),
+          ],
+          onResize: (dy) => _drag(dy, limit),
         ),
       ),
     );
+  }
+
+  /// "‹n› 个进行中，‹m› 个排队"; paused and interrupted only once nothing else is left
+  /// (02 block H "按样稿补的细节"). Failed and waiting go on in their colours.
+  List<LgQueueSpan> _counts(AppLocalizations l10n, FileJobSummary s) {
+    final spans = <LgQueueSpan>[];
+    void add(String text, [LgQueueTone tone = LgQueueTone.neutral]) {
+      if (spans.isNotEmpty) spans.add(LgQueueSpan(l10n.queueSeparator));
+      spans.add(LgQueueSpan(text, tone: tone));
+    }
+
+    if (s.active > 0) add(l10n.queueActiveCount(s.active));
+    if (s.queued > 0) add(l10n.queueQueuedCount(s.queued));
+    if (s.active == 0 && s.queued == 0) {
+      if (s.paused > 0) add(l10n.queuePausedCount(s.paused));
+      if (s.interrupted > 0) add(l10n.queueInterruptedCount(s.interrupted));
+    }
+    if (s.failed > 0) add(l10n.queueFailedCount(s.failed), LgQueueTone.error);
+    if (s.waitingConfirm > 0) {
+      add(l10n.queueWaitingCount(s.waitingConfirm), LgQueueTone.warning);
+    }
+    return spans;
   }
 }
 
@@ -293,7 +225,20 @@ class _Row extends StatelessWidget {
     return l10n.queueRemainingHours(minutes ~/ 60, minutes % 60);
   }
 
-  /// What the row says, and the text behind it on hover (the original error text).
+  /// What a transfer under way says after its percentage.
+  List<String> _progressParts(AppLocalizations l10n) {
+    final r = row;
+    String size(int b) => ftSize(l10n, b);
+    return [
+      l10n.queueBytesOf(size(r.doneBytes), size(r.totalBytes)),
+      if (r.fileCount > 1) l10n.queueFilesOf(r.fileIndex, r.fileCount),
+      if (r.bytesPerSecond != null) '${size(r.bytesPerSecond!.round())}/s',
+      if (r.remaining != null) _remaining(l10n, r.remaining!),
+    ];
+  }
+
+  /// What the row says (after the percentage of a transfer under way), and the text behind it
+  /// on hover (the original error text).
   (String, String?) _status(AppLocalizations l10n) {
     final r = row;
     String size(int b) => ftSize(l10n, b);
@@ -303,18 +248,7 @@ class _Row extends StatelessWidget {
       case FileJobStatus.counting:
         return (l10n.queueStatusCounting, null);
       case FileJobStatus.inProgress:
-        final progress = r.totalBytes > 0 ? r.doneBytes / r.totalBytes : 0.0;
-        return (
-          [
-            '${(progress * 100).floor()}%',
-            l10n.queueBytesOf(size(r.doneBytes), size(r.totalBytes)),
-            if (r.fileCount > 1) l10n.queueFilesOf(r.fileIndex, r.fileCount),
-            if (r.bytesPerSecond != null)
-              '${size(r.bytesPerSecond!.round())}/s',
-            if (r.remaining != null) _remaining(l10n, r.remaining!),
-          ].join(' · '),
-          null,
-        );
+        return (_progressParts(l10n).join(' · '), null);
       case FileJobStatus.waitingConfirm:
         return (l10n.queueStatusWaiting, null);
       case FileJobStatus.deleting:
@@ -367,125 +301,87 @@ class _Row extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final t = LgTokens.of(context);
-    final c = t.colors;
     final l10n = AppLocalizations.of(context)!;
     final r = row;
     final (status, detail) = _status(l10n);
-    final color = switch (r.status) {
-      FileJobStatus.failed => c.error,
-      FileJobStatus.waitingConfirm => c.warning,
-      _ => c.text2,
+    final (direction, label) = switch (r.direction) {
+      FileJobDirection.upload => (LgQueueDirection.upload, l10n.queueUpload),
+      FileJobDirection.download => (
+        LgQueueDirection.download,
+        l10n.queueDownload,
+      ),
+      FileJobDirection.delete => (LgQueueDirection.delete, l10n.queueDelete),
     };
-    final (icon, direction) = switch (r.direction) {
-      FileJobDirection.upload => (LgIcons.upload, l10n.queueUpload),
-      FileJobDirection.download => (LgIcons.download, l10n.queueDownload),
-      FileJobDirection.delete => (LgIcons.trash, l10n.queueDelete),
+    double ratio(int done, int total) => total > 0 ? done / total : 0.0;
+    final (state, progress) = switch (r.status) {
+      FileJobStatus.queued => (LgQueueState.queued, null),
+      FileJobStatus.counting => (LgQueueState.counting, null),
+      FileJobStatus.inProgress => (
+        LgQueueState.inProgress,
+        ratio(r.doneBytes, r.totalBytes),
+      ),
+      FileJobStatus.waitingConfirm => (LgQueueState.waitingConfirm, null),
+      FileJobStatus.deleting => (
+        LgQueueState.deleting,
+        r.fileCount > 0 ? ratio(r.fileIndex, r.fileCount) : null,
+      ),
+      FileJobStatus.paused => (
+        LgQueueState.paused,
+        ratio(r.doneBytes, r.totalBytes),
+      ),
+      FileJobStatus.interrupted => (LgQueueState.interrupted, null),
+      FileJobStatus.done => (LgQueueState.done, null),
+      FileJobStatus.skipped => (LgQueueState.skipped, null),
+      FileJobStatus.cancelled => (LgQueueState.cancelled, null),
+      FileJobStatus.failed => (LgQueueState.failed, null),
     };
-    final ends = switch (r.status) {
+    final lead = r.status == FileJobStatus.inProgress
+        ? '${(progress! * 100).floor()}%'
+        : null;
+    final remove = LgQueueAction(
+      icon: LgIcons.x,
+      label: l10n.queueRemove,
+      onPressed: () => jobs.remove(r.id),
+    );
+    final cancel = LgQueueAction(
+      icon: LgIcons.x,
+      label: l10n.queueCancel,
+      onPressed: () => jobs.cancel(r.id),
+    );
+    final actions = switch (r.status) {
       FileJobStatus.done ||
       FileJobStatus.skipped ||
       FileJobStatus.cancelled ||
-      FileJobStatus.failed => [
-        LgIconButton(
-          icon: LgIcons.x,
-          label: l10n.queueRemove,
-          onPressed: () => jobs.remove(r.id),
-        ),
-      ],
-      FileJobStatus.waitingConfirm => const <Widget>[],
+      FileJobStatus.failed => [remove],
+      FileJobStatus.waitingConfirm => const <LgQueueAction>[],
       FileJobStatus.paused => [
         if (connected)
-          LgIconButton(
+          LgQueueAction(
             icon: LgIcons.play,
             label: l10n.queueResume,
             onPressed: () => jobs.resume(r.id),
           ),
-        LgIconButton(
-          icon: LgIcons.x,
-          label: l10n.queueCancel,
-          onPressed: () => jobs.cancel(r.id),
-        ),
+        cancel,
       ],
-      _ => [
-        LgIconButton(
-          icon: LgIcons.x,
-          label: l10n.queueCancel,
-          onPressed: () => jobs.cancel(r.id),
-        ),
-      ],
+      _ => [cancel],
     };
-    Widget statusText = Text(
-      status,
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-      style: t.textS.copyWith(color: color),
+    final spoken = lead == null
+        ? status
+        : [lead, ..._progressParts(l10n)].join(l10n.queueSeparator);
+    // The notes stay open under the row; "查看详情" with the files left out is M7b.
+    final Widget item = LgQueueRow(
+      direction: direction,
+      semanticLabel: l10n.queueRowLabel(label, r.name, spoken),
+      name: r.name,
+      path: r.to.isEmpty ? r.from : '${r.from} → ${r.to}',
+      state: state,
+      status: status,
+      statusLead: lead,
+      progress: progress,
+      actions: actions,
+      detailsOpen: r.notes.isNotEmpty,
+      details: [for (final note in r.notes) LgQueueDetail(_note(l10n, note))],
     );
-    if (detail != null) {
-      statusText = LgTooltip(message: detail, child: statusText);
-    }
-    final path = r.to.isEmpty ? r.from : '${r.from} → ${r.to}';
-    return Padding(
-      padding: const EdgeInsets.symmetric(
-        horizontal: LgSpace.s4,
-        vertical: LgSpace.s1,
-      ),
-      child: Row(
-        children: [
-          Semantics(
-            label: direction,
-            child: LgIcon(icon, size: 18, color: c.text2),
-          ),
-          const SizedBox(width: LgSpace.s3),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        r.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: t.textM.copyWith(color: c.text),
-                      ),
-                    ),
-                    const SizedBox(width: LgSpace.s3),
-                    Expanded(
-                      child: Text(
-                        path,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: t.textS.copyWith(color: c.text2),
-                      ),
-                    ),
-                  ],
-                ),
-                if (r.status == FileJobStatus.inProgress)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 2),
-                    child: LinearProgressIndicator(
-                      value: r.totalBytes > 0
-                          ? r.doneBytes / r.totalBytes
-                          : null,
-                      color: c.accent,
-                      backgroundColor: c.track,
-                    ),
-                  ),
-                statusText,
-                for (final note in r.notes)
-                  Text(
-                    _note(l10n, note),
-                    style: t.textS.copyWith(color: c.text2),
-                  ),
-              ],
-            ),
-          ),
-          ...ends,
-        ],
-      ),
-    );
+    return detail == null ? item : LgTooltip(message: detail, child: item);
   }
 }

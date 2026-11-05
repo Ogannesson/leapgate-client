@@ -1566,7 +1566,13 @@
   "queueNoteResumeUnsupported": "The remote device's version doesn't support resuming. The current file will start over.",
   "queueBytes": "{count, plural, =1{1 byte} other{{count} bytes}}",
   "@queueBytes": {"placeholders": {"count": {"type": "int"}}},
-  "queueResizeHandle": "Resize the transfers panel",
+  "queueRowLabel": "{direction} {name}, {status}",
+  "@queueRowLabel": {"placeholders": {"direction": {"type": "String"}, "name": {"type": "String"}, "status": {"type": "String"}}},
+  "ftMarkProgress": "File transfer {percent}%",
+  "@ftMarkProgress": {"placeholders": {"percent": {"type": "int"}}},
+  "ftMarkAttention": "A replace confirmation is waiting",
+  "ftViewSwitchLabel": "{view}, {mark}",
+  "@ftViewSwitchLabel": {"placeholders": {"view": {"type": "String"}, "mark": {"type": "String"}}},
   "connCloseRemoteDesktop": "Close remote desktop",
   "tabCloseTitle": "Close the tab?"
 }
