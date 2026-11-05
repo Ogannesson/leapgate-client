@@ -18,83 +18,11 @@ sealed class Prompt<T> {
   const Prompt();
 }
 
-// The copied file model's questions ([OverwritePrompt], [DeletePrompt], [RenamePrompt]) go
-// with its `FileModel` and `FileController`: coder A removes them once the rewrite (M7a,
-// `LEAPGATE.md` §10.15) uses the `Ft*` questions at the end of this file. [OverwriteChoice] and
-// [OverwriteAnswer] stay.
-
-/// A file being transferred already exists at the destination. Upstream:
-/// `models/file_model.dart:178` (`overrideFileConfirm`), dialog at `:217-290`.
-///
-/// Closed without an answer (null) counts as cancel, as upstream's Esc does. Upstream could
-/// also lose the dialog to a `dismissAll` from elsewhere and then read it as skip; nothing here
-/// closes a question that way.
-final class OverwritePrompt extends Prompt<OverwriteAnswer> {
-  const OverwritePrompt({required this.path, required this.isIdentical});
-
-  final String path;
-
-  /// The two files are the same; upstream adds `identical_file_tip`.
-  final bool isIdentical;
-}
-
 /// Upstream's dialog returns `true`, `null`, `false` for these three.
 enum OverwriteChoice { overwrite, skip, cancel }
 
 /// [forAll] is upstream's "Do this for all conflicts" box.
 typedef OverwriteAnswer = ({OverwriteChoice choice, bool forAll});
-
-enum DeleteKind {
-  file,
-  emptyDirectory,
-
-  /// One file of a directory that is not empty, asked file by file; this one offers "for all".
-  fileInDirectory,
-}
-
-/// Confirms deleting one item. Upstream: `models/file_model.dart:779`, `:814`
-/// (`removeAction`), dialog at `:858-920`.
-///
-/// Closed without an answer (null) skips this file and asks about the next one. Upstream's Esc
-/// is "cancel", and with "for all" ticked before it, that cancels the rest of the directory.
-final class DeletePrompt extends Prompt<DeleteAnswer> {
-  const DeletePrompt(
-      {required this.kind,
-      required this.path,
-      this.index = 0,
-      this.count = 1,
-      this.forAll = false});
-
-  final DeleteKind kind;
-  final String path;
-
-  /// Position among the files of the directory; upstream shows `index + 1/count` when there
-  /// are more than one.
-  final int index;
-  final int count;
-
-  /// How the "for all" box starts. Upstream keeps the last answer's box through one delete
-  /// action, so the first file of the next directory starts with it.
-  final bool forAll;
-}
-
-typedef DeleteAnswer = ({bool delete, bool forAll});
-
-enum RenameError { alreadyExists, invalidName }
-
-/// Asks for a new name and keeps asking until [check] passes. Upstream:
-/// `models/file_model.dart:952-1015` (`renameAction`). Answers the new name as typed; an empty
-/// or unchanged name is the caller's to ignore, as upstream does.
-final class RenamePrompt extends Prompt<String> {
-  const RenamePrompt(
-      {required this.name, required this.isDirectory, required this.check});
-
-  final String name;
-  final bool isDirectory;
-
-  /// Checked when the user submits; a non-null result is shown under the field.
-  final RenameError? Function(String newName) check;
-}
 
 // ---- The file transfer view's questions (M7a step 0, `LEAPGATE.md` §10.15) ----
 // Coder A asks them from the file transfer model; coder B draws them (`pages/files/
