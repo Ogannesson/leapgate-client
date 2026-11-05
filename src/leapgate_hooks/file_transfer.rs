@@ -27,9 +27,7 @@ pub(crate) fn read_local_dir(path: String, show_hidden: bool) -> String {
 }
 
 /// M7a-3: removes the link itself, never what it points to (upstream's folder removal recurses
-/// into a folder link's target). A Windows peer removes a folder link or junction with
-/// `remove_dir` (non-recursive `FileRemoveDir`); a file link, or any link on a Unix peer, is
-/// unlinked with `FileRemoveFile`. The result comes as `job_done` / `job_error` for `act_id`.
+/// into a folder link's target). The result comes as `job_done` / `job_error` for `act_id`.
 pub(crate) fn remove_link(
     session_id: SessionID,
     act_id: i32,
@@ -41,39 +39,56 @@ pub(crate) fn remove_link(
         return;
     };
     if is_remote {
-        let mut file_action = FileAction::new();
-        if is_dir_link && session.peer_platform() == "Windows" {
-            file_action.set_remove_dir(FileRemoveDir {
-                id: act_id,
-                path,
-                recursive: false,
-                ..Default::default()
-            });
-        } else {
-            file_action.set_remove_file(FileRemoveFile {
-                id: act_id,
-                path,
-                file_num: 0,
-                ..Default::default()
-            });
-        }
         let mut msg = Message::new();
-        msg.set_file_action(file_action);
+        msg.set_file_action(link_action(
+            act_id,
+            path,
+            is_dir_link,
+            &session.peer_platform(),
+        ));
         session.send(Data::Message(msg));
     } else {
-        match remove_local_link(&path, is_dir_link) {
+        match remove_local_link(&path) {
             Ok(()) => session.ui_handler.job_done(act_id, 0),
             Err(err) => session.ui_handler.job_error(act_id, err.to_string(), 0),
         }
     }
 }
 
-fn remove_local_link(path: &str, is_dir_link: bool) -> std::io::Result<()> {
-    if cfg!(windows) && is_dir_link {
-        std::fs::remove_dir(path)
+/// A Windows peer removes a folder link or junction with `remove_dir` (non-recursive
+/// `FileRemoveDir`); a file link, or any link on another peer, is unlinked with `FileRemoveFile`.
+fn link_action(act_id: i32, path: String, is_dir_link: bool, peer_platform: &str) -> FileAction {
+    let mut file_action = FileAction::new();
+    if is_dir_link && peer_platform == "Windows" {
+        file_action.set_remove_dir(FileRemoveDir {
+            id: act_id,
+            path,
+            recursive: false,
+            ..Default::default()
+        });
     } else {
-        std::fs::remove_file(path)
+        file_action.set_remove_file(FileRemoveFile {
+            id: act_id,
+            path,
+            file_num: 0,
+            ..Default::default()
+        });
     }
+    file_action
+}
+
+/// Windows tells a folder link or junction by the link's own attributes, not by the listing: a
+/// broken one lists as a file link (`entry_type` 5). Elsewhere any link is unlinked.
+fn remove_local_link(path: &str) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
+        if std::fs::symlink_metadata(path)?.file_attributes() & FILE_ATTRIBUTE_DIRECTORY != 0 {
+            return std::fs::remove_dir(path);
+        }
+    }
+    std::fs::remove_file(path)
 }
 
 #[cfg(test)]
@@ -157,12 +172,12 @@ mod tests {
         sfs::create_dir(&target).unwrap();
         sfs::create_dir(target.join("sub")).unwrap();
         sfs::write(target.join("f.txt"), b"x").unwrap();
-        let check = |link: PathBuf, is_dir_link: bool| {
-            remove_local_link(&link.to_string_lossy(), is_dir_link).unwrap();
-            assert!(
-                sfs::symlink_metadata(&link).is_err(),
-                "{link:?} still there"
-            );
+        let removed = |link: &PathBuf| {
+            remove_local_link(&link.to_string_lossy()).unwrap();
+            assert!(sfs::symlink_metadata(link).is_err(), "{link:?} still there");
+        };
+        let check = |link: PathBuf| {
+            removed(&link);
             assert_eq!(sfs::read(target.join("f.txt")).unwrap(), b"x");
             assert!(target.join("sub").is_dir());
         };
@@ -178,38 +193,83 @@ mod tests {
                 }
                 Err(e) => panic!("{what}: {e}"),
             };
+            let junction = |link: &PathBuf, target: &PathBuf| {
+                let status = std::process::Command::new("cmd")
+                    .args(["/C", "mklink", "/J"])
+                    .arg(link)
+                    .arg(target)
+                    .stdout(std::process::Stdio::null())
+                    .status()
+                    .unwrap();
+                assert!(status.success());
+            };
             let link = dir.join("dir-symlink");
             if made(symlink_dir(&target, &link), "folder symbolic link") {
-                check(link, true);
+                check(link);
             }
             let link = dir.join("file-symlink");
             if made(
                 symlink_file(target.join("f.txt"), &link),
                 "file symbolic link",
             ) {
-                check(link, false);
+                check(link);
             }
             let link = dir.join("junction");
-            let status = std::process::Command::new("cmd")
-                .args(["/C", "mklink", "/J"])
-                .arg(&link)
-                .arg(&target)
-                .stdout(std::process::Stdio::null())
-                .status()
-                .unwrap();
-            assert!(status.success());
-            check(link, true);
+            junction(&link, &target);
+            check(link);
+            // Broken ones, which upstream lists as file links.
+            let gone = dir.join("gone");
+            sfs::create_dir(&gone).unwrap();
+            let broken_symlink = dir.join("broken-symlink");
+            let made_symlink = made(symlink_dir(&gone, &broken_symlink), "folder symbolic link");
+            let broken_junction = dir.join("broken-junction");
+            junction(&broken_junction, &gone);
+            sfs::remove_dir(&gone).unwrap();
+            if made_symlink {
+                removed(&broken_symlink);
+            }
+            removed(&broken_junction);
         }
         #[cfg(unix)]
         {
             use std::os::unix::fs::symlink;
             let link = dir.join("dir-symlink");
             symlink(&target, &link).unwrap();
-            check(link, true);
+            check(link);
             let link = dir.join("file-symlink");
             symlink(target.join("f.txt"), &link).unwrap();
-            check(link, false);
+            check(link);
         }
         sfs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A remote folder link is removed without recursing: a non-recursive `RemoveDir` on a
+    /// Windows peer, `RemoveFile` elsewhere.
+    #[test]
+    fn remote_link_removal_never_recurses() {
+        use base::message_proto::file_action::Union;
+        match link_action(7, r"C:\a\link".to_owned(), true, "Windows").union {
+            Some(Union::RemoveDir(d)) => {
+                assert_eq!(
+                    (d.id, d.path.as_str(), d.recursive),
+                    (7, r"C:\a\link", false)
+                )
+            }
+            other => panic!("{other:?}"),
+        }
+        for (is_dir_link, platform) in [
+            (false, "Windows"),
+            (true, "Linux"),
+            (true, "Mac OS"),
+            (true, "Android"),
+            (true, ""),
+        ] {
+            match link_action(7, "/a/link".to_owned(), is_dir_link, platform).union {
+                Some(Union::RemoveFile(f)) => {
+                    assert_eq!((f.id, f.path.as_str(), f.file_num), (7, "/a/link", 0))
+                }
+                other => panic!("{platform}: {other:?}"),
+            }
+        }
     }
 }

@@ -49,8 +49,9 @@ pub struct FtReason {
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Os {
     Windows,
-    /// Also Android.
     Linux,
+    /// Linux's errnos, bionic's wording.
+    Android,
     Mac,
 }
 
@@ -58,7 +59,8 @@ impl Os {
     /// From a peer info's `platform`; anything else counts as Windows.
     fn of(platform: &str) -> Self {
         match platform {
-            "Linux" | "Android" => Os::Linux,
+            "Linux" => Os::Linux,
+            "Android" => Os::Android,
             "Mac OS" => Os::Mac,
             _ => Os::Windows,
         }
@@ -69,6 +71,8 @@ const LOCAL: Os = if cfg!(windows) {
     Os::Windows
 } else if cfg!(any(target_os = "macos", target_os = "ios")) {
     Os::Mac
+} else if cfg!(target_os = "android") {
+    Os::Android
 } else {
     Os::Linux
 };
@@ -107,12 +111,14 @@ fn classify_on(local: Os, text: &str, peer: Os, side: &str) -> FtReason {
     }
 }
 
-/// The last `(os error N)` and the text before it: wrappers such as `validation failed: ` or
-/// `failed to validate path component '…': ` put the inner error last.
+/// The `(os error N)` that ends the text, and the text before it: wrappers such as
+/// `validation failed: ` or `failed to validate path component '…': ` put the inner error last.
+/// One elsewhere is part of a path or name.
 fn os_error(text: &str) -> Option<(&str, i32)> {
     const MARK: &str = "(os error ";
-    let start = text.rfind(MARK)?;
-    let n = text[start + MARK.len()..].split(')').next()?.parse().ok()?;
+    let rest = text.strip_suffix(')')?;
+    let start = rest.rfind(MARK)?;
+    let n = rest[start + MARK.len()..].parse().ok()?;
     Some((text[..start].trim_end(), n))
 }
 
@@ -150,7 +156,7 @@ fn by_code(os: Os, n: i32) -> Option<Code> {
             123 | 161 => InvalidName,
             _ => return None,
         },
-        Os::Linux => match n {
+        Os::Linux | Os::Android => match n {
             // 30: read-only file system
             13 | 1 | 30 => PermissionDenied,
             26 | 16 => InUse,
@@ -176,19 +182,25 @@ fn by_code(os: Os, n: i32) -> Option<Code> {
     })
 }
 
-/// The English wording (glibc, macOS libc) of the errnos in `by_code`, and of the file errnos
-/// whose numbers are also Windows codes there (5, 19, 21, 32, 39).
+/// The English wording (glibc, bionic's `bionic_errdefs.h`, macOS libc) of the errnos in
+/// `by_code`, and of the file errnos whose numbers are also Windows codes there (5, 19, 21, 32,
+/// 39, 123).
 fn strerror(os: Os, n: i32) -> Option<&'static str> {
+    use Os::{Android, Linux, Mac};
     Some(match (os, n) {
         (Os::Windows, _) => return None,
+        (Android, 5) => "I/O error",
+        (Android, 40) => "Too many symbolic links encountered",
+        (Android, 84) => "Illegal byte sequence",
+        (Android, 122) => "Quota exceeded",
         (_, 1) => "Operation not permitted",
         (_, 2) => "No such file or directory",
         (_, 5) => "Input/output error",
         (_, 13) => "Permission denied",
-        (Os::Linux, 16) => "Device or resource busy",
-        (Os::Mac, 16) => "Resource busy",
-        (Os::Linux, 19) => "No such device",
-        (Os::Mac, 19) => "Operation not supported by device",
+        (Linux | Android, 16) => "Device or resource busy",
+        (Mac, 16) => "Resource busy",
+        (Linux | Android, 19) => "No such device",
+        (Mac, 19) => "Operation not supported by device",
         (_, 20) => "Not a directory",
         (_, 21) => "Is a directory",
         (_, 22) => "Invalid argument",
@@ -197,15 +209,16 @@ fn strerror(os: Os, n: i32) -> Option<&'static str> {
         (_, 28) => "No space left on device",
         (_, 30) => "Read-only file system",
         (_, 32) => "Broken pipe",
-        (Os::Linux, 36) => "File name too long",
-        (Os::Linux, 39) => "Directory not empty",
-        (Os::Linux, 40) => "Too many levels of symbolic links",
-        (Os::Linux, 84) => "Invalid or incomplete multibyte or wide character",
-        (Os::Linux, 122) => "Disk quota exceeded",
-        (Os::Mac, 62) => "Too many levels of symbolic links",
-        (Os::Mac, 63) => "File name too long",
-        (Os::Mac, 69) => "Disc quota exceeded",
-        (Os::Mac, 92) => "Illegal byte sequence",
+        (Linux | Android, 36) => "File name too long",
+        (Linux | Android, 39) => "Directory not empty",
+        (Linux, 40) => "Too many levels of symbolic links",
+        (Linux, 84) => "Invalid or incomplete multibyte or wide character",
+        (Linux, 122) => "Disk quota exceeded",
+        (Linux | Android, 123) => "No medium found",
+        (Mac, 62) => "Too many levels of symbolic links",
+        (Mac, 63) => "File name too long",
+        (Mac, 69) => "Disc quota exceeded",
+        (Mac, 92) => "Illegal byte sequence",
         _ => return None,
     })
 }
@@ -372,6 +385,11 @@ mod tests {
                 (r#""/home/a/b.txt" not exists"#, Os::Linux, "remote"),
                 (NotFound, none()),
             ),
+            // an "(os error N)" inside the path is no error code
+            (
+                (r#""/home/a (os error 5)/b.txt" not exists"#, Os::Linux, "remote"),
+                (NotFound, none()),
+            ),
             // base/fs.rs:207/249 `get_recursive_files`, `TransferJob::new_read`
             (("Not exists", Os::Windows, "remote"), (NotFound, none())),
             // ui_cm_interface.rs:1385 `start_read_job`: a Windows peer's CM wraps it
@@ -484,41 +502,48 @@ mod tests {
         }
     }
 
-    /// Each errno code on each platform, as that side reports it.
+    /// Every number in `LEAPGATE.md` §10.15's table, as that side reports it.
     #[test]
     fn error_codes_per_platform() {
-        let cases = [
-            // Windows (Win32), English wording
-            ("Access is denied. (os error 5)", Os::Windows, PermissionDenied),
-            ("The process cannot access the file because it is being used by another process. (os error 32)", Os::Windows, InUse),
-            ("The system cannot find the file specified. (os error 2)", Os::Windows, NotFound),
-            ("The device is not ready. (os error 21)", Os::Windows, NotFound),
-            ("There is not enough space on the disk. (os error 112)", Os::Windows, DiskFull),
-            ("The file size exceeds the limit allowed and cannot be saved. (os error 223)", Os::Windows, FileTooLarge),
-            ("The filename or extension is too long. (os error 206)", Os::Windows, PathTooLong),
-            ("The filename, directory name, or volume label syntax is incorrect. (os error 123)", Os::Windows, InvalidName),
-            // Linux and Android (errno)
-            ("Permission denied (os error 13)", Os::Linux, PermissionDenied),
-            ("Read-only file system (os error 30)", Os::Linux, PermissionDenied),
-            ("Text file busy (os error 26)", Os::Linux, InUse),
-            ("No such file or directory (os error 2)", Os::Linux, NotFound),
-            ("No space left on device (os error 28)", Os::Linux, DiskFull),
-            ("File too large (os error 27)", Os::Linux, FileTooLarge),
-            ("File name too long (os error 36)", Os::Linux, PathTooLong),
-            ("Invalid or incomplete multibyte or wide character (os error 84)", Os::Linux, InvalidName),
-            ("Too many levels of symbolic links (os error 40)", Os::Linux, SymlinkInPath),
-            // macOS (errno)
-            ("Operation not permitted (os error 1)", Os::Mac, PermissionDenied),
-            ("Resource busy (os error 16)", Os::Mac, InUse),
-            ("Not a directory (os error 20)", Os::Mac, NotFound),
-            ("Disc quota exceeded (os error 69)", Os::Mac, DiskFull),
-            ("File too large (os error 27)", Os::Mac, FileTooLarge),
-            ("File name too long (os error 63)", Os::Mac, PathTooLong),
-            ("Illegal byte sequence (os error 92)", Os::Mac, InvalidName),
-            ("Too many levels of symbolic links (os error 62)", Os::Mac, SymlinkInPath),
+        let unix = |disk_full, path_too_long, invalid_name, symlink| {
+            [
+                (PermissionDenied, vec![13, 1, 30]),
+                (InUse, vec![26, 16]),
+                (NotFound, vec![2, 20]),
+                (DiskFull, disk_full),
+                (FileTooLarge, vec![27]),
+                (PathTooLong, path_too_long),
+                (InvalidName, invalid_name),
+                (SymlinkInPath, symlink),
+            ]
+        };
+        let windows = [
+            (PermissionDenied, vec![5, 1920, 19]),
+            (InUse, vec![32, 33]),
+            (NotFound, vec![2, 3, 15, 21]),
+            (DiskFull, vec![112, 39]),
+            (FileTooLarge, vec![223, 665]),
+            (PathTooLong, vec![206]),
+            (InvalidName, vec![123, 161]),
         ];
-        for (text, peer, expected) in cases {
-            assert_eq!(code(text, peer, "remote").0, expected, "{text}");
+        let linux = || unix(vec![28, 122], vec![36], vec![22, 84], vec![40]);
+        let mac = unix(vec![28, 69], vec![63], vec![22, 92], vec![62]);
+        for (platform, table) in [
+            ("Windows", windows.to_vec()),
+            ("Linux", linux().to_vec()),
+            ("Android", linux().to_vec()),
+            ("Mac OS", mac.to_vec()),
+        ] {
+            for (expected, numbers) in table {
+                for n in numbers {
+                    let text = format!("x (os error {n})");
+                    assert_eq!(
+                        code(&text, Os::of(platform), "remote").0,
+                        expected,
+                        "{n} on {platform}"
+                    );
+                }
+            }
         }
         // Windows has no errno for a symlink in the path: upstream's sentence stands in.
         assert_eq!(
@@ -540,6 +565,16 @@ mod tests {
             // the peer's: 5 is EIO there, not ACCESS_DENIED
             ("Input/output error (os error 5)", Os::Linux, Other),
             ("Input/output error (os error 5)", Os::Mac, Other),
+            // bionic words some errnos differently from glibc
+            ("I/O error (os error 5)", Os::Android, Other),
+            (
+                "Too many symbolic links encountered (os error 40)",
+                Os::Android,
+                SymlinkInPath,
+            ),
+            ("Quota exceeded (os error 122)", Os::Android, DiskFull),
+            // the peer's: 123 is ENOMEDIUM, not INVALID_NAME
+            ("No medium found (os error 123)", Os::Linux, Other),
             // the peer's: 13 is INVALID_DATA, 28 OUT_OF_PAPER on Windows
             (
                 "Permission denied (os error 13)",
