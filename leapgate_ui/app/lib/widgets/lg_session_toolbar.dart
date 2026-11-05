@@ -16,6 +16,7 @@ import 'package:flutter_hbb/leapgate/identity_color.dart';
 
 import '../icons/lg_icon.dart';
 import '../theme/lg_tokens.dart';
+import 'lg_file_marks.dart';
 import 'lg_menu.dart';
 import 'lg_pressable.dart';
 import 'lg_status.dart';
@@ -264,10 +265,27 @@ class LgToolbarMenuButton extends StatelessWidget {
     this.disabledNote,
     this.badge = 0,
     this.state = LgToolbarMenuState.normal,
+    this.progress,
+    this.alert = false,
+    this.highlighted = false,
+    this.semanticLabel,
   });
 
   final String label;
   final List<Widget> items;
+
+  /// The ring of the overall progress of the file transfers, after the name (the view switch,
+  /// 02 §3.2); [alert] draws the reminder mark in its place. On a bar at a side, where only the
+  /// icon shows, it sits on the corner of the icon like [badge].
+  final double? progress;
+  final bool alert;
+
+  /// Tinted and bold as when its menu is open, while it is closed: the view switch of a view's
+  /// own title bar, which names the view that is shown (`.vt .ti.on`).
+  final bool highlighted;
+
+  /// The accessible name when it must say more than [label] ("文件传输，45%").
+  final String? semanticLabel;
 
   /// Shown before the name in detail mode, and alone on a bar at a side (01
   /// §2.3).
@@ -313,13 +331,19 @@ class LgToolbarMenuButton extends StatelessWidget {
                 final focus = Focus.of(context);
                 if (!focus.hasFocus) focus.requestFocus();
               },
-        semanticLabel: label,
+        semanticLabel: semanticLabel ?? label,
         toggled: controller.isOpen,
+        // The view that is shown is "selected" to a screen reader.
+        selected: highlighted ? true : null,
         builder: (context, states) {
           // The gallery shows an open menu with the selected state forced.
-          final open =
-              controller.isOpen || states.contains(WidgetState.selected);
-          final overlay = open ? null : lgStateOverlay(c, states);
+          final menuOpen =
+              controller.isOpen ||
+              LgStateOverride.of(context).contains(WidgetState.selected);
+          final open = menuOpen || highlighted;
+          // An open menu is the whole story of the button; a highlighted one still answers the
+          // pointer with the hover tint on its ground.
+          final overlay = menuOpen ? null : lgStateOverlay(c, states);
           final base = open ? c.active : null;
           final fg = switch (state) {
             _ when open => c.accent,
@@ -362,7 +386,7 @@ class LgToolbarMenuButton extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: overlay == null
                       ? base
-                      : Color.alphaBlend(overlay, Colors.transparent),
+                      : Color.alphaBlend(overlay, base ?? Colors.transparent),
                   borderRadius: radius,
                 ),
                 child: ExcludeSemantics(
@@ -393,6 +417,18 @@ class LgToolbarMenuButton extends StatelessWidget {
                               SizedBox(width: t.sizes.toolGap),
                               LgBadge(badge),
                             ],
+                            if (alert || progress != null) ...[
+                              // On a view's own bar the ring stands a little further off
+                              // the name (`.vt .ti .rg` adds 4 to the gap).
+                              SizedBox(
+                                width:
+                                    t.sizes.toolGap +
+                                    (highlighted ? LgSpace.s1 : 0),
+                              ),
+                              alert
+                                  ? const LgReminderMark()
+                                  : LgProgressRing(value: progress!),
+                            ],
                             SizedBox(width: t.sizes.toolGap),
                             LgIcon(LgIcons.chevD, size: 16, color: fg),
                           ] else if (lead == null)
@@ -407,6 +443,14 @@ class LgToolbarMenuButton extends StatelessWidget {
                       // count sits on the corner of the icon.
                       if (vertical && badge > 0)
                         Positioned(top: -8, right: -12, child: LgBadge(badge)),
+                      if (vertical && (alert || progress != null))
+                        Positioned(
+                          top: -8,
+                          right: -12,
+                          child: alert
+                              ? const LgReminderMark()
+                              : LgProgressRing(value: progress!),
+                        ),
                     ],
                   ),
                 ),

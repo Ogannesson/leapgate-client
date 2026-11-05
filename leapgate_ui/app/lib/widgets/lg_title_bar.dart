@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import '../icons/lg_icon.dart';
 import '../theme/lg_tokens.dart';
 import 'lg_button.dart';
+import 'lg_file_marks.dart';
 import 'lg_menu.dart';
 import 'lg_pressable.dart';
 import 'lg_status.dart';
@@ -64,6 +65,7 @@ class LgSessionTab {
     this.tooltip,
     this.progress,
     this.alert = false,
+    this.markLabel,
   });
 
   final String name;
@@ -84,12 +86,16 @@ class LgSessionTab {
   final Widget? tooltip;
 
   /// Overall progress 0..1 of the tab's file transfers, drawn as the small ring by the status
-  /// (02 §3.2); null draws none. M7a step 0: the designer draws it.
+  /// (02 §3.2); null draws none.
   final double? progress;
 
   /// A replace confirmation waits in the tab: the reminder mark replaces the ring (02 §3.2,
   /// the exit page's `.rmd`).
   final bool alert;
+
+  /// What the ring or the reminder mark means, for a screen reader ("文件传输 45%", "有替换确认
+  /// 等待处理"); both are decoration without it.
+  final String? markLabel;
 }
 
 class LgTitleBar extends StatefulWidget {
@@ -243,6 +249,9 @@ class _LgTitleBarState extends State<LgTitleBar> {
           strip: c.identity[s.identity].solid,
           status: s.status,
           badge: s.unread,
+          progress: s.progress,
+          markLabel: s.markLabel,
+          alertMark: s.alert,
           disconnected: s.disconnected,
           tooltip: s.tooltip,
           closeLabel: labels.closeTab,
@@ -426,6 +435,9 @@ class _Tab extends StatelessWidget {
     this.status,
     this.badge = 0,
     this.alert = false,
+    this.alertMark = false,
+    this.progress,
+    this.markLabel,
     this.semanticLabel,
     this.disconnected = false,
     this.tooltip,
@@ -442,6 +454,13 @@ class _Tab extends StatelessWidget {
   /// The home tab only: the reminder mark before [badge]. The mark and the
   /// number are then decoration, [semanticLabel] says what they mean.
   final bool alert;
+
+  /// A session tab's file transfer mark, after the status: the ring of the overall progress,
+  /// or the reminder mark when a replace confirmation waits (the mark wins). 4 px after the
+  /// status (`.tab .rg` pulls its 8 px gap in by 4).
+  final bool alertMark;
+  final double? progress;
+  final String? markLabel;
   final String? semanticLabel;
   final bool disconnected;
   final Widget? tooltip;
@@ -507,6 +526,15 @@ class _Tab extends StatelessWidget {
                         DefaultTextStyle(
                           style: t.textS.copyWith(color: c.text2),
                           child: status!,
+                        ),
+                      ],
+                      if (alertMark || progress != null) ...[
+                        const SizedBox(width: LgSpace.s1),
+                        Semantics(
+                          label: markLabel,
+                          child: alertMark
+                              ? const LgReminderMark()
+                              : LgProgressRing(value: progress!),
                         ),
                       ],
                       if (semanticLabel != null && (badge > 0 || alert)) ...[
