@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
+import 'package:flutter_hbb/leapgate/connection.dart';
 import 'package:flutter_hbb/leapgate/file_transfer/errors.dart';
 import 'package:flutter_hbb/leapgate/file_transfer/jobs.dart';
 
@@ -23,9 +24,14 @@ const kQueueMaxHeight = 600.0;
 /// A new job expands a collapsed panel once; collapsed by hand, it stays so until the next new
 /// job. The height is saved for every device ([kOptionLeapgateFtQueueHeight]).
 class FileQueuePanel extends StatefulWidget {
-  const FileQueuePanel({super.key, required this.jobs});
+  const FileQueuePanel({super.key, required this.jobs, this.connection});
 
   final FileJobs jobs;
+
+  /// The session's connection: while it is not connected, "继续" and "全部继续" are not drawn
+  /// (a row the connection's end left paused does not resume until it is back). Null counts as
+  /// connected.
+  final ConnectionModel? connection;
 
   @override
   State<FileQueuePanel> createState() => _FileQueuePanelState();
@@ -87,6 +93,16 @@ class _FileQueuePanelState extends State<FileQueuePanel> {
 
   @override
   Widget build(BuildContext context) {
+    final connection = widget.connection;
+    if (connection == null) return _build(context, true);
+    return ListenableBuilder(
+      listenable: connection,
+      builder: (context, _) =>
+          _build(context, connection.stage == ConnStage.connected),
+    );
+  }
+
+  Widget _build(BuildContext context, bool connected) {
     final t = LgTokens.of(context);
     final c = t.colors;
     final l10n = AppLocalizations.of(context)!;
@@ -116,6 +132,7 @@ class _FileQueuePanelState extends State<FileQueuePanel> {
             ),
           _Summary(
             jobs: widget.jobs,
+            connected: connected,
             expanded: open,
             onToggle: rows.isEmpty
                 ? null
@@ -126,7 +143,8 @@ class _FileQueuePanelState extends State<FileQueuePanel> {
               height: _height,
               child: ListView(
                 children: [
-                  for (final r in rows) _Row(row: r, jobs: widget.jobs),
+                  for (final r in rows)
+                    _Row(row: r, jobs: widget.jobs, connected: connected),
                 ],
               ),
             ),
@@ -139,11 +157,13 @@ class _FileQueuePanelState extends State<FileQueuePanel> {
 class _Summary extends StatelessWidget {
   const _Summary({
     required this.jobs,
+    required this.connected,
     required this.expanded,
     required this.onToggle,
   });
 
   final FileJobs jobs;
+  final bool connected;
   final bool expanded;
   final VoidCallback? onToggle;
 
@@ -212,7 +232,7 @@ class _Summary extends StatelessWidget {
                 style: t.textM.copyWith(color: c.text2),
               ),
             ),
-            if (s.paused > 0)
+            if (s.paused > 0 && connected)
               LgButton(
                 label: l10n.queueResumeAll,
                 kind: LgButtonKind.text,
@@ -241,10 +261,11 @@ class _Summary extends StatelessWidget {
 /// One job (02 block H "每一行"): direction, name, source → destination, the state of the row
 /// with its progress, and the buttons of that state. Pausing and retrying are M7b.
 class _Row extends StatelessWidget {
-  const _Row({required this.row, required this.jobs});
+  const _Row({required this.row, required this.jobs, required this.connected});
 
   final FileJobRow row;
   final FileJobs jobs;
+  final bool connected;
 
   String _remaining(AppLocalizations l10n, Duration d) {
     final s = d.inSeconds;
@@ -355,11 +376,12 @@ class _Row extends StatelessWidget {
       ],
       FileJobStatus.waitingConfirm => const <Widget>[],
       FileJobStatus.paused => [
-        LgIconButton(
-          icon: LgIcons.play,
-          label: l10n.queueResume,
-          onPressed: () => jobs.resume(r.id),
-        ),
+        if (connected)
+          LgIconButton(
+            icon: LgIcons.play,
+            label: l10n.queueResume,
+            onPressed: () => jobs.resume(r.id),
+          ),
         LgIconButton(
           icon: LgIcons.x,
           label: l10n.queueCancel,

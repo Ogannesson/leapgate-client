@@ -44,7 +44,7 @@ class ConnectionPanel extends StatefulWidget {
   final bool active;
 
   /// No other view is open in the tab. When false the close button reads "关闭文件传输" (02 §2.2
-  /// "连接过程和中断"); it closes this view either way.
+  /// "连接过程和中断"), or "关闭远程桌面" on the remote desktop; it closes this view either way.
   final bool lastView;
 
   @override
@@ -161,8 +161,11 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
     final actions = <LgPanelAction>[];
     final cancel = LgPanelAction(label: l10n.connCancel, onPressed: conn.cancel);
     // Closing closes this view either way; the tab goes with its last one.
-    final closeLabel =
-        widget.lastView ? l10n.connCloseTab : l10n.connCloseFileTransfer;
+    final closeLabel = widget.lastView
+        ? l10n.connCloseTab
+        : ffi.connType == ConnType.fileTransfer
+            ? l10n.connCloseFileTransfer
+            : l10n.connCloseRemoteDesktop;
 
     List<LgPanelStep> twoSteps(LgStepState connect, LgStepState verify) => [
           LgPanelStep(l10n.connStepConnect, connect),

@@ -227,6 +227,50 @@ void main() {
       },
     );
 
+    testMainWindow('the remote desktop\'s "关闭标签" shortcut asks as "×" does', (
+      tester,
+    ) async {
+      await pumpMainWindow(tester);
+      final desk = await open(tester);
+      await emit(tester, fakes, desk, connectionReady());
+      await emit(tester, fakes, desk, peerInfo());
+      await openFiles(tester);
+      mainNavigation.connect(_id);
+      await tester.pump();
+
+      desk.shortcutModel.onTriggered(kShortcutActionCloseTab);
+      await settle(tester);
+      expect(find.text('断开与此设备的 2 个会话？'), findsOneWidget);
+      await tester.tap(find.text('取消'));
+      await settle(tester);
+      expect(appCore.sessions.sessionsOf(_id), hasLength(2));
+    });
+
+    testMainWindow(
+      'the remote desktop\'s connection panel beside a file view: "关闭远程桌面"',
+      (tester) async {
+        await pumpMainWindow(tester);
+        final desk = await open(tester);
+        await openFiles(tester);
+        mainNavigation.connect(_id);
+        await tester.pump();
+        fakes.lg.reasons['nope'] = 'not_allowed';
+        await emit(
+          tester,
+          fakes,
+          desk,
+          msgbox('error', 'Connection Error', 'nope'),
+        );
+        expect(find.text('关闭标签'), findsNothing);
+        await tester.tap(find.text('关闭远程桌面'));
+        await settle(tester);
+        expect(
+          appCore.sessions.sessionsOf(_id).single.connType,
+          ConnType.fileTransfer,
+        );
+      },
+    );
+
     testMainWindow(
       'a tab of the file transfer alone: closes at once, or asks as "断开" with '
       'unfinished transfers',

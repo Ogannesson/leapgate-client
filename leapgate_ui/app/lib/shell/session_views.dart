@@ -77,7 +77,12 @@ class SessionTabView extends StatelessWidget {
   Widget _view(FFI view) {
     final active = selected && view == current;
     if (!isFileView(view)) {
-      return SessionPage(ffi: view, active: active, overlays: overlays);
+      return SessionPage(
+        ffi: view,
+        active: active,
+        overlays: overlays,
+        lastView: views.length == 1,
+      );
     }
     return FileView(
       ffi: view,

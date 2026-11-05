@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/consts.dart';
+import 'package:flutter_hbb/leapgate/app_core.dart';
+import 'package:flutter_hbb/leapgate/connection.dart';
+import 'package:flutter_hbb/leapgate/session.dart';
 import 'package:flutter_hbb/leapgate/file_transfer/errors.dart';
 import 'package:flutter_hbb/leapgate/file_transfer/jobs.dart';
 import 'package:flutter_hbb/leapgate/prompts.dart';
@@ -80,7 +83,11 @@ Widget _app(Widget child) => MaterialApp(
   home: Scaffold(body: child),
 );
 
-Future<void> _pumpQueue(WidgetTester tester, FileJobs jobs) async {
+Future<void> _pumpQueue(
+  WidgetTester tester,
+  FileJobs jobs, {
+  ConnectionModel? connection,
+}) async {
   tester.view.physicalSize = const Size(1280, 800);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
@@ -88,7 +95,7 @@ Future<void> _pumpQueue(WidgetTester tester, FileJobs jobs) async {
     _app(
       Align(
         alignment: Alignment.bottomCenter,
-        child: FileQueuePanel(jobs: jobs),
+        child: FileQueuePanel(jobs: jobs, connection: connection),
       ),
     ),
   );
@@ -163,6 +170,22 @@ void main() {
       await tester.tap(find.text('全部继续'));
       await tester.tap(_button('继续').first);
       expect(jobs.calls, ['resumeAll', 'resume:1']);
+    });
+
+    testWidgets('not connected: no "继续" and no "全部继续"', (tester) async {
+      final session = appCore.sessions.open('100200300', ConnType.fileTransfer);
+      final jobs = _Jobs()
+        ..rows = [_row(1, FileJobStatus.paused, done: 1024, total: 2048)]
+        ..summary = _summary(paused: 1);
+      await _pumpQueue(tester, jobs, connection: session.connection);
+      expect(session.connection.stage, isNot(ConnStage.connected));
+      expect(_rich('1 个已暂停'), findsOneWidget);
+      expect(find.text('全部继续'), findsNothing);
+      expect(_button('继续'), findsNothing);
+      expect(_button('取消'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+      await appCore.sessions.closeDevice('100200300');
+      await tester.pump(const Duration(seconds: 10));
     });
 
     testWidgets('each state says what it is and offers its buttons', (

@@ -6,9 +6,9 @@
 // (02 §1.4.6). The chat, voice call and quality monitor actions live beside what they toggle.
 
 import 'package:flutter_hbb/consts.dart';
-import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/models/state_model.dart';
 
+import '../../../shell/tab_menu.dart';
 import '../chat/chat.dart';
 import '../route_details.dart';
 
@@ -79,9 +79,11 @@ void registerSessionShortcuts(
   });
   shortcuts.register(kShortcutActionSwitchTabNext, onNextTab);
   shortcuts.register(kShortcutActionSwitchTabPrev, onPreviousTab);
+  // As the tab's "×" (M7a): asks with several views or unfinished transfers. The keys reach a
+  // session only while its tab is the selected one.
   shortcuts.register(
     kShortcutActionCloseTab,
-    () => appCore.sessions.closeDevice(ffi.id),
+    () => closeSessionTab(env.overlays, ffi.id, show: () {}),
   );
   shortcuts.register(kShortcutActionToggleToolbar, onToggleCollapsed);
   shortcuts.register(kShortcutActionPinToolbar, onTogglePin);
