@@ -33,6 +33,11 @@ const _kTimeout = Duration(seconds: 30);
 /// This device's paths are Windows paths. `FileController.isWindows` is the pane's.
 final _localWindows = isWindows;
 
+/// A remote read for a folder another open replaced before its turn: never sent.
+class _Superseded {
+  const _Superseded();
+}
+
 /// The file transfer model of one session (upstream `FileModel`). Every session has one; only a
 /// `ConnType.fileTransfer` session uses it.
 class FileModel implements FileTransferModel {
@@ -247,7 +252,9 @@ class FileModel implements FileTransferModel {
           remote.entries.any((e) => remote._sameName(e.name, n));
       if (has(name)) {
         kind = FtOverwriteKind.existing;
-      } else if (has('$name.download') || has('$name.digest')) {
+      } else if (remote.showHidden &&
+          (has('$name.download') || has('$name.digest'))) {
+        // Without hidden items the file itself may be there but not listed.
         kind = FtOverwriteKind.tempOnly;
       }
     }
@@ -326,7 +333,12 @@ class FileController extends ChangeNotifier implements FilePane {
   List<Entry>? _drives;
 
   /// The remote read waiting for the one in flight, and the end of the line.
-  ({String path, bool hidden, Future<FileDirectory> result})? _remoteNext;
+  ({
+    String path,
+    bool hidden,
+    bool forOpen,
+    Future<FileDirectory> result
+  })? _remoteNext;
   Future<void> _remoteTail = Future.value();
 
   @override
@@ -467,9 +479,11 @@ class FileController extends ChangeNotifier implements FilePane {
   @override
   void refresh() => unawaited(_refresh());
 
-  /// Reads the folder again, or retries the one that failed to open first.
+  /// Reads the folder again: the one being opened, the one shown, or the one that failed to
+  /// open first.
   Future<void> _refresh() async {
-    final path = this.path.isNotEmpty ? this.path : _openError?.path;
+    final path =
+        _reading?.path ?? (this.path.isNotEmpty ? this.path : _openError?.path);
     if (path != null) await _openDirectoryPath(path, isBack: true);
   }
 
@@ -489,11 +503,12 @@ class FileController extends ChangeNotifier implements FilePane {
     _reading = (path: path, since: clock.now());
     notifyListeners();
     try {
-      final fd = await _fetch(path);
+      final fd = await _fetch(path, forOpen: true);
       if (requestGeneration != _directoryRequestGeneration) return null;
       _show(fd);
       return null;
     } catch (e) {
+      if (e is _Superseded) return null;
       final error = _error(e);
       if (requestGeneration != _directoryRequestGeneration) return error;
       debugPrint("Failed to openDirectory $path: $e");
@@ -534,8 +549,8 @@ class FileController extends ChangeNotifier implements FilePane {
     }
   }
 
-  Future<FileDirectory> _fetch(String path) async {
-    if (!isLocal) return _readRemote(path, _showHidden);
+  Future<FileDirectory> _fetch(String path, {bool forOpen = false}) async {
+    if (!isLocal) return _readRemote(path, _showHidden, forOpen: forOpen);
     final result = fileTransferApi.readLocalDir(path, showHidden: _showHidden);
     final directory = result.directory;
     if (directory == null) {
@@ -545,18 +560,25 @@ class FileController extends ChangeNotifier implements FilePane {
   }
 
   /// A remote read fails without saying which (10 §4.4), so one goes at a time; a read asked
-  /// again while it still waits shares that wait.
-  Future<FileDirectory> _readRemote(String path, bool hidden) {
+  /// again while it still waits shares that wait. A read [forOpen] a folder that is no longer
+  /// the one being opened when its turn comes is not sent.
+  Future<FileDirectory> _readRemote(String path, bool hidden,
+      {required bool forOpen}) {
     final next = _remoteNext;
-    if (next != null && next.path == path && next.hidden == hidden) {
+    if (next != null &&
+        next.path == path &&
+        next.hidden == hidden &&
+        next.forOpen == forOpen) {
       return next.result;
     }
     late final Future<FileDirectory> result;
     result = _remoteTail.then((_) {
       if (identical(_remoteNext?.result, result)) _remoteNext = null;
+      if (forOpen && _reading?.path != path) throw const _Superseded();
       return model.fileFetcher.fetchDirectory(path, false, hidden);
     });
-    _remoteNext = (path: path, hidden: hidden, result: result);
+    _remoteNext =
+        (path: path, hidden: hidden, forOpen: forOpen, result: result);
     _remoteTail = result.then<void>((_) {}, onError: (Object _) {});
     return result;
   }
@@ -702,7 +724,7 @@ class FileController extends ChangeNotifier implements FilePane {
       if (versionCmp(_session?.ffiModel.pi.version ?? '', '1.3.3') < 0) {
         for (final (_, jobID) in folders) {
           model.jobs.emptyFoldersNotCreated(jobID,
-              const EmptyFoldersNotCreated(0, EmptyFoldersReason.peerTooOld));
+              const EmptyFoldersNotCreated(EmptyFoldersReason.peerTooOld));
         }
         return;
       }
@@ -721,11 +743,11 @@ class FileController extends ChangeNotifier implements FilePane {
       }
       final root = PathUtil.dirname(item.path, isWindows);
       for (final dir in emptyDirs) {
-        createDirWithRemote(
+        _createEmptyDir(
+            jobID,
             PathUtil.getOtherSidePath(
                 root, dir.path, isWindows, folder, otherWindows),
             true);
-        model.jobs.addFoldersMade(jobID);
       }
     }
   }
@@ -751,8 +773,7 @@ class FileController extends ChangeNotifier implements FilePane {
         await DownloadPaths.ensureNoLinks(folder, path);
       }
       for (final path in paths) {
-        await createDirWithRemote(path, false);
-        model.jobs.addFoldersMade(jobID);
+        _createEmptyDir(jobID, path, false);
       }
     } on FormatException catch (err) {
       await bind.sessionCancelJob(sessionId: sessionId, actId: jobID);
@@ -767,7 +788,7 @@ class FileController extends ChangeNotifier implements FilePane {
   void _emptyDirsUnreadable(int jobID, Object error) {
     debugPrint("Failed to read empty dirs of job $jobID: $error");
     model.jobs.emptyFoldersNotCreated(
-        jobID, const EmptyFoldersNotCreated(0, EmptyFoldersReason.unreadable));
+        jobID, const EmptyFoldersNotCreated(EmptyFoldersReason.unreadable));
   }
 
   /// A remote device that can't read them answers nothing (M7a-7): that is the timeout.
@@ -789,12 +810,20 @@ class FileController extends ChangeNotifier implements FilePane {
     }
   }
 
-  Future<void> createDirWithRemote(String path, bool isRemote) async {
-    bind.sessionCreateDir(
-        sessionId: sessionId,
-        actId: JobController.jobID.next(),
-        path: path,
-        isRemote: isRemote);
+  /// Upstream `createDirWithRemote`, counting the folder for [jobID] once Rust says it was made.
+  void _createEmptyDir(int jobID, String path, bool isRemote) {
+    final id = JobController.jobID.next();
+    unawaited(model
+        ._request(
+            id,
+            () => bind.sessionCreateDir(
+                sessionId: sessionId,
+                actId: id,
+                path: path,
+                isRemote: isRemote))
+        .then((error) {
+      if (error == null) model.jobs.addFoldersMade(jobID);
+    }));
   }
 
   FtNameError? _checkName(String name, {Entry? renaming}) {
@@ -971,7 +1000,7 @@ class FileController extends ChangeNotifier implements FilePane {
                   path: item.path,
                   isRemote: isRemote,
                   fileNum: 0));
-      if (error is TimeoutException) _timedOut(id);
+      _requestFailed(id, error);
       return;
     }
     final id = jobController.addDeleteDirJob(item, isRemote, files.length);
@@ -985,10 +1014,7 @@ class FileController extends ChangeNotifier implements FilePane {
               path: files[i].path,
               isRemote: isRemote,
               fileNum: i));
-      if (error is TimeoutException) {
-        _timedOut(id);
-        return;
-      }
+      if (_requestFailed(id, error)) return;
     }
     if (_stopped(id)) return;
     _history.removeWhere((element) => element.contains(item.path));
@@ -1007,8 +1033,16 @@ class FileController extends ChangeNotifier implements FilePane {
     return i < 0 || jobController.jobTable[i].err == 'cancel';
   }
 
-  void _timedOut(int id) {
-    jobController.updateJobStatus(id, error: 'timeout');
-    model.jobs.setError(id, const FtError.timeout());
+  /// The row fails and the item stops when there was no answer, or the request could not go
+  /// out; a `job_error` (a [String]) the copied `jobError` has already put on the row.
+  bool _requestFailed(int id, Object? error) {
+    if (error == null || error is String) return false;
+    if (error is TimeoutException) {
+      jobController.updateJobStatus(id, error: 'timeout');
+      model.jobs.setError(id, const FtError.timeout());
+    } else {
+      jobController.updateJobStatus(id, error: '$error');
+    }
+    return true;
   }
 }

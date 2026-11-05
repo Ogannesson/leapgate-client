@@ -198,6 +198,7 @@ void main() {
         return answers.last.future;
       });
       final model = t.s.fileModel;
+      model.remoteController.setShowHidden(true);
       final opened = model.remoteController.openDirectory('/home/u');
       await settle();
       _dir(t.s, '/home/u', [_json('a.txt'), _json('b.txt.digest')]);
@@ -230,6 +231,11 @@ void main() {
           .postOverrideFileConfirm(_overwrite(ids[3], 'C:\\src\\d\\sub\\x.txt'));
       await settle();
       answers[3].complete((choice: OverwriteChoice.skip, forAll: false));
+      // Without hidden items the file may be there, hidden, next to a visible temporary one.
+      model.remoteController.setShowHidden(false);
+      await model.postOverrideFileConfirm(_overwrite(ids[1], 'C:\\src\\b.txt'));
+      await settle();
+      answers[4].complete((choice: OverwriteChoice.skip, forAll: false));
 
       expect(prompts.map((q) => (q.name, q.folder, q.kind)), [
         ('a.txt', '/home/u', FtOverwriteKind.existing),
@@ -237,6 +243,7 @@ void main() {
         // Shown, but not in the list read: stale or hidden.
         ('c.txt', '/home/u', FtOverwriteKind.existingOrTemp),
         ('x.txt', '/other/d/sub', FtOverwriteKind.existingOrTemp),
+        ('b.txt', '/home/u', FtOverwriteKind.existingOrTemp),
       ]);
     });
   });
@@ -265,22 +272,27 @@ void main() {
       expect(model.jobs.summary.active, 2);
       expect(model.jobs.summary.queued, 2);
 
-      var now = DateTime(2026, 11, 5, 12);
-      void progress(int id, int bytes, int seconds) => withClock(
-          Clock(() => now.add(Duration(seconds: seconds))),
-          () => jobs.tryUpdateJobProgress({
+      final start = DateTime(2026, 11, 5, 12);
+      T at<T>(int seconds, T Function() f) =>
+          withClock(Clock(() => start.add(Duration(seconds: seconds))), f);
+      void progress(int id, int bytes, int seconds) =>
+          at(seconds, () => jobs.tryUpdateJobProgress({
                 'id': '$id',
                 'file_num': '0',
                 'speed': '0',
                 'finished_size': '$bytes',
               }));
+      FileJobRow first(int seconds) => at(seconds, () => model.jobs.rows[0]);
       progress(rows[0].id, 100, 0);
       progress(rows[0].id, 200, 1);
-      expect(model.jobs.rows[0].bytesPerSecond, 100);
-      expect(model.jobs.rows[0].remaining, isNull, reason: 'not steady yet');
+      expect(first(1).bytesPerSecond, 100);
+      expect(first(1).remaining, isNull, reason: 'not steady yet');
       progress(rows[0].id, 500, 4);
-      expect(model.jobs.rows[0].bytesPerSecond, 100);
-      expect(model.jobs.rows[0].remaining, const Duration(seconds: 5));
+      expect(first(4).bytesPerSecond, 100);
+      expect(first(4).remaining, const Duration(seconds: 5));
+      // Stalled: no bytes over the last 10 s.
+      expect(first(70).bytesPerSecond, 0);
+      expect(first(70).remaining, isNull);
       // a.bin and the queued b.bin; the other two have no size yet.
       expect(model.jobs.summary.progress, closeTo(500 / 1010, 1e-9));
 
@@ -336,16 +348,47 @@ void main() {
       expect(rows[0].error?.reason, FtReason.diskFull);
       expect(rows[1].status, FileJobStatus.cancelled);
       expect(sides, [FtSide.unknown]);
+      model.jobs.clearFinished();
+      expect(model.jobs.rows.map((r) => r.status), [FileJobStatus.failed]);
     });
 
     test('folders go with their hidden items; nothing goes into "此电脑" (R2-Q22)', () async {
       final t = _session(platform: 'Windows');
+      t.bind.emptyDirs =
+          jsonEncode([{'id': 0, 'path': 'C:\\d\\empty', 'entries': []}]);
       final model = t.s.fileModel;
       expect(model.localController.showHidden, isFalse);
       await model.localController.transfer([_entry('C:\\d', type: 0)], to: 'D:\\x');
       await model.localController.transfer([_entry('C:\\e', type: 0)], to: '/');
       expect(_args(t.bind, #sessionSendFiles, #includeHidden), [true]);
       expect(_args(t.bind, #sessionSendFiles, #to), ['D:\\x\\d']);
+      expect(_args(t.bind, #sessionReadLocalEmptyDirsRecursiveSync, #includeHidden),
+          [true]);
+
+      // The empty folder counts once it was made.
+      final mkdir = t.bind.callsTo(#sessionCreateDir).single.namedArguments;
+      expect((mkdir[#path], mkdir[#isRemote]), ('D:\\x\\d\\empty', true));
+      expect(model.jobs.rows.single.folderCount, 0);
+      await model.onJobDone({'id': '${mkdir[#actId]}', 'file_num': '-1'});
+      expect(model.jobs.rows.single.folderCount, 1);
+    });
+
+    test('a delete under way fails when the connection goes; one whose request could not go '
+        'fails at once', () async {
+      final t = _session();
+      t.bind.failing.add(#sessionRemoveFile);
+      appCore.prompter = TestPrompter((_) => true);
+      final local = t.s.fileModel.localController;
+      await local.delete([_entry('C:\\f.txt')]);
+      expect(t.s.fileModel.jobs.rows.single.status, FileJobStatus.failed);
+
+      t.bind.failing.clear();
+      unawaited(local.delete([_entry('C:\\g.txt')]));
+      await settle();
+      expect(t.s.fileModel.jobs.rows.last.status, FileJobStatus.deleting);
+      t.s.connection.reconnect(false);
+      final row = t.s.fileModel.jobs.rows.last;
+      expect((row.status, row.error), (FileJobStatus.failed, null));
     });
   });
 
@@ -374,6 +417,7 @@ void main() {
           FtError(FtReason.permissionDenied, text: '$side:$text');
       final remote = t.s.fileModel.remoteController;
       final a = remote.openDirectory('/a');
+      await settle();
       final b = remote.openDirectory('/b');
       final drives = remote.drives();
       await settle();
@@ -392,6 +436,34 @@ void main() {
       // The first read lost to the second: no banner for it.
       expect(remote.openError, isNull);
       expect(await drives, isEmpty, reason: 'a Linux peer has no drives');
+    });
+
+    test('a read replaced before its turn is not sent; a job ending while a folder opens '
+        'refreshes that folder', () async {
+      final t = _session();
+      final remote = t.s.fileModel.remoteController;
+      final a = remote.openDirectory('/a');
+      await settle();
+      final b = remote.openDirectory('/b');
+      final c = remote.openDirectory('/c');
+      await settle();
+      _dir(t.s, '/a', []);
+      await a;
+      await b;
+      await settle();
+      expect(_args(t.bind, #sessionReadRemoteDir, #path), ['/a', '/c']);
+
+      // A job ends while /c is read: the refresh reads /c again, not the /a shown.
+      unawaited(t.s.fileModel.onJobDone({'id': '999', 'file_num': '0'}));
+      await settle();
+      _dir(t.s, '/c', [_json('x')]);
+      await c;
+      await settle();
+      expect(_args(t.bind, #sessionReadRemoteDir, #path), ['/a', '/c', '/c']);
+      _dir(t.s, '/c', [_json('x')]);
+      await settle();
+      expect(remote.path, '/c');
+      expect(remote.reading, isNull);
     });
 
     test('a remote read that gets no answer times out after 30 s', () {

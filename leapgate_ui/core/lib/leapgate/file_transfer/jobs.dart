@@ -47,11 +47,10 @@ sealed class FileJobNote {
 
 enum EmptyFoldersReason { peerTooOld, unreadable }
 
-/// "‹k› 个空文件夹未创建：远程设备的版本过低 / 未能读取。"
+/// "空文件夹未创建：远程设备的版本过低 / 未能读取。" Neither case knows how many there were.
 final class EmptyFoldersNotCreated extends FileJobNote {
-  const EmptyFoldersNotCreated(this.count, this.reason);
+  const EmptyFoldersNotCreated(this.reason);
 
-  final int count;
   final EmptyFoldersReason reason;
 }
 
@@ -292,7 +291,9 @@ class FileTransferJobs extends ChangeNotifier implements FileJobs {
       folderCount: info?.foldersMade ?? 0,
       bytesPerSecond: rate?.speed,
       remaining: rate?.remaining,
-      error: status == FileJobStatus.failed ? _errorOf(job) : null,
+      error: status == FileJobStatus.failed && !_deleteCut(job)
+          ? _errorOf(job)
+          : null,
       notes: [
         if (info?.emptyFolders != null) info!.emptyFolders!,
         if (transfer && status == FileJobStatus.paused && _resumeUnsupported)
@@ -301,9 +302,24 @@ class FileTransferJobs extends ChangeNotifier implements FileJobs {
     );
   }
 
+  bool get _connected {
+    final conn = _session?.connection;
+    return conn == null || conn.stage == ConnStage.connected;
+  }
+
+  /// A delete under way, or whose wait ran out, while the connection is down: "失败：连接已中断"
+  /// (02 §2.4.7), a failed row without an error. Deletes are not resumed.
+  bool _deleteCut(JobProgress job) =>
+      job.type != JobType.transfer &&
+      !_connected &&
+      (job.state == JobState.none ||
+          job.state == JobState.inProgress ||
+          (job.state == JobState.error && job.err == 'timeout'));
+
   FileJobStatus _status(List<JobProgress> table, int i) {
     final job = table[i];
     final transfer = job.type == JobType.transfer;
+    if (_deleteCut(job)) return FileJobStatus.failed;
     switch (job.state) {
       case JobState.done:
       // Upstream's own values in `err`: a `job_error` "cancel" is not a failure, and FT2 is not
@@ -322,7 +338,7 @@ class FileTransferJobs extends ChangeNotifier implements FileJobs {
     }
     if (!transfer) return FileJobStatus.deleting;
     final conn = _session?.connection;
-    if (conn != null && conn.stage != ConnStage.connected) {
+    if (conn != null && !_connected) {
       // Ended without retrying by itself: Rust keeps the job and resumes it on reconnecting.
       return conn.stage == ConnStage.failed && conn.retryCountdown == null
           ? FileJobStatus.paused
@@ -358,9 +374,14 @@ class FileTransferJobs extends ChangeNotifier implements FileJobs {
   ({double speed, Duration? remaining})? _rate(JobProgress job) {
     final s = _samples[job.id];
     if (s == null || s.length < 2) return null;
-    final span = s.last.at.difference(s.first.at);
+    // Up to now, so a transfer that stalls slows down instead of keeping its last speed.
+    final now = clock.now();
+    final windowStart = now.subtract(_kSpeedWindow);
+    final from =
+        s.lastWhere((x) => !x.at.isAfter(windowStart), orElse: () => s.first);
+    final span = now.difference(from.at);
     if (span <= Duration.zero) return null;
-    final speed = (s.last.bytes - s.first.bytes) * 1000 / span.inMilliseconds;
+    final speed = (s.last.bytes - from.bytes) * 1000 / span.inMilliseconds;
     final left = job.totalSize - job.finishedSize;
     return (
       speed: speed,
@@ -464,18 +485,24 @@ class FileTransferJobs extends ChangeNotifier implements FileJobs {
   }
 
   @override
-  void remove(int id) => _removeWhere((job) => job.id == id);
+  void remove(int id) => _removeWhere((row) =>
+      row.id == id &&
+      (_finished.contains(row.status) || row.status == FileJobStatus.failed));
 
   @override
-  void clearFinished() => _removeWhere((job) => job.state == JobState.done);
+  void clearFinished() =>
+      _removeWhere((row) => _finished.contains(row.status));
 
-  /// Only ended rows go: done, skipped, cancelled and failed.
-  void _removeWhere(bool Function(JobProgress job) test) {
+  static const _finished = {
+    FileJobStatus.done,
+    FileJobStatus.skipped,
+    FileJobStatus.cancelled,
+  };
+
+  void _removeWhere(bool Function(FileJobRow row) test) {
     final gone = {
-      for (final job in _jobs.jobTable)
-        if ((job.state == JobState.done || job.state == JobState.error) &&
-            test(job))
-          job.id
+      for (final row in rows)
+        if (test(row)) row.id
     };
     if (gone.isEmpty) return;
     for (final id in gone) {
