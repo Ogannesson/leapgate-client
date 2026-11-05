@@ -605,6 +605,8 @@ const kLeapgateFtSortLocal = 'leapgate-ft-sort-local';
 const kLeapgateFtSortRemote = 'leapgate-ft-sort-remote';
 
 // M7a shell (coder B): the queue panel.
+/// The queue panel's height in logical pixels while expanded, for every device.
+const String kOptionLeapgateFtQueueHeight = 'leapgate-ft-queue-height';
 
 // M7a panes (coder C): column widths, the divider between the panes.
 

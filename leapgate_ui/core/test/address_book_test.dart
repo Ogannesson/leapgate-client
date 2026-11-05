@@ -238,7 +238,11 @@ void main() {
             windows: true,
             ab: ab.menuFlags(PeerCategory.group)),
         [
-          [PeerAction.remoteDesktop, PeerAction.viaRelay],
+          [
+            PeerAction.remoteDesktop,
+            PeerAction.fileTransfer,
+            PeerAction.viaRelay
+          ],
           [PeerAction.addToAb],
         ]);
   });

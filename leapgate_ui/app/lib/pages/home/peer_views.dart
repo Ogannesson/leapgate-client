@@ -37,6 +37,18 @@ void connectPeer(String id, {PeerCategory? category, bool relay = false}) {
   );
 }
 
+/// "文件传输" of a device menu or the connect box (02 §2.1.1), as [connectPeer].
+void openFileTransferPeer(String id, {PeerCategory? category}) {
+  final shared = category == PeerCategory.addressBook
+      ? appCore.addressBook.sharedPasswordOf(id)
+      : null;
+  mainNavigation.openFileTransfer(
+    id,
+    password: shared ?? '',
+    isSharedPassword: shared != null,
+  );
+}
+
 /// What one device shows in a card or a row.
 class PeerItem {
   const PeerItem({
@@ -259,6 +271,10 @@ List<Widget> peerMenuItems(
     PeerAction.remoteDesktop => LgMenuItem(
       label: l10n.connectBoxRemoteDesktop,
       onPressed: () => connectPeer(id, category: item.category),
+    ),
+    PeerAction.fileTransfer => LgMenuItem(
+      label: l10n.ftFileTransfer,
+      onPressed: () => openFileTransferPeer(id, category: item.category),
     ),
     PeerAction.useAsExit => LgMenuItem(
       label: l10n.exitUseAsExit,

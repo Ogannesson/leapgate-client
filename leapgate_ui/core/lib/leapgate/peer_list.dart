@@ -51,6 +51,8 @@ List<SourcedPeer> searchablePeers(List<CategoryPeers> categories) {
 /// What the "⋯" menu of a device offers (01 P1 block F).
 enum PeerAction {
   remoteDesktop,
+  // M7a: every device, as upstream's cards (`_transferFileAction`).
+  fileTransfer,
   // M5: only when the remote device is on Windows (`libs/leapgate/src/exit/mod.rs`).
   useAsExit,
   viaRelay,
@@ -95,6 +97,7 @@ List<List<PeerAction>> peerMenu(
   // [windows] is this device's platform (the shortcut); the exit is the remote device's.
   final connect = [
     PeerAction.remoteDesktop,
+    PeerAction.fileTransfer,
     if (peerWindows) PeerAction.useAsExit,
     PeerAction.viaRelay,
   ];

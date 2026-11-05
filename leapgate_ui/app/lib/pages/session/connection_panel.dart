@@ -43,8 +43,8 @@ class ConnectionPanel extends StatefulWidget {
   /// Its tab is the selected one.
   final bool active;
 
-  /// No other view is open in the tab. When false the close button closes this view and reads
-  /// "关闭文件传输" (02 §2.2 "连接过程和中断"). M7a step 0: coder B makes it so.
+  /// No other view is open in the tab. When false the close button reads "关闭文件传输" (02 §2.2
+  /// "连接过程和中断"), or "关闭远程桌面" on the remote desktop; it closes this view either way.
   final bool lastView;
 
   @override
@@ -160,6 +160,12 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
     final inputs = <Widget>[];
     final actions = <LgPanelAction>[];
     final cancel = LgPanelAction(label: l10n.connCancel, onPressed: conn.cancel);
+    // Closing closes this view either way; the tab goes with its last one.
+    final closeLabel = widget.lastView
+        ? l10n.connCloseTab
+        : ffi.connType == ConnType.fileTransfer
+            ? l10n.connCloseFileTransfer
+            : l10n.connCloseRemoteDesktop;
 
     List<LgPanelStep> twoSteps(LgStepState connect, LgStepState verify) => [
           LgPanelStep(l10n.connStepConnect, connect),
@@ -290,8 +296,7 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
         message = l10n.connRestarting;
         busy = true;
         dim = true;
-        actions.add(
-            LgPanelAction(label: l10n.connCloseTab, onPressed: conn.cancel));
+        actions.add(LgPanelAction(label: closeLabel, onPressed: conn.cancel));
       case ConnStage.failed:
         final view = reasonView(l10n, conn.reason!, ffi.id);
         message = failureText(l10n, ffi);
@@ -328,7 +333,7 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
               NextStep.reconnect => l10n.connReconnect,
               NextStep.useRelay => l10n.connUseRelay,
               NextStep.changeId => l10n.connChangeId,
-              NextStep.closeTab => l10n.connCloseTab,
+              NextStep.closeTab => closeLabel,
               NextStep.openNetworkSettings => l10n.settingsNetOpenSettings,
             },
             onPressed: onPressed,
