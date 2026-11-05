@@ -1,8 +1,11 @@
 // The one place the file transfer view reaches the M7a exports (`LEAPGATE.md` §10.15). The file
 // transfer models call [fileTransferApi] only; tests set a fake (`test/file_transfer_fakes.dart`).
 // The calls the copied models make to block 1 (`bind.session*`) stay where they are.
+import 'dart:convert';
+
 import '../../common.dart';
 import '../../models/file_model.dart';
+import '../bridge.dart';
 import 'errors.dart';
 
 /// `leapgate_ft_read_local_dir`: the folder, or why it could not be read.
@@ -31,20 +34,30 @@ abstract interface class FileTransferApi {
 /// Set by tests; the app keeps the default.
 FileTransferApi fileTransferApi = const RustFileTransferApi();
 
-/// Block 2. The exports don't exist until the Rust lane is merged and the bridge regenerated
-/// (`LEAPGATE.md` §10.15): every method throws until then.
-// TODO(M7a 整合): call the block 2 exports; parse with FtError.fromJson and FileDirectory.fromJson.
+/// Block 2 (`src/leapgate_ffi.rs`, "File transfer (M7a)").
 class RustFileTransferApi implements FileTransferApi {
   const RustFileTransferApi();
 
   @override
   FtError reason(String text,
           {required String peerPlatform, required FtSide side}) =>
-      throw UnimplementedError('leapgate_ft_reason');
+      FtError.fromJson(jsonDecode(lgBind.leapgateFtReason(
+          text: text, peerPlatform: peerPlatform, side: side.code)));
 
   @override
-  LocalDirResult readLocalDir(String path, {required bool showHidden}) =>
-      throw UnimplementedError('leapgate_ft_read_local_dir');
+  LocalDirResult readLocalDir(String path, {required bool showHidden}) {
+    final m = jsonDecode(
+            lgBind.leapgateFtReadLocalDir(path: path, showHidden: showHidden))
+        as Map<String, dynamic>;
+    if (m.containsKey('error')) {
+      return (
+        directory: null,
+        error: FtError(FtReason.parse(m['reason'] as String?),
+            text: m['error'] as String? ?? ''),
+      );
+    }
+    return (directory: FileDirectory.fromJson(m), error: null);
+  }
 
   @override
   Future<void> removeLink(SessionID sessionId,
@@ -52,5 +65,10 @@ class RustFileTransferApi implements FileTransferApi {
           required String path,
           required bool isRemote,
           required bool isDirLink}) =>
-      throw UnimplementedError('leapgate_ft_remove_link');
+      lgBind.leapgateFtRemoveLink(
+          sessionId: sessionId,
+          actId: actId,
+          path: path,
+          isRemote: isRemote,
+          isDirLink: isDirLink);
 }
