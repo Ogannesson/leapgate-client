@@ -72,6 +72,9 @@ class FileView extends StatefulWidget {
 class _FileViewState extends State<FileView> {
   final _localFocus = FocusNode(debugLabel: 'local files');
   final _remoteFocus = FocusNode(debugLabel: 'remote files');
+
+  /// The list that had the keys last, which gets them back when the view is shown again.
+  late FocusNode _lastList = _localFocus;
   late PaneDropArea _local;
   late PaneDropArea _remote;
 
@@ -87,6 +90,8 @@ class _FileViewState extends State<FileView> {
   void initState() {
     super.initState();
     _areas();
+    _localFocus.addListener(_onListFocus);
+    _remoteFocus.addListener(_onListFocus);
     widget.ffi.connection.addListener(_onConnection);
     if (_connected) _focusLocal();
   }
@@ -104,9 +109,10 @@ class _FileViewState extends State<FileView> {
       widget.ffi.connection.addListener(_onConnection);
       _connected = _isConnected;
     }
-    // Shown again: the keys work without a click first. Not while the connection panel is up,
-    // which takes the focus for its own field.
-    if (widget.active && !old.active && _isConnected) _focusLocal();
+    // Shown again (or a dialog over it closed): the keys work without a click first, in the
+    // list that had them. Not while the connection panel is up, which takes the focus for its
+    // own field.
+    if (widget.active && !old.active && _isConnected) _focusLast();
   }
 
   @override
@@ -131,6 +137,17 @@ class _FileViewState extends State<FileView> {
   void _focusLocal() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && widget.active) _localFocus.requestFocus();
+    });
+  }
+
+  void _onListFocus() {
+    if (_localFocus.hasFocus) _lastList = _localFocus;
+    if (_remoteFocus.hasFocus) _lastList = _remoteFocus;
+  }
+
+  void _focusLast() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && widget.active) _lastList.requestFocus();
     });
   }
 
