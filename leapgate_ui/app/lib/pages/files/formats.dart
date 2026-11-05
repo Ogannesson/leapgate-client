@@ -179,13 +179,15 @@ String folderName(AppLocalizations l10n, String path, bool isWindows) {
 }
 
 /// Why [path] did not open, for the banner on top of the pane, the list area and under the path
-/// field (02 §2.5).
+/// field (02 §2.5). [brief]: the text of a reason that is not recognised is left out, for the
+/// banner, which has it in the tooltip ([openErrorDetail]).
 String openErrorText(
   AppLocalizations l10n,
   String path,
   FtError error,
-  bool isWindows,
-) {
+  bool isWindows, {
+  bool brief = false,
+}) {
   final folder = folderName(l10n, path, isWindows);
   return switch (error.reason) {
     FtReason.permissionDenied => l10n.filesCantOpenNoAccess(folder),
@@ -199,7 +201,7 @@ String openErrorText(
     FtReason.invalidName || FtReason.invalidNameWindows =>
       l10n.filesCantOpenReason(folder, l10n.filesReasonInvalidName),
     _ =>
-      error.text.isEmpty
+      brief || error.text.isEmpty
           ? l10n.filesCantOpen(folder)
           // The copy ends the sentence; one the text brings would make two.
           : l10n.filesCantOpenText(
@@ -208,6 +210,18 @@ String openErrorText(
             ),
   };
 }
+
+/// The text [openErrorText] leaves out when brief; null when there is none.
+String? openErrorDetail(FtError error) => switch (error.reason) {
+  FtReason.permissionDenied ||
+  FtReason.notFound ||
+  FtReason.timeout ||
+  FtReason.androidScope ||
+  FtReason.pathTooLong ||
+  FtReason.invalidName ||
+  FtReason.invalidNameWindows => null,
+  _ => error.text.isEmpty ? null : error.text,
+};
 
 /// The remote device's platform after its name in the pane header; empty until it is known.
 String platformText(String platform) =>

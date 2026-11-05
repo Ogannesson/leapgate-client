@@ -6,6 +6,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_hbb/leapgate/file_transfer/errors.dart';
 import 'package:flutter_hbb/leapgate/file_transfer/pane.dart';
 import 'package:flutter_hbb/leapgate/session.dart';
 import 'package:flutter_hbb/models/file_model.dart';
@@ -52,7 +53,10 @@ String statusLine(
   if (folders > 0) {
     return l10n.filesSelectedFolders(selection.length, folders);
   }
-  final size = selection.fold<int>(0, (a, e) => a + e.size);
+  // A file link has no size (its column is empty): it adds none, and only links say none.
+  final files = selection.where((e) => e.entryType != 5);
+  if (files.isEmpty) return l10n.filesSelected(selection.length);
+  final size = files.fold<int>(0, (a, e) => a + e.size);
   return l10n.filesSelectedSize(selection.length, formatFileSize(l10n, size));
 }
 
@@ -394,6 +398,33 @@ class _FilePaneViewState extends State<FilePaneView> {
     );
   }
 
+  /// The banner of a folder that did not open (02 §2.5): a read that timed out can be retried;
+  /// the text of one that is not recognised is in the tooltip.
+  Widget _openErrorBanner(
+    AppLocalizations l10n,
+    ({String path, FtError error}) error,
+  ) {
+    final timeout = error.error.reason == FtReason.timeout;
+    final banner = LgBanner(
+      tone: LgTone.error,
+      slim: true,
+      dense: true,
+      text: openErrorText(
+        l10n,
+        error.path,
+        error.error,
+        _pane.isWindows,
+        brief: true,
+      ),
+      actionLabel: timeout ? l10n.filesRetry : null,
+      onAction: timeout ? () => _pane.openDirectory(error.path) : null,
+      dismissLabel: l10n.filesDismiss,
+      onDismiss: _pane.dismissOpenError,
+    );
+    final detail = openErrorDetail(error.error);
+    return detail == null ? banner : LgTooltip(message: detail, child: banner);
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
@@ -424,19 +455,7 @@ class _FilePaneViewState extends State<FilePaneView> {
                         LgSpace.s3,
                         LgSpace.s2,
                       ),
-                      child: LgBanner(
-                        tone: LgTone.error,
-                        slim: true,
-                        dense: true,
-                        text: openErrorText(
-                          l10n,
-                          error.path,
-                          error.error,
-                          _pane.isWindows,
-                        ),
-                        dismissLabel: l10n.filesDismiss,
-                        onDismiss: _pane.dismissOpenError,
-                      ),
+                      child: _openErrorBanner(l10n, error),
                     ),
                   _actionRow(l10n, shown),
                   Expanded(child: _listArea(l10n, t, shown)),

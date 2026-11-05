@@ -233,6 +233,13 @@ void main() {
       expect(folderName(l10n, '/home/u', false), 'u');
     });
 
+    test('a file link adds no size; only links say none', () {
+      final file = _e('预算.xlsx', size: 88576);
+      final link = _e('l', type: _fileLink);
+      expect(statusLine(l10n, [], [file, link]), '已选择 2 个项目，86.5 KB');
+      expect(statusLine(l10n, [], [link]), '已选择 1 个项目');
+    });
+
     test('the system date format has the date and the time', () {
       final text = formatFileDate(_e('x'));
       expect(text, contains('2025'));
@@ -287,7 +294,15 @@ void main() {
     'the connection panel covers the panes until connected (groups 1, 13)',
     (tester) async {
       final v = await _pump(tester, connected: false);
-      expect(find.byType(ModalBarrier), findsWidgets);
+      final barrier = find.descendant(
+        of: find.byType(FileView),
+        matching: find.byType(ModalBarrier),
+      );
+      // The panes dim under the panel.
+      expect(
+        tester.widget<ModalBarrier>(barrier).color,
+        LgTokens.of(tester.element(barrier)).colors.scrim,
+      );
       expect(find.textContaining('正在连接'), findsWidgets);
       v.ffi.connection.onPeerInfo();
       await tester.pump();
@@ -350,6 +365,30 @@ void main() {
         await tester.pump();
         expect(v.model.remote.calls, contains('dismissOpenError'));
         expect(find.text('无法打开“私密”：没有访问权限。'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'the banner: a timed-out read retries; a text not recognised is in the tooltip',
+      (tester) async {
+        final v = await _pump(tester);
+        v.model.remote
+          ..openError = (path: r'D:\备份\慢', error: const FtError.timeout())
+          ..notifyListeners();
+        await tester.pump();
+        await tester.tap(find.text('重试'));
+        expect(v.model.remote.calls, [r'openDirectory:D:\备份\慢']);
+
+        v.model.remote
+          ..openError = (
+            path: r'D:\备份\怪',
+            error: const FtError(FtReason.other, text: 'Wrong id.'),
+          )
+          ..notifyListeners();
+        await tester.pump();
+        expect(find.text('无法打开“怪”。'), findsOneWidget);
+        expect(_tip('Wrong id.'), findsOneWidget);
+        expect(find.text('重试'), findsNothing);
       },
     );
 
@@ -625,6 +664,22 @@ void main() {
         expect(v.model.uploads, hasLength(1));
       },
     );
+
+    testWidgets('from the system while not connected: nothing is uploaded', (
+      tester,
+    ) async {
+      final v = await _pump(tester, connected: false);
+      final blank = tester.getCenter(_inPane('远程设备', find.byType(ListView)));
+      await _systemDrag(tester, 'entered', _at(blank));
+      await _systemDrag(tester, 'performOperation', [r'C:\a.txt']);
+      expect(v.model.uploads, isEmpty);
+
+      v.ffi.connection.onPeerInfo();
+      await tester.pump();
+      await _systemDrag(tester, 'entered', _at(blank));
+      await _systemDrag(tester, 'performOperation', [r'C:\a.txt']);
+      expect(v.model.uploads.single.paths, [r'C:\a.txt']);
+    });
 
     testWidgets('from one pane onto a folder row of the other', (tester) async {
       final v = await _pump(tester);
