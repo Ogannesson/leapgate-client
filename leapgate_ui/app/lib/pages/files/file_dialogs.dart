@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_hbb/leapgate/file_transfer/errors.dart';
 import 'package:flutter_hbb/leapgate/prompts.dart';
 
-import '../../icons/lg_icon.dart';
 import '../../l10n/app_localizations.dart';
 import '../../shell/tab_overlays.dart';
 import '../../widgets/lg_banner.dart';
@@ -135,13 +134,13 @@ class _OverwriteDialogState extends State<_OverwriteDialog> {
           p.folder,
         ),
       },
+      // `.btn.txt.mv` of `d-rp-normal`: the way out of the whole transfer, plain text, bottom left.
+      leading: LgButton(
+        label: l10n.ftOverwriteCancel,
+        kind: LgButtonKind.text,
+        onPressed: () => _answer(OverwriteChoice.cancel),
+      ),
       actions: [
-        // `.btn.txt.mv` of `d-rp-normal`: the way out of the whole transfer, plain text.
-        LgDialogAction(
-          label: l10n.ftOverwriteCancel,
-          kind: LgButtonKind.text,
-          onPressed: () => _answer(OverwriteChoice.cancel),
-        ),
         LgDialogAction(
           label: l10n.ftOverwriteSkip,
           isDefault: identical,
@@ -259,7 +258,6 @@ class _DeleteDialog extends StatelessWidget {
 class _NameDialog extends StatefulWidget {
   const _NameDialog({
     required this.title,
-    required this.icon,
     required this.action,
     required this.initial,
     required this.selectTo,
@@ -276,7 +274,6 @@ class _NameDialog extends StatefulWidget {
     required void Function(String?) close,
   }) : this(
          title: (l10n) => l10n.ftNewFolder,
-         icon: LgIcons.folderPlus,
          action: (l10n) => l10n.ftNewFolderCreate,
          initial: (l10n) => l10n.ftNewFolder,
          selectTo: null,
@@ -290,7 +287,6 @@ class _NameDialog extends StatefulWidget {
   _NameDialog.rename(FtRenamePrompt p, {required void Function(String?) close})
     : this(
         title: (l10n) => l10n.ftRenameTitle(p.name),
-        icon: LgIcons.edit,
         action: (l10n) => l10n.ftRename,
         initial: (_) => p.name,
         // A file's name up to its extension (a leading dot is part of the name).
@@ -306,7 +302,6 @@ class _NameDialog extends StatefulWidget {
       );
 
   final String Function(AppLocalizations l10n) title;
-  final LgIcons icon;
   final String Function(AppLocalizations l10n) action;
   final String Function(AppLocalizations l10n) initial;
 
@@ -385,7 +380,6 @@ class _NameDialogState extends State<_NameDialog> {
     final failure = _failure;
     final dialog = LgFormDialog(
       title: widget.title(l10n),
-      icon: widget.icon,
       banner: failure == null
           ? null
           : LgBanner(
