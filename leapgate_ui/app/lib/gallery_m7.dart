@@ -813,7 +813,8 @@ List<Specimen> _m7Specimens() {
     add(
       'file-pane-header',
       'local-and-remote$sfx',
-      const Size(682, 156),
+      // Three headers of the spacious mode's 48 px and two 8 px gaps, in the padding.
+      const Size(682, 192),
       (_) => SizedBox(
         width: 650,
         child: Column(
@@ -849,21 +850,20 @@ List<Specimen> _m7Specimens() {
   add(
     'file-pane-header',
     'platforms',
-    const Size(682, 156),
+    const Size(682, 192),
     (_) => SizedBox(
       width: 650,
       child: Column(
+        spacing: 8,
         children: [
           for (final (p, id) in [
             (LgPlatform.linux, '234 567 891'),
             (LgPlatform.macos, '345 678 912'),
             (LgPlatform.android, '456 789 123'),
-          ]) ...[
+          ])
             LgFilePaneFrame(
               child: LgFilePaneHeader(title: '远程设备', subtitle: '客厅迷你主机 · ${p.name}', platform: p, remoteId: id),
             ),
-            const SizedBox(height: 8),
-          ],
         ],
       ),
     ),
@@ -1140,7 +1140,8 @@ List<Specimen> _m7Specimens() {
   add(
     'file-drop',
     'chips',
-    const Size(420, 120),
+    // Three chips of 29 px in the spacious mode, two 12 px gaps, in the padding.
+    const Size(420, 144),
     (_) => Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
