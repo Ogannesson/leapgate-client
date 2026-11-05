@@ -145,6 +145,32 @@ void main() {
   );
 
   testMainWindow(
+    'a tab with only the file view: "远程桌面" from the device menu opens the remote desktop in '
+    'it',
+    (tester) async {
+      await pumpMainWindow(tester);
+      await openFiles(tester);
+      mainNavigation.showHome();
+      await tester.pump();
+
+      mainNavigation.connect(_id);
+      await tester.pump();
+      await tester.pump();
+      final views = appCore.sessions.sessionsOf(_id);
+      expect(views.map((v) => v.connType), [
+        ConnType.fileTransfer,
+        ConnType.defaultConn,
+      ]);
+      expect(
+        tester
+            .widget<SessionPage>(find.byType(SessionPage, skipOffstage: false))
+            .active,
+        true,
+      );
+    },
+  );
+
+  testMainWindow(
     'the remote desktop\'s view switch lists both views and opens the file transfer',
     (tester) async {
       await pumpMainWindow(tester);

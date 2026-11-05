@@ -1586,5 +1586,6 @@
   "tabCloseTitle": "Close the tab?",
   "filesSearchFiltering": "Search this folder, filtering",
   "filesSortAscending": "ascending",
-  "filesSortDescending": "descending"
+  "filesSortDescending": "descending",
+  "queueStatusPausedOnly": "Paused"
 }

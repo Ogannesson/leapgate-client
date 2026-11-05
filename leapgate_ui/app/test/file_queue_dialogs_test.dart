@@ -160,6 +160,7 @@ void main() {
           _row(
             2,
             FileJobStatus.paused,
+            // Loaded from the last session: no bytes known until it goes on.
             done: 0,
             total: 1024,
             notes: const [ResumeUnsupported()],
@@ -169,7 +170,9 @@ void main() {
       await _pumpQueue(tester, jobs);
       expect(_rich('2 个已暂停'), findsOneWidget);
       expect(find.text('已暂停 · 已传 2 KB / 4 KB'), findsOneWidget);
-      expect(find.text('已暂停 · 已传 0 字节 / 1 KB'), findsOneWidget);
+      expect(find.text('已暂停'), findsOneWidget);
+      expect(find.textContaining('0 字节'), findsNothing);
+      expect(find.byType(LgQueueBar), findsOneWidget);
       expect(find.text('远程设备的版本不支持断点续传，当前文件将从头传输。'), findsOneWidget);
       await tester.tap(find.text('全部继续'));
       await tester.tap(_button('继续').first);

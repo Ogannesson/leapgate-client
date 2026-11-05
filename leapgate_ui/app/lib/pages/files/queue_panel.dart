@@ -255,6 +255,10 @@ class _Row extends StatelessWidget {
         return (l10n.queueStatusWaiting, null);
       case FileJobStatus.deleting:
         return (l10n.queueStatusDeleting(r.fileIndex, r.fileCount), null);
+      // A job loaded from the last session has no bytes until it goes on (the saved job keeps
+      // none, `fs.rs` `TransferJobMeta`).
+      case FileJobStatus.paused when r.doneBytes == 0:
+        return (l10n.queueStatusPausedOnly, null);
       case FileJobStatus.paused:
         return (
           l10n.queueStatusPaused(size(r.doneBytes), size(r.totalBytes)),
@@ -343,7 +347,7 @@ class _Row extends StatelessWidget {
       ),
       FileJobStatus.paused => (
         LgQueueState.paused,
-        ratio(r.doneBytes, r.totalBytes),
+        r.doneBytes == 0 ? null : ratio(r.doneBytes, r.totalBytes),
       ),
       FileJobStatus.interrupted => (LgQueueState.interrupted, null),
       FileJobStatus.done => (LgQueueState.done, null),

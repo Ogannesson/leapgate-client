@@ -1370,5 +1370,6 @@
   "tabCloseTitle": "关闭标签？",
   "filesSearchFiltering": "搜索当前文件夹，正在过滤",
   "filesSortAscending": "升序",
-  "filesSortDescending": "降序"
+  "filesSortDescending": "降序",
+  "queueStatusPausedOnly": "已暂停"
 }
