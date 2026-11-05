@@ -33,7 +33,11 @@ enum FtReason {
 
   /// Dart's own: reading a remote folder, counting before a delete or reading empty folders got
   /// no answer in time. Rust never returns it.
-  timeout('timeout');
+  timeout('timeout'),
+
+  /// Dart's own: a delete under way when the connection went (02 §2.4.7, "连接已中断"); deletes
+  /// are not resumed. Rust never returns it.
+  disconnected('disconnected');
 
   const FtReason(this.code);
 
@@ -62,6 +66,8 @@ class FtError {
   const FtError(this.reason, {this.args = const [], this.text = ''});
 
   const FtError.timeout() : this(FtReason.timeout);
+
+  const FtError.disconnected() : this(FtReason.disconnected);
 
   /// `leapgate_ft_reason`'s `{"reason","args","text"}`.
   factory FtError.fromJson(Map<String, dynamic> m) => FtError(

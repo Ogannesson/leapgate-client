@@ -291,9 +291,11 @@ class FileTransferJobs extends ChangeNotifier implements FileJobs {
       folderCount: info?.foldersMade ?? 0,
       bytesPerSecond: rate?.speed,
       remaining: rate?.remaining,
-      error: status == FileJobStatus.failed && !_deleteCut(job)
-          ? _errorOf(job)
-          : null,
+      error: status != FileJobStatus.failed
+          ? null
+          : _deleteCut(job)
+              ? const FtError.disconnected()
+              : _errorOf(job),
       notes: [
         if (info?.emptyFolders != null) info!.emptyFolders!,
         if (transfer && status == FileJobStatus.paused && _resumeUnsupported)
@@ -307,8 +309,8 @@ class FileTransferJobs extends ChangeNotifier implements FileJobs {
     return conn == null || conn.stage == ConnStage.connected;
   }
 
-  /// A delete under way, or whose wait ran out, while the connection is down: "失败：连接已中断"
-  /// (02 §2.4.7), a failed row without an error. Deletes are not resumed.
+  /// A delete under way, or whose wait ran out, while the connection is down: failed with
+  /// [FtError.disconnected] (02 §2.4.7). Deletes are not resumed.
   bool _deleteCut(JobProgress job) =>
       job.type != JobType.transfer &&
       !_connected &&

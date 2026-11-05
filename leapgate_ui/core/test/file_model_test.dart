@@ -388,7 +388,8 @@ void main() {
       expect(t.s.fileModel.jobs.rows.last.status, FileJobStatus.deleting);
       t.s.connection.reconnect(false);
       final row = t.s.fileModel.jobs.rows.last;
-      expect((row.status, row.error), (FileJobStatus.failed, null));
+      expect((row.status, row.error?.reason),
+          (FileJobStatus.failed, FtReason.disconnected));
     });
   });
 
