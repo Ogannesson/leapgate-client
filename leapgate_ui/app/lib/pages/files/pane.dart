@@ -314,18 +314,24 @@ class _FilePaneViewState extends State<FilePaneView> {
     final reading = _readingShown;
     if (_pane.path.isEmpty) {
       if (error != null) {
-        // The first folder did not open: nothing to go back to (02 §2.2 block E).
+        // The first folder did not open: nothing to go back to (02 §2.2 block E). The text of
+        // an error that is not recognised is in the tooltip, as on the banner.
+        final detail = openErrorDetail(error.error);
+        final state = LgEmptyState(
+          openErrorText(l10n, error.path, error.error, _pane.isWindows,
+              brief: true),
+          icon: LgIcons.err,
+          iconColor: t.colors.error,
+          iconBackground: t.colors.errorBg,
+          secondaryActionLabel: l10n.filesGoHome,
+          onSecondaryAction: _pane.goHome,
+          actionLabel: l10n.filesRetry,
+          onAction: () => _pane.openDirectory(error.path),
+        );
         return Center(
-          child: LgEmptyState(
-            openErrorText(l10n, error.path, error.error, _pane.isWindows),
-            icon: LgIcons.err,
-            iconColor: t.colors.error,
-            iconBackground: t.colors.errorBg,
-            secondaryActionLabel: l10n.filesGoHome,
-            onSecondaryAction: _pane.goHome,
-            actionLabel: l10n.filesRetry,
-            onAction: () => _pane.openDirectory(error.path),
-          ),
+          child: detail == null
+              ? state
+              : LgTooltip(message: detail, child: state),
         );
       }
       return LgReadingOverlay(

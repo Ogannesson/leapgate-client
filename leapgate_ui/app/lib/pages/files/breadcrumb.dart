@@ -131,7 +131,8 @@ class _FileBreadcrumbState extends State<FileBreadcrumb> {
       _cancel();
     } else {
       _failed = _field.text;
-      final text = openErrorText(l10n, path, error, _pane.isWindows);
+      final text =
+          openErrorText(l10n, path, error, _pane.isWindows, brief: true);
       setState(() => _error = text);
       _fieldFocus.requestFocus();
     }

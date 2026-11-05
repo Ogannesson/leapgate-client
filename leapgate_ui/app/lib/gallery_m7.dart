@@ -42,8 +42,8 @@ List<_M7File> _m7Local(bool en) => [
 List<_M7File> _m7Remote(bool en) => [
   _M7File(LgFileKind.folder, _x(en, '照片', 'Photos'), '2026/10/12 09:30', _x(en, '文件夹', 'Folder'), ''),
   _M7File(LgFileKind.file, _x(en, '年度报告.docx', 'annual-report.docx'), '2026/09/30 18:22', _x(en, 'DOCX 文件', 'DOCX file'), '2.3 MB'),
-  _M7File(LgFileKind.file, _x(en, '视频素材.mp4.digest', 'clip.mp4.digest'), '2026/10/22 15:41', _x(en, '未完成的传输', 'Unfinished transfer'), _x(en, '64 字节', '64 bytes')),
-  _M7File(LgFileKind.file, _x(en, '视频素材.mp4.download', 'clip.mp4.download'), '2026/10/22 15:41', _x(en, '未完成的传输', 'Unfinished transfer'), '2.1 GB'),
+  _M7File(LgFileKind.file, _x(en, '视频素材.mp4.digest', 'clip.mp4.digest'), '2026/10/22 15:41', _x(en, '未完成的传输', 'Incomplete transfer'), _x(en, '64 字节', '64 bytes')),
+  _M7File(LgFileKind.file, _x(en, '视频素材.mp4.download', 'clip.mp4.download'), '2026/10/22 15:41', _x(en, '未完成的传输', 'Incomplete transfer'), '2.1 GB'),
   _M7File(LgFileKind.file, _x(en, '说明.txt', 'notes.txt'), '2026/10/05 11:20', _x(en, 'TXT 文件', 'TXT file'), '4 KB'),
 ];
 
