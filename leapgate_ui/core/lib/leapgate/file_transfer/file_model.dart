@@ -18,6 +18,7 @@ import '../../consts.dart';
 import '../../models/file_model.dart';
 import '../../models/platform_model.dart';
 import '../../utils/download_paths.dart';
+import '../connection.dart';
 import '../prompts.dart';
 import '../session.dart';
 import 'errors.dart';
@@ -37,6 +38,15 @@ final _localWindows = isWindows;
 class _Superseded {
   const _Superseded();
 }
+
+/// What the copied `FileFetcher.beginRemoteSession` ends the remote reads in flight with when
+/// the connection comes back (`models/file_model.dart`, `_kRemoteSessionChangedError`): the
+/// reconnect reads the folders again, so it is no error to show.
+const _kRemoteSessionChanged =
+    'Remote directory read cancelled because the session changed';
+
+bool _isSessionChanged(Object e) =>
+    e is StateError && e.message == _kRemoteSessionChanged;
 
 /// The file transfer model of one session (upstream `FileModel`). Every session has one; only a
 /// `ConnType.fileTransfer` session uses it.
@@ -284,6 +294,8 @@ class FileModel implements FileTransferModel {
   Future<void> uploadPaths(List<String> paths, {String? to}) async {
     final items = <Entry>[];
     for (final path in paths) {
+      // A whole drive (`D:\`) has no name to make at the destination.
+      if (p.dirname(path) == path) continue;
       final type = io.FileSystemEntity.typeSync(path);
       if (type == io.FileSystemEntityType.notFound) continue;
       final dir = type == io.FileSystemEntityType.directory;
@@ -381,6 +393,11 @@ class FileController extends ChangeNotifier implements FilePane {
   void setShowHidden(bool value) {
     _showHidden = value;
     notifyListeners();
+    // Saved now: a reconnect's `onReady` reads it back (`close` saves it again).
+    unawaited(bind.sessionPeerOption(
+        sessionId: sessionId,
+        name: isLocal ? "local_show_hidden" : "remote_show_hidden",
+        value: value ? "Y" : ""));
     refresh();
   }
 
@@ -444,10 +461,21 @@ class FileController extends ChangeNotifier implements FilePane {
           _home,
         }
       ];
+      // A folder before the one that opened is gone: the pane says so (02 §2.5, "未找到").
+      ({String path, FtError error})? missing;
       for (var i = 0; i < dirs.length; i++) {
         final error = await _openDirectoryPath(dirs[i],
             isBack: true, showError: showError && i == dirs.length - 1);
-        if (error == null) return true;
+        if (error == null) {
+          if (missing != null) {
+            _openError = missing;
+            notifyListeners();
+          }
+          return true;
+        }
+        if (missing == null && error.reason == FtReason.notFound) {
+          missing = (path: dirs[i], error: error);
+        }
       }
       return false;
     }
@@ -508,7 +536,7 @@ class FileController extends ChangeNotifier implements FilePane {
       _show(fd);
       return null;
     } catch (e) {
-      if (e is _Superseded) return null;
+      if (e is _Superseded || _isSessionChanged(e)) return null;
       final error = _error(e);
       if (requestGeneration != _directoryRequestGeneration) return error;
       debugPrint("Failed to openDirectory $path: $e");
@@ -675,6 +703,9 @@ class FileController extends ChangeNotifier implements FilePane {
   /// (R2-Q22); never into "此电脑".
   @override
   Future<void> transfer(List<Entry> items, {String? to}) async {
+    // Nothing goes out while the connection is down; the views offer no way to start one.
+    final conn = _session?.connection;
+    if (conn != null && conn.stage != ConnStage.connected) return;
     final other = _other;
     final folder = to ?? other.path;
     final otherWindows = other.isWindows;
@@ -986,6 +1017,9 @@ class FileController extends ChangeNotifier implements FilePane {
     final isRemote = !isLocal;
     if (item.isLink || item.isFile) {
       final id = jobController.addDeleteFileJob(item, isRemote);
+      // The counts of the confirmation (`_deleteReady`): a link is no file.
+      model.jobs.addDelete(id,
+          files: item.isLink ? 0 : 1, bytes: item.isLink ? 0 : item.size);
       final error = await model._request(
           id,
           () => item.isLink
@@ -1004,6 +1038,8 @@ class FileController extends ChangeNotifier implements FilePane {
       return;
     }
     final id = jobController.addDeleteDirJob(item, isRemote, files.length);
+    model.jobs.addDelete(id,
+        files: files.length, bytes: files.fold(0, (n, f) => n + f.size));
     for (var i = 0; i < files.length; i++) {
       if (_stopped(id)) return;
       final error = await model._request(

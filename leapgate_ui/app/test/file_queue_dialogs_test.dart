@@ -212,8 +212,9 @@ void main() {
         expect(tester.takeException(), isNull);
         expect(tester.getSize(find.byType(ListView)).height, 240);
         expect(fakes.bind.localOptions[kOptionLeapgateFtQueueHeight], '600');
-        // 59 minutes 40 seconds is about an hour, not "60 分钟".
-        expect(find.textContaining('剩余约 1 小时 0 分钟'), findsOneWidget);
+        // 59 minutes 40 seconds is about an hour, not "60 分钟" or "1 小时 0 分钟".
+        expect(find.textContaining('剩余约 1 小时'), findsOneWidget);
+        expect(find.textContaining('0 分钟'), findsNothing);
       },
     );
 
@@ -259,7 +260,13 @@ void main() {
           _row(4, FileJobStatus.interrupted),
           _row(5, FileJobStatus.skipped),
           _row(6, FileJobStatus.cancelled),
-          _row(7, FileJobStatus.done, count: 0),
+          // A delete gives no size; only empty folders or links: no count either.
+          _row(
+            7,
+            FileJobStatus.done,
+            direction: FileJobDirection.delete,
+            count: 0,
+          ),
           _row(
             8,
             FileJobStatus.failed,
@@ -270,8 +277,22 @@ void main() {
             FileJobStatus.failed,
             error: const FtError(FtReason.other, text: 'Wrong id'),
           ),
+          _row(
+            10,
+            FileJobStatus.done,
+            direction: FileJobDirection.delete,
+            count: 3,
+            total: 4096,
+          ),
+          _row(
+            11,
+            FileJobStatus.failed,
+            direction: FileJobDirection.delete,
+            error: const FtError(FtReason.other, text: 'Wrong id'),
+          ),
+          _row(12, FileJobStatus.done, count: 2, total: 2048),
         ]
-        ..summary = _summary(active: 2, failed: 2, finished: 3);
+        ..summary = _summary(active: 2, failed: 3, finished: 5);
       // Tall enough for every row to be built.
       fakes.bind.localOptions[kOptionLeapgateFtQueueHeight] = '600';
       await _pumpQueue(tester, jobs);
@@ -289,15 +310,18 @@ void main() {
       expect(find.text('已中断，重新连接后将继续'), findsOneWidget);
       expect(find.text('已跳过：目标位置已有同名文件'), findsOneWidget);
       expect(find.text('已取消'), findsOneWidget);
-      expect(find.text('已完成 · 0 个文件，0 字节'), findsOneWidget);
+      expect(find.text('已完成'), findsOneWidget);
+      expect(find.text('已完成 · 3 个文件'), findsOneWidget);
+      expect(find.text('已完成 · 2 个文件，2 KB'), findsOneWidget);
       // A download fills this device.
       expect(find.text('失败：本机的磁盘空间不足'), findsOneWidget);
       expect(find.text('传输失败'), findsOneWidget);
+      expect(find.text('删除失败'), findsOneWidget);
       expect(find.text(r'D:\备份\照片 → C:\Users\u\Pictures'), findsWidgets);
 
       // Running rows cancel, finished ones go from the list.
       expect(_button('取消'), findsNWidgets(4));
-      expect(_button('移除'), findsNWidgets(5));
+      expect(_button('移除'), findsNWidgets(8));
       await tester.tap(_button('取消').first);
       await tester.tap(_button('移除').first);
       expect(jobs.calls, ['cancel:1', 'remove:5']);
@@ -415,9 +439,29 @@ void main() {
       await tester.pump();
       expect(find.text('永久删除这 3 个项目？'), findsOneWidget);
       expect(find.text('将从远程设备上删除 12 个文件（2 KB），无法恢复。'), findsOneWidget);
+      // Only empty folders and links: the items, not "0 个文件（0 字节）".
+      state.value = const FtDeleteReady(
+        kind: FtDeleteKind.contents,
+        name: '',
+        items: 2,
+      );
+      await tester.pump();
+      expect(find.text('永久删除这 2 个项目？'), findsOneWidget);
+      expect(find.text('将从远程设备上删除这 2 个项目，无法恢复。'), findsOneWidget);
       await tester.tap(find.text('删除'));
       await tester.pump();
       expect(await answer, true);
+    });
+
+    testWidgets('a question of a tab that closed is answered with null', (
+      tester,
+    ) async {
+      await pumpScope(tester);
+      final answer = showFilePrompt(overlays, 'dev', const FtDisconnectPrompt(1));
+      await tester.pump();
+      overlays.forget('dev');
+      expect(await answer, isNull);
+      expect(overlays.isOpen('dev'), isFalse);
     });
 
     testWidgets('delete: a link, a count that failed (retry), over the limit', (

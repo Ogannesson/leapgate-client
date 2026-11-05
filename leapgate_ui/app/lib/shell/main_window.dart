@@ -174,6 +174,11 @@ class _MainWindowState extends State<MainWindow>
     if (device != null) settingsUnlock.lock();
     _dropComposition();
     if (mounted) setState(() => _selected = device);
+    // Once the tab takes focus again (its `ExcludeFocus` lifts with this frame).
+    if (device != null) {
+      WidgetsBinding.instance
+          .addPostFrameCallback((_) => _overlays.refocus(device));
+    }
   }
 
   /// Shows [view] in its tab and selects the tab: a view just opened, or one picked in the view

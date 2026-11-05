@@ -198,6 +198,9 @@ class _DeleteDialog extends StatelessWidget {
             body: switch (kind) {
               FtDeleteKind.file => l10n.ftDeleteFileBody(side),
               FtDeleteKind.emptyFolder => l10n.ftDeleteEmptyFolderBody(side),
+              // Only empty folders and links: no file count to give.
+              FtDeleteKind.contents when state.files == 0 =>
+                l10n.ftDeleteItemsBody(items, side),
               FtDeleteKind.contents => l10n.ftDeleteContentsBody(
                 state.files,
                 formatFileSize(l10n, state.bytes),
@@ -254,6 +257,7 @@ class _DeleteDialog extends StatelessWidget {
 class _NameDialog extends StatefulWidget {
   const _NameDialog({
     required this.title,
+    required this.icon,
     required this.action,
     required this.initial,
     required this.selectTo,
@@ -270,6 +274,7 @@ class _NameDialog extends StatefulWidget {
     required void Function(String?) close,
   }) : this(
          title: (l10n) => l10n.ftNewFolder,
+         icon: LgIcons.folderPlus,
          action: (l10n) => l10n.ftNewFolderCreate,
          initial: (l10n) => l10n.ftNewFolder,
          selectTo: null,
@@ -283,6 +288,7 @@ class _NameDialog extends StatefulWidget {
   _NameDialog.rename(FtRenamePrompt p, {required void Function(String?) close})
     : this(
         title: (l10n) => l10n.ftRenameTitle(p.name),
+        icon: LgIcons.edit,
         action: (l10n) => l10n.ftRename,
         initial: (_) => p.name,
         // A file's name up to its extension (a leading dot is part of the name).
@@ -298,6 +304,7 @@ class _NameDialog extends StatefulWidget {
       );
 
   final String Function(AppLocalizations l10n) title;
+  final LgIcons icon;
   final String Function(AppLocalizations l10n) action;
   final String Function(AppLocalizations l10n) initial;
 
@@ -376,7 +383,7 @@ class _NameDialogState extends State<_NameDialog> {
     final failure = _failure;
     final dialog = LgFormDialog(
       title: widget.title(l10n),
-      icon: LgIcons.folderPlus,
+      icon: widget.icon,
       banner: failure == null
           ? null
           : LgBanner(

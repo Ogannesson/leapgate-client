@@ -97,14 +97,21 @@ class SessionTabView extends StatelessWidget {
         lastView: views.length == 1,
       );
     }
-    return FileView(
-      ffi: view,
-      model: fileTransferFor(view),
-      active: active,
-      lastView: views.length == 1,
-      viewSwitch: SessionViewSwitch(ffi: view),
-      route: FileRouteMark(ffi: view),
-      onDisconnect: () => disconnectFileView(view),
+    // Not under a dialog of the tab or the window either: the file view would put the keyboard
+    // on its list behind it (Enter there would transfer again); closed, the list gets it back.
+    return ListenableBuilder(
+      listenable: overlays,
+      builder: (context, _) => FileView(
+        ffi: view,
+        model: fileTransferFor(view),
+        active: active &&
+            !overlays.isOpen(view.id) &&
+            !overlays.isOpen(kWindowScope),
+        lastView: views.length == 1,
+        viewSwitch: SessionViewSwitch(ffi: view),
+        route: FileRouteMark(ffi: view),
+        onDisconnect: () => disconnectFileView(view),
+      ),
     );
   }
 

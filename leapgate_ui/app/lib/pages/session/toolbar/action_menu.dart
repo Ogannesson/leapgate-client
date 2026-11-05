@@ -332,10 +332,11 @@ Future<void> _resetWayland(ToolbarEnv env) async {
   env.notifyChanged();
 }
 
-/// `dialog.dart:1807-1826`: after switching, this side's session closes.
+/// `dialog.dart:1807-1826`: after switching, this side's session closes. Only the remote
+/// desktop: a file transfer in the same tab goes on (the tab goes with its last view).
 Future<void> _switchSides(ToolbarEnv env) async {
   final ffi = env.ffi;
   if (!await confirmSwitchSides(env.overlays, ffi, env.l10n)) return;
   await bind.sessionSwitchSides(sessionId: env.sessionId);
-  await appCore.sessions.closeDevice(ffi.id);
+  await appCore.sessions.close(ffi);
 }

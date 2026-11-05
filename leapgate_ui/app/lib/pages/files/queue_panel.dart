@@ -223,6 +223,7 @@ class _Row extends StatelessWidget {
     // Rounded to minutes first, so 59.5 minutes and more read as an hour.
     final minutes = (s / 60).round();
     if (minutes < 60) return l10n.queueRemainingMinutes(minutes);
+    if (minutes % 60 == 0) return l10n.queueRemainingWholeHours(minutes ~/ 60);
     return l10n.queueRemainingHours(minutes ~/ 60, minutes % 60);
   }
 
@@ -261,6 +262,15 @@ class _Row extends StatelessWidget {
         );
       case FileJobStatus.interrupted:
         return (l10n.queueStatusInterrupted, null);
+      // A delete gives no size: "已完成 · ‹N› 个文件", or "已完成" with only empty folders or
+      // links.
+      case FileJobStatus.done when r.direction == FileJobDirection.delete:
+        return (
+          r.fileCount == 0
+              ? l10n.queueStatusDeletedNoFiles
+              : l10n.queueStatusDeleted(r.fileCount),
+          null,
+        );
       case FileJobStatus.done:
         return (
           r.fileCount == 0 && r.folderCount > 0
@@ -276,7 +286,12 @@ class _Row extends StatelessWidget {
         final e = r.error ?? const FtError(FtReason.other);
         // "传输失败。‹原文›": the text is behind the row until "查看详情" (M7b).
         if (e.reason == FtReason.other) {
-          return (l10n.ftReasonOther, e.text.isEmpty ? null : e.text);
+          return (
+            r.direction == FileJobDirection.delete
+                ? l10n.queueStatusDeleteFailed
+                : l10n.ftReasonOther,
+            e.text.isEmpty ? null : e.text,
+          );
         }
         return (
           l10n.queueStatusFailed(
