@@ -780,8 +780,9 @@ void main() {
         tester.getSize(name).width,
         greaterThanOrEqualTo(kFileNameColumnMin),
       );
-      // A long current folder leaves room for the root and "…" only, and is shortened.
-      expect(_inPane('本机', find.text('…')), findsOneWidget);
+      // At the narrowest the root is an icon, "…" and the drive give way, and the long current
+      // folder is shortened (its full path is in the tooltip).
+      expect(_inPane('本机', find.text('…')), findsNothing);
       expect(_inPane('本机', find.text('C:')), findsNothing);
       expect(_inPane('本机', find.text('一个名字非常非常非常非常非常非常长的文件夹')), findsOneWidget);
 
