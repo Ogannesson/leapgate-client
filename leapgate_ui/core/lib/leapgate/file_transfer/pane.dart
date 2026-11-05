@@ -102,6 +102,4 @@ abstract interface class FileTransferModel {
 }
 
 /// The file transfer model of [session], a `ConnType.fileTransfer` view.
-// TODO(M7a core): coder A returns `session.fileModel` once it implements FileTransferModel.
-FileTransferModel fileTransferOf(FFI session) =>
-    throw UnimplementedError('fileTransferOf');
+FileTransferModel fileTransferOf(FFI session) => session.fileModel;

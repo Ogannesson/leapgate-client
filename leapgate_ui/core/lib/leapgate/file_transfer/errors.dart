@@ -1,6 +1,9 @@
 // Why a file operation failed (FT2, `LEAPGATE.md` §10.15). The types above the line are the
 // step 0 contract: the panes, the queue and the dialogs map [FtReason] to the copy of 02 §2.5.
 // Coder A appends below it what turns a `job_error` into an [FtError].
+import 'dart:async';
+
+import 'file_transfer_api.dart';
 
 /// The reason codes of `leapgate_ft_reason`, plus [timeout], which Dart decides itself. [code]
 /// is the JSON value; it is an interface, as C3's codes are.
@@ -73,3 +76,19 @@ class FtError {
 }
 
 // ---- coder A ----
+
+/// What the copied `FileFetcher` completes a remote read with when it gives up after 30 s
+/// (`models/file_model.dart`, `_registerRemoteReadTask`).
+const _kFetchTimeout = 'Failed to read dir, timeout';
+
+/// What the file transfer models got back: a `job_error`'s `err`, or what a read or a wait for
+/// Rust's answer ended with. A wait that ran out is [FtReason.timeout]; the rest goes to FT2.
+/// [peerPlatform] is the peer info's `platform`.
+FtError ftErrorOf(Object error,
+    {required String peerPlatform, required FtSide side}) {
+  if (error is TimeoutException || error == _kFetchTimeout) {
+    return const FtError.timeout();
+  }
+  return fileTransferApi.reason('$error',
+      peerPlatform: peerPlatform, side: side);
+}

@@ -601,6 +601,8 @@ const String kOptionEnableHwcodec = "enable-hwcodec";
 // §10.15). Each lane appends its keys under its heading.
 
 // M7a core (coder A): the sort of each pane.
+const kLeapgateFtSortLocal = 'leapgate-ft-sort-local';
+const kLeapgateFtSortRemote = 'leapgate-ft-sort-remote';
 
 // M7a shell (coder B): the queue panel.
 

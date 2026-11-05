@@ -123,7 +123,8 @@ void main() {
     final files = appCore.sessions.open('100200300', ConnType.fileTransfer);
 
     final answer = await files
-        .ask(const OverwritePrompt(path: 'C:\\a.txt', isIdentical: false));
+        .ask(const FtOverwritePrompt(
+            name: 'a.txt', folder: 'C:\\', kind: FtOverwriteKind.existing));
 
     expect(answer, (choice: OverwriteChoice.skip, forAll: true));
     expect(prompter.asked.single.$2, same(files));
