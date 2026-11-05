@@ -1220,5 +1220,98 @@ List<Specimen> _m7Specimens() {
     const Size(420, 80),
     (_) => const SizedBox(width: 388, child: LgCountingNote('正在统计要删除的项目…')),
   );
+
+  // What the dialog and menu components were given for the M7a visual check ------------------
+  // A confirmation with something at the start of its buttons (`d-rp-normal`: the plain-text
+  // "取消传输" at the lower left, "跳过" and "替换" at the right), a form dialog without the
+  // icon tile (`d-nf-ok`, `d-rn-ok`) and a menu row with the check mark (read as checked).
+  for (final en in [false, true]) {
+    final sfx = en ? '-english' : '';
+    add(
+      'dialog-parts-m7a',
+      'confirm-leading$sfx',
+      const Size(560, 340),
+      padding: 0,
+      (_) => _m6Stage(
+        width: 560,
+        height: 340,
+        LgConfirmDialog(
+          title: _x(en, '替换“年度报告.docx”？', 'Replace “annual-report.docx”?'),
+          body: _x(en, '目标文件夹“D:\\备份”中已有同名文件。', 'The destination folder “D:\\Backup” already has a file with this name.'),
+          width: 480,
+          leading: LgButton(label: _x(en, '取消传输', 'Cancel transfer'), kind: LgButtonKind.text, onPressed: _noop),
+          actions: [
+            LgDialogAction(label: _x(en, '跳过', 'Skip'), onPressed: _noop),
+            LgDialogAction(label: _x(en, '替换', 'Replace'), kind: LgButtonKind.primary, isDefault: true, onPressed: _noop),
+          ],
+          children: [
+            LgCheckbox(value: false, label: _x(en, '对此次传输中的其他冲突执行相同操作', 'Do this for the other conflicts in this transfer'), onChanged: (_) {}),
+          ],
+        ),
+      ),
+    );
+    add(
+      'dialog-parts-m7a',
+      'form-without-icon$sfx',
+      const Size(520, 360),
+      padding: 0,
+      (_) => _m6Stage(
+        width: 520,
+        height: 360,
+        LgFormDialog(
+          title: _x(en, '新建文件夹', 'New folder'),
+          note: _x(en, '位置：远程设备 · D:\\备份', 'Location: Remote device · D:\\Backup'),
+          actions: [
+            LgDialogAction(label: _x(en, '取消', 'Cancel'), onPressed: _noop),
+            LgDialogAction(label: _x(en, '新建', 'Create'), kind: LgButtonKind.primary, isDefault: true, onPressed: _noop),
+          ],
+          children: [
+            LgFormField(
+              label: _x(en, '名称', 'Name'),
+              child: LgTextField(controller: TextEditingController(text: _x(en, '新建文件夹', 'New folder')), semanticLabel: _x(en, '名称', 'Name')),
+            ),
+          ],
+        ),
+      ),
+    );
+    add(
+      'dialog-parts-m7a',
+      'form-without-icon-or-note$sfx',
+      const Size(520, 320),
+      padding: 0,
+      (_) => _m6Stage(
+        width: 520,
+        height: 320,
+        LgFormDialog(
+          title: _x(en, '重命名“年度报告.docx”', 'Rename “annual-report.docx”'),
+          actions: [
+            LgDialogAction(label: _x(en, '取消', 'Cancel'), onPressed: _noop),
+            LgDialogAction(label: _x(en, '重命名', 'Rename'), kind: LgButtonKind.primary, isDefault: true, onPressed: _noop),
+          ],
+          children: [
+            LgFormField(
+              label: _x(en, '名称', 'Name'),
+              child: LgTextField(controller: TextEditingController(text: _x(en, 'annual-report final.docx', 'annual-report final.docx')), semanticLabel: _x(en, '名称', 'Name')),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+  add(
+    'dialog-parts-m7a',
+    'menu-checked-row',
+    const Size(260, 256),
+    (_) => const LgMenuPanel(
+      width: 216,
+      items: [
+        LgMenuGroup('排序方式'),
+        LgMenuItem(label: '名称', checked: true, onPressed: _noop),
+        LgMenuItem(label: '修改日期', checked: false, onPressed: _noop),
+        LgMenuItem(label: '类型', checked: false, onPressed: _noop),
+        LgMenuItem(label: '大小', checked: false, onPressed: _noop),
+      ],
+    ),
+  );
   return list;
 }
