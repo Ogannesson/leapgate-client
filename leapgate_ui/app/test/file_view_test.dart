@@ -814,6 +814,24 @@ void main() {
       await _key(tester, LogicalKeyboardKey.f5);
       expect(v.model.local.calls, contains('refresh'));
     });
+
+    testWidgets('a dialog over the view closes: the remote list keeps the keys', (
+      tester,
+    ) async {
+      final v = await _pump(tester);
+      await _click(tester, _row('说明.txt'));
+      expect(FocusManager.instance.primaryFocus?.debugLabel, 'remote files');
+      // The shell makes the view inactive while a dialog of the tab or the window is open.
+      await tester.pumpWidget(_app(v, active: false));
+      await tester.pump();
+      await tester.pumpWidget(_app(v, active: true));
+      await tester.pump();
+      await tester.pump();
+      expect(FocusManager.instance.primaryFocus?.debugLabel, 'remote files');
+      await _key(tester, LogicalKeyboardKey.f5);
+      expect(v.model.remote.calls, contains('refresh'));
+      expect(v.model.local.calls, isNot(contains('refresh')));
+    });
   });
 
   testWidgets(
