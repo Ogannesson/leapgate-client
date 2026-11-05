@@ -2056,6 +2056,8 @@ pub fn _make_fd_to_json(id: i32, path: String, entries: &Vec<FileEntry>) -> Map<
         entry_map.insert("name".into(), json!(entry.name));
         entry_map.insert("size".into(), json!(entry.size));
         entry_map.insert("modified_time".into(), json!(entry.modified_time));
+        // leapgate: FT1, the new UI dims hidden entries (LEAPGATE.md §10.15)
+        entry_map.insert("is_hidden".into(), json!(entry.is_hidden));
         entries_out.push(entry_map);
     }
     fd_json.insert("entries".into(), json!(entries_out));

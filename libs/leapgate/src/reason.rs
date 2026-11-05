@@ -83,8 +83,7 @@ pub fn classify(msgtype: &str, title: &str, text: &str) -> Reason {
     let reason = match_reason(msgtype, title, text);
     if reason == Reason::Other {
         let text = clip(text);
-        let mut logged = LOGGED.lock().unwrap();
-        if logged.len() < MAX_LOGGED && logged.insert(text.to_owned()) {
+        if first_time(text) {
             log::info!(
                 "leapgate reason: unrecognized msgbox type={:?} title={:?} text={:?}",
                 msgtype,
@@ -96,10 +95,16 @@ pub fn classify(msgtype: &str, title: &str, text: &str) -> Reason {
     reason
 }
 
+/// Whether a clipped unrecognized text has not been logged yet. FT2 (`ft_reason`) shares the set.
+pub(crate) fn first_time(text: &str) -> bool {
+    let mut logged = LOGGED.lock().unwrap();
+    logged.len() < MAX_LOGGED && logged.insert(text.to_owned())
+}
+
 /// At most this many characters of an unrecognized text are kept and logged.
 const MAX_LOGGED_CHARS: usize = 200;
 
-fn clip(text: &str) -> &str {
+pub(crate) fn clip(text: &str) -> &str {
     match text.char_indices().nth(MAX_LOGGED_CHARS) {
         Some((end, _)) => &text[..end],
         None => text,

@@ -2003,13 +2003,13 @@ Telegram 机器人设置改成两步（`leapgate_bot_lookup` 只查、什么都�
 | `invalid_name` | 123、161 | 22、84 | 22、92 |
 | `symlink_in_path` | — | 40 | 62 |
 
-- 没有错误码的，按上游自己拼的句子认：`symlink path component is not allowed` → `symlink_in_path`；以 `invalid Windows download file name: ` 开头 → `invalid_name_windows`（冒号后面是名字）；`invalid download file name`、`invalid file name component`、`invalid file name in remote directory listing: …`、`file name contains null bytes`、`path traversal detected in file name`、`absolute path detected in file name`、`empty file name in multi-file transfer`、`… cannot be empty`、`… contains null bytes`、`new file name cannot be empty`、`Invalid path` → `invalid_name`；`Not exists`、以 ` not exists` 结尾的（`"‹路径›" not exists`、`Parent directoy of … not exists`）→ `not_found`；正文等于 `one-way-file-transfer-tip`（是翻译键）→ `one_way`；以 `file transfer rejected: too many files (` 开头 → `too_many_files`，从括号里取两个数；正文等于 `Permission denied`（没有错误码，Android 的范围检查）→ `android_scope`；正文等于 `skipped` → `skipped`；其余 → `other`（续传临时文件异常、`Wrong id` 这类内部错误也是 `other`）。
-- `side`：`local` 按本机平台的表查（本机平台用 `cfg!` 取，不写死 Windows）；`remote` 按 `peer_platform` 的表查；`unknown`（传输任务）：对端也是 Windows 时两边同一张表；对端不是 Windows 时，看 `(os error N)` 前面的文字是不是那个 errno 的英文原句（Linux glibc、macOS 各一张小表，约 15 条），是就按对端平台查，否则按本机查。原因：上传时本机读出错，被控端会把同一句原文原样发回来（10 §4.3），"从远程回来的"不一定是远程设备的错误。
+- 没有错误码的，按上游自己拼的句子认：`symlink path component is not allowed` → `symlink_in_path`；以 `invalid Windows download file name: ` 开头 → `invalid_name_windows`（冒号后面是名字）；`invalid download file name`、`invalid file name component`、`invalid file name in remote directory listing: …`、`file name contains null bytes`、`path traversal detected in file name`、`absolute path detected in file name`、`empty file name in multi-file transfer`、`… cannot be empty`、`… contains null bytes`、`new file name cannot be empty`、`Invalid path` → `invalid_name`；`Not exists`、以 ` not exists` 结尾的（`"‹路径›" not exists`、`Parent directoy of … not exists`）→ `not_found`；正文等于 `one-way-file-transfer-tip`（是翻译键）→ `one_way`；以 `file transfer rejected: too many files (` 开头 → `too_many_files`，从括号里取两个数；正文等于 `Permission denied`（没有错误码，Android 的范围检查）→ `android_scope`；正文等于 `skipped` → `skipped`；其余 → `other`（续传临时文件异常、`Wrong id` 这类内部错误也是 `other`）。Windows 被控端连接管理进程给读任务的初始化错误包了一层 `validation failed: `（`ui_cm_interface.rs` `start_read_job`），先去掉再认，`validation failed: Not exists` 是 `not_found`；`validation task failed: `、`task failed: `、`serialize failed: ` 后面是任务异常或序列化错误，照旧 `other`。
+- `side`：`local` 按本机平台的表查（本机平台用 `cfg!` 取，不写死 Windows）；`remote` 按 `peer_platform` 的表查；`unknown`（传输任务）：对端也是 Windows 时两边同一张表；对端不是 Windows 时，看 `(os error N)` 前面的文字是不是那个 errno 的英文原句（Linux glibc、Android bionic、macOS 各一张小表，约 15 条；bionic 和 glibc 只有 5、40、84、122 的措辞不同，码表和 Linux 共用），是就按对端平台查，否则按本机查。只有 `(os error N)` 紧挨原文末尾时才认作错误码，在路径或名字中间的不算。小表除了上面表里的 errno，还收了号码和上面 Windows 那列撞上的文件类 errno（5 EIO、19 ENODEV、21 EISDIR、32 EPIPE、Linux 和 Android 的 39 ENOTEMPTY、123 ENOMEDIUM），否则对端的 `Input/output error (os error 5)` 会按本机查成没有访问权限；它们按对端查不到，是 `other`。实现（`ft_reason.rs` `unknown_side`）不假定本机是 Windows：两端不同时，以非 Windows 那端（都不是时以对端）的原句判断。原因：上传时本机读出错，被控端会把同一句原文原样发回来（10 §4.3），"从远程回来的"不一定是远程设备的错误。
 - 没认出的同一段正文只在日志里写一次，和 C3 共用截断和去重。
 - FT2 是纯函数，不依赖任务状态；M7b 在 `io_loop.rs` 加 FT3~FT5 挂钩时调同一个函数。
 
 **Rust 的做法和约束**
-- `leapgate_ft_remove_link`（10 §4.2）：远程时由 Rust 从会话自己的对端信息取平台，不由 Dart 传。Windows 对端、目录链接 → 发 `FileRemoveDir { id: act_id, path, recursive: false }`（被控端只调 `std::fs::remove_dir`，只删链接或联接本身，各版本对端都认）；其余（文件链接，Linux、macOS 对端的目录链接）→ 发 `FileRemoveFile { id: act_id, path, file_num: 0 }`。本机同理：Windows 上目录链接调 `std::fs::remove_dir`，其余调 `std::fs::remove_file`，结果照本机删文件那样推 `job_done` / `job_error`。上游删文件夹的导出（固定递归）不改。
+- `leapgate_ft_remove_link`（10 §4.2）：远程时由 Rust 从会话自己的对端信息取平台，不由 Dart 传。Windows 对端、目录链接 → 发 `FileRemoveDir { id: act_id, path, recursive: false }`（被控端只调 `std::fs::remove_dir`，只删链接或联接本身，各版本对端都认）；其余（文件链接，Linux、macOS 对端的目录链接）→ 发 `FileRemoveFile { id: act_id, path, file_num: 0 }`。本机：Windows 上按链接自身的属性（`symlink_metadata` 带目录属性 0x10）调 `std::fs::remove_dir`，不看 `is_dir_link`（目标已不存在的目录链接上游列成文件链接），其余调 `std::fs::remove_file`，结果照本机删文件那样推 `job_done` / `job_error`。上游删文件夹的导出（固定递归）不改。
 - `leapgate_ft_read_local_dir` 直接调 `fs::read_dir(&fs::get_path(&path), show_hidden)` 和 `crate::common::make_fd_to_json`，失败时把错误原文交给 FT2 的归类。
 - 上游文件只改 `src/common.rs` 一处；其余都在 `libs/leapgate` 和 `src/leapgate_*`。
 
@@ -2076,6 +2076,7 @@ Telegram 机器人设置改成两步（`leapgate_bot_lookup` 只查、什么都�
 - 远程读文件夹串行：慢的网络盘上快速连点两层文件夹，后一个要等前一个。
 - 远程读空文件夹失败时被控端什么都不回，只能等到超时，附注写"未能读取"（M7a-7）。
 - Linux 被控端的系统文字被翻译成本地语言时，`unknown` 的消歧会退化：撞号时可能归错，查不到时显示原文。
+- 远程 Windows 上目标已不存在的目录链接或目录联接删不掉，报没有访问权限：上游把它列成文件链接（`entry_type` 5），`leapgate_ft_remove_link` 只能发 `FileRemoveFile`。本机这一侧按链接自身的目录属性选 `remove_dir`，不受影响。
 - FAT32 上超过 4 GB 的文件可能报 112（显示成空间不足），下载最后改名时目标正被占用可能报 5（显示成没有访问权限）；验收时在测试虚拟机上实测，归错再调表（10 §4.8）。
 
 **测试**
