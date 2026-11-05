@@ -17,6 +17,7 @@ import 'package:leapgate_ui/shell/tab_overlays.dart';
 import 'package:leapgate_ui/theme/lg_theme.dart';
 import 'package:leapgate_ui/theme/lg_tokens.dart';
 import 'package:leapgate_ui/widgets/lg_button.dart';
+import 'package:leapgate_ui/widgets/lg_file_queue.dart';
 
 import 'file_transfer_fakes.dart';
 import 'session_fakes.dart' show AppFakes, installAppFakes;
@@ -144,7 +145,8 @@ void main() {
           progress: 0.24,
         );
       await _pumpQueue(tester, jobs);
-      expect(_rich('1 个进行中，1 个排队，1 个失败，1 个等待确认 · 24%'), findsOneWidget);
+      expect(_rich('1 个进行中，1 个排队，1 个失败，1 个等待确认'), findsOneWidget);
+      expect(find.text('24%'), findsOneWidget);
       expect(find.text('清除已完成'), findsOneWidget);
       expect(find.text('全部继续'), findsNothing);
       await tester.tap(find.text('清除已完成'));
@@ -278,6 +280,11 @@ void main() {
           '45% · 610 MB / 1.32 GB · 3 / 12 个文件 · 1.20 MB/s · 剩余约 10 分钟',
         ),
         findsOneWidget,
+      );
+      // A screen reader gets the row in one sentence.
+      expect(
+        tester.widget<LgQueueRow>(find.byType(LgQueueRow).first).semanticLabel,
+        '下载 照片，45%，610 MB / 1.32 GB，3 / 12 个文件，1.20 MB/s，剩余约 10 分钟',
       );
       expect(find.text('正在统计文件…'), findsOneWidget);
       expect(find.text('正在删除… 37 / 120 个文件'), findsOneWidget);

@@ -1357,7 +1357,10 @@
   "queueNoteEmptyFoldersUnreadable": "空文件夹未创建：未能读取。",
   "queueNoteResumeUnsupported": "远程设备的版本不支持断点续传，当前文件将从头传输。",
   "queueBytes": "{count} 字节",
-  "queueResizeHandle": "调整传输面板的高度",
+  "queueRowLabel": "{direction} {name}，{status}",
+  "ftMarkProgress": "文件传输 {percent}%",
+  "ftMarkAttention": "有替换确认等待处理",
+  "ftViewSwitchLabel": "{view}，{mark}",
   "connCloseRemoteDesktop": "关闭远程桌面",
   "tabCloseTitle": "关闭标签？"
 }

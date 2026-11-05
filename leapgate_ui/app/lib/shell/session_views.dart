@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/connection.dart';
+import 'package:flutter_hbb/leapgate/file_transfer/jobs.dart';
 import 'package:flutter_hbb/leapgate/file_transfer/pane.dart';
 import 'package:flutter_hbb/leapgate/prompts.dart';
 import 'package:flutter_hbb/leapgate/session.dart';
@@ -12,8 +13,10 @@ import '../pages/files/file_view.dart';
 import '../pages/session/reasons.dart';
 import '../pages/session/session_names.dart';
 import '../pages/session/session_page.dart';
+import '../widgets/lg_file_marks.dart';
 import '../widgets/lg_menu.dart';
 import '../widgets/lg_session_toolbar.dart';
+import '../widgets/lg_status.dart';
 import 'navigation.dart';
 import 'tab_overlays.dart';
 
@@ -37,6 +40,16 @@ String viewName(AppLocalizations l10n, ConnType type) =>
     type == ConnType.fileTransfer
     ? l10n.ftFileTransfer
     : l10n.toolbarRemoteDesktop;
+
+/// What the transfer ring or the reminder mark of [summary] means to a screen reader ("文件传输
+/// 45%", "有替换确认等待处理"), on the tab and the view switch; null when neither shows.
+String? transferMarkLabel(AppLocalizations l10n, FileJobSummary summary) {
+  if (summary.waitingConfirm > 0) return l10n.ftMarkAttention;
+  final progress = summary.progress;
+  return progress == null
+      ? null
+      : l10n.ftMarkProgress((progress * 100).floor());
+}
 
 /// "断开" of the file transfer view, and the tab's "×" when it is the tab's only view: with
 /// unfinished transfers it asks first (R2-Q28), then closes this view (the tab goes with its
@@ -124,29 +137,56 @@ class SessionViewSwitch extends StatelessWidget {
 
   static const _kinds = [ConnType.defaultConn, ConnType.fileTransfer];
 
-  String _state(AppLocalizations l10n, FFI? view) {
-    if (view == null) return l10n.ftViewNotOpen;
+  /// The connection method of an open view, or the state it is in.
+  Widget _state(AppLocalizations l10n, FFI view) {
     final conn = view.connection;
-    final String route;
     if (conn.stage == ConnStage.failed) {
-      route = conn.retryCountdown != null
-          ? l10n.sessionInterrupted
+      return conn.retryCountdown != null
+          ? LgStatusText(LgStatus.warning, l10n.sessionInterrupted)
           : isDisconnected(conn.reason!)
-          ? l10n.sessionDisconnected
-          : l10n.sessionFailed;
-    } else if (!showsRoute(conn)) {
-      route = l10n.sessionConnecting;
-    } else {
-      route = conn.direct! ? l10n.sessionDirect : l10n.sessionRelayed;
+          ? LgStatusText(LgStatus.offline, l10n.sessionDisconnected)
+          : LgStatusText(LgStatus.warning, l10n.sessionFailed);
     }
-    final progress = isFileView(view)
-        ? fileTransferFor(view).jobs.summary.progress
+    if (!showsRoute(conn)) {
+      return LgStatusText(LgStatus.connecting, l10n.sessionConnecting);
+    }
+    final direct = conn.direct!;
+    return LgRouteMark(
+      route: direct ? LgRoute.direct : LgRoute.relay,
+      label: direct ? l10n.sessionDirect : l10n.sessionRelayed,
+      encrypted: conn.secure != false,
+      unencryptedLabel: l10n.sessionUnencrypted,
+    );
+  }
+
+  /// The row of one kind of view: "未打开", or its connection method after the file
+  /// transfer's ring and percentage (or the reminder mark, 02 §3.2).
+  LgMenuItem _item(AppLocalizations l10n, ConnType kind, FFI? view) {
+    final summary = view != null && isFileView(view)
+        ? fileTransferFor(view).jobs.summary
         : null;
-    return [
-      route,
-      if (conn.secure == false && showsRoute(conn)) l10n.sessionUnencrypted,
-      if (progress != null) '${(progress * 100).floor()}%',
-    ].join(' · ');
+    final progress = summary?.progress;
+    final alert = (summary?.waitingConfirm ?? 0) > 0;
+    final Widget? tail = view == null
+        ? null
+        : LgViewMenuTail(
+            progress: progress,
+            percentText: progress == null
+                ? null
+                : '${(progress * 100).floor()}%',
+            alert: alert,
+            status: _state(l10n, view),
+          );
+    return LgMenuItem(
+      label: viewName(l10n, kind),
+      checked: kind == ffi.connType,
+      hint: view == null ? l10n.ftViewNotOpen : null,
+      // The reminder mark is an icon: the row says what it means.
+      trailing: alert
+          ? Semantics(label: l10n.ftMarkAttention, child: tail)
+          : tail,
+      onPressed: () => _show(kind),
+    );
   }
 
   void _show(ConnType kind) {
@@ -170,22 +210,41 @@ class SessionViewSwitch extends StatelessWidget {
               if (isFileView(v)) fileTransferFor(v).jobs,
             ],
           ]),
-          builder: (context, _) => LgToolbarMenuButton(
-            label: viewName(l10n, ffi.connType),
-            icon: isFileView(ffi) ? LgIcons.files : LgIcons.monitor,
-            items: [
-              for (final kind in _kinds)
-                LgMenuItem(
-                  label: viewName(l10n, kind),
-                  checked: kind == ffi.connType,
-                  hint: _state(
+          builder: (context, _) {
+            // The ring and the reminder mark only while the device has a file view.
+            final files = views.where(isFileView).firstOrNull;
+            final summary = files == null
+                ? null
+                : fileTransferFor(files).jobs.summary;
+            final alert = (summary?.waitingConfirm ?? 0) > 0;
+            final name = viewName(l10n, ffi.connType);
+            // On the file view's own bar the name already says "文件传输": "文件传输，45%".
+            final mark = summary == null
+                ? null
+                : isFileView(ffi) && !alert && summary.progress != null
+                ? '${(summary.progress! * 100).floor()}%'
+                : transferMarkLabel(l10n, summary);
+            return LgToolbarMenuButton(
+              label: name,
+              icon: isFileView(ffi) ? LgIcons.files : LgIcons.monitor,
+              // The file view's title bar names the view it shows (`.vt .ti.on`); the remote
+              // desktop toolbar stays as it was.
+              highlighted: isFileView(ffi),
+              progress: summary?.progress,
+              alert: alert,
+              semanticLabel: mark == null
+                  ? null
+                  : l10n.ftViewSwitchLabel(name, mark),
+              items: [
+                for (final kind in _kinds)
+                  _item(
                     l10n,
+                    kind,
                     views.where((v) => v.connType == kind).firstOrNull,
                   ),
-                  onPressed: () => _show(kind),
-                ),
-            ],
-          ),
+              ],
+            );
+          },
         );
       },
     );

@@ -336,6 +336,7 @@ class _MainWindowState extends State<MainWindow>
       disconnected: disconnected,
       progress: summary?.progress,
       alert: (summary?.waitingConfirm ?? 0) > 0,
+      markLabel: summary == null ? null : transferMarkLabel(l10n, summary),
       tooltip: LgTabTip(
         name: name,
         id: formatPeerId(s.id),
