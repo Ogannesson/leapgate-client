@@ -160,6 +160,7 @@ class _FileBreadcrumbState extends State<FileBreadcrumb> {
       onRoot: () => _pane.openDirectory('/'),
       onSegment: (i) => _pane.openDirectory(crumbs[i + 1].path),
       onEdit: () => widget.editing.value = true,
+      editLabel: l10n.filesEditPath,
       rootMenu: _pane.isWindows
           ? [_DriveItems(pane: _pane, current: drive)]
           : [

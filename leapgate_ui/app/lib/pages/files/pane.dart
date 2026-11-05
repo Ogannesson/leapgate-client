@@ -342,6 +342,8 @@ class _FilePaneViewState extends State<FilePaneView> {
     }
     return LgReadingOverlay(
       reading: reading,
+      // The same folder read again keeps its rows as they are.
+      dim: reading && _pane.reading!.path != _pane.path,
       label: l10n.filesReading,
       child: FileList(
         pane: _pane,
@@ -364,26 +366,31 @@ class _FilePaneViewState extends State<FilePaneView> {
   }
 
   /// What a drag over the pane draws: the pane tinted with where the items go when they land on
-  /// its folder, a neutral frame when they can't land, nothing over a folder row (the row is the
-  /// target, `FileList`).
+  /// its folder, a neutral frame when they can't land. Over a folder row the row is the target
+  /// (`FileList`): rows from the other pane say it in the label that follows them, files from
+  /// the system's file manager in the pane's card, without the frame.
   Widget _dropZone(AppLocalizations l10n, Widget child) {
     return ValueListenableBuilder<FileDropSpot?>(
       valueListenable: widget.area.hover,
       child: child,
-      builder: (context, spot, child) => LgDropZone(
-        state: spot == null || spot.to != null
-            ? LgDropState.none
-            : spot.accepted
-            ? LgDropState.accept
-            : LgDropState.reject,
-        message: spot == null || !spot.accepted
-            ? null
-            : _pane.isLocal
-            ? l10n.filesDownloadTo(spot.folder)
-            : l10n.filesUploadTo(spot.folder),
-        messageIcon: _pane.isLocal ? LgIcons.download : LgIcons.upload,
-        child: child!,
-      ),
+      builder: (context, spot, child) {
+        final row = spot != null && spot.to != null;
+        return LgDropZone(
+          state: spot == null || (row && !spot.fromSystem)
+              ? LgDropState.none
+              : spot.accepted
+              ? LgDropState.accept
+              : LgDropState.reject,
+          framed: !row,
+          message: spot == null || !spot.accepted
+              ? null
+              : _pane.isLocal
+              ? l10n.filesDownloadTo(spot.folder)
+              : l10n.filesUploadTo(spot.folder),
+          messageIcon: _pane.isLocal ? LgIcons.download : LgIcons.upload,
+          child: child!,
+        );
+      },
     );
   }
 

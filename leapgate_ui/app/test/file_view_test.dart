@@ -316,6 +316,22 @@ void main() {
       remote.notifyListeners();
       await tester.pump();
       expect(find.text('正在读取…'), findsNothing);
+
+      // The same folder read again: the note, the rows as they were.
+      remote.reading = (
+        path: remote.path,
+        since: DateTime.now().subtract(const Duration(seconds: 1)),
+      );
+      remote.notifyListeners();
+      await tester.pump();
+      expect(find.text('正在读取…'), findsOneWidget);
+      final rows = find.ancestor(
+        of: _row('说明.txt'),
+        matching: find.byType(Opacity),
+      );
+      for (final o in tester.widgetList<Opacity>(rows)) {
+        expect(o.opacity, 1);
+      }
     });
 
     testWidgets(
@@ -408,7 +424,12 @@ void main() {
           ..path = '/home/u';
         final local = _local()
           ..path = r'C:\Users\u\Documents\工作\项目\二零二六年\十月\会议纪要\附件\最终版';
-        await _pump(tester, local: local, remote: remote);
+        await _pump(
+          tester,
+          local: local,
+          remote: remote,
+          size: const Size(960, 600),
+        );
         expect(_inPane('远程设备', find.text('/')), findsOneWidget);
         expect(_inPane('远程设备', find.text('home')), findsOneWidget);
         expect(_inPane('本机', find.text('…')), findsOneWidget);
@@ -441,6 +462,22 @@ void main() {
         expect(find.text(r'未找到“D:\没有”。'), findsOneWidget);
       },
     );
+  });
+
+  testWidgets('"编辑路径" opens the path field as a click on the blank does', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    await _pump(tester);
+    // A screen reader's "activate" on the remote pane's one (the second in reading order).
+    final edit = find.semantics.byLabel('编辑路径');
+    expect(edit, findsNWidgets(2));
+    tester.semantics.tap(edit.last);
+    semantics.dispose();
+    await tester.pump();
+    await tester.pump();
+    final field = _inPane('远程设备', find.byType(EditableText)).first;
+    expect(tester.widget<EditableText>(field).controller.text, r'D:\备份');
   });
 
   testWidgets(
@@ -563,10 +600,16 @@ void main() {
         await _systemDrag(tester, 'entered', _at(blank));
         expect(find.text('上传到“备份”'), findsOneWidget);
         expect(_dropState(tester, '远程设备'), LgDropState.accept);
-        // Over a folder row the row is the target, not the pane.
+        // Over a folder row the row is the target; the pane only says so, without its frame.
         await _systemDrag(tester, 'updated', _at(folder));
         expect(target(), isTrue);
-        expect(_dropState(tester, '远程设备'), LgDropState.none);
+        expect(find.text('上传到“旧照片”'), findsOneWidget);
+        expect(
+          tester
+              .widget<LgDropZone>(_inPane('远程设备', find.byType(LgDropZone)))
+              .framed,
+          isFalse,
+        );
         await _systemDrag(tester, 'updated', _at(local));
         expect(_dropState(tester, '本机'), LgDropState.reject);
         expect(_dropState(tester, '远程设备'), LgDropState.none);
@@ -575,6 +618,7 @@ void main() {
         expect(v.model.uploads.single.paths, [r'C:\a.txt', r'C:\文件夹']);
         expect(v.model.uploads.single.to, r'D:\备份\旧照片');
         expect(target(), isFalse);
+        expect(find.text('上传到“旧照片”'), findsNothing);
 
         await _systemDrag(tester, 'entered', _at(local));
         await _systemDrag(tester, 'performOperation', [r'C:\b.txt']);

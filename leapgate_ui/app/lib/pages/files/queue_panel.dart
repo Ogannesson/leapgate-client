@@ -229,7 +229,7 @@ class _Row extends StatelessWidget {
   /// What a transfer under way says after its percentage.
   List<String> _progressParts(AppLocalizations l10n) {
     final r = row;
-    String size(int b) => ftSize(l10n, b);
+    String size(int b) => formatFileSize(l10n, b);
     return [
       l10n.queueBytesOf(size(r.doneBytes), size(r.totalBytes)),
       if (r.fileCount > 1) l10n.queueFilesOf(r.fileIndex, r.fileCount),

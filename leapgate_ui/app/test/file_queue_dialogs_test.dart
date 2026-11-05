@@ -282,7 +282,7 @@ void main() {
       // A screen reader gets the row in one sentence.
       expect(
         tester.widget<LgQueueRow>(find.byType(LgQueueRow).first).semanticLabel,
-        '下载 照片，45%，610 MB / 1.32 GB，3 / 12 个文件，1.20 MB/s，剩余约 10 分钟',
+        '下载 照片，45%，610 MB / 1.32 GB，3 / 12 个文件，1.2 MB/s，剩余约 10 分钟',
       );
       expect(find.text('正在统计文件…'), findsOneWidget);
       expect(find.text('正在删除… 37 / 120 个文件'), findsOneWidget);
