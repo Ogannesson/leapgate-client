@@ -6,7 +6,6 @@ import 'package:flutter_hbb/leapgate/file_transfer/errors.dart';
 import 'package:flutter_hbb/leapgate/file_transfer/pane.dart';
 import 'package:flutter_hbb/models/file_model.dart';
 
-import '../../icons/lg_icon.dart';
 import '../../l10n/app_localizations.dart';
 import '../../widgets/lg_breadcrumb.dart';
 import '../../widgets/lg_file_marks.dart';
@@ -204,15 +203,18 @@ class _DriveItemsState extends State<_DriveItems> {
         if (snap.hasError) {
           return LgMenuItem(label: l10n.filesDrivesFailed, onPressed: null);
         }
-        final current = widget.current?.toLowerCase();
+        // A drive read from "/" is "/C:" and the open folder's is "C:\": compared without the
+        // slashes around them.
+        String key(String path) =>
+            path.replaceAll(RegExp(r'^[\\/]+|[\\/]+$'), '').toLowerCase();
+        final current = widget.current == null ? null : key(widget.current!);
         return Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             for (final d in snap.data!)
               LgMenuItem(
-                icon: LgIcons.drive,
                 label: d.name,
-                checked: d.path.toLowerCase() == current,
+                checked: key(d.path) == current,
                 onPressed: () => widget.pane.openDirectory(d.path),
               ),
           ],

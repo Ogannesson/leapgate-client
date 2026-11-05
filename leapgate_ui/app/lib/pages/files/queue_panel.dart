@@ -85,11 +85,14 @@ class _FileQueuePanelState extends State<FileQueuePanel> {
     });
   }
 
-  /// [limit] is the most the list gets in the space there is now; the drag starts from what
-  /// shows.
-  void _drag(double dy, double limit) => setState(() {
+  /// [limit] is the most the list gets in the space there is now, [content] what its rows need;
+  /// the drag starts from what shows. Pulled past the rows nothing more shows, and a taller
+  /// height saved before stays.
+  void _drag(double dy, double limit, double content) => setState(() {
     _dragged = true;
-    _height = (math.min(_height, limit) - dy).clamp(kQueueMinHeight, limit);
+    final kept = math.min(_height, limit);
+    final next = (math.min(kept, content) - dy).clamp(kQueueMinHeight, limit);
+    _height = next > content ? math.max(next, kept) : next;
   });
 
   /// The grip has no end-of-drag callback; the pointer that dragged it comes up inside the
@@ -145,12 +148,16 @@ class _FileQueuePanelState extends State<FileQueuePanel> {
     final s = jobs.summary;
     final open = _expanded && rows.isNotEmpty;
     final progress = rows.isEmpty ? null : s.progress;
-    final summary = LgQueuePanel.summaryHeight(LgTokens.of(context), width);
+    final t = LgTokens.of(context);
+    final summary = LgQueuePanel.summaryHeight(t, width);
+    final content = _contentHeight(t, width, rows);
     return Listener(
       onPointerUp: (_) => _endDrag(),
       onPointerCancel: (_) => _endDrag(),
       child: SizedBox(
-        height: summary + (open ? math.min(_height, limit) : 0),
+        // A row or two: the list as high as they are, not the saved height with space under them.
+        height:
+            summary + (open ? math.min(math.min(_height, limit), content) : 0),
         child: LgQueuePanel(
           title: l10n.queueTitle,
           expanded: open,
@@ -179,10 +186,34 @@ class _FileQueuePanelState extends State<FileQueuePanel> {
             for (final r in rows)
               _Row(row: r, jobs: jobs, connected: connected),
           ],
-          onResize: (dy) => _drag(dy, limit),
+          onResize: (dy) => _drag(dy, limit, content),
         ),
       ),
     );
+  }
+
+  /// The height `LgQueuePanel`'s open list needs for [rows] at [width]: its padding, each row
+  /// at its least height (`LgQueueRow`: a list row's when the path goes under the name, a
+  /// button's when beside it) and the notes open under a row. A status that wraps is not
+  /// counted; the list scrolls by that line.
+  static double _contentHeight(
+    LgTokens t,
+    double width,
+    List<FileJobRow> rows,
+  ) {
+    final s = t.sizes;
+    final row = width < kLgQueueStackBelow
+        ? math.max(s.tableRow, s.lh + s.lhS)
+        : s.button - 2;
+    var height = 2 * LgSpace.s1;
+    for (final r in rows) {
+      height += row;
+      if (r.notes.isNotEmpty) {
+        height +=
+            LgSpace.s1 + LgSpace.s2 + r.notes.length * (s.lhM + LgSpace.s1 + 2);
+      }
+    }
+    return height;
   }
 
   /// "‹n› 个进行中，‹m› 个排队"; paused and interrupted only once nothing else is left

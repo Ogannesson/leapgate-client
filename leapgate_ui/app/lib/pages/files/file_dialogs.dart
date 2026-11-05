@@ -136,8 +136,10 @@ class _OverwriteDialogState extends State<_OverwriteDialog> {
         ),
       },
       actions: [
+        // `.btn.txt.mv` of `d-rp-normal`: the way out of the whole transfer, plain text.
         LgDialogAction(
           label: l10n.ftOverwriteCancel,
+          kind: LgButtonKind.text,
           onPressed: () => _answer(OverwriteChoice.cancel),
         ),
         LgDialogAction(

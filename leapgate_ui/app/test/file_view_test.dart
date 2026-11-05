@@ -8,6 +8,7 @@ import 'package:flutter_hbb/leapgate/file_transfer/errors.dart';
 import 'package:flutter_hbb/leapgate/session.dart';
 import 'package:flutter_hbb/models/file_model.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:leapgate_ui/icons/lg_icon.dart';
 import 'package:leapgate_ui/l10n/app_localizations.dart';
 import 'package:leapgate_ui/l10n/app_localizations_zh.dart';
 import 'package:leapgate_ui/pages/files/breadcrumb.dart';
@@ -21,6 +22,7 @@ import 'package:leapgate_ui/widgets/lg_file_list.dart';
 import 'package:leapgate_ui/widgets/lg_file_marks.dart';
 import 'package:leapgate_ui/widgets/lg_file_pane.dart';
 import 'package:leapgate_ui/widgets/lg_menu.dart';
+import 'package:leapgate_ui/widgets/lg_menu_items.dart';
 import 'package:leapgate_ui/widgets/lg_tooltip.dart';
 
 import 'file_transfer_fakes.dart';
@@ -86,6 +88,7 @@ Future<_View> _pump(
   FakeFilePane? local,
   FakeFilePane? remote,
   bool connected = true,
+  bool connectedBefore = false,
   bool active = true,
   Size size = const Size(1280, 800),
 }) async {
@@ -96,6 +99,8 @@ Future<_View> _pump(
   ffi.ffiModel.pi
     ..platform = 'Windows'
     ..hostname = 'den-pc';
+  // The peer's information came: the session was connected (and lost it if not [connected]).
+  if (connectedBefore) ffi.ffiModel.pi.isSet.value = true;
   if (connected) ffi.connection.onPeerInfo();
   final model = FakeFileTransferModel(
     local: local ?? _local(),
@@ -291,22 +296,39 @@ void main() {
   );
 
   testWidgets(
-    'the connection panel covers the panes until connected (groups 1, 13)',
+    'the connection panel alone until connected (groups 1, 13)',
     (tester) async {
       final v = await _pump(tester, connected: false);
       final barrier = find.descendant(
         of: find.byType(FileView),
         matching: find.byType(ModalBarrier),
       );
-      // The panes dim under the panel.
+      // Never connected: no panes and no queue behind the panel (`d-cp-conn`, `d-cp-pw`).
+      expect(find.textContaining('正在连接'), findsWidgets);
+      expect(find.byType(FilePaneView), findsNothing);
+      expect(find.text('传输'), findsNothing);
+      expect(tester.widget<ModalBarrier>(barrier).color, isNull);
+      v.ffi.connection.onPeerInfo();
+      await tester.pump();
+      expect(find.textContaining('正在连接'), findsNothing);
+      expect(find.byType(FilePaneView), findsNWidgets(2));
+    },
+  );
+
+  testWidgets(
+    'connected before: the panel covers the dimmed panes (02 "连接过程和中断")',
+    (tester) async {
+      await _pump(tester, connected: false, connectedBefore: true);
+      final barrier = find.descendant(
+        of: find.byType(FileView),
+        matching: find.byType(ModalBarrier),
+      );
+      expect(find.byType(FilePaneView), findsNWidgets(2));
+      expect(find.text('传输'), findsOneWidget);
       expect(
         tester.widget<ModalBarrier>(barrier).color,
         LgTokens.of(tester.element(barrier)).colors.scrim,
       );
-      expect(find.textContaining('正在连接'), findsWidgets);
-      v.ffi.connection.onPeerInfo();
-      await tester.pump();
-      expect(find.textContaining('正在连接'), findsNothing);
     },
   );
 
@@ -456,6 +478,25 @@ void main() {
       expect(v.model.remote.calls, contains(r'openDirectory:C:\'));
     });
 
+    testWidgets('the root drop-down ticks the open folder\'s drive (`d-pa-dd`)', (
+      tester,
+    ) async {
+      // Drives read from "/" come as "/C:" (`PathUtil.join('/', 'C:')`).
+      final local = _local()
+        ..driveList = [
+          _e('C:', type: _drive, path: '/C:'),
+          _e('D:', type: _drive, path: '/D:'),
+        ];
+      await _pump(tester, local: local);
+      await tester.tap(_inPane('本机', _tip('此电脑')));
+      await tester.pump();
+      await tester.pump();
+      LgMenuItem item(String label) => tester.widget<LgMenuItem>(_menuItem(label));
+      expect(item('C:').checked, isTrue);
+      expect(item('D:').checked, isFalse);
+      expect(item('D:').icon, isNull);
+    });
+
     testWidgets(
       'a Linux device starts at "/"; a long path leaves out the middle',
       (tester) async {
@@ -585,6 +626,27 @@ void main() {
     await tester.pump();
     expect(find.text('显示隐藏的项目'), findsOneWidget);
     expect(find.text('取消选择'), findsOneWidget);
+    // As `d-more`: icons, the tick column, the sort rows in the menu itself.
+    expect(tester.widget<LgMenuItem>(_menuItem('全选')).icon, LgIcons.select);
+    expect(tester.widget<LgMenuItem>(_menuItem('取消选择')).icon, LgIcons.x);
+    expect(tester.widget<LgMenuItem>(_menuItem('显示隐藏的项目')).checked, false);
+    expect(
+      tester.getSemantics(_menuItem('显示隐藏的项目')),
+      matchesSemantics(
+        label: '显示隐藏的项目',
+        isButton: true,
+        hasCheckedState: true,
+        isEnabled: true,
+        hasEnabledState: true,
+        isFocusable: true,
+        hasTapAction: true,
+        hasFocusAction: true,
+      ),
+    );
+    expect(find.byType(LgSubmenu), findsNothing);
+    expect(find.widgetWithText(LgMenuGroup, '排序方式'), findsOneWidget);
+    expect(tester.widget<LgMenuItem>(_menuItem('名称')).checked, true);
+    expect(tester.widget<LgMenuItem>(_menuItem('大小')).checked, false);
     await tester.tap(find.text('显示隐藏的项目'));
     await tester.pump();
     expect(v.model.local.calls, contains('setShowHidden:true'));
@@ -598,6 +660,23 @@ void main() {
         expect(find.text(item), findsWidgets, reason: item);
       }
       expect(find.text('F2'), findsOneWidget);
+      // As `d-cx-folder`: an icon on each row, two dividers, "删除" in the danger style.
+      LgMenuItem item(String label) => tester.widget<LgMenuItem>(_menuItem(label));
+      expect(
+        [for (final l in ['打开', '上传', '重命名', '删除', '复制路径']) item(l).icon],
+        [
+          LgIcons.folder,
+          LgIcons.upload,
+          LgIcons.edit,
+          LgIcons.trash,
+          LgIcons.copy,
+        ],
+      );
+      expect(item('删除').danger, isTrue);
+      expect(item('重命名').danger, isFalse);
+      expect(find.byType(LgMenuDivider), findsNWidgets(2));
+      // Enter opens a folder; it sends only files.
+      expect(item('上传').shortcut, isNull);
       await tester.tap(_menuItem('重命名'));
       await tester.pump();
       expect(v.model.local.calls, contains('rename:照片'));
@@ -608,6 +687,9 @@ void main() {
       expect(find.text('新建文件夹'), findsWidgets);
       expect(find.text('Ctrl+Shift+N'), findsOneWidget);
       expect(find.text('刷新'), findsOneWidget);
+      expect(item('新建文件夹').icon, LgIcons.folderPlus);
+      expect(item('刷新').icon, LgIcons.refresh);
+      expect(item('显示隐藏的项目').checked, false);
     });
 
     testWidgets('several selected: "重命名" is greyed', (tester) async {
@@ -615,6 +697,8 @@ void main() {
       v.model.local.select(v.model.local.entries.sublist(1));
       await tester.pump();
       await _click(tester, _row('预算.xlsx'), buttons: kSecondaryMouseButton);
+      // Files only: Enter sends them (`d-cx-file`).
+      expect(tester.widget<LgMenuItem>(_menuItem('上传')).shortcut, 'Enter');
       await tester.tap(_menuItem('删除'));
       await tester.pump();
       expect(v.model.local.calls, ['delete:年度报告.docx,预算.xlsx']);
@@ -668,7 +752,8 @@ void main() {
     testWidgets('from the system while not connected: nothing is uploaded', (
       tester,
     ) async {
-      final v = await _pump(tester, connected: false);
+      // The connection lost: the panes are drawn under the panel.
+      final v = await _pump(tester, connected: false, connectedBefore: true);
       final blank = tester.getCenter(_inPane('远程设备', find.byType(ListView)));
       await _systemDrag(tester, 'entered', _at(blank));
       await _systemDrag(tester, 'performOperation', [r'C:\a.txt']);

@@ -261,24 +261,31 @@ class _FileViewState extends State<FileView> {
                   listenable: conn,
                   builder: (context, _) => Stack(
                     children: [
-                      Padding(
-                        padding: padding,
-                        child: Column(
-                          children: [
-                            Expanded(child: _panes(compact)),
-                            SizedBox(height: gap),
-                            FileQueuePanel(
-                              jobs: widget.model.jobs,
-                              connection: conn,
-                            ),
-                          ],
+                      // Not connected yet: the panel alone on the page (`d-cp-conn`,
+                      // `d-cp-pw`); the panes come with the peer's information.
+                      if (conn.stage == ConnStage.connected ||
+                          widget.ffi.ffiModel.pi.isSet.value)
+                        Padding(
+                          padding: padding,
+                          child: Column(
+                            children: [
+                              Expanded(child: _panes(compact)),
+                              SizedBox(height: gap),
+                              FileQueuePanel(
+                                jobs: widget.model.jobs,
+                                connection: conn,
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
                       if (conn.stage != ConnStage.connected) ...[
-                        // The panes dim under the panel (02 §2.2 "连接过程和中断").
+                        // Connected before: the panes dim under the panel (02 §2.2 "连接过程和
+                        // 中断").
                         ModalBarrier(
                           dismissible: false,
-                          color: t.colors.scrim,
+                          color: widget.ffi.ffiModel.pi.isSet.value
+                              ? t.colors.scrim
+                              : null,
                         ),
                         ConnectionPanel(
                           ffi: widget.ffi,
