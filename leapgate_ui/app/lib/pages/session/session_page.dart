@@ -40,7 +40,8 @@ class SessionPage extends StatefulWidget {
 
   final FFI ffi;
 
-  /// This tab is the selected one.
+  /// This tab is the selected one and this view the one it shows (M7a: a tab can also hold the
+  /// file transfer view, `shell/session_views.dart`).
   final bool active;
   final TabOverlays overlays;
 

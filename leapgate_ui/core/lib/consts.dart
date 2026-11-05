@@ -603,5 +603,7 @@ const String kOptionEnableHwcodec = "enable-hwcodec";
 // M7a core (coder A): the sort of each pane.
 
 // M7a shell (coder B): the queue panel.
+/// The queue panel's height in logical pixels while expanded, for every device.
+const String kOptionLeapgateFtQueueHeight = 'leapgate-ft-queue-height';
 
 // M7a panes (coder C): column widths, the divider between the panes.

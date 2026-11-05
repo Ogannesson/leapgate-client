@@ -86,7 +86,7 @@ void main() {
 
     test('Recent: rename, favorites, saved password, "Delete"', () {
       expect(menu(PeerCategory.recent), [
-        [PeerAction.remoteDesktop, PeerAction.viaRelay],
+        [PeerAction.remoteDesktop, PeerAction.fileTransfer, PeerAction.viaRelay],
         [PeerAction.alwaysRelay, PeerAction.createShortcut],
         [PeerAction.rename, PeerAction.addFavorite, PeerAction.clearPassword],
         [PeerAction.delete],
@@ -97,7 +97,7 @@ void main() {
 
     test('Favorites: no danger group, "Remove from favorites" does it', () {
       expect(menu(PeerCategory.favorites, favorite: true), [
-        [PeerAction.remoteDesktop, PeerAction.viaRelay],
+        [PeerAction.remoteDesktop, PeerAction.fileTransfer, PeerAction.viaRelay],
         [PeerAction.alwaysRelay, PeerAction.createShortcut],
         [
           PeerAction.rename,
@@ -109,7 +109,7 @@ void main() {
 
     test('LAN: wake-on-LAN and "Remove", no rename or saved password', () {
       expect(menu(PeerCategory.lan), [
-        [PeerAction.remoteDesktop, PeerAction.viaRelay],
+        [PeerAction.remoteDesktop, PeerAction.fileTransfer, PeerAction.viaRelay],
         [
           PeerAction.alwaysRelay,
           PeerAction.wakeOnLan,

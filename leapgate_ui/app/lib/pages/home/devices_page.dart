@@ -234,22 +234,31 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
 
   /// [category] is where the device is listed (the address book connects with its shared
   /// password); null for what was typed.
-  void _connect(String id, {bool relay = false, PeerCategory? category}) =>
-      connectPeer(id, category: category, relay: relay);
+  void _connect(String id,
+          {bool relay = false,
+          PeerCategory? category,
+          bool fileTransfer = false}) =>
+      fileTransfer
+          ? openFileTransferPeer(id, category: category)
+          : connectPeer(id, category: category, relay: relay);
 
   /// Enter, "Connect" and its menu: the current row.
-  void _runCurrent({bool relay = false}) {
+  void _runCurrent({bool relay = false, bool fileTransfer = false}) {
     final found = _search;
     final search = found?.search;
     final row = _currentRow(search);
     if (row == null) return;
     if (search == null) {
-      _connect(_rowIds(null)[row], relay: relay, category: _tabs.current);
+      _connect(_rowIds(null)[row],
+          relay: relay, category: _tabs.current, fileTransfer: fileTransfer);
     } else if (row == 0) {
-      _connect(_input, relay: relay);
+      _connect(_input, relay: relay, fileTransfer: fileTransfer);
     } else {
       final id = search.matches[row - 1].id;
-      _connect(id, relay: relay, category: found!.sources[id]);
+      _connect(id,
+          relay: relay,
+          category: found!.sources[id],
+          fileTransfer: fileTransfer);
     }
   }
 
@@ -394,6 +403,11 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
             checked: true,
             hint: l10n.connectBoxDefault,
             onPressed: _runCurrent,
+          ),
+          LgMenuItem(
+            label: l10n.ftFileTransfer,
+            checked: false,
+            onPressed: () => _runCurrent(fileTransfer: true),
           ),
           if (_exitTarget() case final exit?)
             LgMenuItem(
@@ -698,6 +712,10 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
                 LgMenuItem(
                   label: l10n.connectBoxRemoteDesktop,
                   onPressed: () => _connect(_input),
+                ),
+                LgMenuItem(
+                  label: l10n.ftFileTransfer,
+                  onPressed: () => _connect(_input, fileTransfer: true),
                 ),
                 if (isExitId(_input))
                   LgMenuItem(

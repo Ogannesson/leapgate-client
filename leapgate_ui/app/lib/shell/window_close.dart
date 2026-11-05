@@ -9,6 +9,7 @@ import '../l10n/app_localizations.dart';
 import '../widgets/lg_button.dart';
 import '../widgets/lg_feedback.dart';
 import '../widgets/lg_selection.dart';
+import 'session_views.dart';
 import 'tab_overlays.dart';
 
 // What closing the main window does (01 §2.1 "窗口关闭", §3.2 block G, §8.1 Q6). Asking
@@ -65,7 +66,10 @@ Future<void> closeMainWindow(TabOverlays overlays) async {
   );
   var action = plan.action;
   final exits = appCore.exitNodes.runningCount;
-  if (plan.askSessions || plan.askAction) {
+  // Unfinished transfers are asked about even after "Don't show again" (R2-Q28, 02 §3.1).
+  final transfers =
+      unfinishedTransfers(devices.expand(appCore.sessions.sessionsOf));
+  if (plan.askSessions || plan.askAction || transfers > 0) {
     final answer = await overlays.show<CloseAnswer>(
         kWindowScope,
         (context, close) => LgDialogScrim(
@@ -74,6 +78,7 @@ Future<void> closeMainWindow(TabOverlays overlays) async {
                 plan: plan,
                 sessions: devices.length,
                 exits: exits,
+                transfers: transfers,
                 onClose: close)));
     if (answer == null) return;
     if (plan.askAction) action = answer.action;
@@ -119,6 +124,7 @@ class CloseDialog extends StatefulWidget {
       required this.plan,
       required this.sessions,
       this.exits = 0,
+      this.transfers = 0,
       required this.onClose});
 
   final ClosePlan plan;
@@ -126,6 +132,9 @@ class CloseDialog extends StatefulWidget {
 
   /// Exit nodes running: they go on in the background, or stop with a remembered "Quit".
   final int exits;
+
+  /// Unfinished file transfers: one more sentence, beside the exit nodes' one.
+  final int transfers;
   final void Function(CloseAnswer? answer) onClose;
 
   @override
@@ -194,6 +203,7 @@ class _CloseDialogState extends State<CloseDialog> {
           // The "Quit" choice says so itself.
           else if (!plan.askAction)
             Text(l10n.exitCloseQuitBody(widget.exits)),
+        if (widget.transfers > 0) Text(l10n.ftUnfinished(widget.transfers)),
       ],
     );
   }

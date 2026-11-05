@@ -5,6 +5,8 @@ import 'package:flutter_hbb/leapgate/bridge.dart';
 import 'package:flutter_hbb/leapgate/prompts.dart';
 import 'package:flutter_hbb/leapgate/session.dart';
 
+import '../pages/files/file_dialogs.dart';
+
 /// The whole content area below the title bar: the window close confirmation covers every tab.
 const Object kWindowScope = #window;
 
@@ -52,9 +54,10 @@ class TabOverlays extends ChangeNotifier {
   }
 }
 
-/// [Prompter] over the tab overlays. M2a has nothing that asks yet: the file transfer prompts
-/// come with the file transfer view (M7a), so for now a question is logged and closed without
-/// an answer, which each prompt reads as its "closed" case.
+/// [Prompter] over the tab overlays: the file transfer view's questions over the session's tab
+/// (`pages/files/file_dialogs.dart`). A question without a dialog (the copied file model's own,
+/// until coder A's rewrite drops them) is logged and closed without an answer, which each prompt
+/// reads as its "closed" case.
 class ShellPrompter implements Prompter {
   ShellPrompter(this.overlays);
 
@@ -62,6 +65,7 @@ class ShellPrompter implements Prompter {
 
   @override
   Future<T?> ask<T>(Prompt<T> prompt, {FFI? session}) async {
+    if (isFilePrompt(prompt)) return showFilePrompt(overlays, session?.id, prompt);
     lgBind.leapgateLog(
         level: 2,
         msg: 'leapgate ui: no dialog yet for ${prompt.runtimeType}');

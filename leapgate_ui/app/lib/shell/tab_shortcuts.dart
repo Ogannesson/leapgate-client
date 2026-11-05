@@ -13,16 +13,21 @@ import 'package:flutter_hbb/models/shortcut_model.dart';
 /// model's for the Flutter input source) and runs [of]'s callbacks, registered with its other
 /// shortcuts. Everywhere else, the home tab and a session tab whose image does not have the
 /// keyboard, the keys reach the focus tree unhandled and are matched here.
+///
+/// "关闭标签" is matched here only when [onCloseTab] is set: in a view without session shortcuts
+/// (the file transfer view, 02 §2.2 "键盘").
 class TabShortcuts extends StatefulWidget {
   const TabShortcuts({
     super.key,
     required this.onNext,
     required this.onPrevious,
+    this.onCloseTab,
     required this.child,
   });
 
   final VoidCallback onNext;
   final VoidCallback onPrevious;
+  final VoidCallback? onCloseTab;
   final Widget child;
 
   /// The tab switch of the window, for the sessions' shortcuts; look it up when the keys are
@@ -66,6 +71,9 @@ class _TabShortcutsState extends State<TabShortcuts> {
         return KeyEventResult.handled;
       case kShortcutActionSwitchTabPrev:
         widget.onPrevious();
+        return KeyEventResult.handled;
+      case kShortcutActionCloseTab when widget.onCloseTab != null:
+        widget.onCloseTab!();
         return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;
