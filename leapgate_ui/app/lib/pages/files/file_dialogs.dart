@@ -10,6 +10,7 @@ import '../../shell/tab_overlays.dart';
 import '../../widgets/lg_banner.dart';
 import '../../widgets/lg_button.dart';
 import '../../widgets/lg_feedback.dart';
+import '../../widgets/lg_file_marks.dart';
 import '../../widgets/lg_form_dialog.dart';
 import '../../widgets/lg_selection.dart';
 import '../../widgets/lg_text_field.dart';
@@ -184,9 +185,8 @@ class _DeleteDialog extends StatelessWidget {
       builder: (context, state, _) => switch (state) {
         FtDeleteCounting() => LgConfirmDialog(
           title: l10n.ftDelete,
-          body: l10n.ftDeleteCounting,
-          bodyIcon: LgIcons.spinner,
           actions: [cancel],
+          children: [LgCountingNote(l10n.ftDeleteCounting)],
         ),
         FtDeleteReady(:final kind, :final name, :final items) =>
           LgConfirmDialog(

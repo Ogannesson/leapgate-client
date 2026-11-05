@@ -15,6 +15,8 @@ import 'package:leapgate_ui/shell/navigation.dart';
 import 'package:leapgate_ui/shell/session_views.dart';
 import 'package:leapgate_ui/theme/lg_theme.dart';
 import 'package:leapgate_ui/theme/lg_tokens.dart';
+import 'package:leapgate_ui/widgets/lg_menu.dart';
+import 'package:leapgate_ui/widgets/lg_session_toolbar.dart';
 import 'package:leapgate_ui/widgets/lg_status.dart';
 import 'package:leapgate_ui/widgets/lg_title_bar.dart';
 
@@ -145,12 +147,28 @@ void main() {
       final desk = await open(tester);
       await emit(tester, fakes, desk, connectionReady(direct: true));
       await emit(tester, fakes, desk, peerInfo());
+      // The remote desktop alone: the switch as before, no ring, no mark, not highlighted.
+      final alone = tester.widget<LgToolbarMenuButton>(
+        find.byWidgetPredicate(
+          (w) => w is LgToolbarMenuButton && w.label == '远程桌面',
+        ),
+      );
+      expect(alone.progress, isNull);
+      expect(alone.alert, false);
+      expect(alone.highlighted, false);
+      expect(alone.semanticLabel, isNull);
 
       await tester.tap(find.text('远程桌面').first);
       await tester.pumpAndSettle();
       expect(find.text('文件传输'), findsOneWidget);
       expect(find.text('未打开'), findsOneWidget);
-      expect(find.text('直连'), findsWidgets);
+      expect(
+        find.descendant(
+          of: find.widgetWithText(LgMenuItem, '远程桌面'),
+          matching: find.textContaining('直连', findRichText: true),
+        ),
+        findsOneWidget,
+      );
 
       await tester.tap(find.text('文件传输'));
       await tester.pump();
@@ -174,7 +192,26 @@ void main() {
       await tester.pump();
       await tester.tap(find.text('远程桌面').first);
       await settle(tester);
-      expect(find.text('正在连接… · 45%'), findsOneWidget);
+      final row = find.widgetWithText(LgMenuItem, '文件传输');
+      expect(
+        find.descendant(
+          of: row,
+          matching: find.textContaining('正在连接…', findRichText: true),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: row, matching: find.text('45%')),
+        findsOneWidget,
+      );
+      // The switch carries the ring and names it.
+      final button = tester.widget<LgToolbarMenuButton>(
+        find.byWidgetPredicate(
+          (w) => w is LgToolbarMenuButton && w.label == '远程桌面',
+        ),
+      );
+      expect(button.progress, 0.45);
+      expect(button.semanticLabel, '远程桌面，文件传输 45%');
     },
   );
 
@@ -187,6 +224,7 @@ void main() {
       await emit(tester, fakes, desk, connectionReady(direct: true));
       await emit(tester, fakes, desk, peerInfo());
       expect(titleBar(tester).sessions.single.status, isA<LgRouteMark>());
+      expect(titleBar(tester).sessions.single.markLabel, isNull);
 
       // The file transfer still connecting is the worst.
       final files = await openFiles(tester);
@@ -199,9 +237,12 @@ void main() {
       await tester.pump();
       tab = titleBar(tester).sessions.single;
       expect(tab.progress, 0.3);
+      expect(tab.markLabel, '文件传输 30%');
       jobsOf(files).set(unfinished: 1, progress: 0.3, waiting: 1);
       await tester.pump();
-      expect(titleBar(tester).sessions.single.alert, true);
+      tab = titleBar(tester).sessions.single;
+      expect(tab.alert, true);
+      expect(tab.markLabel, '有替换确认等待处理');
     },
   );
 

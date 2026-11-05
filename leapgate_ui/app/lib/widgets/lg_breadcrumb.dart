@@ -15,8 +15,12 @@ import 'lg_tooltip.dart';
 /// The folders from the root to the open one. Every one but the last can be clicked; the root has
 /// a drop-down of its own ("此电脑" lists the drives). When the row is too narrow the middle ones
 /// fold into "…", whose tooltip lists them, and the root, the first folder (the drive) and the
-/// last ones always stay in view (02 §2.2 block C). A click on the empty part of the row is
-/// [onEdit]: the caller swaps in an [LgPathInput].
+/// last ones stay in view (02 §2.2 block C). Narrower still, the drive folds too; narrower than
+/// that the root keeps only [rootIcon] and its arrow (its name goes into the tooltip, the name
+/// a screen reader reads stays), and then the "…" goes as well, the open folder's tooltip
+/// listing the whole path; the open folder is cut with "…" to the room that is left. Nothing
+/// overflows at any width. A click on the empty part of the row is [onEdit]: the caller swaps in
+/// an [LgPathInput].
 class LgBreadcrumb extends StatelessWidget {
   const LgBreadcrumb({
     super.key,
@@ -28,6 +32,8 @@ class LgBreadcrumb extends StatelessWidget {
     required this.onEdit,
     this.rootMenu = const [],
     this.separatorLabel = '›',
+    this.rootIcon = LgIcons.monitor,
+    this.editLabel,
   });
 
   /// "此电脑" on Windows, "/" elsewhere.
@@ -51,6 +57,13 @@ class LgBreadcrumb extends StatelessWidget {
   /// What joins the folders in the tooltip of the "…".
   final String separatorLabel;
 
+  /// What the root is drawn as when the row has no room for its name.
+  final LgIcons rootIcon;
+
+  /// "编辑路径": with it the empty part of the row is a button of its own to a screen reader (a
+  /// press on it is [onEdit], as it is for the pointer). Without it the row reads as it did.
+  final String? editLabel;
+
   static const double _crumbPad = LgSpace.s2;
   static const double _gap = LgSpace.s1;
   static const double _chevron = 14;
@@ -61,7 +74,7 @@ class LgBreadcrumb extends StatelessWidget {
 
   /// The least room the open folder is left before the drive is folded as well; a longer name
   /// ends in "…" and shows whole in its tooltip.
-  static const double _minLast = 64;
+  static const double _minLast = 48;
 
   @override
   Widget build(BuildContext context) {
@@ -74,6 +87,8 @@ class LgBreadcrumb extends StatelessWidget {
       explicitChildNodes: true,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
+        // With a name of its own the empty part is a node by itself, the row is not one too.
+        excludeFromSemantics: editLabel != null,
         onTap: onEdit,
         child: Container(
           height: t.sizes.button,
@@ -95,17 +110,17 @@ class LgBreadcrumb extends StatelessWidget {
                 return w;
               }
 
-              // The root chip: padding, the name, and with a menu the gap and the arrow.
-              final rootWidth =
-                  width(rootLabel, style) +
-                  _crumbPad * 2 +
-                  (rootMenu.isEmpty ? 0 : _gap + _chevron);
+              // The root chip: padding, the name, and with a menu the gap and the arrow; or the
+              // icon in the name's place.
+              final arrow = rootMenu.isEmpty ? 0.0 : _gap + _chevron;
+              final rootFull = width(rootLabel, style) + _crumbPad * 2 + arrow;
+              final rootIconWidth = t.sizes.icon + _crumbPad * 2 + arrow;
               final n = segments.length;
               // The folded folders are `from..to`, none when `to < from`. The first folder (the
               // drive) stays until the middle ones are all folded and it still does not fit.
               // Widths of everything that stays: the root, then a separator and a folder for
-              // each one kept; the "…" and its separator when some are folded.
-              double total(int from, int to) {
+              // each one kept; the "…" and its separator when some are folded ([dots]).
+              double total(double rootWidth, int from, int to, bool dots) {
                 var w = rootWidth;
                 for (var i = 0; i < n; i++) {
                   if (i >= from && i <= to) continue;
@@ -116,7 +131,7 @@ class LgBreadcrumb extends StatelessWidget {
                       width(segments[i], i == n - 1 ? bold : style) +
                       _crumbPad * 2;
                 }
-                if (to >= from) {
+                if (dots && to >= from) {
                   w +=
                       _gap +
                       _chevron +
@@ -132,9 +147,9 @@ class LgBreadcrumb extends StatelessWidget {
               final lastWidth = n == 0
                   ? 0.0
                   : width(segments[n - 1], bold) + _crumbPad * 2;
-              bool fits(int from, int to) {
-                var w = total(from, to);
-                if (from == 1 && to >= n - 2) {
+              bool fits(double rootWidth, int from, int to, bool dots) {
+                var w = total(rootWidth, from, to, dots);
+                if (to >= n - 2) {
                   w -= (lastWidth - _minLast).clamp(0.0, lastWidth);
                 }
                 return w <= constraints.maxWidth + _tolerance;
@@ -142,7 +157,7 @@ class LgBreadcrumb extends StatelessWidget {
 
               var from = 1;
               var to = 0;
-              while (!fits(from, to)) {
+              while (!fits(rootFull, from, to, true)) {
                 if (to < n - 2) {
                   to++;
                 } else if (from == 1 && n >= 2) {
@@ -151,12 +166,33 @@ class LgBreadcrumb extends StatelessWidget {
                   break;
                 }
               }
+              // Nothing is left to fold and it is still too wide: the root gives up its name,
+              // then the "…" goes (the open folder's tooltip carries the path instead).
+              var rootAsIcon = false;
+              var dots = true;
+              if (!fits(rootFull, from, to, true)) {
+                rootAsIcon = true;
+                dots = fits(rootIconWidth, from, to, true);
+              }
+              final hidden = to >= from;
+              // What cannot give way is the root, the separators and the padding of the last
+              // folder; when even that is wider than the row the row is clipped, not overflowed.
+              final rowWidth = total(
+                rootAsIcon ? rootIconWidth : rootFull,
+                from,
+                to,
+                dots,
+              );
+              final clip =
+                  rowWidth - (n == 0 ? 0 : lastWidth - _crumbPad * 2) >
+                  constraints.maxWidth;
               final children = <Widget>[
                 _Root(
                   label: rootLabel,
                   tip: rootTip,
                   menu: rootMenu,
                   onPressed: onRoot,
+                  icon: rootAsIcon ? rootIcon : null,
                 ),
               ];
               void add(Widget w) {
@@ -168,7 +204,7 @@ class LgBreadcrumb extends StatelessWidget {
               }
 
               for (var i = 0; i < n; i++) {
-                if (to >= from && i == from) {
+                if (dots && hidden && i == from) {
                   add(
                     _Folded(
                       tip: [
@@ -179,9 +215,15 @@ class LgBreadcrumb extends StatelessWidget {
                 }
                 if (i >= from && i <= to) continue;
                 final last = i == n - 1;
+                final current = _Current(
+                  segments[i],
+                  pathTip: last && hidden && !dots
+                      ? [rootLabel, ...segments].join(' $separatorLabel ')
+                      : null,
+                );
                 add(
                   last
-                      ? Flexible(child: _Current(segments[i]))
+                      ? (clip ? current : Flexible(child: current))
                       : _Crumb(
                           label: segments[i],
                           onPressed: () => onSegment(i),
@@ -189,7 +231,35 @@ class LgBreadcrumb extends StatelessWidget {
                 );
               }
               // Only the last folder gives way when nothing is folded any more.
-              return Row(children: children);
+              final row = clip
+                  ? ClipRect(
+                      child: OverflowBox(
+                        alignment: Alignment.centerLeft,
+                        minWidth: 0,
+                        maxWidth: double.infinity,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: children,
+                        ),
+                      ),
+                    )
+                  : Row(children: children);
+              if (editLabel == null) return row;
+              return Stack(
+                fit: StackFit.passthrough,
+                children: [
+                  Positioned.fill(
+                    child: Semantics(
+                      button: true,
+                      label: editLabel,
+                      onTap: onEdit,
+                      excludeSemantics: true,
+                      child: const SizedBox.expand(),
+                    ),
+                  ),
+                  row,
+                ],
+              );
             },
           ),
         ),
@@ -206,6 +276,7 @@ class _Root extends StatelessWidget {
     required this.tip,
     required this.menu,
     required this.onPressed,
+    this.icon,
   });
 
   final String label;
@@ -213,23 +284,29 @@ class _Root extends StatelessWidget {
   final List<Widget> menu;
   final VoidCallback onPressed;
 
+  /// Drawn in the name's place when the row has no room for the name; the name is then the
+  /// tooltip, and still the name a screen reader reads.
+  final LgIcons? icon;
+
   @override
   Widget build(BuildContext context) {
     final t = LgTokens.of(context);
     final c = t.colors;
+    // One chip in the mockup: 8, the name, 4, the arrow, 8. The name takes the left 8 and the
+    // arrow button the rest.
+    final name = _Crumb(
+      label: label,
+      onPressed: onPressed,
+      icon: icon,
+      padding: EdgeInsets.only(
+        left: LgSpace.s2,
+        right: menu.isEmpty ? LgSpace.s2 : 0,
+      ),
+    );
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        // One chip in the mockup: 8, the name, 4, the arrow, 8. The name takes the left 8 and
-        // the arrow button the rest.
-        _Crumb(
-          label: label,
-          onPressed: onPressed,
-          padding: EdgeInsets.only(
-            left: LgSpace.s2,
-            right: menu.isEmpty ? LgSpace.s2 : 0,
-          ),
-        ),
+        icon == null ? name : LgTooltip(message: label, child: name),
         if (menu.isNotEmpty)
           LgMenuAnchor(
             items: menu,
@@ -273,11 +350,15 @@ class _Crumb extends StatelessWidget {
     required this.label,
     required this.onPressed,
     this.padding = const EdgeInsets.symmetric(horizontal: LgSpace.s2),
+    this.icon,
   });
 
   final String label;
   final VoidCallback onPressed;
   final EdgeInsets padding;
+
+  /// Drawn instead of the label (which stays the name for a screen reader).
+  final LgIcons? icon;
 
   @override
   Widget build(BuildContext context) {
@@ -298,12 +379,14 @@ class _Crumb extends StatelessWidget {
             borderRadius: _crumbRadius,
           ),
           child: ExcludeSemantics(
-            child: Text(
-              label,
-              maxLines: 1,
-              softWrap: false,
-              style: t.textM.copyWith(color: c.text),
-            ),
+            child: icon != null
+                ? LgIcon(icon!, size: t.sizes.icon, color: c.text)
+                : Text(
+                    label,
+                    maxLines: 1,
+                    softWrap: false,
+                    style: t.textM.copyWith(color: c.text),
+                  ),
           ),
         ),
       ),
@@ -314,24 +397,41 @@ class _Crumb extends StatelessWidget {
 /// The folder that is open: bold, not a button, and the one that is cut with "…" when the row is
 /// too narrow for even the root and the drive and it.
 class _Current extends StatelessWidget {
-  const _Current(this.label);
+  const _Current(this.label, {this.pathTip});
 
   final String label;
+
+  /// The whole path, when the folders before this one are not shown at all: the tooltip lists
+  /// them (the name of this one is cut to what is left, and is in the path too).
+  final String? pathTip;
 
   @override
   Widget build(BuildContext context) {
     final t = LgTokens.of(context);
+    final style = t.textM.copyWith(
+      color: t.colors.text,
+      fontWeight: FontWeight.w700,
+    );
     return Container(
       height: t.sizes.button - LgSpace.s2,
       padding: const EdgeInsets.symmetric(horizontal: LgSpace.s2),
       alignment: Alignment.centerLeft,
-      child: LgEllipsisText(
-        label,
-        style: t.textM.copyWith(
-          color: t.colors.text,
-          fontWeight: FontWeight.w700,
-        ),
-      ),
+      child: pathTip == null
+          ? LgEllipsisText(label, style: style)
+          : Semantics(
+              label: label,
+              excludeSemantics: true,
+              child: LgTooltip(
+                message: pathTip!,
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  softWrap: false,
+                  overflow: TextOverflow.ellipsis,
+                  style: style,
+                ),
+              ),
+            ),
     );
   }
 }
