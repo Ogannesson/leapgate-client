@@ -31,7 +31,7 @@ class LgFormDialog extends StatelessWidget {
   const LgFormDialog({
     super.key,
     required this.title,
-    required this.icon,
+    this.icon,
     required this.actions,
     this.note,
     this.banner,
@@ -43,8 +43,10 @@ class LgFormDialog extends StatelessWidget {
   /// "登录", "添加设备", "修改标签颜色".
   final String title;
 
-  /// In the tile before the title.
-  final LgIcons icon;
+  /// In the tile before the title. Without it there is no tile and the title
+  /// starts at the left edge ("新建文件夹", "重命名": a question about a name
+  /// needs no picture).
+  final LgIcons? icon;
 
   /// A small line under the head ("添加到：家里的电脑").
   final String? note;
@@ -94,17 +96,19 @@ class LgFormDialog extends StatelessWidget {
                   children: [
                     Row(
                       children: [
-                        Container(
-                          width: 44,
-                          height: 44,
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(
-                            color: c.bg,
-                            borderRadius: BorderRadius.circular(LgRadius.r12),
+                        if (icon != null) ...[
+                          Container(
+                            width: 44,
+                            height: 44,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: c.bg,
+                              borderRadius: BorderRadius.circular(LgRadius.r12),
+                            ),
+                            child: LgIcon(icon!, size: 24, color: c.text2),
                           ),
-                          child: LgIcon(icon, size: 24, color: c.text2),
-                        ),
-                        const SizedBox(width: 14),
+                          const SizedBox(width: 14),
+                        ],
                         Expanded(
                           child: Semantics(
                             header: true,
