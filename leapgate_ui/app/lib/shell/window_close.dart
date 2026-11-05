@@ -57,9 +57,11 @@ typedef CloseAnswer = ({
 /// Runs the close flow; the window stays when the user cancels.
 Future<void> closeMainWindow(TabOverlays overlays) async {
   final local = appCore.options.local;
-  final devices = appCore.sessions.devices;
+  // Sessions are views, as the tab's own confirmation counts them.
+  final views =
+      appCore.sessions.devices.expand(appCore.sessions.sessionsOf).toList();
   final plan = planWindowClose(
-    sessions: devices.length,
+    sessions: views.length,
     installed: appCore.options.isInstalled,
     confirmSessions: local.getBool(kOptionEnableConfirmClosingTabs),
     remembered: rememberedCloseAction(local),
@@ -67,8 +69,7 @@ Future<void> closeMainWindow(TabOverlays overlays) async {
   var action = plan.action;
   final exits = appCore.exitNodes.runningCount;
   // Unfinished transfers are asked about even after "Don't show again" (R2-Q28, 02 §3.1).
-  final transfers =
-      unfinishedTransfers(devices.expand(appCore.sessions.sessionsOf));
+  final transfers = unfinishedTransfers(views);
   if (plan.askSessions || plan.askAction || transfers > 0) {
     final answer = await overlays.show<CloseAnswer>(
         kWindowScope,
@@ -76,7 +77,7 @@ Future<void> closeMainWindow(TabOverlays overlays) async {
             onEscape: () => close(null),
             child: CloseDialog(
                 plan: plan,
-                sessions: devices.length,
+                sessions: views.length,
                 exits: exits,
                 transfers: transfers,
                 onClose: close)));
@@ -196,7 +197,8 @@ class _CloseDialogState extends State<CloseDialog> {
             label: l10n.closingDontShowAgain,
             onChanged: (v) => setState(() => _dontShowAgain = v),
           ),
-        if (widget.exits > 0)
+        // Not in the question asked only for the transfers (02 §3.1).
+        if (widget.exits > 0 && (plan.askSessions || plan.askAction))
           if ((plan.askAction ? _action : plan.action) ==
               CloseAction.background)
             Text(l10n.exitCloseBackground(widget.exits))
@@ -204,6 +206,12 @@ class _CloseDialogState extends State<CloseDialog> {
           else if (!plan.askAction)
             Text(l10n.exitCloseQuitBody(widget.exits)),
         if (widget.transfers > 0) Text(l10n.ftUnfinished(widget.transfers)),
+        // Quitting with exit nodes is asked anyway (M5-11): one dialog with both sentences.
+        if (widget.exits > 0 &&
+            !plan.askSessions &&
+            !plan.askAction &&
+            plan.action == CloseAction.exit)
+          Text(l10n.exitCloseQuitBody(widget.exits)),
       ],
     );
   }

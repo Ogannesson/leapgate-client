@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/consts.dart';
@@ -171,6 +173,36 @@ void main() {
       await tester.tap(_button('继续').first);
       expect(jobs.calls, ['resumeAll', 'resume:1']);
     });
+
+    testWidgets(
+      'the list is at most six tenths of the height given; the saved one stays',
+      (tester) async {
+        fakes.bind.localOptions[kOptionLeapgateFtQueueHeight] = '600';
+        final jobs = _Jobs()
+          ..rows = [
+            _row(
+              1,
+              FileJobStatus.inProgress,
+              done: 1,
+              total: 2,
+              remaining: const Duration(seconds: 3580),
+            ),
+          ]
+          ..summary = _summary(active: 1);
+        await tester.pumpWidget(
+          _app(
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: SizedBox(height: 400, child: FileQueuePanel(jobs: jobs)),
+            ),
+          ),
+        );
+        expect(tester.getSize(find.byType(ListView)).height, 240);
+        expect(fakes.bind.localOptions[kOptionLeapgateFtQueueHeight], '600');
+        // 59 minutes 40 seconds is about an hour, not "60 分钟".
+        expect(find.textContaining('剩余约 1 小时 0 分钟'), findsOneWidget);
+      },
+    );
 
     testWidgets('not connected: no "继续" and no "全部继续"', (tester) async {
       final session = appCore.sessions.open('100200300', ConnType.fileTransfer);
@@ -464,6 +496,31 @@ void main() {
         expect(await answer, '资料');
       },
     );
+
+    testWidgets('new folder: Esc waits while the name is submitted', (
+      tester,
+    ) async {
+      await pumpScope(tester);
+      final made = Completer<FtError?>();
+      final answer = showFilePrompt(
+        overlays,
+        'dev',
+        FtNewFolderPrompt(
+          isWindows: true,
+          check: (_) => null,
+          submit: (_) => made.future,
+        ),
+      );
+      await tester.pump();
+      await tester.tap(find.text('新建'));
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
+      expect(find.text('新建'), findsOneWidget);
+      made.complete(null);
+      await tester.pump();
+      expect(await answer, '新建文件夹');
+    });
 
     testWidgets(
       'rename: the name up to its extension selected, unchanged is off',

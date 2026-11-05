@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/session.dart';
 
@@ -86,46 +87,59 @@ void showSessionTabMenu(
   overlay.insert(entry);
 }
 
-/// The tab's "×" and "关闭" (01 §3.2 block G, 02 §3.1): one view closes at once, unless it is a
-/// file transfer view with unfinished transfers, which asks as its "断开" does; several views
-/// ask "断开与此设备的 ‹N› 个会话？", with the transfers sentence when there are any. [show]
-/// selects the tab first, so the question is seen over it.
+/// The tabs whose [closeSessionTab] question is open, by their first view: another "×" meanwhile
+/// does nothing. Keyed by the session rather than the device ID, so a question whose tab went
+/// away unanswered (its overlay goes with it) cannot block a later tab of the same device.
+final _asking = Expando<bool>();
+
+/// The tab's "×", "关闭" and the "关闭标签" shortcut (01 §3.2 block G, 02 §3.1): one view closes
+/// at once, unless it is a file transfer view with unfinished transfers, which asks as its "断开"
+/// does; several views ask "断开与此设备的 ‹N› 个会话？", with the transfers sentence when there
+/// are any. With "关闭窗口前确认断开会话" off, several views close at once too, and unfinished
+/// transfers still ask, with that sentence alone. [show] selects the tab first, so the question
+/// is seen over it.
 Future<void> closeSessionTab(TabOverlays overlays, String device,
     {required VoidCallback show}) async {
   final views = appCore.sessions.sessionsOf(device);
-  if (views.isEmpty) return;
-  if (views.length == 1) {
-    if (isFileView(views.single) && unfinishedTransfers(views) > 0) {
-      show();
-      return disconnectFileView(views.single);
-    }
-    return appCore.sessions.closeDevice(device);
-  }
-  show();
+  if (views.isEmpty || views.any((v) => _asking[v] == true)) return;
   final unfinished = unfinishedTransfers(views);
-  final ok = await overlays.show<bool>(
-    device,
-    (context, close) {
-      final l10n = AppLocalizations.of(context)!;
-      return LgDialogScrim(
-        onEscape: () => close(null),
-        child: LgConfirmDialog(
-          title: l10n.tabCloseViewsTitle(views.length),
-          body: unfinished > 0 ? l10n.ftUnfinished(unfinished) : null,
-          actions: [
-            LgDialogAction(label: l10n.connCancel, onPressed: () => close(null)),
-            LgDialogAction(
-              label: l10n.closingDisconnect,
-              kind: LgButtonKind.primary,
-              isDefault: true,
-              onPressed: () => close(true),
-            ),
-          ],
-        ),
-      );
-    },
-  );
-  if (ok == true) await appCore.sessions.closeDevice(device);
+  final confirm = views.length > 1 &&
+      appCore.options.local.getBool(kOptionEnableConfirmClosingTabs);
+  if (!confirm && unfinished == 0) return appCore.sessions.closeDevice(device);
+  show();
+  final asking = views.first;
+  _asking[asking] = true;
+  try {
+    if (views.length == 1) return await disconnectFileView(views.single);
+    final ok = await overlays.show<bool>(
+      device,
+      (context, close) {
+        final l10n = AppLocalizations.of(context)!;
+        return LgDialogScrim(
+          onEscape: () => close(null),
+          child: LgConfirmDialog(
+            title: confirm
+                ? l10n.tabCloseViewsTitle(views.length)
+                : l10n.tabCloseTitle,
+            body: unfinished > 0 ? l10n.ftUnfinished(unfinished) : null,
+            actions: [
+              LgDialogAction(
+                  label: l10n.connCancel, onPressed: () => close(null)),
+              LgDialogAction(
+                label: confirm ? l10n.closingDisconnect : l10n.closingClose,
+                kind: LgButtonKind.primary,
+                isDefault: true,
+                onPressed: () => close(true),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    if (ok == true) await appCore.sessions.closeDevice(device);
+  } finally {
+    _asking[asking] = null;
+  }
 }
 
 /// "关闭其他标签": asks once, over the whole window, only when the other tabs have unfinished

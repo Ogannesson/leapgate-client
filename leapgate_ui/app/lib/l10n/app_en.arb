@@ -1492,5 +1492,6 @@
   "queueBytes": "{count, plural, =1{1 byte} other{{count} bytes}}",
   "@queueBytes": {"placeholders": {"count": {"type": "int"}}},
   "queueResizeHandle": "Resize the transfers panel",
-  "connCloseRemoteDesktop": "Close remote desktop"
+  "connCloseRemoteDesktop": "Close remote desktop",
+  "tabCloseTitle": "Close the tab?"
 }

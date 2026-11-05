@@ -41,9 +41,10 @@ Future<T?> showFilePrompt<T>(
     } else if (p is FtDeletePrompt) {
       dialog = _DeleteDialog(prompt: p, close: answer);
     } else if (p is FtNewFolderPrompt) {
-      dialog = _NameDialog.newFolder(p, close: answer);
+      // These draw their own layer: Esc waits while the name is being submitted.
+      return _NameDialog.newFolder(p, close: answer);
     } else if (p is FtRenamePrompt) {
-      dialog = _NameDialog.rename(p, close: answer);
+      return _NameDialog.rename(p, close: answer);
     } else {
       dialog = _DisconnectDialog(
         unfinished: (p as FtDisconnectPrompt).unfinished,
@@ -392,7 +393,7 @@ class _NameDialogState extends State<_NameDialog> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final failure = _failure;
-    return LgFormDialog(
+    final dialog = LgFormDialog(
       title: widget.title(l10n),
       icon: LgIcons.folderPlus,
       banner: failure == null
@@ -439,6 +440,10 @@ class _NameDialogState extends State<_NameDialog> {
           ),
         ),
       ],
+    );
+    return LgDialogScrim(
+      onEscape: _busy ? null : () => widget.close(null),
+      child: dialog,
     );
   }
 }

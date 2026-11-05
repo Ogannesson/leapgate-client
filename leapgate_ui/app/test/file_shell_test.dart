@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
+import 'package:flutter_hbb/leapgate/exit_api.dart';
 import 'package:flutter_hbb/leapgate/file_transfer/pane.dart';
 import 'package:flutter_hbb/leapgate/session.dart';
+import 'package:flutter_hbb/models/state_model.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:leapgate_ui/icons/lg_icon.dart';
 import 'package:leapgate_ui/l10n/app_localizations.dart';
@@ -16,6 +18,7 @@ import 'package:leapgate_ui/theme/lg_tokens.dart';
 import 'package:leapgate_ui/widgets/lg_status.dart';
 import 'package:leapgate_ui/widgets/lg_title_bar.dart';
 
+import '../../core/test/exit_fakes.dart' show FakeExitApi;
 import 'file_transfer_fakes.dart';
 import 'session_fakes.dart';
 
@@ -202,7 +205,102 @@ void main() {
     },
   );
 
+  testMainWindow(
+    'the remote desktop in full screen closes beside a file view: full screen ends',
+    (tester) async {
+      await pumpMainWindow(tester);
+      final desk = await open(tester);
+      await openFiles(tester);
+      mainNavigation.connect(_id);
+      await tester.pump();
+      stateGlobal.setFullscreen(true);
+      await tester.pump();
+
+      await appCore.sessions.close(desk);
+      await tester.pump();
+      expect(stateGlobal.fullscreen.value, false);
+      expect(tester.widget<FileView>(find.byType(FileView)).active, true);
+    },
+  );
+
   group('closing (01 §3.2 block G, 02 §3.1)', () {
+    testMainWindow('a second "×" while the tab asks opens no second question', (
+      tester,
+    ) async {
+      await pumpMainWindow(tester);
+      await open(tester);
+      await openFiles(tester);
+      titleBar(tester).onCloseTab(1);
+      await settle(tester);
+      titleBar(tester).onCloseTab(1);
+      await settle(tester);
+      expect(find.text('断开与此设备的 2 个会话？'), findsOneWidget);
+    });
+
+    testMainWindow(
+      '"关闭窗口前确认断开会话" off: two views close at once; unfinished transfers still ask, '
+      'that sentence alone',
+      (tester) async {
+        fakes.bind.localOptions[kOptionEnableConfirmClosingTabs] = 'N';
+        await pumpMainWindow(tester);
+        await open(tester);
+        await openFiles(tester);
+        titleBar(tester).onCloseTab(1);
+        await settle(tester);
+        expect(appCore.sessions.devices, isEmpty);
+
+        await open(tester);
+        final files = await openFiles(tester);
+        jobsOf(files).set(unfinished: 1);
+        titleBar(tester).onCloseTab(1);
+        await settle(tester);
+        expect(find.text('关闭标签？'), findsOneWidget);
+        expect(find.text('断开与此设备的 2 个会话？'), findsNothing);
+        expect(find.text('1 个传输尚未完成，下次打开文件传输时可继续。'), findsOneWidget);
+        await tester.tap(find.text('关闭').last);
+        await settle(tester);
+        expect(appCore.sessions.devices, isEmpty);
+      },
+    );
+
+    testMainWindow('the window close counts sessions, not tabs', (
+      tester,
+    ) async {
+      fakes.bind.installed = true;
+      await pumpMainWindow(tester);
+      await open(tester);
+      await openFiles(tester);
+      await tester.tap(
+        find.byWidgetPredicate(
+          (w) => w is LgIcon && w.icon == LgIcons.windowClose,
+        ),
+      );
+      await settle(tester);
+      expect(find.text('断开全部 2 个会话并关闭窗口？'), findsOneWidget);
+    });
+
+    testMainWindow(
+      'asked only for the transfers, installed: no exit node sentence',
+      (tester) async {
+        fakes.bind.installed = true;
+        fakes.bind.localOptions[kOptionEnableConfirmClosingTabs] = 'N';
+        exitApi = FakeExitApi();
+        appCore.exitNodes.use('700800900');
+        await pumpMainWindow(tester);
+        final files = await openFiles(tester);
+        jobsOf(files).set(unfinished: 1);
+        await tester.tap(
+          find.byWidgetPredicate(
+            (w) => w is LgIcon && w.icon == LgIcons.windowClose,
+          ),
+        );
+        await settle(tester);
+        expect(find.text('关闭窗口？'), findsOneWidget);
+        expect(find.text('1 个传输尚未完成，下次打开文件传输时可继续。'), findsOneWidget);
+        expect(find.text('1 个出口将在后台继续运行。'), findsNothing);
+      },
+    );
+
     testMainWindow(
       '"×" with two views asks once, with the transfers sentence',
       (tester) async {

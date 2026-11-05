@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
@@ -79,10 +81,12 @@ class _FileQueuePanelState extends State<FileQueuePanel> {
     });
   }
 
-  void _drag(DragUpdateDetails d) => setState(
-    () => _height = (_height - d.delta.dy).clamp(
+  /// [limit] is the most the list gets in the space there is now; the drag starts from what
+  /// shows.
+  void _drag(DragUpdateDetails d, double limit) => setState(
+    () => _height = (math.min(_height, limit) - d.delta.dy).clamp(
       kQueueMinHeight,
-      kQueueMaxHeight,
+      limit,
     ),
   );
 
@@ -94,15 +98,27 @@ class _FileQueuePanelState extends State<FileQueuePanel> {
   @override
   Widget build(BuildContext context) {
     final connection = widget.connection;
-    if (connection == null) return _build(context, true);
-    return ListenableBuilder(
-      listenable: connection,
-      builder: (context, _) =>
-          _build(context, connection.stage == ConnStage.connected),
+    // Six tenths of the height the panel is given, at most kQueueMaxHeight; the saved height
+    // stays as it is.
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final limit = math.max(
+          kQueueMinHeight,
+          constraints.maxHeight.isFinite
+              ? math.min(constraints.maxHeight * 0.6, kQueueMaxHeight)
+              : kQueueMaxHeight,
+        );
+        if (connection == null) return _build(context, true, limit);
+        return ListenableBuilder(
+          listenable: connection,
+          builder: (context, _) =>
+              _build(context, connection.stage == ConnStage.connected, limit),
+        );
+      },
     );
   }
 
-  Widget _build(BuildContext context, bool connected) {
+  Widget _build(BuildContext context, bool connected, double limit) {
     final t = LgTokens.of(context);
     final c = t.colors;
     final l10n = AppLocalizations.of(context)!;
@@ -124,7 +140,7 @@ class _FileQueuePanelState extends State<FileQueuePanel> {
                 cursor: SystemMouseCursors.resizeRow,
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
-                  onVerticalDragUpdate: _drag,
+                  onVerticalDragUpdate: (d) => _drag(d, limit),
                   onVerticalDragEnd: (_) => _saveHeight(),
                   child: const SizedBox(height: LgSpace.s2),
                 ),
@@ -140,7 +156,7 @@ class _FileQueuePanelState extends State<FileQueuePanel> {
           ),
           if (open)
             SizedBox(
-              height: _height,
+              height: math.min(_height, limit),
               child: ListView(
                 children: [
                   for (final r in rows)
@@ -270,8 +286,10 @@ class _Row extends StatelessWidget {
   String _remaining(AppLocalizations l10n, Duration d) {
     final s = d.inSeconds;
     if (s < 60) return l10n.queueRemainingSeconds(s < 1 ? 1 : s);
-    if (s < 3600) return l10n.queueRemainingMinutes((s / 60).round());
-    return l10n.queueRemainingHours(d.inHours, d.inMinutes % 60);
+    // Rounded to minutes first, so 59.5 minutes and more read as an hour.
+    final minutes = (s / 60).round();
+    if (minutes < 60) return l10n.queueRemainingMinutes(minutes);
+    return l10n.queueRemainingHours(minutes ~/ 60, minutes % 60);
   }
 
   /// What the row says, and the text behind it on hover (the original error text).

@@ -139,6 +139,14 @@ class _MainWindowState extends State<MainWindow>
     _current.removeWhere((d, _) => !devices.contains(d));
     _devices = devices;
     _keepDisplayOn();
+    // The remote desktop in full screen closed and its tab now shows the file view, which has
+    // no way out of full screen.
+    if (selected != null &&
+        selected == _selected &&
+        stateGlobal.fullscreen.isTrue &&
+        isFileView(_currentOf(selected))) {
+      stateGlobal.setFullscreen(false);
+    }
     _select(selected);
   }
 

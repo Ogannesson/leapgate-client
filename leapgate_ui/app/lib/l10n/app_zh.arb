@@ -1297,5 +1297,6 @@
   "queueNoteResumeUnsupported": "远程设备的版本不支持断点续传，当前文件将从头传输。",
   "queueBytes": "{count} 字节",
   "queueResizeHandle": "调整传输面板的高度",
-  "connCloseRemoteDesktop": "关闭远程桌面"
+  "connCloseRemoteDesktop": "关闭远程桌面",
+  "tabCloseTitle": "关闭标签？"
 }
