@@ -365,3 +365,40 @@ pub fn leapgate_lang_changed(lang: String) {
         lang,
     }));
 }
+
+// ---- File transfer (M7a) ----
+// `LEAPGATE.md` §10.15.
+
+/// FT2: `{"reason":…,"args":[…],"text":…}` for a `job_error`'s `err`. `peer_platform` is the
+/// peer info's `platform`; `side` is `local`, `remote` or `unknown` (a transfer).
+pub fn leapgate_ft_reason(text: String, peer_platform: String, side: String) -> SyncReturn<String> {
+    let reason = leapgate::ft_reason::classify(&text, &peer_platform, &side);
+    SyncReturn(serde_json::to_string(&reason).unwrap_or_default())
+}
+
+/// M7a-4: as upstream's `session_read_local_dir_sync`, but a failure is
+/// `{"error":…,"reason":…}` instead of an empty string.
+pub fn leapgate_ft_read_local_dir(path: String, show_hidden: bool) -> SyncReturn<String> {
+    SyncReturn(crate::leapgate_hooks::file_transfer::read_local_dir(
+        path,
+        show_hidden,
+    ))
+}
+
+/// M7a-3: removes a link itself, not what it points to. The result comes as the session's
+/// `job_done` / `job_error` with `id` = `act_id` and `file_num` 0.
+pub fn leapgate_ft_remove_link(
+    session_id: SessionID,
+    act_id: i32,
+    path: String,
+    is_remote: bool,
+    is_dir_link: bool,
+) {
+    crate::leapgate_hooks::file_transfer::remove_link(
+        session_id,
+        act_id,
+        path,
+        is_remote,
+        is_dir_link,
+    );
+}
