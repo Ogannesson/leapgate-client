@@ -4,7 +4,6 @@
 // leftover of an unfinished transfer). The rows draw and report clicks; selecting, sorting and
 // opening are the caller's.
 
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../icons/lg_icon.dart';
@@ -281,10 +280,11 @@ class _ResizeHandleState extends State<_ResizeHandle> {
 /// that is [selected] is tinted, one that has the keyboard ([focused]) has the accent frame inside
 /// it, and a folder row over which files are dragged ([dropTarget]) has both.
 ///
-/// A press with the primary button calls [onTap] at once (a selection must not wait to see
-/// whether a second click follows); a second press within the double-click time and nearby also
-/// calls [onDoubleTap]. The caller reads the Ctrl and Shift keys in [onTap]. The right button
-/// calls [onSecondaryTap] with the pointer's place on the screen.
+/// The row does not handle the pointer. Presses, the Ctrl and Shift keys, double clicks, the
+/// right button and drags are the page's, taken once for the whole list (a selection must not
+/// wait to see whether a second click follows, and the rows must not each keep a clock of their
+/// own). What the row keeps is the hover tint, which is drawing, and the one action a screen
+/// reader has for it: [onSemanticTap], "activate", which the page treats as a click on this row.
 class LgFileRow extends StatefulWidget {
   const LgFileRow({
     super.key,
@@ -301,9 +301,7 @@ class LgFileRow extends StatefulWidget {
     this.focused = false,
     this.dropTarget = false,
     this.topDivider = false,
-    this.onTap,
-    this.onDoubleTap,
-    this.onSecondaryTap,
+    this.onSemanticTap,
     this.semanticLabel,
   });
 
@@ -323,11 +321,13 @@ class LgFileRow extends StatefulWidget {
   /// The thin line between this row and the one above: drawn where neither row is tinted (the
   /// caller knows its neighbour; a row that is hovered or tinted leaves it out itself).
   final bool topDivider;
-  final VoidCallback? onTap;
-  final VoidCallback? onDoubleTap;
-  final ValueChanged<Offset>? onSecondaryTap;
 
-  /// What a screen reader says; the name and the three cells, one per line, when null.
+  /// The "activate" action of a screen reader (the semantics' tap); null leaves the row with
+  /// none.
+  final VoidCallback? onSemanticTap;
+
+  /// What a screen reader says; the name, the date modified, the type and the size, one per
+  /// line (the ones that are there), when null.
   final String? semanticLabel;
 
   @override
@@ -336,32 +336,6 @@ class LgFileRow extends StatefulWidget {
 
 class _LgFileRowState extends State<LgFileRow> {
   bool _hovered = false;
-  Duration? _lastDown;
-  Offset? _lastPosition;
-
-  void _onDown(PointerDownEvent e) {
-    if (e.kind == PointerDeviceKind.mouse &&
-        e.buttons == kSecondaryMouseButton) {
-      widget.onSecondaryTap?.call(e.position);
-      return;
-    }
-    // The middle button and the like do nothing.
-    if (e.kind == PointerDeviceKind.mouse && e.buttons != kPrimaryButton) {
-      return;
-    }
-    final again =
-        _lastDown != null &&
-        e.timeStamp - _lastDown! <= kDoubleTapTimeout &&
-        (e.position - _lastPosition!).distance <= kDoubleTapSlop;
-    widget.onTap?.call();
-    if (again) {
-      widget.onDoubleTap?.call();
-      _lastDown = null;
-    } else {
-      _lastDown = e.timeStamp;
-      _lastPosition = e.position;
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -440,59 +414,60 @@ class _LgFileRowState extends State<LgFileRow> {
     );
     final label =
         w.semanticLabel ??
-        [w.name, w.type, w.size].where((s) => s.isNotEmpty).join('\n');
+        [
+          w.name,
+          w.modified,
+          w.type,
+          w.size,
+        ].where((s) => s.isNotEmpty).join('\n');
     return Semantics(
       container: true,
       excludeSemantics: true,
       label: label,
       button: true,
       selected: w.selected,
-      onTap: w.onTap,
+      onTap: w.onSemanticTap,
       child: MouseRegion(
         cursor: SystemMouseCursors.basic,
         onEnter: (_) => setState(() => _hovered = true),
         onExit: (_) => setState(() => _hovered = false),
-        child: Listener(
-          behavior: HitTestBehavior.opaque,
-          onPointerDown: _onDown,
-          child: Container(
-            height: t.sizes.tableRow,
-            padding: const EdgeInsets.symmetric(horizontal: LgSpace.s2),
-            decoration: BoxDecoration(color: bg, borderRadius: radius),
-            foregroundDecoration: w.focused || drop
-                ? BoxDecoration(
-                    borderRadius: radius,
-                    border: Border.all(color: c.accent, width: 2),
-                  )
-                : null,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                if (w.topDivider && !tinted && !hovered)
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    top: 0,
-                    height: 1,
-                    child: ColoredBox(color: c.border),
-                  ),
-                Center(
-                  child: Row(
-                    children: [
-                      Expanded(child: name),
-                      const SizedBox(width: _gap),
-                      cell(w.modified, w.columns.modified),
-                      if (w.showType) ...[
-                        const SizedBox(width: _gap),
-                        cell(w.type, w.columns.type),
-                      ],
-                      const SizedBox(width: _gap),
-                      cell(w.size, w.columns.size, end: true),
-                    ],
-                  ),
+        child: Container(
+          height: t.sizes.tableRow,
+          padding: const EdgeInsets.symmetric(horizontal: LgSpace.s2),
+          decoration: BoxDecoration(color: bg, borderRadius: radius),
+          foregroundDecoration: w.focused || drop
+              ? BoxDecoration(
+                  borderRadius: radius,
+                  border: Border.all(color: c.accent, width: 2),
+                )
+              : null,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              if (w.topDivider && !tinted && !hovered)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  top: 0,
+                  height: 1,
+                  child: ColoredBox(color: c.border),
                 ),
-              ],
-            ),
+              Center(
+                child: Row(
+                  children: [
+                    Expanded(child: name),
+                    const SizedBox(width: _gap),
+                    cell(w.modified, w.columns.modified),
+                    if (w.showType) ...[
+                      const SizedBox(width: _gap),
+                      cell(w.type, w.columns.type),
+                    ],
+                    const SizedBox(width: _gap),
+                    cell(w.size, w.columns.size, end: true),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
       ),

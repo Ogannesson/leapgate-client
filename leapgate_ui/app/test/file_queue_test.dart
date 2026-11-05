@@ -33,9 +33,10 @@ LgQueueRow _row({
   bool detailsOpen = false,
   VoidCallback? onToggleDetails,
   List<LgQueueDetail> details = const [],
+  String semanticLabel = '下载 照片，45%，610 MB / 1.32 GB',
 }) => LgQueueRow(
   direction: LgQueueDirection.download,
-  directionLabel: '下载',
+  semanticLabel: semanticLabel,
   name: name,
   path: r'D:\备份\照片 → C:\Users\zhangsan\Pictures',
   state: state,
@@ -74,8 +75,22 @@ LgQueuePanel _panel({
   actions: actions,
   rows: rows,
   onResize: onResize,
-  resizeLabel: '调整传输面板的高度',
 );
+
+/// Every node of the semantics tree under [root].
+List<SemanticsNode> _nodes(SemanticsNode root) {
+  final all = <SemanticsNode>[];
+  void visit(SemanticsNode n) {
+    all.add(n);
+    n.visitChildren((c) {
+      visit(c);
+      return true;
+    });
+  }
+
+  visit(root);
+  return all;
+}
 
 Widget _sized(Widget panel, {double width = 1240, double height = 300}) =>
     SizedBox(width: width, height: height, child: panel);
@@ -194,22 +209,18 @@ void main() {
       expect(find.byType(LgQueueBar), findsNothing);
     });
 
-    testWidgets('the summary is a live region', (tester) async {
-      final handle = tester.ensureSemantics();
-      await _pump(tester, _sized(_panel(), height: 60));
-      var live = false;
-      void visit(SemanticsNode n) {
-        if (n.getSemanticsData().flagsCollection.isLiveRegion) live = true;
-        n.visitChildren((c) {
-          visit(c);
-          return true;
-        });
-      }
-
-      visit(tester.getSemantics(find.byType(LgQueuePanel)));
-      expect(live, isTrue);
-      handle.dispose();
-    });
+    testWidgets(
+      'the summary is not a live region: it changes with every update of the numbers',
+      (tester) async {
+        final handle = tester.ensureSemantics();
+        await _pump(tester, _sized(_panel(), height: 60));
+        final live = _nodes(
+          tester.getSemantics(find.byType(LgQueuePanel)),
+        ).where((n) => n.getSemanticsData().flagsCollection.isLiveRegion);
+        expect(live, isEmpty);
+        handle.dispose();
+      },
+    );
   });
 
   group('panel', () {
@@ -276,15 +287,22 @@ void main() {
       },
     );
 
-    testWidgets('the grip is named', (tester) async {
-      final handle = tester.ensureSemantics();
-      await _pump(
-        tester,
-        _sized(_panel(onToggle: () {}, rows: [_row()], onResize: (_) {})),
-      );
-      expect(find.bySemanticsLabel('调整传输面板的高度'), findsOneWidget);
-      handle.dispose();
-    });
+    testWidgets(
+      'the grip is for the pointer: a screen reader does not meet it',
+      (tester) async {
+        final handle = tester.ensureSemantics();
+        int count() =>
+            _nodes(tester.getSemantics(find.byType(LgQueuePanel))).length;
+        await _pump(tester, _sized(_panel(onToggle: () {}, rows: [_row()])));
+        final without = count();
+        await _pump(
+          tester,
+          _sized(_panel(onToggle: () {}, rows: [_row()], onResize: (_) {})),
+        );
+        expect(count(), without);
+        handle.dispose();
+      },
+    );
 
     testWidgets('a row is separated from the one above it', (tester) async {
       await _pump(
@@ -467,27 +485,38 @@ void main() {
       expect(log, ['pause', 'cancel']);
     });
 
-    testWidgets('a row says its direction, name and state to a screen reader', (
-      tester,
-    ) async {
-      final handle = tester.ensureSemantics();
-      await _pump(
-        tester,
-        _rowIn(
-          _row(
-            actions: [
-              LgQueueAction(icon: LgIcons.x, label: '取消', onPressed: () {}),
-            ],
+    testWidgets(
+      'a row is read as the caller\'s one sentence, once; the buttons keep their names',
+      (tester) async {
+        final handle = tester.ensureSemantics();
+        await _pump(
+          tester,
+          _rowIn(
+            _row(
+              semanticLabel: '下载 照片，45%，610 MB / 1.32 GB，3 / 12 个文件',
+              actions: [
+                LgQueueAction(icon: LgIcons.x, label: '取消', onPressed: () {}),
+              ],
+            ),
           ),
-        ),
-      );
-      expect(
-        find.bySemanticsLabel(RegExp('下载 照片.*45%.*610 MB')),
-        findsOneWidget,
-      );
-      expect(find.bySemanticsLabel('取消'), findsOneWidget);
-      handle.dispose();
-    });
+        );
+        expect(
+          find.bySemanticsLabel('下载 照片，45%，610 MB / 1.32 GB，3 / 12 个文件'),
+          findsOneWidget,
+        );
+        expect(find.bySemanticsLabel('取消'), findsOneWidget);
+        // Nothing else in the row repeats what the sentence says: not the name, not the path,
+        // not the status line.
+        final labels = [
+          for (final n in _nodes(tester.getSemantics(find.byType(LgQueueRow))))
+            n.label,
+        ].where((l) => l.isNotEmpty).toList();
+        expect(labels.where((l) => l.contains('照片')), hasLength(1));
+        expect(labels.where((l) => l.contains('610 MB')), hasLength(1));
+        expect(labels.where((l) => l.contains(r'C:\Users')), isEmpty);
+        handle.dispose();
+      },
+    );
   });
 
   group('details', () {
@@ -606,6 +635,30 @@ void main() {
         expect(path.top, greaterThanOrEqualTo(name.bottom - 1));
       },
     );
+
+    testWidgets('a row of the narrow layout is as high as a list row, no more', (
+      tester,
+    ) async {
+      // `.qn` has no padding of its own: the name and the path (22 + 18) fit in the 44 of the row.
+      await _pump(
+        tester,
+        _sized(
+          _panel(onToggle: () {}, rows: [_row()]),
+          width: 936,
+          height: 200,
+        ),
+      );
+      expect(tester.getSize(find.byType(LgQueueRow)).height, 44);
+      await _pump(
+        tester,
+        _sized(
+          _panel(onToggle: () {}, rows: [_row()]),
+          width: 1240,
+          height: 200,
+        ),
+      );
+      expect(tester.getSize(find.byType(LgQueueRow)).height, 34);
+    });
 
     testWidgets('the summary is lower on a wide panel than on a narrow one', (
       tester,

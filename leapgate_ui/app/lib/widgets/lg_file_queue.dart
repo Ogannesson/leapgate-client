@@ -121,7 +121,7 @@ class LgQueueRow extends StatelessWidget {
   const LgQueueRow({
     super.key,
     required this.direction,
-    required this.directionLabel,
+    required this.semanticLabel,
     required this.name,
     required this.path,
     required this.state,
@@ -137,8 +137,12 @@ class LgQueueRow extends StatelessWidget {
 
   final LgQueueDirection direction;
 
-  /// "上传" / "下载" / "删除", for a screen reader.
-  final String directionLabel;
+  /// What a screen reader says of the row as a whole, in one sentence ("下载 照片，45%，610 MB /
+  /// 1.32 GB，3 / 12 个文件"): the caller writes it, the order of the words and the punctuation
+  /// are the language's. The name, the path and the status in the row are left out of the
+  /// reading so as not to say it twice; the buttons at the end and the details link keep their
+  /// own names.
+  final String semanticLabel;
   final String name;
   final String path;
   final LgQueueState state;
@@ -216,7 +220,7 @@ class LgQueueRow extends StatelessWidget {
           ),
           const SizedBox(width: LgSpace.s2),
         ],
-        Flexible(child: statusText),
+        Flexible(child: ExcludeSemantics(child: statusText)),
         if (state == LgQueueState.doneWithIssues && detailsLabel != null) ...[
           const SizedBox(width: LgSpace.s4),
           _DetailsLink(
@@ -241,10 +245,9 @@ class LgQueueRow extends StatelessWidget {
       overflow: TextOverflow.ellipsis,
       style: (stacked ? t.textS : small).copyWith(color: c.text2),
     );
-    final identity = stacked
-        ? Padding(
-            padding: const EdgeInsets.symmetric(vertical: LgSpace.s1),
-            child: Column(
+    final identity = ExcludeSemantics(
+      child: stacked
+          ? Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -257,18 +260,19 @@ class LgQueueRow extends StatelessWidget {
                 ),
                 pathText,
               ],
+            )
+          : Row(
+              children: [
+                SizedBox(width: 116, child: nameText),
+                const SizedBox(width: LgSpace.s3),
+                Expanded(child: pathText),
+              ],
             ),
-          )
-        : Row(
-            children: [
-              SizedBox(width: 116, child: nameText),
-              const SizedBox(width: LgSpace.s3),
-              Expanded(child: pathText),
-            ],
-          );
+    );
     final row = Container(
       constraints: BoxConstraints(
-        minHeight: stacked ? t.sizes.tableRow + LgSpace.s1 : t.sizes.button - 2,
+        // `.frame.mn .qr` is as high as a list row; the wide row is a button's height.
+        minHeight: stacked ? t.sizes.tableRow : t.sizes.button - 2,
       ),
       padding: const EdgeInsets.only(left: LgSpace.s3, right: LgSpace.s2),
       child: Row(
@@ -308,8 +312,7 @@ class LgQueueRow extends StatelessWidget {
     return Semantics(
       container: true,
       explicitChildNodes: true,
-      label:
-          '$directionLabel $name, ${statusLead == null ? '' : '$statusLead, '}$status',
+      label: semanticLabel,
       child: body,
     );
   }
@@ -507,7 +510,6 @@ class LgQueuePanel extends StatelessWidget {
     this.actions = const [],
     this.rows = const [],
     this.onResize,
-    this.resizeLabel,
   });
 
   /// "传输".
@@ -527,10 +529,10 @@ class LgQueuePanel extends StatelessWidget {
 
   /// [LgQueueRow]s; the panel adds the dividers and sets how their path is laid out.
   final List<Widget> rows;
-  final ValueChanged<double>? onResize;
 
-  /// The grip's name ("调整传输面板的高度").
-  final String? resizeLabel;
+  /// Drags the panel's height by its grip. The grip is for the pointer only: it has no name and no
+  /// place in the semantics tree, a screen reader has nothing to do with it.
+  final ValueChanged<double>? onResize;
 
   /// The height of the summary line in this mode and at this width.
   static double summaryHeight(LgTokens t, double width) =>
@@ -598,7 +600,7 @@ class LgQueuePanel extends StatelessWidget {
                     right: 0,
                     top: 0,
                     height: LgSpace.s3,
-                    child: _Grip(label: resizeLabel, onDelta: onResize!),
+                    child: _Grip(onDelta: onResize!),
                   ),
               ],
             );
@@ -610,16 +612,14 @@ class LgQueuePanel extends StatelessWidget {
 }
 
 class _Grip extends StatelessWidget {
-  const _Grip({required this.label, required this.onDelta});
+  const _Grip({required this.onDelta});
 
-  final String? label;
   final ValueChanged<double> onDelta;
 
   @override
   Widget build(BuildContext context) {
     final c = LgTokens.of(context).colors;
-    return Semantics(
-      label: label,
+    return ExcludeSemantics(
       child: MouseRegion(
         cursor: SystemMouseCursors.resizeUpDown,
         child: GestureDetector(
@@ -712,7 +712,6 @@ class _Summary extends StatelessWidget {
     return Semantics(
       container: true,
       explicitChildNodes: true,
-      liveRegion: true,
       child: Container(
         height: height,
         padding: const EdgeInsets.only(left: LgSpace.s5, right: LgSpace.s2),

@@ -956,7 +956,8 @@ class LgEmptyState extends StatelessWidget {
     this.onSecondaryAction,
     this.iconBackground,
   }) : assert(actionLabel == null || onAction != null),
-       assert(secondaryActionLabel == null || onSecondaryAction != null);
+       assert(secondaryActionLabel == null || onSecondaryAction != null),
+       assert(secondaryActionLabel == null || actionLabel != null);
 
   final String text;
   final LgIcons icon;
@@ -1011,24 +1012,36 @@ class LgEmptyState extends StatelessWidget {
           ),
           if (actionLabel != null) ...[
             const SizedBox(height: LgSpace.s3),
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (secondaryActionLabel != null) ...[
-                  LgButton(
-                    label: secondaryActionLabel!,
-                    onPressed: onSecondaryAction,
+            // One way out stands in the column as it always did (a label wider than the box is
+            // cut by the button). Two share a row, and each may be cut.
+            if (secondaryActionLabel == null)
+              LgButton(
+                label: actionLabel!,
+                icon: actionIcon,
+                kind: LgButtonKind.primary,
+                onPressed: onAction,
+              )
+            else
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Flexible(
+                    child: LgButton(
+                      label: secondaryActionLabel!,
+                      onPressed: onSecondaryAction,
+                    ),
                   ),
                   const SizedBox(width: LgSpace.s2),
+                  Flexible(
+                    child: LgButton(
+                      label: actionLabel!,
+                      icon: actionIcon,
+                      kind: LgButtonKind.primary,
+                      onPressed: onAction,
+                    ),
+                  ),
                 ],
-                LgButton(
-                  label: actionLabel!,
-                  icon: actionIcon,
-                  kind: LgButtonKind.primary,
-                  onPressed: onAction,
-                ),
-              ],
-            ),
+              ),
           ],
         ],
       ),

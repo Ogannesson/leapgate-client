@@ -12,8 +12,10 @@ import '../icons/lg_icon.dart';
 import '../theme/lg_tokens.dart';
 import 'lg_button.dart';
 import 'lg_device.dart';
+import 'lg_pressable.dart';
 import 'lg_status.dart';
 import 'lg_text_field.dart';
+import 'lg_tooltip.dart';
 
 /// The ground of a pane: the surface colour, 16 px corners, nothing may spill out of them.
 class LgFilePaneFrame extends StatelessWidget {
@@ -49,6 +51,8 @@ class LgFilePaneFrame extends StatelessWidget {
 /// ("本机", "远程设备") and the device after it in the quieter text. The remote device's tile is on
 /// its identity colour (the same as its card, 01 §2.4), the local one on a neutral ground. While
 /// the remote platform is not known ([platform] null) the tile is left out and nothing turns.
+/// With [compact] the line is the navigation height instead of the input height (the smallest
+/// window, `.frame.mn .ch`); the page passes it by the height of the window.
 class LgFilePaneHeader extends StatelessWidget {
   const LgFilePaneHeader({
     super.key,
@@ -56,6 +60,7 @@ class LgFilePaneHeader extends StatelessWidget {
     required this.subtitle,
     this.platform,
     this.remoteId,
+    this.compact = false,
   });
 
   final String title;
@@ -67,6 +72,7 @@ class LgFilePaneHeader extends StatelessWidget {
   /// The remote device's ID, which gives the tile its identity colour; null draws the neutral
   /// tile of the local pane.
   final String? remoteId;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -74,7 +80,7 @@ class LgFilePaneHeader extends StatelessWidget {
     final c = t.colors;
     final platform = this.platform;
     return Container(
-      height: t.sizes.main,
+      height: compact ? math.min(t.sizes.main, t.sizes.nav) : t.sizes.main,
       padding: const EdgeInsets.symmetric(horizontal: LgSpace.s4),
       child: Row(
         children: [
@@ -132,7 +138,8 @@ class LgFileNavButton {
 }
 
 /// The navigation row (`.nv`): back, up and home, then [path] (an `LgBreadcrumb` or an
-/// `LgPathInput`) taking the room, then refresh.
+/// `LgPathInput`) taking the room, then refresh. With [compact] it is 4 px lower (the smallest
+/// window, `.frame.mn .nv`); the page passes it by the height of the window.
 class LgFileNavRow extends StatelessWidget {
   const LgFileNavRow({
     super.key,
@@ -141,6 +148,7 @@ class LgFileNavRow extends StatelessWidget {
     required this.home,
     required this.refresh,
     required this.path,
+    this.compact = false,
   });
 
   final LgFileNavButton back;
@@ -148,6 +156,7 @@ class LgFileNavRow extends StatelessWidget {
   final LgFileNavButton home;
   final LgFileNavButton refresh;
   final Widget path;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -155,7 +164,7 @@ class LgFileNavRow extends StatelessWidget {
     Widget button(LgFileNavButton b) =>
         LgIconButton(icon: b.icon, label: b.label, onPressed: b.onPressed);
     return Container(
-      height: t.sizes.button + LgSpace.s2,
+      height: t.sizes.button + (compact ? LgSpace.s1 : LgSpace.s2),
       padding: const EdgeInsets.symmetric(horizontal: LgSpace.s3),
       child: Row(
         children: [
@@ -175,10 +184,16 @@ class LgFileNavRow extends StatelessWidget {
 }
 
 /// The row of actions (`.op`): the [actions] (the transfer button, the list tools, the "⋯" menu)
-/// from the left, the search of the folder at the right. A pane narrower than [collapseBelow]
-/// cannot hold both: the search is then an icon, and a press on it lets the field take the whole
-/// row until focus leaves it empty. [LgFileOpRowState.openSearch] does the same from the
-/// keyboard (Ctrl+F) when the field is not on show.
+/// from the left, the search of the folder at the right.
+///
+/// A pane narrower than [collapseBelow] cannot hold both: the search is then an icon, and
+/// [searchOpen] says whether the field has taken the whole row. The page owns that flag: a press
+/// on the icon calls [onSearchOpenChanged] with true, and the field gets the keyboard when the
+/// flag comes on, however it came on (Ctrl+F sets it too); focus leaving the field calls it with
+/// false, whether the field is empty or not. What was typed stays in [searchController], so the
+/// icon is drawn in the accent colour while the folder is filtered, and opens on the same text.
+/// In a wide pane the field is always there and [searchOpen] means nothing. The field is one
+/// widget kept alive across the two layouts, so crossing the width loses no typing.
 class LgFileOpRow extends StatefulWidget {
   const LgFileOpRow({
     super.key,
@@ -188,8 +203,12 @@ class LgFileOpRow extends StatefulWidget {
     required this.searchPlaceholder,
     required this.searchClearLabel,
     required this.searchOpenLabel,
+    required this.searchOpen,
+    required this.onSearchOpenChanged,
+    this.searchActiveLabel,
     this.onSearchChanged,
     this.collapseBelow = 540,
+    this.compact = false,
   });
 
   final List<Widget> actions;
@@ -204,15 +223,28 @@ class LgFileOpRow extends StatefulWidget {
 
   /// The icon's name while collapsed ("搜索当前文件夹").
   final String searchOpenLabel;
+
+  /// The icon's name while collapsed and the folder is filtered ("搜索当前文件夹，正在过滤");
+  /// [searchOpenLabel] when null.
+  final String? searchActiveLabel;
+
+  /// A narrow pane shows the field (and hides the actions) while this is true.
+  final bool searchOpen;
+  final ValueChanged<bool> onSearchOpenChanged;
   final ValueChanged<String>? onSearchChanged;
   final double collapseBelow;
 
+  /// The smallest window's row, 4 px lower (`.frame.mn .op`); the page passes it by the height
+  /// of the window.
+  final bool compact;
+
   @override
-  State<LgFileOpRow> createState() => LgFileOpRowState();
+  State<LgFileOpRow> createState() => _LgFileOpRowState();
 }
 
-class LgFileOpRowState extends State<LgFileOpRow> {
-  bool _open = false;
+class _LgFileOpRowState extends State<LgFileOpRow> {
+  final _fieldKey = GlobalKey();
+  bool _narrow = false;
 
   @override
   void initState() {
@@ -227,6 +259,11 @@ class LgFileOpRowState extends State<LgFileOpRow> {
       oldWidget.searchFocusNode.removeListener(_onFocus);
       widget.searchFocusNode.addListener(_onFocus);
     }
+    if (!oldWidget.searchOpen && widget.searchOpen) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && widget.searchOpen) widget.searchFocusNode.requestFocus();
+      });
+    }
   }
 
   @override
@@ -235,24 +272,15 @@ class LgFileOpRowState extends State<LgFileOpRow> {
     super.dispose();
   }
 
-  // Focus gone from an empty field puts the icon back.
+  // Focus gone from the open field gives the icon back, empty or not.
   void _onFocus() {
-    if (!widget.searchFocusNode.hasFocus &&
-        _open &&
-        widget.searchController.text.isEmpty) {
-      setState(() => _open = false);
+    if (!widget.searchFocusNode.hasFocus && _narrow && widget.searchOpen) {
+      widget.onSearchOpenChanged(false);
     }
   }
 
-  /// Shows the field (when the pane is narrow) and gives it the keyboard.
-  void openSearch() {
-    setState(() => _open = true);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) widget.searchFocusNode.requestFocus();
-    });
-  }
-
   Widget _field() => ListenableBuilder(
+    key: _fieldKey,
     listenable: widget.searchController,
     builder: (context, _) => LgTextField(
       controller: widget.searchController,
@@ -266,22 +294,40 @@ class LgFileOpRowState extends State<LgFileOpRow> {
         size: 20,
         color: LgTokens.of(context).colors.text2,
       ),
+      // A press on the button must not count as a press outside the field: that would take the
+      // focus away, and a narrow pane would fold the field before the press ended.
       trailing: widget.searchController.text.isEmpty
           ? null
-          : LgIconButton(
-              icon: LgIcons.x,
-              label: widget.searchClearLabel,
-              size: 24,
-              iconSize: 16,
-              focusable: false,
-              onPressed: () {
-                widget.searchController.clear();
-                widget.onSearchChanged?.call('');
-                widget.searchFocusNode.requestFocus();
-              },
+          : TextFieldTapRegion(
+              child: LgIconButton(
+                icon: LgIcons.x,
+                label: widget.searchClearLabel,
+                size: 24,
+                iconSize: 16,
+                focusable: false,
+                onPressed: () {
+                  widget.searchController.clear();
+                  widget.onSearchChanged?.call('');
+                  widget.searchFocusNode.requestFocus();
+                },
+              ),
             ),
       onChanged: widget.onSearchChanged,
     ),
+  );
+
+  Widget _icon() => ListenableBuilder(
+    listenable: widget.searchController,
+    builder: (context, _) {
+      final filtering = widget.searchController.text.isNotEmpty;
+      return _SearchIcon(
+        label: filtering
+            ? (widget.searchActiveLabel ?? widget.searchOpenLabel)
+            : widget.searchOpenLabel,
+        filtering: filtering,
+        onPressed: () => widget.onSearchOpenChanged(true),
+      );
+    },
   );
 
   @override
@@ -290,10 +336,9 @@ class LgFileOpRowState extends State<LgFileOpRow> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final narrow = constraints.maxWidth < widget.collapseBelow;
-        final showField =
-            !narrow || _open || widget.searchController.text.isNotEmpty;
-        Widget content;
-        if (narrow && showField) {
+        _narrow = narrow;
+        final Widget content;
+        if (narrow && widget.searchOpen) {
           content = _field();
         } else {
           content = Row(
@@ -306,11 +351,7 @@ class LgFileOpRowState extends State<LgFileOpRow> {
                 child: Align(
                   alignment: Alignment.centerRight,
                   child: narrow
-                      ? LgIconButton(
-                          icon: LgIcons.search,
-                          label: widget.searchOpenLabel,
-                          onPressed: openSearch,
-                        )
+                      ? _icon()
                       : ConstrainedBox(
                           constraints: const BoxConstraints(maxWidth: 196),
                           child: _field(),
@@ -321,12 +362,64 @@ class LgFileOpRowState extends State<LgFileOpRow> {
           );
         }
         return Container(
-          height: t.sizes.button + LgSpace.s2,
+          height: t.sizes.button + (widget.compact ? LgSpace.s1 : LgSpace.s2),
           padding: const EdgeInsets.symmetric(horizontal: LgSpace.s3),
           alignment: Alignment.centerLeft,
           child: content,
         );
       },
+    );
+  }
+}
+
+/// The search as an icon (a narrow pane): a button the size of the other icon buttons; in the
+/// accent colour on a tint while the folder is filtered, so that a list with items missing says
+/// why.
+class _SearchIcon extends StatelessWidget {
+  const _SearchIcon({
+    required this.label,
+    required this.filtering,
+    required this.onPressed,
+  });
+
+  final String label;
+  final bool filtering;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = LgTokens.of(context);
+    final c = t.colors;
+    const radius = BorderRadius.all(Radius.circular(LgRadius.r10));
+    return LgTooltip(
+      message: label,
+      child: LgPressable(
+        onPressed: onPressed,
+        semanticLabel: label,
+        builder: (context, states) => LgFocusRing(
+          show: states.contains(WidgetState.focused),
+          radius: radius,
+          child: Container(
+            width: t.sizes.button,
+            height: t.sizes.button,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: filtering
+                  ? Color.alphaBlend(
+                      lgStateOverlay(c, states) ?? Colors.transparent,
+                      c.active,
+                    )
+                  : lgStateOverlay(c, states),
+              borderRadius: radius,
+            ),
+            child: LgIcon(
+              LgIcons.search,
+              size: t.sizes.icon,
+              color: filtering ? c.accent : c.text2,
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -365,8 +458,11 @@ class LgFileStatusRow extends StatelessWidget {
 
 /// The list while a folder is read (`.es.ld`, `.lst.ld`): when the wait goes past the moment the
 /// caller allows for (about half a second, 02 §2.2 block E) it dims what is shown, takes away
-/// its clicks, and lays "正在读取…" with a turning arc over it. Nothing changes while [reading]
-/// is false, so the caller turns it on after the delay.
+/// its clicks, and lays "正在读取…" with a turning arc over it.
+///
+/// The child keeps its place in the tree whatever [reading] says (a scroll position, a State in
+/// the list below it must survive the wait): only the parameters of the wrappers around it
+/// change, and the cover is added after it in the stack (over it).
 class LgReadingOverlay extends StatelessWidget {
   const LgReadingOverlay({
     super.key,
@@ -383,40 +479,43 @@ class LgReadingOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (!reading) return child;
     final t = LgTokens.of(context);
     final c = t.colors;
     return Stack(
+      fit: StackFit.passthrough,
       children: [
-        Positioned.fill(
-          child: IgnorePointer(
-            child: ExcludeSemantics(child: Opacity(opacity: .45, child: child)),
+        IgnorePointer(
+          ignoring: reading,
+          child: ExcludeSemantics(
+            excluding: reading,
+            child: Opacity(opacity: reading ? .45 : 1, child: child),
           ),
         ),
-        Positioned.fill(
-          child: ColoredBox(
-            color: c.surface.withValues(alpha: .4),
-            child: Semantics(
-              liveRegion: true,
-              label: label,
-              child: ExcludeSemantics(
-                child: Padding(
-                  padding: const EdgeInsets.only(top: LgSpace.s8),
-                  child: Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        LgSpinner(size: 24, color: c.text),
-                        const SizedBox(height: LgSpace.s3),
-                        Text(label, style: t.text.copyWith(color: c.text)),
-                      ],
+        if (reading)
+          Positioned.fill(
+            child: ColoredBox(
+              color: c.surface.withValues(alpha: .4),
+              child: Semantics(
+                liveRegion: true,
+                label: label,
+                child: ExcludeSemantics(
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: LgSpace.s8),
+                    child: Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          LgSpinner(size: 24, color: c.text),
+                          const SizedBox(height: LgSpace.s3),
+                          Text(label, style: t.text.copyWith(color: c.text)),
+                        ],
+                      ),
                     ),
                   ),
                 ),
               ),
             ),
           ),
-        ),
       ],
     );
   }
@@ -439,6 +538,10 @@ enum LgDropState {
 /// `.col.nodrop::before`, `.dmsg`): a dashed frame 8 px inside the pane, tinted when the drop is
 /// accepted, with [message] ("上传到“备份”") in a card at the middle. It lies over the content and
 /// lets every pointer event through.
+///
+/// The child keeps its place in the tree whatever [state] says (the list under the pointer must
+/// keep its scroll position and its rows while files are dragged over it): the highlight is added
+/// after the child in the stack (over it), and removed again, without touching it.
 class LgDropZone extends StatelessWidget {
   const LgDropZone({
     super.key,
@@ -457,26 +560,27 @@ class LgDropZone extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (state == LgDropState.none) return child;
     final t = LgTokens.of(context);
     final c = t.colors;
     final accept = state == LgDropState.accept;
     return Stack(
+      fit: StackFit.passthrough,
       children: [
         child,
-        Positioned.fill(
-          child: IgnorePointer(
-            child: Padding(
-              padding: const EdgeInsets.all(LgSpace.s2),
-              child: CustomPaint(
-                painter: _DashedFrame(
-                  color: accept ? c.accent : c.borderStrong,
-                  fill: accept ? c.active : null,
+        if (state != LgDropState.none)
+          Positioned.fill(
+            child: IgnorePointer(
+              child: Padding(
+                padding: const EdgeInsets.all(LgSpace.s2),
+                child: CustomPaint(
+                  painter: _DashedFrame(
+                    color: accept ? c.accent : c.borderStrong,
+                    fill: accept ? c.active : null,
+                  ),
                 ),
               ),
             ),
           ),
-        ),
         if (accept && message != null)
           Positioned.fill(
             child: IgnorePointer(

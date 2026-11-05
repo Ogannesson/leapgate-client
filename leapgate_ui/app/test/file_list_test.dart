@@ -1,9 +1,10 @@
 // Behaviour of the file list's header and rows (docs LEAPGATE.md §10.15): sorting and the width
-// handles of the header, and the clicks, the keyboard and the states of a row. The rows report
-// what the pointer did; selecting and opening are the caller's. No pixels.
+// handles of the header, and the states of a row. A row draws and has one action for a screen
+// reader; the pointer, the keys and the selection are the page's. No pixels.
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:leapgate_ui/icons/lg_icon.dart';
 import 'package:leapgate_ui/widgets/lg_file_list.dart';
@@ -52,9 +53,7 @@ Widget _row({
   bool focused = false,
   bool dropTarget = false,
   bool showType = true,
-  VoidCallback? onTap,
-  VoidCallback? onDoubleTap,
-  ValueChanged<Offset>? onSecondaryTap,
+  VoidCallback? onSemanticTap,
   double width = 618,
 }) => SizedBox(
   width: width,
@@ -70,9 +69,7 @@ Widget _row({
     focused: focused,
     dropTarget: dropTarget,
     showType: showType,
-    onTap: onTap,
-    onDoubleTap: onDoubleTap,
-    onSecondaryTap: onSecondaryTap,
+    onSemanticTap: onSemanticTap,
   ),
 );
 
@@ -193,76 +190,77 @@ void main() {
   });
 
   group('row', () {
-    testWidgets('a press selects at once, with no wait for a second click', (
-      tester,
-    ) async {
-      var taps = 0;
-      await pumpLg(tester, _row(onTap: () => taps++, onDoubleTap: () {}));
-      await tester.tap(find.text('年度报告.docx'));
-      expect(taps, 1);
-    });
-
-    testWidgets('a second press soon after is a double click', (tester) async {
-      final log = <String>[];
-      await pumpLg(
-        tester,
-        _row(onTap: () => log.add('tap'), onDoubleTap: () => log.add('double')),
-      );
-      await tester.tap(find.text('年度报告.docx'));
-      await tester.pump(const Duration(milliseconds: 100));
-      await tester.tap(find.text('年度报告.docx'));
-      expect(log, ['tap', 'tap', 'double']);
-    });
-
-    testWidgets('two presses far apart in time are two clicks', (tester) async {
-      final log = <String>[];
-      await pumpLg(
-        tester,
-        _row(onTap: () => log.add('tap'), onDoubleTap: () => log.add('double')),
-      );
-      // The events of the test carry no clock of their own: give them one.
-      final at = tester.getCenter(find.text('年度报告.docx'));
-      final g = await tester.createGesture(kind: PointerDeviceKind.mouse);
-      await g.down(at);
-      await g.up();
-      await g.down(at, timeStamp: const Duration(milliseconds: 600));
-      await g.up(timeStamp: const Duration(milliseconds: 650));
-      expect(log, ['tap', 'tap']);
-    });
-
-    testWidgets('a third press after a double click starts over', (
-      tester,
-    ) async {
-      final log = <String>[];
-      await pumpLg(
-        tester,
-        _row(onTap: () => log.add('tap'), onDoubleTap: () => log.add('double')),
-      );
-      for (var i = 0; i < 3; i++) {
+    testWidgets(
+      'the row takes no part in the pointer: the page does that for the list',
+      (tester) async {
+        // There is nothing to give a callback to: presses, keys, double clicks and the right
+        // button belong to the page. A press on the row does nothing by itself.
+        await pumpLg(tester, _row(selected: false));
         await tester.tap(find.text('年度报告.docx'));
-        await tester.pump(const Duration(milliseconds: 50));
-      }
-      expect(log.where((e) => e == 'double').length, 1);
-    });
+        await tester.tap(
+          find.text('年度报告.docx'),
+          buttons: kSecondaryMouseButton,
+        );
+        expect(tester.takeException(), isNull);
+        expect(
+          find.descendant(
+            of: find.byType(LgFileRow),
+            matching: find.byType(GestureDetector),
+          ),
+          findsNothing,
+        );
+      },
+    );
 
     testWidgets(
-      'the right button reports where the pointer is, and does not select',
+      'a screen reader\'s "activate" is the one action, and it calls back',
       (tester) async {
+        final handle = tester.ensureSemantics();
         var taps = 0;
-        Offset? at;
+        await pumpLg(tester, _row(onSemanticTap: () => taps++));
+        tester.semantics.performAction(
+          find.semantics.byLabel(RegExp('年度报告.docx')),
+          SemanticsAction.tap,
+        );
+        expect(taps, 1);
+        await pumpLg(tester, _row());
+        final plain = tester.getSemantics(
+          find.bySemanticsLabel(RegExp('年度报告.docx')),
+        );
+        expect(
+          plain.getSemanticsData().hasAction(SemanticsAction.tap),
+          isFalse,
+        );
+        handle.dispose();
+      },
+    );
+
+    testWidgets(
+      'hovering tints the row and takes its divider away; leaving gives it back',
+      (tester) async {
+        Finder divider() => find.descendant(
+          of: find.byType(LgFileRow),
+          matching: find.byWidgetPredicate(
+            (w) => w is ColoredBox && w.color != Colors.transparent,
+          ),
+        );
         await pumpLg(
           tester,
-          _row(onTap: () => taps++, onSecondaryTap: (p) => at = p),
+          const SizedBox(
+            width: 618,
+            child: LgFileRow(
+              kind: LgFileKind.file,
+              name: '说明.txt',
+              topDivider: true,
+            ),
+          ),
         );
-        final centre = tester.getCenter(find.text('年度报告.docx'));
-        final g = await tester.startGesture(
-          centre,
-          buttons: kSecondaryMouseButton,
-          kind: PointerDeviceKind.mouse,
-        );
-        await g.up();
-        expect(at, centre);
-        expect(taps, 0);
+        final resting = divider().evaluate().length;
+        final g = await hover(tester, find.text('说明.txt'));
+        expect(divider().evaluate().length, lessThan(resting));
+        await g.moveTo(const Offset(1, 1));
+        await tester.pump();
+        expect(divider().evaluate().length, resting);
       },
     );
 
@@ -369,13 +367,13 @@ void main() {
       'a row is a button with its cells in the name, and says when selected',
       (tester) async {
         final handle = tester.ensureSemantics();
-        await pumpLg(tester, _row(selected: true, onTap: () {}));
+        await pumpLg(tester, _row(selected: true, onSemanticTap: () {}));
         final node = tester.getSemantics(
           find.bySemanticsLabel(RegExp('年度报告.docx')),
         );
         final data = node.getSemanticsData();
-        expect(data.label, contains('DOCX 文件'));
-        expect(data.label, contains('2.4 MB'));
+        // Name, date modified, type and size, in the order of the columns.
+        expect(data.label, '年度报告.docx\n2026/10/28 14:05\nDOCX 文件\n2.4 MB');
         expect(data.flagsCollection.isSelected.name, 'isTrue');
         expect(data.flagsCollection.isButton, isTrue);
         handle.dispose();

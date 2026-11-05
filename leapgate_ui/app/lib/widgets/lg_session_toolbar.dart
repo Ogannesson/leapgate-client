@@ -333,13 +333,17 @@ class LgToolbarMenuButton extends StatelessWidget {
               },
         semanticLabel: semanticLabel ?? label,
         toggled: controller.isOpen,
+        // The view that is shown is "selected" to a screen reader.
+        selected: highlighted ? true : null,
         builder: (context, states) {
           // The gallery shows an open menu with the selected state forced.
-          final open =
+          final menuOpen =
               controller.isOpen ||
-              highlighted ||
-              states.contains(WidgetState.selected);
-          final overlay = open ? null : lgStateOverlay(c, states);
+              LgStateOverride.of(context).contains(WidgetState.selected);
+          final open = menuOpen || highlighted;
+          // An open menu is the whole story of the button; a highlighted one still answers the
+          // pointer with the hover tint on its ground.
+          final overlay = menuOpen ? null : lgStateOverlay(c, states);
           final base = open ? c.active : null;
           final fg = switch (state) {
             _ when open => c.accent,
@@ -382,7 +386,7 @@ class LgToolbarMenuButton extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: overlay == null
                       ? base
-                      : Color.alphaBlend(overlay, Colors.transparent),
+                      : Color.alphaBlend(overlay, base ?? Colors.transparent),
                   borderRadius: radius,
                 ),
                 child: ExcludeSemantics(
@@ -414,7 +418,13 @@ class LgToolbarMenuButton extends StatelessWidget {
                               LgBadge(badge),
                             ],
                             if (alert || progress != null) ...[
-                              SizedBox(width: t.sizes.toolGap),
+                              // On a view's own bar the ring stands a little further off
+                              // the name (`.vt .ti .rg` adds 4 to the gap).
+                              SizedBox(
+                                width:
+                                    t.sizes.toolGap +
+                                    (highlighted ? LgSpace.s1 : 0),
+                              ),
                               alert
                                   ? const LgReminderMark()
                                   : LgProgressRing(value: progress!),

@@ -106,8 +106,9 @@ class LgTextField extends StatefulWidget {
   /// wider than the field (the port of an exit card).
   final bool showErrorText;
 
-  /// The field of a bar (the search of a file list, `.sf`): at rest it is a tint of the window's
-  /// ground with no frame; focused or with an error it is the ordinary field. Best with [dense].
+  /// The field of a bar (the search of a file list, `.sf`, and the path input, `.bc.inp`): at
+  /// rest it is a tint of the window's ground with no frame; focused or with an error it is the
+  /// ordinary field; its corners are 10 where the ordinary field's are 12. Best with [dense].
   final bool quiet;
 
   @override
@@ -152,7 +153,11 @@ class _LgTextFieldState extends State<LgTextField> {
         (_node.hasFocus ||
             LgStateOverride.of(context).contains(WidgetState.focused));
     final error = widget.errorText != null;
-    final radius = BorderRadius.circular(LgRadius.r12);
+    // A quiet field is the search and the path of a bar, `.sf` and `.bc.inp`: 10 like the
+    // breadcrumb it stands beside.
+    final radius = BorderRadius.circular(
+      widget.quiet ? LgRadius.r10 : LgRadius.r12,
+    );
     final Border? border;
     if (!widget.enabled) {
       border = null;

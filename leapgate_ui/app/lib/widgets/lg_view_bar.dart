@@ -4,6 +4,8 @@
 // progress), the connection method with its details, and, at the far end, "断开". The parts are
 // given; this draws the bar they stand in.
 
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../icons/lg_icon.dart';
@@ -17,6 +19,7 @@ class LgViewBar extends StatelessWidget {
     required this.disconnectLabel,
     required this.onDisconnect,
     this.route,
+    this.compact = false,
   });
 
   /// An [LgToolbarMenuButton] with `highlighted` (and `progress` or `alert` while files move).
@@ -29,12 +32,19 @@ class LgViewBar extends StatelessWidget {
   final String disconnectLabel;
   final VoidCallback onDisconnect;
 
+  /// The bar of the smallest window, a button and 8 px high where the ordinary one is a toolbar
+  /// high (`.frame.mn .vt`); the page passes it by the height of the window. The detail mode's
+  /// bar is lower than that already and stays as it is.
+  final bool compact;
+
   @override
   Widget build(BuildContext context) {
     final t = LgTokens.of(context);
     final c = t.colors;
     return Container(
-      height: t.sizes.bar,
+      height: compact
+          ? math.min(t.sizes.bar, t.sizes.button + LgSpace.s2)
+          : t.sizes.bar,
       padding: const EdgeInsets.symmetric(horizontal: LgSpace.s3),
       decoration: BoxDecoration(
         color: c.surface,

@@ -90,7 +90,9 @@ class LgBreadcrumb extends StatelessWidget {
                   textDirection: TextDirection.ltr,
                   maxLines: 1,
                 )..layout();
-                return p.width;
+                final w = p.width;
+                p.dispose();
+                return w;
               }
 
               // The root chip: padding, the name, and with a menu the gap and the arrow.
@@ -343,13 +345,20 @@ class _Folded extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = LgTokens.of(context);
     final c = t.colors;
+    // It answers the pointer's hover with the tooltip and nothing else: a press on it is its
+    // own, so that it does not fall through to the row behind it, which would turn into the
+    // path input.
     return LgTooltip(
       message: tip,
-      child: Container(
-        height: t.sizes.button - LgSpace.s2,
-        padding: const EdgeInsets.symmetric(horizontal: LgSpace.s2),
-        alignment: Alignment.center,
-        child: Text('…', style: t.textM.copyWith(color: c.text)),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () {},
+        child: Container(
+          height: t.sizes.button - LgSpace.s2,
+          padding: const EdgeInsets.symmetric(horizontal: LgSpace.s2),
+          alignment: Alignment.center,
+          child: Text('…', style: t.textM.copyWith(color: c.text)),
+        ),
       ),
     );
   }
@@ -437,6 +446,7 @@ class _LgPathInputState extends State<LgPathInput> {
             focusNode: widget.focusNode,
             semanticLabel: widget.semanticLabel,
             dense: true,
+            quiet: true,
             errorText: widget.errorText,
             // The card below says it; the field's name carries it for a screen reader.
             showErrorText: false,

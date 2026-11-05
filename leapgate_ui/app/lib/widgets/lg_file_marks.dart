@@ -110,27 +110,29 @@ class LgViewMenuTail extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = LgTokens.of(context);
-    final parts = <Widget>[
-      if (alert)
-        const LgReminderMark()
-      else if (progress != null)
-        LgProgressRing(value: progress!),
-      if (percentText != null && !alert)
-        Text(
-          percentText!,
-          style: t.textS.copyWith(
-            color: t.colors.accent,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-      ?status,
-    ];
+    final showRing = !alert && progress != null;
+    final showPercent = !alert && percentText != null;
+    // `.mr` puts 12 between its parts; the connection method after the ring or the percentage
+    // has 12 more of margin (`.mr .rg+.stt`, `.mr .pc+.stt`).
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        for (final (i, p) in parts.indexed) ...[
-          if (i > 0) const SizedBox(width: LgSpace.s2),
-          p,
+        if (alert) const LgReminderMark(),
+        if (showRing) LgProgressRing(value: progress!),
+        if (showPercent) ...[
+          if (showRing) const SizedBox(width: LgSpace.s3),
+          Text(
+            percentText!,
+            style: t.textS.copyWith(
+              color: t.colors.accent,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+        if (status != null) ...[
+          if (alert || showRing || showPercent)
+            SizedBox(width: alert ? LgSpace.s3 : LgSpace.s3 * 2),
+          status!,
         ],
       ],
     );

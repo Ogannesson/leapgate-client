@@ -84,7 +84,8 @@ Widget _m7Crumb(
   onEdit: _noop,
 );
 
-LgFileNavRow _m7Nav(bool en, Widget path, {bool canGoUp = true}) => LgFileNavRow(
+LgFileNavRow _m7Nav(bool en, Widget path, {bool canGoUp = true, bool compact = false}) => LgFileNavRow(
+  compact: compact,
   back: LgFileNavButton(icon: LgIcons.arrowL, label: _x(en, '后退（Alt+←）', 'Back (Alt+←)'), onPressed: _noop),
   up: LgFileNavButton(icon: LgIcons.arrowU, label: _x(en, '上一级（Alt+↑）', 'Up (Alt+↑)'), onPressed: canGoUp ? _noop : null),
   home: LgFileNavButton(icon: LgIcons.home, label: _x(en, '主文件夹', 'Home folder'), onPressed: _noop),
@@ -101,6 +102,8 @@ class _M7Ops extends StatefulWidget {
     this.deleteEnabled = true,
     this.newFolderEnabled = true,
     this.search = '',
+    this.open = false,
+    this.compact = false,
   });
 
   final bool local;
@@ -110,6 +113,10 @@ class _M7Ops extends StatefulWidget {
   final bool newFolderEnabled;
   final String search;
 
+  /// A narrow pane's field is open at the start.
+  final bool open;
+  final bool compact;
+
   @override
   State<_M7Ops> createState() => _M7OpsState();
 }
@@ -117,13 +124,15 @@ class _M7Ops extends StatefulWidget {
 class _M7OpsState extends State<_M7Ops> {
   late final _controller = TextEditingController(text: widget.search);
   final _focus = FocusNode();
+  late bool _open = widget.open;
 
   // The exporter shows one specimen after another in the same place, so that the State outlives
-  // them: the text has to follow the specimen.
+  // them: the text and the flag have to follow the specimen.
   @override
   void didUpdateWidget(_M7Ops oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.search != widget.search) _controller.text = widget.search;
+    if (oldWidget.open != widget.open) _open = widget.open;
   }
 
   @override
@@ -137,6 +146,10 @@ class _M7OpsState extends State<_M7Ops> {
   Widget build(BuildContext context) {
     final en = widget.en;
     return LgFileOpRow(
+      compact: widget.compact,
+      searchOpen: _open,
+      onSearchOpenChanged: (v) => setState(() => _open = v),
+      searchActiveLabel: _x(en, '搜索当前文件夹，正在过滤', 'Search this folder, filtering'),
       actions: [
         LgButton(
           label: widget.local ? _x(en, '上传', 'Upload') : _x(en, '下载', 'Download'),
@@ -200,9 +213,12 @@ Widget _m7Pane({
   bool editing = false,
   bool platformKnown = true,
   bool upDisabled = false,
+  bool compact = false,
+  bool searchOpen = false,
+  bool? showTypeColumn,
 }) {
   final rows = files ?? (local ? _m7Local(en) : _m7Remote(en));
-  final showType = width >= 520;
+  final showType = showTypeColumn ?? width >= 520;
   final path = segments ??
       (local
           ? ['C:', 'Users', 'zhangsan', 'Documents']
@@ -266,7 +282,11 @@ Widget _m7Pane({
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: LgSpace.s2),
-                child: Column(
+                // A list that is cut at the pane's edge, as a scrolled one is (the smallest
+                // window shows fewer rows than the specimens have).
+                child: ListView(
+                  physics: const NeverScrollableScrollPhysics(),
+                  padding: EdgeInsets.zero,
                   children: [
                     for (final (i, f) in rows.indexed)
                       LgFileRow(
@@ -283,7 +303,6 @@ Widget _m7Pane({
                         topDivider: i > 0 &&
                             !(f.selected && selection) &&
                             !(rows[i - 1].selected && selection),
-                        onTap: _noop,
                       ),
                   ],
                 ),
@@ -298,6 +317,7 @@ Widget _m7Pane({
     child: Column(
       children: [
         LgFilePaneHeader(
+          compact: compact,
           title: local ? _x(en, '本机', 'This device') : _x(en, '远程设备', 'Remote device'),
           subtitle: local
               ? 'LAPTOP-ZHANGSAN'
@@ -314,6 +334,7 @@ Widget _m7Pane({
                   controller: TextEditingController(text: r'D:\备份\2025'),
                   semanticLabel: _x(en, '路径', 'Path'),
                   dense: true,
+                  quiet: true,
                   errorText: _x(en, r'未找到“D:\备份\2025”。', r'“D:\Backup\2025” was not found.'),
                   showErrorText: false,
                 )
@@ -324,6 +345,7 @@ Widget _m7Pane({
                   menu: linux ? const [LgMenuItem(label: '/', checked: true, onPressed: _noop)] : null,
                 ),
           canGoUp: !upDisabled && !(linux && path.isEmpty),
+          compact: compact,
         ),
         if (banner != null)
           Padding(
@@ -343,6 +365,8 @@ Widget _m7Pane({
           transferEnabled: transferEnabled && selected.isNotEmpty,
           deleteEnabled: selected.isNotEmpty,
           search: search,
+          open: searchOpen,
+          compact: compact,
         ),
         Expanded(child: listArea),
         LgFileStatusRow(text),
@@ -365,11 +389,51 @@ Widget _m7Pane({
 LgQueueAction _m7Cancel(bool en) => LgQueueAction(icon: LgIcons.x, label: _x(en, '取消', 'Cancel'), onPressed: _noop);
 LgQueueAction _m7Remove(bool en) => LgQueueAction(icon: LgIcons.x, label: _x(en, '移除', 'Remove'), onPressed: _noop);
 
+/// A queue row with the sentence a screen reader gets, written here the way the page's owner
+/// writes it: direction, name, then the state, in the language's punctuation.
+LgQueueRow _m7Row({
+  required bool en,
+  required LgQueueDirection direction,
+  required String name,
+  required String path,
+  required LgQueueState state,
+  required String status,
+  String? statusLead,
+  double? progress,
+  List<LgQueueAction> actions = const [],
+  String? detailsLabel,
+  bool detailsOpen = false,
+  VoidCallback? onToggleDetails,
+  List<LgQueueDetail> details = const [],
+}) {
+  final dir = switch (direction) {
+    LgQueueDirection.upload => _x(en, '上传', 'Upload'),
+    LgQueueDirection.download => _x(en, '下载', 'Download'),
+    LgQueueDirection.delete => _x(en, '删除', 'Delete'),
+  };
+  final lead = statusLead == null ? '' : _x(en, '$statusLead，', '$statusLead, ');
+  return LgQueueRow(
+    direction: direction,
+    semanticLabel: _x(en, '$dir $name，$lead$status', '$dir $name, $lead$status'),
+    name: name,
+    path: path,
+    state: state,
+    status: status,
+    statusLead: statusLead,
+    progress: progress,
+    actions: actions,
+    detailsLabel: detailsLabel,
+    detailsOpen: detailsOpen,
+    onToggleDetails: onToggleDetails,
+    details: details,
+  );
+}
+
 List<Widget> _m7QueueRows(bool en, {int count = 12, bool details = true}) {
   final rows = <Widget>[
-    LgQueueRow(
+    _m7Row(
+      en: en,
       direction: LgQueueDirection.download,
-      directionLabel: _x(en, '下载', 'Download'),
       name: _x(en, '照片', 'Photos'),
       path: r'D:\备份\照片 → C:\Users\zhangsan\Pictures',
       state: LgQueueState.inProgress,
@@ -381,35 +445,35 @@ List<Widget> _m7QueueRows(bool en, {int count = 12, bool details = true}) {
         _m7Cancel(en),
       ],
     ),
-    LgQueueRow(
+    _m7Row(
+      en: en,
       direction: LgQueueDirection.upload,
-      directionLabel: _x(en, '上传', 'Upload'),
       name: _x(en, '安装包.zip', 'installer.zip'),
       path: r'C:\Users\zhangsan\Downloads → D:\备份',
       state: LgQueueState.queued,
       status: _x(en, '排队中', 'Queued'),
       actions: [_m7Cancel(en)],
     ),
-    LgQueueRow(
+    _m7Row(
+      en: en,
       direction: LgQueueDirection.download,
-      directionLabel: _x(en, '下载', 'Download'),
       name: _x(en, '旧照片', 'Old photos'),
       path: r'D:\备份\旧照片 → C:\Users\zhangsan\Pictures',
       state: LgQueueState.counting,
       status: _x(en, '正在统计文件…', 'Counting files…'),
       actions: [_m7Cancel(en)],
     ),
-    LgQueueRow(
+    _m7Row(
+      en: en,
       direction: LgQueueDirection.upload,
-      directionLabel: _x(en, '上传', 'Upload'),
       name: _x(en, '年度报告.docx', 'annual-report.docx'),
       path: r'C:\Users\zhangsan\Documents → D:\备份',
       state: LgQueueState.waitingConfirm,
       status: _x(en, '等待确认：目标位置已有同名文件', 'Awaiting confirmation: a file with the same name exists at the destination'),
     ),
-    LgQueueRow(
+    _m7Row(
+      en: en,
       direction: LgQueueDirection.delete,
-      directionLabel: _x(en, '删除', 'Delete'),
       name: _x(en, '临时', 'temp'),
       path: r'D:\备份\临时',
       state: LgQueueState.deleting,
@@ -417,9 +481,9 @@ List<Widget> _m7QueueRows(bool en, {int count = 12, bool details = true}) {
       progress: .31,
       actions: [_m7Cancel(en)],
     ),
-    LgQueueRow(
+    _m7Row(
+      en: en,
       direction: LgQueueDirection.upload,
-      directionLabel: _x(en, '上传', 'Upload'),
       name: _x(en, '视频素材.mp4', 'clip.mp4'),
       path: r'C:\Users\zhangsan\Videos → D:\备份',
       state: LgQueueState.paused,
@@ -430,27 +494,27 @@ List<Widget> _m7QueueRows(bool en, {int count = 12, bool details = true}) {
         _m7Cancel(en),
       ],
     ),
-    LgQueueRow(
+    _m7Row(
+      en: en,
       direction: LgQueueDirection.upload,
-      directionLabel: _x(en, '上传', 'Upload'),
       name: _x(en, '项目资料备份', 'Project backup'),
       path: r'C:\Users\zhangsan\Documents → D:\备份',
       state: LgQueueState.interrupted,
       status: _x(en, '已中断，重新连接后将继续', 'Interrupted, will resume after reconnecting'),
       actions: [_m7Cancel(en)],
     ),
-    LgQueueRow(
+    _m7Row(
+      en: en,
       direction: LgQueueDirection.upload,
-      directionLabel: _x(en, '上传', 'Upload'),
       name: _x(en, '预算.xlsx', 'budget.xlsx'),
       path: r'C:\Users\zhangsan\Documents → D:\备份',
       state: LgQueueState.done,
       status: _x(en, '已完成 · 1 个文件，86.5 KB', 'Completed · 1 file, 86.5 KB'),
       actions: [_m7Remove(en)],
     ),
-    LgQueueRow(
+    _m7Row(
+      en: en,
       direction: LgQueueDirection.upload,
-      directionLabel: _x(en, '上传', 'Upload'),
       name: _x(en, '项目资料', 'Project files'),
       path: r'C:\Users\zhangsan\Documents → D:\备份',
       state: LgQueueState.doneWithIssues,
@@ -467,27 +531,27 @@ List<Widget> _m7QueueRows(bool en, {int count = 12, bool details = true}) {
         _m7Remove(en),
       ],
     ),
-    LgQueueRow(
+    _m7Row(
+      en: en,
       direction: LgQueueDirection.upload,
-      directionLabel: _x(en, '上传', 'Upload'),
       name: _x(en, '说明.txt', 'notes.txt'),
       path: r'C:\Users\zhangsan\Documents → D:\备份',
       state: LgQueueState.skipped,
       status: _x(en, '已跳过：目标位置已有同名文件', 'Skipped: a file with the same name exists at the destination'),
       actions: [_m7Remove(en)],
     ),
-    LgQueueRow(
+    _m7Row(
+      en: en,
       direction: LgQueueDirection.download,
-      directionLabel: _x(en, '下载', 'Download'),
       name: _x(en, '视频', 'Videos'),
       path: r'D:\备份\视频 → C:\Users\zhangsan\Videos',
       state: LgQueueState.cancelled,
       status: _x(en, '已取消', 'Canceled'),
       actions: [_m7Remove(en)],
     ),
-    LgQueueRow(
+    _m7Row(
+      en: en,
       direction: LgQueueDirection.upload,
-      directionLabel: _x(en, '上传', 'Upload'),
       name: _x(en, '会议录音.m4a', 'meeting.m4a'),
       path: r'C:\Users\zhangsan\Documents → D:\备份',
       state: LgQueueState.failed,
@@ -534,7 +598,6 @@ LgQueuePanel _m7Queue(
       ],
   rows: _m7QueueRows(en, count: count, details: details),
   onResize: grip ? (_) {} : null,
-  resizeLabel: _x(en, '调整传输面板的高度', 'Resize the transfer panel'),
 );
 
 // ---- the specimens ------------------------------------------------------------------
@@ -571,9 +634,10 @@ List<Widget> _m7ViewMenu(bool en, {bool alert = false}) => [
   LgMenuItem(label: _x(en, '摄像头', 'Camera'), icon: LgIcons.camera, hint: _x(en, '未打开', 'Not open'), onPressed: _noop),
 ];
 
-Widget _m7ViewBar(bool en, {double? progress, bool alert = false, bool route = true}) => SizedBox(
-  width: 1100,
+Widget _m7ViewBar(bool en, {double? progress, bool alert = false, bool route = true, bool compact = false, double width = 1100}) => SizedBox(
+  width: width,
   child: LgViewBar(
+    compact: compact,
     viewSwitch: _m7ViewSwitch(en, progress: progress, alert: alert),
     route: route
         ? LgToolbarRouteButton(
@@ -584,6 +648,56 @@ Widget _m7ViewBar(bool en, {double? progress, bool alert = false, bool route = t
         : null,
     disconnectLabel: _x(en, '断开', 'Disconnect'),
     onDisconnect: _noop,
+  ),
+);
+
+/// The content of the 960 × 600 window under its tabs (`.frame.mn` of the mockup): the view bar,
+/// the two panes and the queue, in the smallest window's measures: the page's 4 / 8 / 8 padding and
+/// its 4 gap, the panes 8 apart, every row one step lower.
+Widget _m7MinWindow({required bool expanded, bool en = false}) => Builder(
+  builder: (context) => SizedBox(
+    width: 960,
+    height: 560,
+    child: ColoredBox(
+      color: LgTokens.of(context).colors.bg,
+      child: Column(
+        children: [
+          _m7ViewBar(en, progress: .45, compact: true, width: 960),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(LgSpace.s2, LgSpace.s1, LgSpace.s2, LgSpace.s2),
+              child: Column(
+                children: [
+                  Expanded(
+                    child: Row(
+                      children: [
+                        Expanded(child: _m7Pane(local: true, en: en, width: double.infinity, height: double.infinity, compact: true, showTypeColumn: false)),
+                        const SizedBox(width: LgSpace.s2),
+                        Expanded(child: _m7Pane(local: false, en: en, width: double.infinity, height: double.infinity, compact: true, selection: false, showTypeColumn: false)),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: LgSpace.s1),
+                  SizedBox(
+                    height: expanded ? 190 : 44,
+                    child: _m7Queue(
+                      en,
+                      count: 3,
+                      expanded: expanded,
+                      grip: expanded,
+                      spans: [LgQueueSpan(_x(en, expanded ? '1 个进行中，2 个排队' : '1 个进行中', expanded ? '1 in progress, 2 queued' : '1 in progress'))],
+                      progress: .45,
+                      percent: '45%',
+                      actions: const [],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    ),
   ),
 );
 
@@ -639,7 +753,12 @@ List<Specimen> _m7Specimens() {
     add('file-view-bar', 'default$sfx', const Size(1132, 84), (_) => _m7ViewBar(en));
     add('file-view-bar', 'progress$sfx', const Size(1132, 84), (_) => _m7ViewBar(en, progress: .45));
   }
+  add('file-view-bar', 'compact', const Size(1132, 84), (_) => _m7ViewBar(false, progress: .45, compact: true));
   add('file-view-bar', 'alert', const Size(1132, 84), (_) => _m7ViewBar(false, alert: true));
+  add('file-view-bar', 'hover', const Size(1132, 84), (_) => _m7ViewBar(false, progress: .45), states: const {WidgetState.hovered});
+  // The smallest window, bar to queue: where the rows get a step lower (mockup `.frame.mn`).
+  add('file-min-window', 'queue-folded', const Size(992, 592), (_) => _m7MinWindow(expanded: false));
+  add('file-min-window', 'queue-expanded', const Size(992, 592), (_) => _m7MinWindow(expanded: true));
   add('file-view-bar', 'connecting', const Size(1132, 84), (_) => _m7ViewBar(false, route: false));
   add(
     'file-view-bar',
@@ -767,6 +886,7 @@ List<Specimen> _m7Specimens() {
         controller: TextEditingController(text: r'D:\备份\照片'),
         semanticLabel: '路径',
         dense: true,
+        quiet: true,
       ),
     ),
     states: const {WidgetState.focused},
@@ -783,6 +903,7 @@ List<Specimen> _m7Specimens() {
             controller: TextEditingController(text: r'D:\备份\2025'),
             semanticLabel: '路径',
             dense: true,
+            quiet: true,
             errorText: r'未找到“D:\备份\2025”。',
             showErrorText: false,
           ),
@@ -807,7 +928,10 @@ List<Specimen> _m7Specimens() {
   add('file-ops', 'upload-english', const Size(730, 76), (_) => opCard(const _M7Ops(local: true, en: true), width: 698));
   add('file-ops', 'search-text', const Size(650, 76), (_) => opCard(const _M7Ops(local: true, en: false, search: '报告')));
   add('file-ops', 'collapsed', const Size(520, 76), (_) => opCard(const _M7Ops(local: true, en: false), width: 468));
-  add('file-ops', 'collapsed-open', const Size(520, 76), (_) => opCard(const _M7Ops(local: true, en: false, search: '报告'), width: 468));
+  // Collapsed with something typed: the icon is in the accent colour on a tint.
+  add('file-ops', 'collapsed-filtering', const Size(520, 76), (_) => opCard(const _M7Ops(local: true, en: false, search: '报告'), width: 468));
+  add('file-ops', 'collapsed-open', const Size(520, 76), (_) => opCard(const _M7Ops(local: true, en: false, search: '报告', open: true), width: 468));
+  add('file-ops', 'compact', const Size(650, 76), (_) => opCard(const _M7Ops(local: true, en: false, compact: true)));
   add('file-ops', 'new-folder-off', const Size(650, 76), (_) => opCard(const _M7Ops(local: true, en: false, newFolderEnabled: false, transferEnabled: false)));
 
   // The list ----------------------------------------------------------------------------------
@@ -1041,7 +1165,7 @@ List<Specimen> _m7Specimens() {
         rows: [
           LgQueueRow(
             direction: LgQueueDirection.download,
-            directionLabel: '下载',
+            semanticLabel: '下载 照片，失败：远程设备仅允许向其上传文件，不允许下载、删除、重命名或新建文件夹',
             name: '照片',
             path: r'D:\备份\照片 → C:\Users\zhangsan\Pictures',
             state: LgQueueState.failed,
@@ -1050,7 +1174,7 @@ List<Specimen> _m7Specimens() {
           ),
           LgQueueRow(
             direction: LgQueueDirection.upload,
-            directionLabel: '上传',
+            semanticLabel: '上传 预算.xlsx，已完成 · 1 个文件，86.5 KB',
             name: '预算.xlsx',
             path: r'C:\Users\zhangsan\Documents → D:\备份',
             state: LgQueueState.done,

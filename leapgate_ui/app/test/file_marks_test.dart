@@ -2,9 +2,11 @@
 // and the reminder mark on a tab and on the view switch, the tail of the switch's menu row, the
 // view bar, the counting note and the loading row. Nothing here compares pixels.
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:leapgate_ui/icons/lg_icon.dart';
+import 'package:leapgate_ui/theme/lg_tokens.dart';
 import 'package:leapgate_ui/widgets/lg_button.dart';
 import 'package:leapgate_ui/widgets/lg_file_marks.dart';
 import 'package:leapgate_ui/widgets/lg_menu.dart';
@@ -163,6 +165,71 @@ void main() {
       expect(plain.style!.fontWeight, FontWeight.w400);
     });
 
+    testWidgets('the view that is shown is "selected" to a screen reader', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      await pumpLg(tester, button(highlighted: true));
+      expect(
+        tester.getSemantics(find.bySemanticsLabel('文件传输，45%')),
+        isSemantics(isSelected: true, hasSelectedState: true),
+      );
+      await pumpLg(tester, button());
+      expect(
+        tester.getSemantics(find.bySemanticsLabel('文件传输，45%')),
+        isSemantics(hasSelectedState: false, isSelected: false),
+      );
+      handle.dispose();
+    });
+
+    testWidgets(
+      'a highlighted button still answers the pointer with the hover tint',
+      (tester) async {
+        Color? ground() {
+          final box = tester.widget<Container>(
+            find
+                .descendant(
+                  of: find.byType(LgToolbarMenuButton),
+                  matching: find.byWidgetPredicate(
+                    (w) => w is Container && w.decoration is BoxDecoration,
+                  ),
+                )
+                .first,
+          );
+          return (box.decoration! as BoxDecoration).color;
+        }
+
+        // Only on a desktop does the pointer highlight what it is on (the default platform of a
+        // test is not one).
+        debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+        try {
+          await pumpLg(tester, button(highlighted: true));
+          final resting = ground();
+          expect(resting, isNotNull);
+          final gesture = await hover(tester, find.text('文件传输'));
+          expect(ground(), isNot(resting));
+          await gesture.moveTo(const Offset(1, 1));
+          await tester.pump();
+          expect(ground(), resting);
+        } finally {
+          debugDefaultTargetPlatformOverride = null;
+        }
+      },
+    );
+
+    testWidgets(
+      'on a view\'s own bar the ring stands 4 px further from the name',
+      (tester) async {
+        double gap() =>
+            tester.getTopLeft(find.byType(LgProgressRing)).dx -
+            tester.getRect(find.text('文件传输')).right;
+        await pumpLg(tester, button(progress: .45));
+        final plain = gap();
+        await pumpLg(tester, button(progress: .45, highlighted: true));
+        expect(gap(), plain + 4);
+      },
+    );
+
     testWidgets('the menu opens from it', (tester) async {
       await pumpLg(tester, button(progress: .45));
       await tester.tap(find.text('文件传输'));
@@ -187,6 +254,33 @@ void main() {
       final pct = tester.getTopLeft(find.text('45%')).dx;
       final route = tester.getTopLeft(find.textContaining('直连')).dx;
       expect(ring < pct && pct < route, isTrue);
+    });
+
+    testWidgets('12 between the parts, 24 before the connection method', (
+      tester,
+    ) async {
+      await pumpLg(
+        tester,
+        const LgViewMenuTail(
+          progress: .45,
+          percentText: '45%',
+          status: LgRouteMark(route: LgRoute.direct, label: '直连'),
+        ),
+      );
+      final ring = tester.getRect(find.byType(LgProgressRing));
+      final pct = tester.getRect(find.text('45%'));
+      final route = tester.getRect(find.byType(LgRouteMark));
+      expect(pct.left - ring.right, 12);
+      expect(route.left - pct.right, 24);
+      await pumpLg(
+        tester,
+        const LgViewMenuTail(
+          alert: true,
+          status: LgRouteMark(route: LgRoute.direct, label: '直连'),
+        ),
+      );
+      final mark = tester.getRect(find.byType(LgReminderMark));
+      expect(tester.getRect(find.byType(LgRouteMark)).left - mark.right, 12);
     });
 
     testWidgets('a reminder takes the ring and the percentage away', (
@@ -262,6 +356,31 @@ void main() {
       expect(find.text('路径'), findsNothing);
       expect(find.byType(LgButton), findsOneWidget);
     });
+
+    testWidgets(
+      'the smallest window\'s bar is lower, and the default is as before',
+      (tester) async {
+        Widget bar({bool compact = false}) => SizedBox(
+          width: 900,
+          child: LgViewBar(
+            viewSwitch: const Text('切换'),
+            disconnectLabel: '断开',
+            onDisconnect: () {},
+            compact: compact,
+          ),
+        );
+        await pumpLg(tester, bar());
+        final normal = tester.getSize(find.byType(LgViewBar)).height;
+        expect(normal, 52);
+        await pumpLg(tester, bar(compact: true));
+        expect(tester.getSize(find.byType(LgViewBar)).height, 44);
+        // The detail mode is low enough already: the bar does not get lower than it was.
+        await pumpLg(tester, bar(), mode: LgMode.detail);
+        final detail = tester.getSize(find.byType(LgViewBar)).height;
+        await pumpLg(tester, bar(compact: true), mode: LgMode.detail);
+        expect(tester.getSize(find.byType(LgViewBar)).height, detail);
+      },
+    );
   });
 
   group('small parts', () {
