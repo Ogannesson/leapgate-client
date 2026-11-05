@@ -120,10 +120,12 @@ class _FileViewState extends State<FileView> {
   }
 
   /// Connected (the first time, or again after the panel): the local list has the keys.
+  /// Rebuilt either way for the system drop, which only works while connected.
   void _onConnection() {
     final connected = _isConnected;
-    if (connected && !_connected) _focusLocal();
-    _connected = connected;
+    if (connected == _connected) return;
+    if (connected) _focusLocal();
+    setState(() => _connected = connected);
   }
 
   void _focusLocal() {
@@ -219,7 +221,9 @@ class _FileViewState extends State<FileView> {
             LgSpace.s4,
           );
     return SystemDropTarget(
-      enabled: widget.active,
+      // The barrier over the panes does not stop the plugin's drops; a job queued while not
+      // connected would never end.
+      enabled: widget.active && _connected,
       areas: [_local, _remote],
       onDrop: (paths, to) => widget.model.uploadPaths(paths, to: to),
       child: ExcludeFocus(
@@ -254,7 +258,11 @@ class _FileViewState extends State<FileView> {
                         ),
                       ),
                       if (conn.stage != ConnStage.connected) ...[
-                        const ModalBarrier(dismissible: false),
+                        // The panes dim under the panel (02 §2.2 "连接过程和中断").
+                        ModalBarrier(
+                          dismissible: false,
+                          color: t.colors.scrim,
+                        ),
                         ConnectionPanel(
                           ffi: widget.ffi,
                           active: widget.active,
