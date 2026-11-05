@@ -189,14 +189,25 @@ void main() {
             ),
           ]
           ..summary = _summary(active: 1);
+        // A window 400 high, the panel below the panes as the file view lays it out: the
+        // column leaves its height unbounded, so the window's counts.
+        tester.view.physicalSize = const Size(1280, 400);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
         await tester.pumpWidget(
           _app(
-            Align(
-              alignment: Alignment.bottomCenter,
-              child: SizedBox(height: 400, child: FileQueuePanel(jobs: jobs)),
+            SizedBox(
+              height: 400,
+              child: Column(
+                children: [
+                  const Expanded(child: SizedBox.expand()),
+                  FileQueuePanel(jobs: jobs),
+                ],
+              ),
             ),
           ),
         );
+        expect(tester.takeException(), isNull);
         expect(tester.getSize(find.byType(ListView)).height, 240);
         expect(fakes.bind.localOptions[kOptionLeapgateFtQueueHeight], '600');
         // 59 minutes 40 seconds is about an hour, not "60 分钟".

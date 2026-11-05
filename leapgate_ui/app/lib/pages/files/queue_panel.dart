@@ -99,14 +99,15 @@ class _FileQueuePanelState extends State<FileQueuePanel> {
   Widget build(BuildContext context) {
     final connection = widget.connection;
     // Six tenths of the height the panel is given, at most kQueueMaxHeight; the saved height
-    // stays as it is.
+    // stays as it is. Below the panes in a column the height is unbounded: the window's then.
     return LayoutBuilder(
       builder: (context, constraints) {
+        final room = constraints.maxHeight.isFinite
+            ? constraints.maxHeight
+            : MediaQuery.sizeOf(context).height;
         final limit = math.max(
           kQueueMinHeight,
-          constraints.maxHeight.isFinite
-              ? math.min(constraints.maxHeight * 0.6, kQueueMaxHeight)
-              : kQueueMaxHeight,
+          math.min(room * 0.6, kQueueMaxHeight),
         );
         if (connection == null) return _build(context, true, limit);
         return ListenableBuilder(
