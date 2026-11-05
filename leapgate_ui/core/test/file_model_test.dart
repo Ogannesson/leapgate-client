@@ -280,6 +280,11 @@ void main() {
       expect(model.jobs.unfinished, 4);
       expect(model.jobs.summary.active, 2);
       expect(model.jobs.summary.queued, 2);
+      // Rust reports the waiting jobs' progress too: still queued.
+      jobs.tryUpdateJobProgress(
+          {'id': '${rows[1].id}', 'file_num': '-1', 'speed': '0', 'finished_size': '0'});
+      expect(model.jobs.rows[1].status, FileJobStatus.queued);
+      expect(model.jobs.summary.active, 2);
 
       final start = DateTime(2026, 11, 5, 12);
       T at<T>(int seconds, T Function() f) =>
@@ -359,6 +364,23 @@ void main() {
       expect(sides, [FtSide.unknown]);
       model.jobs.clearFinished();
       expect(model.jobs.rows.map((r) => r.status), [FileJobStatus.failed]);
+    });
+
+    test('an upload that had an error stays failed when its job_done comes after', () async {
+      final t = _session();
+      t.api.onReason =
+          (text, platform, side) => FtError(FtReason.permissionDenied, text: text);
+      final model = t.s.fileModel;
+      await model.localController.transfer([_entry('C:\\a.txt')], to: '/home/u');
+      final id = model.jobs.rows.single.id;
+      model.handleJobError(
+          {'id': '$id', 'err': 'Access is denied. (os error 5)', 'file_num': '0'});
+      await model.onJobDone({'id': '$id', 'file_num': '0'});
+
+      final row = model.jobs.rows.single;
+      expect((row.status, row.error?.reason),
+          (FileJobStatus.failed, FtReason.permissionDenied));
+      expect(model.jobs.summary.failed, 1);
     });
 
     test('folders go with their hidden items; nothing goes into "此电脑" (R2-Q22)', () async {

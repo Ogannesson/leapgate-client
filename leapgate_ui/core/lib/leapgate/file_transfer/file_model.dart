@@ -135,6 +135,7 @@ class FileModel implements FileTransferModel {
       _completeRequest(evt);
     }
     jobController.jobError(evt);
+    if (id != null) jobs.onJobError(id);
   }
 
   void _completeRequest(Map<String, dynamic> evt) {

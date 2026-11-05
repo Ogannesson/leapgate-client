@@ -190,6 +190,10 @@ class FileTransferJobs extends ChangeNotifier implements FileJobs {
 
   /// FT2's answer for the `err` it was asked about.
   final _errors = <int, ({String text, FtError error})>{};
+
+  /// The first `job_error` of a transfer (not a cancel or a skip): a folder upload goes on with
+  /// its other files and ends with a `job_done`, which must not make the row done.
+  final _failed = <int, String>{};
   final _samples = <int, List<({DateTime at, int bytes})>>{};
 
   FFI? get _session => _parent.target;
@@ -232,6 +236,18 @@ class FileTransferJobs extends ChangeNotifier implements FileJobs {
     if (i < 0) return;
     _errors[id] = (text: _jobs.jobTable[i].err, error: error);
     notifyListeners();
+  }
+
+  /// After the job table took a `job_error` for [id].
+  void onJobError(int id) {
+    final i = _jobs.getJob(id);
+    if (i < 0) return;
+    final job = _jobs.jobTable[i];
+    if (job.type == JobType.transfer &&
+        job.state == JobState.error &&
+        job.err != 'cancel') {
+      _failed.putIfAbsent(id, () => job.err);
+    }
   }
 
   void setConfirming(int id, bool confirming) {
@@ -345,6 +361,7 @@ class FileTransferJobs extends ChangeNotifier implements FileJobs {
       // asked about either.
       case JobState.error when job.err == 'cancel':
         if (job.err == 'cancel') return FileJobStatus.cancelled;
+        if (_failed.containsKey(job.id)) return FileJobStatus.failed;
         if (transfer && job.err == 'skipped') return FileJobStatus.skipped;
         return FileJobStatus.done;
       case JobState.error:
@@ -364,9 +381,10 @@ class FileTransferJobs extends ChangeNotifier implements FileJobs {
           : FileJobStatus.interrupted;
     }
     if (_confirming.contains(job.id)) return FileJobStatus.waitingConfirm;
-    // Rust works on one job in each direction at a time (02 §2.2 block H).
-    if (!job.recvJobRes &&
-        table.take(i).any((j) =>
+    // Rust works on one job in each direction at a time (02 §2.2 block H). It reports the
+    // progress of the waiting ones too (`io_loop.rs` `update_jobs_status`), so having had a
+    // `job_progress` says nothing.
+    if (table.take(i).any((j) =>
             j.type == JobType.transfer &&
             j.isRemoteToLocal == job.isRemoteToLocal &&
             (j.state == JobState.inProgress || j.state == JobState.none))) {
@@ -411,16 +429,17 @@ class FileTransferJobs extends ChangeNotifier implements FileJobs {
   }
 
   FtError _errorOf(JobProgress job) {
+    final text = _failed[job.id] ?? job.err;
     final cached = _errors[job.id];
-    if (cached != null && cached.text == job.err) return cached.error;
-    final error = ftErrorOf(job.err,
+    if (cached != null && cached.text == text) return cached.error;
+    final error = ftErrorOf(text,
         peerPlatform: _session?.ffiModel.pi.platform ?? '',
         side: job.type == JobType.transfer
             ? FtSide.unknown
             : job.isRemoteToLocal
                 ? FtSide.remote
                 : FtSide.local);
-    _errors[job.id] = (text: job.err, error: error);
+    _errors[job.id] = (text: text, error: error);
     return error;
   }
 
@@ -528,6 +547,7 @@ class FileTransferJobs extends ChangeNotifier implements FileJobs {
       _info.remove(id);
       _deletes.remove(id);
       _errors.remove(id);
+      _failed.remove(id);
       _confirming.remove(id);
     }
     _jobs.jobTable.removeWhere((job) => gone.contains(job.id));
