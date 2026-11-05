@@ -1204,7 +1204,7 @@
   "filesDisconnect": "断开",
   "filesThisDevice": "本机",
   "filesRemoteDevice": "远程设备",
-  "filesDeviceAndPlatform": "{name} · {platform}",
+  "filesDeviceAndPlatform": "{name}（{platform}）",
   "filesBack": "后退",
   "filesUp": "上一级",
   "filesHome": "主文件夹",
@@ -1258,5 +1258,7 @@
   "filesCantOpenReason": "无法打开“{folder}”：{reason}",
   "filesReasonPathTooLong": "路径过长。",
   "filesReasonInvalidName": "名称无效。",
-  "filesDropRefused": "不能放到这里"
+  "filesDropRefused": "无法放到此处",
+  "filesCantOpenText": "无法打开“{folder}”：{text}。",
+  "filesDrivesFailed": "无法读取驱动器列表。"
 }

@@ -15,7 +15,7 @@ import 'queue_panel.dart';
 
 /// The divider between the panes, and how far it goes to either side.
 const kFileDividerWidth = 7.0;
-const kFileSplitMin = 0.25;
+const kFileSplitMin = 0.35;
 
 /// The file transfer view in its session tab (02 §2.2): the view title bar, the two panes and
 /// the queue panel (`queue_panel.dart`), the connection panel over them while not connected.
@@ -84,6 +84,15 @@ class _FileViewState extends State<FileView> {
       _local.dispose();
       _remote.dispose();
       _areas();
+    }
+    // Shown again: the keys work without a click first. Not while the connection panel is up,
+    // which takes the focus for its own field.
+    if (widget.active &&
+        !old.active &&
+        widget.ffi.connection.stage == ConnStage.connected) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && widget.active) _localFocus.requestFocus();
+      });
     }
   }
 

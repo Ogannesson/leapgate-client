@@ -24,6 +24,26 @@ const kFileTypeColumnMinPane = 520.0;
 /// Typed letters within this long make one prefix (upstream `list_search_action_listener.dart`).
 const kTypeAheadWindow = Duration(milliseconds: 1500);
 
+/// "名称" keeps at least this much when the other columns are wide.
+const kFileNameColumnMin = 120.0;
+
+/// The icon in front of the name.
+const _kLeading = LgSpace.s2 + 20;
+
+/// [widths] as they show in a list [width] wide: the date, type (when shown) and size columns
+/// shrink together so that "名称" keeps [kFileNameColumnMin]. What is saved stays as it was.
+List<double> fitColumns(
+  List<double> widths,
+  double width, {
+  required bool withType,
+}) {
+  final fixed = widths[0] + (withType ? widths[1] : 0) + widths[2];
+  final room = width - _kLeading - kFileNameColumnMin;
+  if (fixed <= room) return widths;
+  final scale = room <= 0 ? 0.0 : room / fixed;
+  return [for (final w in widths) w * scale];
+}
+
 /// The date, type and size columns' widths, from LocalConfig or the defaults.
 List<double> _columnWidths() {
   const fallback = [136.0, 110.0, 80.0];
@@ -60,8 +80,9 @@ class FileList extends StatefulWidget {
   final VoidCallback onEditPath;
   final VoidCallback onFocusSearch;
 
-  /// Tab: the other pane's list takes the focus.
-  final VoidCallback onSwitchPane;
+  /// Tab: the other pane's list takes the focus; false when it has none to take it (its first
+  /// folder did not open), and the key goes on.
+  final bool Function() onSwitchPane;
 
   /// Under the column headers instead of rows (an empty folder, no match).
   final Widget? placeholder;
@@ -296,64 +317,74 @@ class _FileListState extends State<FileList> {
     final keys = HardwareKeyboard.instance;
     final ctrl = keys.isControlPressed,
         shift = keys.isShiftPressed,
-        alt = keys.isAltPressed;
+        alt = keys.isAltPressed,
+        meta = keys.isMetaPressed;
+    // Each key takes only its own modifiers: anything else (Ctrl+Tab for the tabs, Alt+F4)
+    // goes on up.
+    final plain = !ctrl && !shift && !alt && !meta;
+    final shiftOnly = !ctrl && !alt && !meta;
+    final altOnly = alt && !ctrl && !shift && !meta;
+    final ctrlOnly = ctrl && !shift && !alt && !meta;
     final key = event.logicalKey;
     final lead = _indexOf(_lead);
     final page = _scroll.hasClients
         ? (_scroll.position.viewportDimension / _rowHeight).floor() - 1
         : 10;
+    final step = page < 1 ? 1 : page;
     switch (key) {
-      case LogicalKeyboardKey.arrowDown:
+      case LogicalKeyboardKey.arrowDown when shiftOnly:
         _move(lead + 1, extend: shift);
-      case LogicalKeyboardKey.arrowUp:
-        if (alt) {
-          if (_pane.canGoUp) _pane.goUp();
-        } else {
-          _move(lead < 0 ? _entries.length - 1 : lead - 1, extend: shift);
-        }
-      case LogicalKeyboardKey.pageDown:
-        _move(lead + (page < 1 ? 1 : page), extend: shift);
-      case LogicalKeyboardKey.pageUp:
-        _move(lead - (page < 1 ? 1 : page), extend: shift);
-      case LogicalKeyboardKey.home:
+      case LogicalKeyboardKey.arrowUp when altOnly:
+        if (_pane.canGoUp) _pane.goUp();
+      case LogicalKeyboardKey.arrowUp when shiftOnly:
+        _move(lead < 0 ? _entries.length - 1 : lead - 1, extend: shift);
+      case LogicalKeyboardKey.pageDown when shiftOnly:
+        _move(lead + step, extend: shift);
+      case LogicalKeyboardKey.pageUp when shiftOnly:
+        _move(lead - step, extend: shift);
+      case LogicalKeyboardKey.home when shiftOnly:
         _move(0, extend: shift);
-      case LogicalKeyboardKey.end:
+      case LogicalKeyboardKey.end when shiftOnly:
         _move(_entries.length - 1, extend: shift);
-      case LogicalKeyboardKey.enter || LogicalKeyboardKey.numpadEnter:
+      case LogicalKeyboardKey.enter || LogicalKeyboardKey.numpadEnter
+          when plain:
         final sel = _pane.selection;
         if (sel.isNotEmpty) {
           _activate(sel);
         } else if (lead >= 0) {
           _activate([_entries[lead]]);
         }
-      case LogicalKeyboardKey.backspace:
+      case LogicalKeyboardKey.backspace when plain:
         if (_pane.canGoBack) _pane.goBack();
-      case LogicalKeyboardKey.arrowLeft when alt:
+      case LogicalKeyboardKey.arrowLeft when altOnly:
         if (_pane.canGoBack) _pane.goBack();
       // Kept here, as upstream does, so the focus doesn't move to the other pane.
-      case LogicalKeyboardKey.arrowLeft || LogicalKeyboardKey.arrowRight:
+      case LogicalKeyboardKey.arrowLeft || LogicalKeyboardKey.arrowRight
+          when shiftOnly:
         break;
-      case LogicalKeyboardKey.f5:
+      case LogicalKeyboardKey.f5 when plain:
         _pane.refresh();
-      case LogicalKeyboardKey.keyL when ctrl:
+      case LogicalKeyboardKey.keyL when ctrlOnly:
         widget.onEditPath();
-      case LogicalKeyboardKey.keyF when ctrl:
+      case LogicalKeyboardKey.keyF when ctrlOnly:
         widget.onFocusSearch();
-      case LogicalKeyboardKey.keyA when ctrl:
+      case LogicalKeyboardKey.keyA when ctrlOnly:
         _pane.select(_entries);
-      case LogicalKeyboardKey.keyN when ctrl && shift:
+      case LogicalKeyboardKey.keyN when ctrl && shift && !alt && !meta:
         if (!_pane.isThisPc && _pane.path.isNotEmpty) _pane.newFolder();
-      case LogicalKeyboardKey.f2:
+      case LogicalKeyboardKey.f2 when plain:
         if (_pane.canRename && _pane.selection.length == 1) {
           _pane.rename(_pane.selection.single);
         }
-      case LogicalKeyboardKey.delete:
+      case LogicalKeyboardKey.delete when plain:
         if (_pane.selection.isNotEmpty) _pane.delete(_pane.selection);
-      case LogicalKeyboardKey.tab:
-        widget.onSwitchPane();
+      case LogicalKeyboardKey.tab when shiftOnly:
+        return widget.onSwitchPane()
+            ? KeyEventResult.handled
+            : KeyEventResult.ignored;
       default:
         final char = event.character;
-        if (ctrl || alt || char == null || char.trim().isEmpty) {
+        if (ctrl || alt || meta || char == null || char.trim().isEmpty) {
           return KeyEventResult.ignored;
         }
         return _typeAhead(char)
@@ -391,6 +422,11 @@ class _FileListState extends State<FileList> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final withType = constraints.maxWidth >= kFileTypeColumnMinPane;
+        final widths = fitColumns(
+          _widths,
+          constraints.maxWidth,
+          withType: withType,
+        );
         final names = {for (final e in _pane.entries) e.name};
         return Focus(
           focusNode: widget.focusNode,
@@ -399,7 +435,7 @@ class _FileListState extends State<FileList> {
             children: [
               _Header(
                 sort: _pane.sort,
-                widths: _widths,
+                widths: widths,
                 withType: withType,
                 onSort: _sortBy,
                 onResize: _resize,
@@ -434,6 +470,7 @@ class _FileListState extends State<FileList> {
                                       widget.focusNode.hasFocus,
                                   target: hover?.to == e.path,
                                   partial: isPartialTransfer(e, names),
+                                  widths: widths,
                                   withType: withType,
                                 );
                               },
@@ -457,6 +494,7 @@ class _FileListState extends State<FileList> {
     required bool lead,
     required bool target,
     required bool partial,
+    required List<double> widths,
     required bool withType,
   }) {
     final t = LgTokens.of(context);
@@ -469,7 +507,7 @@ class _FileListState extends State<FileList> {
       type: fileTypeText(l10n, e, partial: partial),
       date: e.isDrive ? '' : formatFileDate(e),
       size: e.isFile && !e.isLink ? formatFileSize(l10n, e.size) : '',
-      widths: _widths,
+      widths: widths,
       withType: withType,
     );
     if (e.isDrive) return row;

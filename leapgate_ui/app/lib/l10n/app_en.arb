@@ -1359,7 +1359,7 @@
   "filesDisconnect": "Disconnect",
   "filesThisDevice": "This device",
   "filesRemoteDevice": "Remote device",
-  "filesDeviceAndPlatform": "{name} · {platform}",
+  "filesDeviceAndPlatform": "{name} ({platform})",
   "@filesDeviceAndPlatform": {"placeholders": {"name": {"type": "String"}, "platform": {"type": "String"}}},
   "filesBack": "Back",
   "filesUp": "Up one level",
@@ -1407,7 +1407,7 @@
   "@filesItems": {"placeholders": {"count": {"type": "int"}}},
   "filesSelectedSize": "{count, plural, =1{1 item selected, {size}} other{{count} items selected, {size}}}",
   "@filesSelectedSize": {"placeholders": {"count": {"type": "int"}, "size": {"type": "String"}}},
-  "filesSelectedFolders": "{count, plural, =1{1 item selected (1 folder)} other{{count} items selected (including {folders} folders)}}",
+  "filesSelectedFolders": "{count, plural, =1{1 item selected} other{{count} items selected}} ({folders, plural, =1{including 1 folder} other{including {folders} folders}})",
   "@filesSelectedFolders": {"placeholders": {"count": {"type": "int"}, "folders": {"type": "int"}}},
   "filesEmptyFolder": "This folder is empty",
   "filesNoMatch": "No matching items",
@@ -1426,5 +1426,8 @@
   "@filesCantOpenReason": {"placeholders": {"folder": {"type": "String"}, "reason": {"type": "String"}}},
   "filesReasonPathTooLong": "The path is too long.",
   "filesReasonInvalidName": "The name isn't valid.",
-  "filesDropRefused": "Can't drop here"
+  "filesDropRefused": "Can't drop here",
+  "filesCantOpenText": "Couldn't open \"{folder}\": {text}.",
+  "@filesCantOpenText": {"placeholders": {"folder": {"type": "String"}, "text": {"type": "String"}}},
+  "filesDrivesFailed": "Couldn't read the list of drives."
 }

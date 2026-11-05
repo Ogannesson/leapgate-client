@@ -165,8 +165,15 @@ class _FilePaneViewState extends State<FilePaneView> {
 
   void _clearSearch() {
     _search.clear();
-    setState(() => _searchOpen = false);
+    _searchOpen = false;
+    _searchChanged();
     widget.listFocus.requestFocus();
+  }
+
+  /// What is selected may no longer show, and Delete or a drag would act on it unseen.
+  void _searchChanged() {
+    if (_pane.selection.isNotEmpty) _pane.select(const []);
+    setState(() {});
   }
 
   Widget _header(AppLocalizations l10n, LgTokens t) {
@@ -343,7 +350,7 @@ class _FilePaneViewState extends State<FilePaneView> {
                           onPressed: _clearSearch,
                           focusable: false,
                         ),
-                  onChanged: (_) => setState(() {}),
+                  onChanged: (_) => _searchChanged(),
                 ),
               ),
             ),
@@ -422,7 +429,12 @@ class _FilePaneViewState extends State<FilePaneView> {
       area: widget.area,
       onEditPath: () => _editingPath.value = true,
       onFocusSearch: _focusSearch,
-      onSwitchPane: widget.otherListFocus.requestFocus,
+      onSwitchPane: () {
+        // No list there until a folder opened in it.
+        if (widget.other.path.isEmpty) return false;
+        widget.otherListFocus.requestFocus();
+        return true;
+      },
       placeholder: placeholder,
     );
     return Stack(

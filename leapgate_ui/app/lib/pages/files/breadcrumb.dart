@@ -45,22 +45,24 @@ List<Crumb> crumbsOf(String path, bool isWindows, String thisPc) {
 }
 
 /// Which segments show in [width] (indexes into [widths], the segments' widths with their
-/// separators): all that fit, otherwise the root, the first folder, "…" and as many of the last
-/// as fit, at least the current one.
+/// separators): all that fit, otherwise the root, "…" and the current one, then the first
+/// folder (from four segments on) and as many of the last as fit. The current one always shows;
+/// the breadcrumb shortens its name when even that does not fit.
 List<int> visibleCrumbs(List<double> widths, double ellipsis, double width) {
-  final all = [for (var i = 0; i < widths.length; i++) i];
-  if (widths.fold<double>(0, (a, b) => a + b) <= width || widths.length < 4) {
-    return all;
+  final n = widths.length;
+  if (n < 2 || widths.fold<double>(0, (a, b) => a + b) <= width) {
+    return [for (var i = 0; i < n; i++) i];
   }
-  final keep = [0, 1];
-  var used = widths[0] + widths[1] + ellipsis;
+  var used = widths[0] + ellipsis + widths[n - 1];
+  final first = n >= 4 && used + widths[1] <= width;
+  if (first) used += widths[1];
   final tail = <int>[];
-  for (var i = widths.length - 1; i > 1; i--) {
-    if (tail.isNotEmpty && used + widths[i] > width) break;
+  for (var i = n - 2; i > (first ? 1 : 0); i--) {
+    if (used + widths[i] > width) break;
     used += widths[i];
     tail.insert(0, i);
   }
-  return [...keep, ...tail];
+  return [0, if (first) 1, ...tail, n - 1];
 }
 
 class FileBreadcrumb extends StatefulWidget {
@@ -183,19 +185,36 @@ class _FileBreadcrumbState extends State<FileBreadcrumb> {
     final style = t.text;
     final crumbs = crumbsOf(_pane.path, _pane.isWindows, l10n.filesThisPc);
     const separator = 18.0;
-    double measure(String s) => (TextPainter(
-      text: TextSpan(text: s, style: style),
-      textDirection: TextDirection.ltr,
-      maxLines: 1,
-    )..layout()).width;
+    double measure(String s) {
+      final painter = TextPainter(
+        text: TextSpan(text: s, style: style),
+        textDirection: TextDirection.ltr,
+        maxLines: 1,
+      )..layout();
+      final width = painter.width;
+      painter.dispose();
+      return width;
+    }
+
     return LayoutBuilder(
       builder: (context, constraints) {
         final widths = [
           for (final c in crumbs) measure(c.label) + LgSpace.s2 * 2 + separator,
         ];
+        final ellipsis = measure('…') + separator;
         // The root's drop-down and some blank to click into the path field.
         final room = constraints.maxWidth - t.sizes.button - LgSpace.s6;
-        final shown = visibleCrumbs(widths, measure('…') + separator, room);
+        final shown = visibleCrumbs(widths, ellipsis, room);
+        // What the current folder's segment may take; its name is shortened to that.
+        var others = 0.0;
+        for (var k = 0; k < shown.length - 1; k++) {
+          others += widths[shown[k]];
+          if (shown[k + 1] != shown[k] + 1) others += ellipsis;
+        }
+        final lastMax = (room - others - separator).clamp(
+          LgSpace.s6,
+          double.infinity,
+        );
         final children = <Widget>[];
         for (var k = 0; k < shown.length; k++) {
           final i = shown[k];
@@ -213,12 +232,19 @@ class _FileBreadcrumbState extends State<FileBreadcrumb> {
             }
           }
           final c = crumbs[i];
+          final current = i == crumbs.length - 1;
+          final button = _CrumbButton(
+            label: c.label,
+            current: current,
+            onPressed: () => _pane.openDirectory(c.path),
+          );
           children.add(
-            _CrumbButton(
-              label: c.label,
-              current: i == crumbs.length - 1,
-              onPressed: () => _pane.openDirectory(c.path),
-            ),
+            current
+                ? ConstrainedBox(
+                    constraints: BoxConstraints(maxWidth: lastMax),
+                    child: button,
+                  )
+                : button,
           );
           if (i == 0) {
             children.add(
@@ -293,6 +319,7 @@ class _CrumbButton extends StatelessWidget {
                 ? t.text.copyWith(fontWeight: FontWeight.w600)
                 : t.text,
             maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
         ),
       ),
@@ -300,7 +327,8 @@ class _CrumbButton extends StatelessWidget {
   }
 }
 
-/// The drives under "此电脑" in the root drop-down; "正在读取…" until they are read.
+/// The drives under "此电脑" in the root drop-down; "正在读取…" until they are read, a greyed
+/// line when they could not be.
 class _DriveItems extends StatefulWidget {
   const _DriveItems({required this.pane});
 
@@ -322,10 +350,13 @@ class _DriveItemsState extends State<_DriveItems> {
         if (snap.connectionState != ConnectionState.done) {
           return LgMenuItem(label: l10n.filesReading, onPressed: null);
         }
+        if (snap.hasError) {
+          return LgMenuItem(label: l10n.filesDrivesFailed, onPressed: null);
+        }
         return Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            for (final d in snap.data ?? const <Entry>[])
+            for (final d in snap.data!)
               LgMenuItem(
                 icon: LgIcons.drive,
                 label: d.name,

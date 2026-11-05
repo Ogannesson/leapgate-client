@@ -11,6 +11,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:leapgate_ui/l10n/app_localizations.dart';
 import 'package:leapgate_ui/l10n/app_localizations_zh.dart';
 import 'package:leapgate_ui/pages/files/breadcrumb.dart';
+import 'package:leapgate_ui/pages/files/file_list.dart';
 import 'package:leapgate_ui/pages/files/file_view.dart';
 import 'package:leapgate_ui/pages/files/formats.dart';
 import 'package:leapgate_ui/pages/files/pane.dart';
@@ -98,29 +99,29 @@ Future<_View> _pump(
     local: local ?? _local(),
     remote: remote ?? _remote(),
   );
-  final disconnects = <int>[];
-  await tester.pumpWidget(
-    MaterialApp(
-      locale: const Locale('zh'),
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
-      supportedLocales: AppLocalizations.supportedLocales,
-      theme: buildLgTheme(brightness: Brightness.light, mode: LgMode.compact),
-      home: Scaffold(
-        body: FileView(
-          ffi: ffi,
-          model: model,
-          active: active,
-          lastView: true,
-          viewSwitch: const Text('视图切换'),
-          route: const Text('直连'),
-          onDisconnect: () => disconnects.add(1),
-        ),
-      ),
-    ),
-  );
+  final v = _View(ffi, model, <int>[]);
+  await tester.pumpWidget(_app(v, active: active));
   await tester.pump();
-  return _View(ffi, model, disconnects);
+  return v;
 }
+
+Widget _app(_View v, {required bool active}) => MaterialApp(
+  locale: const Locale('zh'),
+  localizationsDelegates: AppLocalizations.localizationsDelegates,
+  supportedLocales: AppLocalizations.supportedLocales,
+  theme: buildLgTheme(brightness: Brightness.light, mode: LgMode.compact),
+  home: Scaffold(
+    body: FileView(
+      ffi: v.ffi,
+      model: v.model,
+      active: active,
+      lastView: true,
+      viewSwitch: const Text('视图切换'),
+      route: const Text('直连'),
+      onDisconnect: () => v.disconnects.add(1),
+    ),
+  ),
+);
 
 /// The row of [name], the widget that has its semantics.
 Finder _row(String name) => find.byWidgetPredicate(
@@ -257,6 +258,17 @@ void main() {
         5,
       ]);
       expect(visibleCrumbs([50, 50, 50, 50, 50, 50], 20, 230), [0, 1, 4, 5]);
+      // Fewer than four segments: the root, "…" and the current one.
+      expect(visibleCrumbs([50, 200, 200], 20, 300), [0, 2]);
+      expect(
+        openErrorText(
+          l10n,
+          r'D:\x',
+          const FtError(FtReason.other, text: 'Wrong id.'),
+          true,
+        ),
+        '无法打开“x”：Wrong id。',
+      );
     });
   });
 
@@ -266,7 +278,7 @@ void main() {
       final v = await _pump(tester);
       expect(find.text('本机'), findsOneWidget);
       expect(find.text('远程设备'), findsOneWidget);
-      expect(find.text('den-pc · Windows'), findsOneWidget);
+      expect(find.text('den-pc（Windows）'), findsOneWidget);
       expect(find.text('视图切换'), findsOneWidget);
       expect(find.text('直连'), findsOneWidget);
       expect(find.text('DOCX 文件'), findsOneWidget);
@@ -565,7 +577,7 @@ void main() {
         await _systemDrag(tester, 'updated', _at(folder));
         expect(find.text('上传到“旧照片”'), findsOneWidget);
         await _systemDrag(tester, 'updated', _at(local));
-        expect(find.text('不能放到这里'), findsOneWidget);
+        expect(find.text('无法放到此处'), findsOneWidget);
         await _systemDrag(tester, 'updated', _at(folder));
         await _systemDrag(tester, 'performOperation', [r'C:\a.txt', r'C:\文件夹']);
         expect(v.model.uploads.single.paths, [r'C:\a.txt', r'C:\文件夹']);
@@ -580,7 +592,7 @@ void main() {
 
     testWidgets('from one pane onto a folder row of the other', (tester) async {
       final v = await _pump(tester);
-      await _click(tester, _row('预算.xlsx'));
+      // The press selects the row it starts on.
       final g = await tester.startGesture(
         tester.getCenter(_row('预算.xlsx')),
         kind: PointerDeviceKind.mouse,
@@ -593,7 +605,52 @@ void main() {
       expect(find.text('上传到“旧照片”'), findsOneWidget);
       await g.up();
       await tester.pump();
-      expect(v.model.local.calls, contains(r'transfer:预算.xlsx>D:\备份\旧照片'));
+      expect(v.model.local.calls, [r'transfer:预算.xlsx>D:\备份\旧照片']);
+    });
+
+    testWidgets('back onto the pane it came from: not taken (no move)', (
+      tester,
+    ) async {
+      final v = await _pump(tester);
+      final g = await tester.startGesture(
+        tester.getCenter(_row('预算.xlsx')),
+        kind: PointerDeviceKind.mouse,
+      );
+      await g.moveBy(const Offset(0, -20));
+      await tester.pump();
+      await g.moveTo(tester.getCenter(_row('照片')));
+      await tester.pump();
+      expect(find.text('无法放到此处'), findsOneWidget);
+      expect(find.text('上传到“照片”'), findsNothing);
+      await g.up();
+      await tester.pump();
+      expect(v.model.local.calls, isEmpty);
+      expect(find.text('无法放到此处'), findsNothing);
+    });
+  });
+
+  group('double click and Enter', () {
+    testWidgets('a file goes to the other pane\'s folder (R2-Q27)', (
+      tester,
+    ) async {
+      final v = await _pump(tester);
+      await _click(tester, _row('预算.xlsx'));
+      await _click(tester, _row('预算.xlsx'));
+      expect(v.model.local.calls, ['transfer:预算.xlsx']);
+      await _key(tester, LogicalKeyboardKey.enter);
+      expect(v.model.local.calls, ['transfer:预算.xlsx', 'transfer:预算.xlsx']);
+    });
+
+    testWidgets('a folder opens', (tester) async {
+      final v = await _pump(tester);
+      await _click(tester, _row('旧照片'));
+      await _click(tester, _row('旧照片'));
+      expect(v.model.remote.calls, [r'openDirectory:D:\备份\旧照片']);
+      await _key(tester, LogicalKeyboardKey.enter);
+      expect(v.model.remote.calls, [
+        r'openDirectory:D:\备份\旧照片',
+        r'openDirectory:D:\备份\旧照片',
+      ]);
     });
   });
 
@@ -633,28 +690,83 @@ void main() {
       },
     );
 
-    testWidgets('a view that is not shown takes no keys', (tester) async {
+    testWidgets('Ctrl+Tab and Ctrl+F5 go on to the tabs and the window', (
+      tester,
+    ) async {
+      final v = await _pump(tester);
+      await _click(tester, _row('照片'));
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      expect(await tester.sendKeyDownEvent(LogicalKeyboardKey.tab), isFalse);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.tab);
+      expect(await tester.sendKeyDownEvent(LogicalKeyboardKey.f5), isFalse);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.f5);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      expect(v.model.local.calls, isEmpty);
+      // Tab alone switches panes.
+      expect(await tester.sendKeyDownEvent(LogicalKeyboardKey.tab), isTrue);
+    });
+
+    testWidgets('a view that is not shown takes no keys; shown, it does', (
+      tester,
+    ) async {
       final v = await _pump(tester, active: false);
       await _click(tester, _row('照片'));
       await _key(tester, LogicalKeyboardKey.f5);
       expect(v.model.local.calls, isNot(contains('refresh')));
+
+      await tester.pumpWidget(_app(v, active: true));
+      await tester.pump();
+      await _key(tester, LogicalKeyboardKey.f5);
+      expect(v.model.local.calls, contains('refresh'));
     });
   });
 
   testWidgets(
-    'the divider and the column widths are remembered on this device',
+    'the narrow pane: breadcrumb and columns fit, the search empties the selection',
     (tester) async {
-      await _pump(tester);
-      final divider = find.byWidgetPredicate(
-        (w) => w is SizedBox && w.width == kFileDividerWidth,
+      fakes.bind.localOptions[kOptionFtColumns] = '400,400,400';
+      // The divider as far left as it goes.
+      fakes.bind.localOptions[kOptionFtDivider] = '0.2';
+      final v = await _pump(
+        tester,
+        local: _local()..path = r'C:\Users\u\Documents\一个名字非常非常非常非常非常非常长的文件夹',
+        size: const Size(960, 600),
       );
-      await tester.drag(divider, const Offset(-128, 0));
-      await tester.pump();
-      expect(fakes.bind.localOptions[kOptionFtDivider], isNotEmpty);
+      // An overflow would have failed the test; the name column keeps its room.
+      final name = find
+          .ancestor(of: find.text('年度报告.docx'), matching: find.byType(Expanded))
+          .first;
       expect(
-        double.parse(fakes.bind.localOptions[kOptionFtDivider]!),
-        lessThan(0.5),
+        tester.getSize(name).width,
+        greaterThanOrEqualTo(kFileNameColumnMin),
       );
+      // A long current folder leaves room for the root and "…" only, and is shortened.
+      expect(_inPane('本机', find.text('…')), findsOneWidget);
+      expect(_inPane('本机', find.text('C:')), findsNothing);
+      expect(_inPane('本机', find.text('一个名字非常非常非常非常非常非常长的文件夹')), findsOneWidget);
+
+      await _click(tester, _row('年度报告.docx'));
+      expect(v.model.local.selection, hasLength(1));
+      await tester.tap(_inPane('本机', find.bySemanticsLabel('搜索当前文件夹')));
+      await tester.pump();
+      await tester.pump();
+      await tester.enterText(_inPane('本机', find.byType(EditableText)), '预');
+      await tester.pump();
+      expect(v.model.local.selection, isEmpty);
     },
   );
+
+  testWidgets('the divider is remembered on this device', (tester) async {
+    await _pump(tester);
+    final divider = find.byWidgetPredicate(
+      (w) => w is SizedBox && w.width == kFileDividerWidth,
+    );
+    await tester.drag(divider, const Offset(-128, 0));
+    await tester.pump();
+    expect(fakes.bind.localOptions[kOptionFtDivider], isNotEmpty);
+    expect(
+      double.parse(fakes.bind.localOptions[kOptionFtDivider]!),
+      lessThan(0.5),
+    );
+  });
 }

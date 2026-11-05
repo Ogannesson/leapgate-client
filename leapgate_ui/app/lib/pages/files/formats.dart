@@ -103,8 +103,8 @@ String? _windowsFormat(DateTime time, {required bool date}) {
     sizeOf<SYSTEMTIME>(),
   ).cast<SYSTEMTIME>();
   final out = HeapAlloc(heap, HEAP_ZERO_MEMORY, _chars * 2).cast<Uint16>();
-  if (st == nullptr || out == nullptr) return null;
   try {
+    if (st == nullptr || out == nullptr) return null;
     st.ref
       ..wYear = time.year
       ..wMonth = time.month
@@ -128,8 +128,8 @@ String? _windowsFormat(DateTime time, {required bool date}) {
     if (n <= 1) return null;
     return String.fromCharCodes(out.asTypedList(n - 1));
   } finally {
-    HeapFree(heap, 0, st);
-    HeapFree(heap, 0, out);
+    if (st != nullptr) HeapFree(heap, 0, st);
+    if (out != nullptr) HeapFree(heap, 0, out);
   }
 }
 
@@ -201,7 +201,11 @@ String openErrorText(
     _ =>
       error.text.isEmpty
           ? l10n.filesCantOpen(folder)
-          : l10n.filesCantOpenReason(folder, error.text),
+          // The copy ends the sentence; one the text brings would make two.
+          : l10n.filesCantOpenText(
+              folder,
+              error.text.replaceFirst(RegExp(r'[.。]+$'), ''),
+            ),
   };
 }
 
