@@ -187,13 +187,15 @@ class LgFileNavRow extends StatelessWidget {
 /// from the left, the search of the folder at the right.
 ///
 /// A pane narrower than [collapseBelow] cannot hold both: the search is then an icon, and
-/// [searchOpen] says whether the field has taken the whole row. The page owns that flag: a press
-/// on the icon calls [onSearchOpenChanged] with true, and the field gets the keyboard when the
-/// flag comes on, however it came on (Ctrl+F sets it too); focus leaving the field calls it with
-/// false, whether the field is empty or not. What was typed stays in [searchController], so the
-/// icon is drawn in the accent colour while the folder is filtered, and opens on the same text.
-/// In a wide pane the field is always there and [searchOpen] means nothing. The field is one
-/// widget kept alive across the two layouts, so crossing the width loses no typing.
+/// [searchOpen] says whether the field has taken the whole row. The page owns that flag, and the
+/// row keeps it equal to "the field has the keyboard", in a wide pane as well as a narrow one:
+/// the field taking the focus calls [onSearchOpenChanged] with true (a press on the icon, a press
+/// into the wide field, Ctrl+F), and the field losing it calls it with false, whether the field is
+/// empty or not. The field gets the keyboard when the flag comes on, however it came on. What was
+/// typed stays in [searchController], so the icon is drawn in the accent colour while the folder
+/// is filtered, and opens on the same text. In a wide pane the field is always shown whatever the
+/// flag says. The field is one widget kept alive across the two layouts, so crossing the width
+/// loses neither the typing nor the keyboard.
 class LgFileOpRow extends StatefulWidget {
   const LgFileOpRow({
     super.key,
@@ -244,7 +246,6 @@ class LgFileOpRow extends StatefulWidget {
 
 class _LgFileOpRowState extends State<LgFileOpRow> {
   final _fieldKey = GlobalKey();
-  bool _narrow = false;
 
   @override
   void initState() {
@@ -272,11 +273,12 @@ class _LgFileOpRowState extends State<LgFileOpRow> {
     super.dispose();
   }
 
-  // Focus gone from the open field gives the icon back, empty or not.
+  // The flag follows the keyboard, in either layout, so that it is right whenever the pane
+  // narrows: a field that takes the focus is "open" (a press into the wide field, Ctrl+F), a field
+  // that loses it is "closed", with text or without.
   void _onFocus() {
-    if (!widget.searchFocusNode.hasFocus && _narrow && widget.searchOpen) {
-      widget.onSearchOpenChanged(false);
-    }
+    final hasFocus = widget.searchFocusNode.hasFocus;
+    if (hasFocus != widget.searchOpen) widget.onSearchOpenChanged(hasFocus);
   }
 
   Widget _field() => ListenableBuilder(
@@ -336,7 +338,6 @@ class _LgFileOpRowState extends State<LgFileOpRow> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final narrow = constraints.maxWidth < widget.collapseBelow;
-        _narrow = narrow;
         final Widget content;
         if (narrow && widget.searchOpen) {
           content = _field();

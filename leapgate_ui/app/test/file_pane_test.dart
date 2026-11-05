@@ -428,6 +428,26 @@ void main() {
       expect(edit, 1);
     });
 
+    testWidgets('the … that takes the press is no button to a screen reader', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      await pumpLg(
+        tester,
+        _crumb(['D:', '备份', '2026', '十月', '家庭', '照片', '原图'], width: 330),
+      );
+      // The press it takes would be a second tap action next to the row's own, which the
+      // semantics tree cannot merge: the "…" would come out as a node of its own, a button that
+      // does nothing.
+      var root = tester.getSemantics(find.byType(LgBreadcrumb));
+      while (root.parent != null) {
+        root = root.parent!;
+      }
+      final alone = _semanticsNodes(root).where((n) => n.label == '…');
+      expect(alone, isEmpty);
+      handle.dispose();
+    });
+
     testWidgets('narrower still, the drive folds too and the last is kept', (
       tester,
     ) async {
@@ -721,6 +741,64 @@ void main() {
         );
         expect(c.text, '报告');
         expect(f.hasFocus, isTrue);
+      },
+    );
+
+    testWidgets(
+      'a wide field the page opened and the user left: narrowing shows the buttons, not a field',
+      (tester) async {
+        final (c, f) = holders();
+        final key = GlobalKey<_OpsHostState>();
+        final log = <bool>[];
+        await pumpLg(tester, host(c, f, key: key, log: log));
+        // Ctrl+F in a wide pane: the page sets the flag, the field takes the keyboard.
+        key.currentState!.setOpen(true);
+        await settle(tester);
+        expect(f.hasFocus, isTrue);
+        // A press elsewhere takes the keyboard away; the flag has to follow.
+        f.unfocus();
+        await settle(tester);
+        expect(log, [false]);
+        key.currentState!.setWidth(468);
+        await settle(tester);
+        expect(find.text('上传'), findsOneWidget);
+        expect(find.byType(TextField), findsNothing);
+        expect(find.byTooltip('搜索'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'typing in the wide field and then narrowing keeps the field, the keyboard and the connection',
+      (tester) async {
+        final (c, f) = holders();
+        final key = GlobalKey<_OpsHostState>();
+        final log = <bool>[];
+        await pumpLg(tester, host(c, f, key: key, log: log));
+        await tester.tap(find.byType(TextField));
+        await settle(tester);
+        // The press into the field is the flag coming on, by itself.
+        expect(log, [true]);
+        tester.testTextInput.enterText('报');
+        await tester.pump();
+        final before = tester.state<EditableTextState>(
+          find.byType(EditableText),
+        );
+        key.currentState!.setWidth(468);
+        await settle(tester);
+        expect(
+          find.text('上传'),
+          findsNothing,
+          reason: 'narrow, and the field has the row',
+        );
+        expect(
+          tester.state<EditableTextState>(find.byType(EditableText)),
+          same(before),
+        );
+        expect(f.hasFocus, isTrue);
+        expect(tester.testTextInput.hasAnyClients, isTrue);
+        tester.testTextInput.enterText('报告');
+        await tester.pump();
+        expect(c.text, '报告');
       },
     );
 

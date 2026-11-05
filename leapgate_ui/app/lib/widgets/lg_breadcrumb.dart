@@ -352,6 +352,8 @@ class _Folded extends StatelessWidget {
       message: tip,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
+        // Only there to take the press: a screen reader must not find a button that does nothing.
+        excludeFromSemantics: true,
         onTap: () {},
         child: Container(
           height: t.sizes.button - LgSpace.s2,
