@@ -16,9 +16,9 @@ import '../../theme/lg_tokens.dart';
 import '../../widgets/lg_banner.dart';
 import '../../widgets/lg_button.dart';
 import '../../widgets/lg_device.dart';
+import '../../widgets/lg_file_pane.dart';
+import '../../widgets/lg_list_chrome.dart';
 import '../../widgets/lg_menu.dart';
-import '../../widgets/lg_status.dart';
-import '../../widgets/lg_text_field.dart';
 import '../../widgets/lg_tooltip.dart';
 import '../session/session_names.dart';
 import 'breadcrumb.dart';
@@ -63,8 +63,10 @@ class FilePaneView extends StatefulWidget {
     required this.pane,
     required this.other,
     required this.area,
+    required this.otherArea,
     required this.listFocus,
     required this.otherListFocus,
+    this.compact = false,
   });
 
   /// The session, for the remote device's name and platform in the header.
@@ -72,8 +74,14 @@ class FilePaneView extends StatefulWidget {
   final FilePane pane;
   final FilePane other;
   final PaneDropArea area;
+
+  /// The other pane's, for the label that follows rows dragged out of this one.
+  final PaneDropArea otherArea;
   final FocusNode listFocus;
   final FocusNode otherListFocus;
+
+  /// The smallest window's rows (`FileView`).
+  final bool compact;
 
   @override
   State<FilePaneView> createState() => _FilePaneViewState();
@@ -176,88 +184,66 @@ class _FilePaneViewState extends State<FilePaneView> {
     setState(() {});
   }
 
-  Widget _header(AppLocalizations l10n, LgTokens t) {
+  Widget _header(AppLocalizations l10n) {
     final ffi = widget.ffi;
-    final String title, detail;
-    final Widget icon;
     if (_pane.isLocal) {
-      title = l10n.filesThisDevice;
-      detail = Platform.localHostname;
-      icon = LgIcon(LgIcons.monitor, size: 20, color: t.colors.text2);
-    } else {
-      title = l10n.filesRemoteDevice;
-      final platform = platformText(ffi.ffiModel.pi.platform);
-      detail = platform.isEmpty
-          ? deviceName(ffi)
-          : l10n.filesDeviceAndPlatform(deviceName(ffi), platform);
-      icon = platform.isEmpty
-          ? const SizedBox(width: 20)
-          : LgDeviceAvatar(id: ffi.id, platform: platformOf(ffi), size: 20);
+      return LgFilePaneHeader(
+        title: l10n.filesThisDevice,
+        subtitle: Platform.localHostname,
+        platform: _localPlatform(),
+        compact: widget.compact,
+      );
     }
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        LgSpace.s3,
-        LgSpace.s2,
-        LgSpace.s3,
-        LgSpace.s1,
-      ),
-      child: Row(
-        children: [
-          icon,
-          const SizedBox(width: LgSpace.s2),
-          Semantics(
-            header: true,
-            child: Text(
-              title,
-              style: t.text.copyWith(fontWeight: FontWeight.w600),
-            ),
-          ),
-          const SizedBox(width: LgSpace.s2),
-          Expanded(
-            child: LgEllipsisText(
-              detail,
-              style: t.text.copyWith(color: t.colors.text2),
-            ),
-          ),
-        ],
-      ),
+    final platform = platformText(ffi.ffiModel.pi.platform);
+    return LgFilePaneHeader(
+      title: l10n.filesRemoteDevice,
+      subtitle: platform.isEmpty
+          ? deviceName(ffi)
+          : l10n.filesDeviceAndPlatform(deviceName(ffi), platform),
+      platform: platform.isEmpty ? null : platformOf(ffi),
+      remoteId: ffi.id,
+      compact: widget.compact,
     );
+  }
+
+  static LgPlatform _localPlatform() {
+    if (Platform.isWindows) return LgPlatform.windows;
+    if (Platform.isMacOS) return LgPlatform.macos;
+    if (Platform.isLinux) return LgPlatform.linux;
+    if (Platform.isAndroid) return LgPlatform.android;
+    return LgPlatform.unknown;
   }
 
   Widget _navRow(AppLocalizations l10n) {
     String keyed(String name, String keys) =>
         l10n.filesWithShortcut(name, keys);
-    return Row(
-      children: [
-        LgIconButton(
-          icon: LgIcons.arrowL,
-          label: keyed(l10n.filesBack, 'Alt+←'),
-          onPressed: _pane.canGoBack ? _pane.goBack : null,
-        ),
-        LgIconButton(
-          icon: LgIcons.arrowU,
-          label: keyed(l10n.filesUp, 'Alt+↑'),
-          onPressed: _pane.canGoUp ? _pane.goUp : null,
-        ),
-        LgIconButton(
-          icon: LgIcons.home,
-          label: l10n.filesHome,
-          onPressed: _pane.goHome,
-        ),
-        const SizedBox(width: LgSpace.s1),
-        Expanded(
-          child: FileBreadcrumb(pane: _pane, editing: _editingPath),
-        ),
-        LgIconButton(
-          icon: LgIcons.refresh,
-          label: keyed(l10n.filesRefresh, 'F5'),
-          onPressed: _pane.path.isEmpty ? null : _pane.refresh,
-        ),
-      ],
+    return LgFileNavRow(
+      compact: widget.compact,
+      back: LgFileNavButton(
+        icon: LgIcons.arrowL,
+        label: keyed(l10n.filesBack, 'Alt+←'),
+        onPressed: _pane.canGoBack ? _pane.goBack : null,
+      ),
+      up: LgFileNavButton(
+        icon: LgIcons.arrowU,
+        label: keyed(l10n.filesUp, 'Alt+↑'),
+        onPressed: _pane.canGoUp ? _pane.goUp : null,
+      ),
+      home: LgFileNavButton(
+        icon: LgIcons.home,
+        label: l10n.filesHome,
+        onPressed: _pane.goHome,
+      ),
+      refresh: LgFileNavButton(
+        icon: LgIcons.refresh,
+        label: keyed(l10n.filesRefresh, 'F5'),
+        onPressed: _pane.path.isEmpty ? null : _pane.refresh,
+      ),
+      path: FileBreadcrumb(pane: _pane, editing: _editingPath),
     );
   }
 
-  Widget _actionRow(AppLocalizations l10n, List<Entry> shown, double width) {
+  Widget _actionRow(AppLocalizations l10n, List<Entry> shown) {
     final blocked = transferBlocked(l10n, widget.other);
     final selection = _pane.selection;
     final target = folderName(l10n, widget.other.path, widget.other.isWindows);
@@ -274,87 +260,46 @@ class _FilePaneViewState extends State<FilePaneView> {
     final tip =
         blocked ??
         (upload ? l10n.filesUploadTo(target) : l10n.filesDownloadTo(target));
-    final fold =
-        width < kFileSearchFoldBelow && !_searchOpen && _search.text.isEmpty;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: LgSpace.s2),
-      child: Row(
-        children: [
-          // A pane dragged very narrow clips its buttons instead of overflowing.
-          Flexible(
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              physics: const NeverScrollableScrollPhysics(),
-              child: Row(
-                children: [
-                  tip.isEmpty
-                      ? transfer
-                      : LgTooltip(message: tip, child: transfer),
-                  const SizedBox(width: LgSpace.s2),
-                  LgButton(
-                    label: l10n.filesNewFolder,
-                    icon: LgIcons.folderPlus,
-                    onPressed: _pane.isThisPc || _pane.path.isEmpty
-                        ? null
-                        : _pane.newFolder,
-                  ),
-                  const SizedBox(width: LgSpace.s2),
-                  LgButton(
-                    label: l10n.filesDelete,
-                    icon: LgIcons.trash,
-                    onPressed: selection.isEmpty
-                        ? null
-                        : () => _pane.delete(selection),
-                  ),
-                  LgMenuAnchor(
-                    items: moreMenuItems(l10n, pane: _pane, visible: shown),
-                    builder: (context, controller) => LgIconButton(
-                      icon: LgIcons.more,
-                      label: l10n.filesMore,
-                      onPressed: () => controller.isOpen
-                          ? controller.close()
-                          : controller.open(),
-                    ),
-                  ),
-                ],
-              ),
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.escape): _clearSearch,
+      },
+      child: LgFileOpRow(
+        compact: widget.compact,
+        collapseBelow: kFileSearchFoldBelow,
+        actions: [
+          tip.isEmpty ? transfer : LgTooltip(message: tip, child: transfer),
+          LgListToolButton(
+            icon: LgIcons.folderPlus,
+            label: l10n.filesNewFolder,
+            onPressed: _pane.isThisPc || _pane.path.isEmpty
+                ? null
+                : _pane.newFolder,
+          ),
+          LgListToolButton(
+            icon: LgIcons.trash,
+            label: l10n.filesDelete,
+            onPressed: selection.isEmpty ? null : () => _pane.delete(selection),
+          ),
+          LgMenuAnchor(
+            items: moreMenuItems(l10n, pane: _pane, visible: shown),
+            builder: (context, controller) => LgIconButton(
+              icon: LgIcons.more,
+              label: l10n.filesMore,
+              onPressed: () =>
+                  controller.isOpen ? controller.close() : controller.open(),
             ),
           ),
-          const SizedBox(width: LgSpace.s2),
-          if (fold)
-            LgIconButton(
-              icon: LgIcons.search,
-              label: l10n.filesSearch,
-              onPressed: _focusSearch,
-            )
-          else
-            SizedBox(
-              width: 200,
-              child: CallbackShortcuts(
-                bindings: {
-                  const SingleActivator(LogicalKeyboardKey.escape):
-                      _clearSearch,
-                },
-                child: LgTextField(
-                  controller: _search,
-                  focusNode: _searchFocus,
-                  dense: true,
-                  placeholder: l10n.filesSearch,
-                  semanticLabel: l10n.filesSearch,
-                  leading: const LgIcon(LgIcons.search, size: 16),
-                  trailing: _search.text.isEmpty
-                      ? null
-                      : LgIconButton(
-                          icon: LgIcons.x,
-                          label: l10n.filesClearSearch,
-                          onPressed: _clearSearch,
-                          focusable: false,
-                        ),
-                  onChanged: (_) => _searchChanged(),
-                ),
-              ),
-            ),
         ],
+        searchController: _search,
+        searchFocusNode: _searchFocus,
+        searchPlaceholder: l10n.filesSearch,
+        searchClearLabel: l10n.filesClearSearch,
+        searchOpenLabel: l10n.filesSearch,
+        searchActiveLabel: l10n.filesSearchFiltering,
+        searchOpen: _searchOpen,
+        onSearchOpenChanged: (open) => setState(() => _searchOpen = open),
+        onSearchChanged: (_) => _searchChanged(),
       ),
     );
   }
@@ -363,129 +308,87 @@ class _FilePaneViewState extends State<FilePaneView> {
   Widget _listArea(AppLocalizations l10n, LgTokens t, List<Entry> shown) {
     final error = _pane.openError;
     final reading = _readingShown;
-    Widget centered(Widget child) => Center(
-      child: Padding(padding: const EdgeInsets.all(LgSpace.s4), child: child),
-    );
-    final readingNote = centered(
-      Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const LgSpinner(size: 16),
-          const SizedBox(width: LgSpace.s2),
-          Text(
-            l10n.filesReading,
-            style: t.text.copyWith(color: t.colors.text2),
-          ),
-        ],
-      ),
-    );
     if (_pane.path.isEmpty) {
       if (error != null) {
         // The first folder did not open: nothing to go back to (02 §2.2 block E).
-        return centered(
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                openErrorText(l10n, error.path, error.error, _pane.isWindows),
-                textAlign: TextAlign.center,
-                style: t.text,
-              ),
-              const SizedBox(height: LgSpace.s3),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  LgButton(label: l10n.filesGoHome, onPressed: _pane.goHome),
-                  const SizedBox(width: LgSpace.s2),
-                  LgButton(
-                    label: l10n.filesRetry,
-                    onPressed: () => _pane.openDirectory(error.path),
-                  ),
-                ],
-              ),
-            ],
+        return Center(
+          child: LgEmptyState(
+            openErrorText(l10n, error.path, error.error, _pane.isWindows),
+            icon: LgIcons.err,
+            iconColor: t.colors.error,
+            iconBackground: t.colors.errorBg,
+            secondaryActionLabel: l10n.filesGoHome,
+            onSecondaryAction: _pane.goHome,
+            actionLabel: l10n.filesRetry,
+            onAction: () => _pane.openDirectory(error.path),
           ),
         );
       }
-      return reading ? readingNote : const SizedBox.expand();
+      return LgReadingOverlay(
+        reading: reading,
+        label: l10n.filesReading,
+        child: const SizedBox.expand(),
+      );
     }
     Widget? placeholder;
     if (shown.isEmpty && !reading) {
-      placeholder = centered(
-        Text(
-          _search.text.trim().isNotEmpty
-              ? l10n.filesNoMatch
-              : l10n.filesEmptyFolder,
-          style: t.text.copyWith(color: t.colors.text2),
+      final none = _search.text.trim().isNotEmpty;
+      placeholder = Center(
+        child: LgEmptyState(
+          none ? l10n.filesNoMatch : l10n.filesEmptyFolder,
+          icon: none ? LgIcons.search : LgIcons.folder,
         ),
       );
     }
-    final elsewhere = reading && _pane.reading!.path != _pane.path;
-    final list = FileList(
-      pane: _pane,
-      other: widget.other,
-      entries: shown,
-      focusNode: widget.listFocus,
-      area: widget.area,
-      onEditPath: () => _editingPath.value = true,
-      onFocusSearch: _focusSearch,
-      onSwitchPane: () {
-        // No list there until a folder opened in it.
-        if (widget.other.path.isEmpty) return false;
-        widget.otherListFocus.requestFocus();
-        return true;
-      },
-      placeholder: placeholder,
-    );
-    return Stack(
-      children: [
-        Positioned.fill(
-          child: IgnorePointer(
-            ignoring: elsewhere,
-            child: Opacity(opacity: elsewhere ? 0.4 : 1, child: list),
-          ),
-        ),
-        if (reading) Positioned.fill(child: IgnorePointer(child: readingNote)),
-      ],
+    return LgReadingOverlay(
+      reading: reading,
+      // The same folder read again keeps its rows as they are.
+      dim: reading && _pane.reading!.path != _pane.path,
+      label: l10n.filesReading,
+      child: FileList(
+        pane: _pane,
+        other: widget.other,
+        entries: shown,
+        focusNode: widget.listFocus,
+        area: widget.area,
+        otherArea: widget.otherArea,
+        onEditPath: () => _editingPath.value = true,
+        onFocusSearch: _focusSearch,
+        onSwitchPane: () {
+          // No list there until a folder opened in it.
+          if (widget.other.path.isEmpty) return false;
+          widget.otherListFocus.requestFocus();
+          return true;
+        },
+        placeholder: placeholder,
+      ),
     );
   }
 
-  Widget _dropOverlay(AppLocalizations l10n, LgTokens t) {
+  /// What a drag over the pane draws: the pane tinted with where the items go when they land on
+  /// its folder, a neutral frame when they can't land. Over a folder row the row is the target
+  /// (`FileList`): rows from the other pane say it in the label that follows them, files from
+  /// the system's file manager in the pane's card, without the frame.
+  Widget _dropZone(AppLocalizations l10n, Widget child) {
     return ValueListenableBuilder<FileDropSpot?>(
       valueListenable: widget.area.hover,
-      builder: (context, spot, _) {
-        if (spot == null) return const SizedBox.shrink();
-        final c = t.colors;
-        final message = !spot.accepted
-            ? l10n.filesDropRefused
-            : _pane.isLocal
-            ? l10n.filesDownloadTo(spot.folder)
-            : l10n.filesUploadTo(spot.folder);
-        return IgnorePointer(
-          child: Container(
-            decoration: BoxDecoration(
-              color: spot.accepted && spot.to == null
-                  ? c.accent.withValues(alpha: 0.06)
-                  : null,
-              border: Border.all(
-                color: spot.accepted ? c.accent : c.borderStrong,
-                width: 2,
-              ),
-            ),
-            alignment: Alignment.center,
-            child: Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: LgSpace.s3,
-                vertical: LgSpace.s2,
-              ),
-              decoration: BoxDecoration(
-                color: c.float,
-                borderRadius: BorderRadius.circular(LgRadius.r6),
-                border: Border.all(color: c.border),
-              ),
-              child: Text(message, style: t.text),
-            ),
-          ),
+      child: child,
+      builder: (context, spot, child) {
+        final row = spot != null && spot.to != null;
+        return LgDropZone(
+          state: spot == null || (row && !spot.fromSystem)
+              ? LgDropState.none
+              : spot.accepted
+              ? LgDropState.accept
+              : LgDropState.reject,
+          framed: !row,
+          message: spot == null || !spot.accepted
+              ? null
+              : _pane.isLocal
+              ? l10n.filesDownloadTo(spot.folder)
+              : l10n.filesUploadTo(spot.folder),
+          messageIcon: _pane.isLocal ? LgIcons.download : LgIcons.upload,
+          child: child!,
         );
       },
     );
@@ -497,62 +400,49 @@ class _FilePaneViewState extends State<FilePaneView> {
     final t = LgTokens.of(context);
     final shown = filterEntries(_pane.entries, _search.text);
     final error = _pane.openError;
+    final title = _pane.isLocal ? l10n.filesThisDevice : l10n.filesRemoteDevice;
     return ListenableBuilder(
       listenable: widget.ffi.ffiModel,
-      builder: (context, _) => LayoutBuilder(
-        builder: (context, constraints) => PaneDragTarget(
-          area: widget.area,
-          child: KeyedSubtree(
-            key: widget.area.key,
-            child: Stack(
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _header(l10n, t),
-                    _navRow(l10n),
-                    const SizedBox(height: LgSpace.s1),
-                    _actionRow(l10n, shown, constraints.maxWidth),
-                    if (error != null && _pane.path.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(
-                          LgSpace.s2,
-                          LgSpace.s2,
-                          LgSpace.s2,
-                          0,
-                        ),
-                        child: LgBanner(
-                          tone: LgTone.error,
-                          dense: true,
-                          text: openErrorText(
-                            l10n,
-                            error.path,
-                            error.error,
-                            _pane.isWindows,
-                          ),
-                          dismissLabel: l10n.filesDismiss,
-                          onDismiss: _pane.dismissOpenError,
-                        ),
-                      ),
-                    const SizedBox(height: LgSpace.s1),
-                    Expanded(child: _listArea(l10n, t, shown)),
-                    Container(height: 1, color: t.colors.border),
+      builder: (context, _) => PaneDragTarget(
+        area: widget.area,
+        child: KeyedSubtree(
+          key: widget.area.key,
+          child: _dropZone(
+            l10n,
+            LgFilePaneFrame(
+              semanticLabel: title,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _header(l10n),
+                  _navRow(l10n),
+                  if (error != null && _pane.path.isNotEmpty)
                     Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: LgSpace.s3,
-                        vertical: LgSpace.s1,
+                      padding: const EdgeInsets.fromLTRB(
+                        LgSpace.s3,
+                        0,
+                        LgSpace.s3,
+                        LgSpace.s2,
                       ),
-                      child: Text(
-                        statusLine(l10n, shown, _pane.selection),
-                        style: t.textS.copyWith(color: t.colors.text2),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                      child: LgBanner(
+                        tone: LgTone.error,
+                        slim: true,
+                        dense: true,
+                        text: openErrorText(
+                          l10n,
+                          error.path,
+                          error.error,
+                          _pane.isWindows,
+                        ),
+                        dismissLabel: l10n.filesDismiss,
+                        onDismiss: _pane.dismissOpenError,
                       ),
                     ),
-                  ],
-                ),
-                Positioned.fill(child: _dropOverlay(l10n, t)),
-              ],
+                  _actionRow(l10n, shown),
+                  Expanded(child: _listArea(l10n, t, shown)),
+                  LgFileStatusRow(statusLine(l10n, shown, _pane.selection)),
+                ],
+              ),
             ),
           ),
         ),

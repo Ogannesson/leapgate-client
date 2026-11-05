@@ -14,6 +14,7 @@ import '../../widgets/lg_file_marks.dart';
 import '../../widgets/lg_form_dialog.dart';
 import '../../widgets/lg_selection.dart';
 import '../../widgets/lg_text_field.dart';
+import 'formats.dart';
 
 /// The file transfer view's questions that have a dialog here.
 bool isFilePrompt(Prompt<Object?> prompt) =>
@@ -54,27 +55,6 @@ Future<T?> showFilePrompt<T>(
     }
     return LgDialogScrim(onEscape: () => close(null), child: dialog);
   });
-}
-
-/// A size in three significant digits: "86.5 KB", "610 MB", "1.32 GB" (02 §2.2 block E),
-/// bytes below 1 KB.
-// TODO(M7a 整合): the same rule as the panes' `formats.dart` (coder C); keep one of the two.
-String ftSize(AppLocalizations l10n, int bytes) {
-  if (bytes < 1024) return l10n.queueBytes(bytes);
-  const units = ['KB', 'MB', 'GB', 'TB'];
-  var v = bytes / 1024;
-  var u = 0;
-  // 999.6 KB would print as "1000 KB".
-  while (v >= 999.5 && u < units.length - 1) {
-    v /= 1024;
-    u++;
-  }
-  final digits = v >= 100
-      ? 0
-      : v >= 10
-      ? 1
-      : 2;
-  return '${v.toStringAsFixed(digits)} ${units[u]}';
 }
 
 /// The short reason of 02 §2.5 for [error], with no full stop: for "无法新建文件夹。‹原因›。", a
@@ -220,7 +200,7 @@ class _DeleteDialog extends StatelessWidget {
               FtDeleteKind.emptyFolder => l10n.ftDeleteEmptyFolderBody(side),
               FtDeleteKind.contents => l10n.ftDeleteContentsBody(
                 state.files,
-                ftSize(l10n, state.bytes),
+                formatFileSize(l10n, state.bytes),
                 side,
               ),
               FtDeleteKind.link => l10n.ftDeleteLinkBody,

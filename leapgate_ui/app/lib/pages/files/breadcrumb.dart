@@ -1,18 +1,16 @@
 // The path of a pane (02 §2.2 block C): the breadcrumb with the root's drop-down, the middle
-// left out when it does not fit, and the path field (Ctrl+L or a click on the blank after it).
+// left out when it does not fit (`LgBreadcrumb`), and the path field (Ctrl+L or a click on the
+// blank after it).
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:flutter_hbb/leapgate/file_transfer/errors.dart';
 import 'package:flutter_hbb/leapgate/file_transfer/pane.dart';
 import 'package:flutter_hbb/models/file_model.dart';
 
 import '../../icons/lg_icon.dart';
 import '../../l10n/app_localizations.dart';
-import '../../theme/lg_tokens.dart';
-import '../../widgets/lg_button.dart';
+import '../../widgets/lg_breadcrumb.dart';
+import '../../widgets/lg_file_marks.dart';
 import '../../widgets/lg_menu.dart';
-import '../../widgets/lg_menu_items.dart';
-import '../../widgets/lg_text_field.dart';
-import '../../widgets/lg_tooltip.dart';
 import 'formats.dart';
 
 /// One segment: what it shows and the folder it opens.
@@ -44,27 +42,6 @@ List<Crumb> crumbsOf(String path, bool isWindows, String thisPc) {
   return out;
 }
 
-/// Which segments show in [width] (indexes into [widths], the segments' widths with their
-/// separators): all that fit, otherwise the root, "…" and the current one, then the first
-/// folder (from four segments on) and as many of the last as fit. The current one always shows;
-/// the breadcrumb shortens its name when even that does not fit.
-List<int> visibleCrumbs(List<double> widths, double ellipsis, double width) {
-  final n = widths.length;
-  if (n < 2 || widths.fold<double>(0, (a, b) => a + b) <= width) {
-    return [for (var i = 0; i < n; i++) i];
-  }
-  var used = widths[0] + ellipsis + widths[n - 1];
-  final first = n >= 4 && used + widths[1] <= width;
-  if (first) used += widths[1];
-  final tail = <int>[];
-  for (var i = n - 2; i > (first ? 1 : 0); i--) {
-    if (used + widths[i] > width) break;
-    used += widths[i];
-    tail.insert(0, i);
-  }
-  return [0, if (first) 1, ...tail, n - 1];
-}
-
 class FileBreadcrumb extends StatefulWidget {
   const FileBreadcrumb({super.key, required this.pane, required this.editing});
 
@@ -80,8 +57,14 @@ class FileBreadcrumb extends StatefulWidget {
 class _FileBreadcrumbState extends State<FileBreadcrumb> {
   final _field = TextEditingController();
   final _fieldFocus = FocusNode(debugLabel: 'path field');
-  final _root = GlobalKey();
   String? _error;
+
+  /// The text that [_error] is about; typing something else takes the error away.
+  String _failed = '';
+
+  /// Enter takes the focus out of the field before it hands over the path (`LgPathInput` has
+  /// no way to keep it); the field stays while that path is opened.
+  var _submitting = false;
 
   FilePane get _pane => widget.pane;
 
@@ -90,7 +73,14 @@ class _FileBreadcrumbState extends State<FileBreadcrumb> {
     super.initState();
     widget.editing.addListener(_onEditing);
     _fieldFocus.addListener(() {
-      if (!_fieldFocus.hasFocus && widget.editing.value) _cancel();
+      if (!_fieldFocus.hasFocus && widget.editing.value && !_submitting) {
+        _cancel();
+      }
+    });
+    _field.addListener(() {
+      if (_error != null && _field.text != _failed) {
+        setState(() => _error = null);
+      }
     });
   }
 
@@ -125,204 +115,61 @@ class _FileBreadcrumbState extends State<FileBreadcrumb> {
   Future<void> _submit(String text) async {
     final l10n = AppLocalizations.of(context)!;
     final path = text.trim();
-    if (path.isEmpty) return;
-    final error = await _pane.openDirectory(path, showError: false);
+    if (path.isEmpty) {
+      _fieldFocus.requestFocus();
+      return;
+    }
+    final FtError? error;
+    _submitting = true;
+    try {
+      error = await _pane.openDirectory(path, showError: false);
+    } finally {
+      _submitting = false;
+    }
     if (!mounted) return;
     if (error == null) {
       _cancel();
     } else {
-      setState(
-        () => _error = openErrorText(l10n, path, error, _pane.isWindows),
-      );
+      _failed = _field.text;
+      final text = openErrorText(l10n, path, error, _pane.isWindows);
+      setState(() => _error = text);
       _fieldFocus.requestFocus();
     }
   }
 
-  void _openRootMenu() {
+  @override
+  Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final box = _root.currentContext!.findRenderObject()! as RenderBox;
-    final at = box.localToGlobal(Offset(0, box.size.height));
-    showLgMenuAt(
-      context,
-      globalPosition: at,
-      items: [
-        LgMenuItem(
-          label: _pane.isWindows ? l10n.filesThisPc : '/',
-          onPressed: () => _pane.openDirectory('/'),
-        ),
-        if (_pane.isWindows) ...[
-          const LgMenuDivider(),
-          _DriveItems(pane: _pane),
-        ],
-      ],
-    );
-  }
-
-  Widget _pathField(AppLocalizations l10n) {
-    return CallbackShortcuts(
-      bindings: {const SingleActivator(LogicalKeyboardKey.escape): _cancel},
-      child: LgTextField(
+    if (widget.editing.value) {
+      return LgPathInput(
         controller: _field,
         focusNode: _fieldFocus,
-        dense: true,
         semanticLabel: l10n.filesEditPath,
         errorText: _error,
-        onChanged: (_) {
-          if (_error != null) setState(() => _error = null);
-        },
         onSubmitted: _submit,
-        // Keeps the focus: a path that did not open stays in the field to be corrected.
-        onEditingComplete: () {},
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context)!;
-    if (widget.editing.value) return _pathField(l10n);
-    final t = LgTokens.of(context);
-    final style = t.text;
-    final crumbs = crumbsOf(_pane.path, _pane.isWindows, l10n.filesThisPc);
-    const separator = 18.0;
-    double measure(String s) {
-      final painter = TextPainter(
-        text: TextSpan(text: s, style: style),
-        textDirection: TextDirection.ltr,
-        maxLines: 1,
-      )..layout();
-      final width = painter.width;
-      painter.dispose();
-      return width;
+        onCancel: _cancel,
+      );
     }
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final widths = [
-          for (final c in crumbs) measure(c.label) + LgSpace.s2 * 2 + separator,
-        ];
-        final ellipsis = measure('…') + separator;
-        // The root's drop-down and some blank to click into the path field.
-        final room = constraints.maxWidth - t.sizes.button - LgSpace.s6;
-        final shown = visibleCrumbs(widths, ellipsis, room);
-        // What the current folder's segment may take; its name is shortened to that.
-        var others = 0.0;
-        for (var k = 0; k < shown.length - 1; k++) {
-          others += widths[shown[k]];
-          if (shown[k + 1] != shown[k] + 1) others += ellipsis;
-        }
-        final lastMax = (room - others - separator).clamp(
-          LgSpace.s6,
-          double.infinity,
-        );
-        final children = <Widget>[];
-        for (var k = 0; k < shown.length; k++) {
-          final i = shown[k];
-          if (k > 0) {
-            children.add(const _Separator());
-            if (shown[k - 1] != i - 1) {
-              final hidden = crumbs.sublist(shown[k - 1] + 1, i);
-              children.add(
-                LgTooltip(
-                  message: hidden.map((c) => c.label).join(' › '),
-                  child: Text('…', style: style),
-                ),
-              );
-              children.add(const _Separator());
-            }
-          }
-          final c = crumbs[i];
-          final current = i == crumbs.length - 1;
-          final button = _CrumbButton(
-            label: c.label,
-            current: current,
-            onPressed: () => _pane.openDirectory(c.path),
-          );
-          children.add(
-            current
-                ? ConstrainedBox(
-                    constraints: BoxConstraints(maxWidth: lastMax),
-                    child: button,
-                  )
-                : button,
-          );
-          if (i == 0) {
-            children.add(
-              KeyedSubtree(
-                key: _root,
-                child: LgIconButton(
-                  icon: LgIcons.chevD,
-                  label: _pane.isWindows
-                      ? l10n.filesThisPc
-                      : l10n.filesRootFolder,
-                  onPressed: _openRootMenu,
-                  focusable: false,
-                ),
+    final crumbs = crumbsOf(_pane.path, _pane.isWindows, l10n.filesThisPc);
+    // The drive of the open folder, ticked in the root's drop-down.
+    final drive = _pane.isWindows && crumbs.length > 1 ? crumbs[1].path : null;
+    return LgBreadcrumb(
+      rootLabel: crumbs.first.label,
+      rootTip: _pane.isWindows ? l10n.filesThisPc : l10n.filesRootFolder,
+      segments: [for (final c in crumbs.skip(1)) c.label],
+      onRoot: () => _pane.openDirectory('/'),
+      onSegment: (i) => _pane.openDirectory(crumbs[i + 1].path),
+      onEdit: () => widget.editing.value = true,
+      editLabel: l10n.filesEditPath,
+      rootMenu: _pane.isWindows
+          ? [_DriveItems(pane: _pane, current: drive)]
+          : [
+              LgMenuItem(
+                label: '/',
+                checked: true,
+                onPressed: () => _pane.openDirectory('/'),
               ),
-            );
-          }
-        }
-        return Row(
-          children: [
-            ...children,
-            Expanded(
-              child: Semantics(
-                button: true,
-                label: l10n.filesEditPath,
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () => widget.editing.value = true,
-                  child: SizedBox(height: t.sizes.button),
-                ),
-              ),
-            ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-class _Separator extends StatelessWidget {
-  const _Separator();
-
-  @override
-  Widget build(BuildContext context) =>
-      LgIcon(LgIcons.chevR, size: 14, color: LgTokens.of(context).colors.text2);
-}
-
-class _CrumbButton extends StatelessWidget {
-  const _CrumbButton({
-    required this.label,
-    required this.current,
-    required this.onPressed,
-  });
-
-  final String label;
-  final bool current;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = LgTokens.of(context);
-    return Semantics(
-      button: true,
-      label: label,
-      excludeSemantics: true,
-      child: GestureDetector(
-        onTap: onPressed,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: LgSpace.s2),
-          child: Text(
-            label,
-            style: current
-                ? t.text.copyWith(fontWeight: FontWeight.w600)
-                : t.text,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ),
-      ),
+            ],
     );
   }
 }
@@ -330,9 +177,12 @@ class _CrumbButton extends StatelessWidget {
 /// The drives under "此电脑" in the root drop-down; "正在读取…" until they are read, a greyed
 /// line when they could not be.
 class _DriveItems extends StatefulWidget {
-  const _DriveItems({required this.pane});
+  const _DriveItems({required this.pane, required this.current});
 
   final FilePane pane;
+
+  /// The open folder's drive ("C:\"), null in "此电脑".
+  final String? current;
 
   @override
   State<_DriveItems> createState() => _DriveItemsState();
@@ -348,11 +198,12 @@ class _DriveItemsState extends State<_DriveItems> {
       future: _drives,
       builder: (context, snap) {
         if (snap.connectionState != ConnectionState.done) {
-          return LgMenuItem(label: l10n.filesReading, onPressed: null);
+          return LgMenuLoadingRow(l10n.filesReading);
         }
         if (snap.hasError) {
           return LgMenuItem(label: l10n.filesDrivesFailed, onPressed: null);
         }
+        final current = widget.current?.toLowerCase();
         return Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -360,6 +211,7 @@ class _DriveItemsState extends State<_DriveItems> {
               LgMenuItem(
                 icon: LgIcons.drive,
                 label: d.name,
+                checked: d.path.toLowerCase() == current,
                 onPressed: () => widget.pane.openDirectory(d.path),
               ),
           ],

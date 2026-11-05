@@ -610,7 +610,7 @@ const String kOptionLeapgateFtQueueHeight = 'leapgate-ft-queue-height';
 
 // M7a panes (coder C): column widths, the divider between the panes.
 
-/// The widths of the date, type and size columns, "136,110,80"; both panes share them.
+/// The widths of the date, type and size columns, "140,104,76"; both panes share them.
 const String kOptionFtColumns = "leapgate-ft-columns";
 
 /// Where the divider between the panes is, the local pane's share of the width ("0.5").

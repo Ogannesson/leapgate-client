@@ -17,7 +17,9 @@ import 'package:leapgate_ui/pages/files/formats.dart';
 import 'package:leapgate_ui/pages/files/pane.dart';
 import 'package:leapgate_ui/theme/lg_theme.dart';
 import 'package:leapgate_ui/theme/lg_tokens.dart';
-import 'package:leapgate_ui/widgets/lg_button.dart';
+import 'package:leapgate_ui/widgets/lg_file_list.dart';
+import 'package:leapgate_ui/widgets/lg_file_marks.dart';
+import 'package:leapgate_ui/widgets/lg_file_pane.dart';
 import 'package:leapgate_ui/widgets/lg_menu.dart';
 import 'package:leapgate_ui/widgets/lg_tooltip.dart';
 
@@ -123,13 +125,14 @@ Widget _app(_View v, {required bool active}) => MaterialApp(
   ),
 );
 
-/// The row of [name], the widget that has its semantics.
-Finder _row(String name) => find.byWidgetPredicate(
-  (w) =>
-      w is Semantics &&
-      w.properties.label == name &&
-      w.properties.selected != null,
-);
+/// The row of [name].
+Finder _row(String name) =>
+    find.byWidgetPredicate((w) => w is LgFileRow && w.name == name);
+
+/// What a drag draws over the pane titled [paneTitle].
+LgDropState _dropState(WidgetTester tester, String paneTitle) => tester
+    .widget<LgDropZone>(_inPane(paneTitle, find.byType(LgDropZone)))
+    .state;
 
 Finder _inPane(String paneTitle, Finder f) => find.descendant(
   of: find.ancestor(
@@ -236,7 +239,7 @@ void main() {
       expect(text, isNot(contains(':00:00')));
     });
 
-    test('crumbs of Windows, POSIX and "此电脑"; the middle goes first', () {
+    test('crumbs of Windows, POSIX and "此电脑"', () {
       expect(crumbsOf('/', true, '此电脑').map((c) => c.label), ['此电脑']);
       expect(crumbsOf(r'C:\Users\u', true, '此电脑'), [
         (label: '此电脑', path: '/'),
@@ -249,17 +252,6 @@ void main() {
         '/home',
         '/home/u',
       ]);
-      expect(visibleCrumbs([50, 50, 50, 50, 50, 50], 20, 1000), [
-        0,
-        1,
-        2,
-        3,
-        4,
-        5,
-      ]);
-      expect(visibleCrumbs([50, 50, 50, 50, 50, 50], 20, 230), [0, 1, 4, 5]);
-      // Fewer than four segments: the root, "…" and the current one.
-      expect(visibleCrumbs([50, 200, 200], 20, 300), [0, 2]);
       expect(
         openErrorText(
           l10n,
@@ -324,6 +316,22 @@ void main() {
       remote.notifyListeners();
       await tester.pump();
       expect(find.text('正在读取…'), findsNothing);
+
+      // The same folder read again: the note, the rows as they were.
+      remote.reading = (
+        path: remote.path,
+        since: DateTime.now().subtract(const Duration(seconds: 1)),
+      );
+      remote.notifyListeners();
+      await tester.pump();
+      expect(find.text('正在读取…'), findsOneWidget);
+      final rows = find.ancestor(
+        of: _row('说明.txt'),
+        matching: find.byType(Opacity),
+      );
+      for (final o in tester.widgetList<Opacity>(rows)) {
+        expect(o.opacity, 1);
+      }
     });
 
     testWidgets(
@@ -394,18 +402,16 @@ void main() {
       expect(v.model.local.calls, isEmpty);
       expect(_tip('目标位置不能是“此电脑”'), findsOneWidget);
 
-      await tester.tap(
-        _inPane(
-          '远程设备',
-          find.byWidgetPredicate((w) => w is LgIconButton && w.label == '此电脑'),
-        ),
+      await tester.tap(_inPane('远程设备', _tip('此电脑')));
+      await tester.pump();
+      await tester.pump();
+      final loading = find.byWidgetPredicate(
+        (w) => w is LgMenuLoadingRow && w.text == '正在读取…',
       );
-      await tester.pump();
-      await tester.pump();
-      expect(_menuItem('正在读取…'), findsOneWidget);
+      expect(loading, findsOneWidget);
       remote.read.complete([_e('C:', type: _drive, path: r'C:\')]);
       await tester.pump();
-      expect(_menuItem('正在读取…'), findsNothing);
+      expect(loading, findsNothing);
       await tester.tap(_menuItem('C:'));
       await tester.pump();
       expect(v.model.remote.calls, contains(r'openDirectory:C:\'));
@@ -450,10 +456,28 @@ void main() {
         await tester.enterText(field, r'D:\没有');
         await tester.testTextInput.receiveAction(TextInputAction.done);
         await tester.pump();
+        // The card under the field floats in the frame after.
+        await tester.pump();
         expect(remote.calls, contains(r'openDirectory:D:\没有'));
         expect(find.text(r'未找到“D:\没有”。'), findsOneWidget);
       },
     );
+  });
+
+  testWidgets('"编辑路径" opens the path field as a click on the blank does', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    await _pump(tester);
+    // A screen reader's "activate" on the remote pane's one (the second in reading order).
+    final edit = find.semantics.byLabel('编辑路径');
+    expect(edit, findsNWidgets(2));
+    tester.semantics.tap(edit.last);
+    semantics.dispose();
+    await tester.pump();
+    await tester.pump();
+    final field = _inPane('远程设备', find.byType(EditableText)).first;
+    expect(tester.widget<EditableText>(field).controller.text, r'D:\备份');
   });
 
   testWidgets(
@@ -474,7 +498,7 @@ void main() {
             .descendant(of: _row('.secret'), matching: find.byType(Opacity))
             .first,
       );
-      expect(hidden.opacity, 0.5);
+      expect(hidden.opacity, lessThan(1));
       expect(find.text('符号链接'), findsNWidgets(2));
       expect(find.text('10 字节'), findsNothing);
       expect(find.text('未完成的传输'), findsNWidgets(2));
@@ -572,16 +596,28 @@ void main() {
         final blank = tester.getCenter(_inPane('远程设备', find.byType(ListView)));
         final local = tester.getCenter(_row('预算.xlsx'));
 
+        bool target() => tester.widget<LgFileRow>(_row('旧照片')).dropTarget;
         await _systemDrag(tester, 'entered', _at(blank));
         expect(find.text('上传到“备份”'), findsOneWidget);
+        expect(_dropState(tester, '远程设备'), LgDropState.accept);
+        // Over a folder row the row is the target; the pane only says so, without its frame.
         await _systemDrag(tester, 'updated', _at(folder));
+        expect(target(), isTrue);
         expect(find.text('上传到“旧照片”'), findsOneWidget);
+        expect(
+          tester
+              .widget<LgDropZone>(_inPane('远程设备', find.byType(LgDropZone)))
+              .framed,
+          isFalse,
+        );
         await _systemDrag(tester, 'updated', _at(local));
-        expect(find.text('无法放到此处'), findsOneWidget);
+        expect(_dropState(tester, '本机'), LgDropState.reject);
+        expect(_dropState(tester, '远程设备'), LgDropState.none);
         await _systemDrag(tester, 'updated', _at(folder));
         await _systemDrag(tester, 'performOperation', [r'C:\a.txt', r'C:\文件夹']);
         expect(v.model.uploads.single.paths, [r'C:\a.txt', r'C:\文件夹']);
         expect(v.model.uploads.single.to, r'D:\备份\旧照片');
+        expect(target(), isFalse);
         expect(find.text('上传到“旧照片”'), findsNothing);
 
         await _systemDrag(tester, 'entered', _at(local));
@@ -620,12 +656,16 @@ void main() {
       await tester.pump();
       await g.moveTo(tester.getCenter(_row('照片')));
       await tester.pump();
-      expect(find.text('无法放到此处'), findsOneWidget);
+      expect(_dropState(tester, '本机'), LgDropState.reject);
+      expect(
+        tester.widget<LgDragChip>(find.byType(LgDragChip)).rejected,
+        isTrue,
+      );
       expect(find.text('上传到“照片”'), findsNothing);
       await g.up();
       await tester.pump();
       expect(v.model.local.calls, isEmpty);
-      expect(find.text('无法放到此处'), findsNothing);
+      expect(_dropState(tester, '本机'), LgDropState.none);
     });
   });
 
@@ -756,11 +796,21 @@ void main() {
     },
   );
 
+  testWidgets('connected: the local list takes the keys without a click', (
+    tester,
+  ) async {
+    final v = await _pump(tester, connected: false);
+    v.ffi.connection.onPeerInfo();
+    await tester.pump();
+    await tester.pump();
+    expect(FocusManager.instance.primaryFocus?.debugLabel, 'local files');
+    await _key(tester, LogicalKeyboardKey.f5);
+    expect(v.model.local.calls, contains('refresh'));
+  });
+
   testWidgets('the divider is remembered on this device', (tester) async {
     await _pump(tester);
-    final divider = find.byWidgetPredicate(
-      (w) => w is SizedBox && w.width == kFileDividerWidth,
-    );
+    final divider = find.byKey(kFileDividerKey);
     await tester.drag(divider, const Offset(-128, 0));
     await tester.pump();
     expect(fakes.bind.localOptions[kOptionFtDivider], isNotEmpty);

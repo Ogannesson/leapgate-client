@@ -1258,7 +1258,6 @@
   "filesCantOpenReason": "无法打开“{folder}”：{reason}",
   "filesReasonPathTooLong": "路径过长。",
   "filesReasonInvalidName": "名称无效。",
-  "filesDropRefused": "无法放到此处",
   "filesCantOpenText": "无法打开“{folder}”：{text}。",
   "filesDrivesFailed": "无法读取驱动器列表。",
   "ftFileTransfer": "文件传输",
@@ -1362,5 +1361,8 @@
   "ftMarkAttention": "有替换确认等待处理",
   "ftViewSwitchLabel": "{view}，{mark}",
   "connCloseRemoteDesktop": "关闭远程桌面",
-  "tabCloseTitle": "关闭标签？"
+  "tabCloseTitle": "关闭标签？",
+  "filesSearchFiltering": "搜索当前文件夹，正在过滤",
+  "filesSortAscending": "升序",
+  "filesSortDescending": "降序"
 }

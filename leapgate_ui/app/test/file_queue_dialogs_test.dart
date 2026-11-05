@@ -168,8 +168,8 @@ void main() {
         ..summary = _summary(paused: 2);
       await _pumpQueue(tester, jobs);
       expect(_rich('2 个已暂停'), findsOneWidget);
-      expect(find.text('已暂停 · 已传 2.00 KB / 4.00 KB'), findsOneWidget);
-      expect(find.text('已暂停 · 已传 0 字节 / 1.00 KB'), findsOneWidget);
+      expect(find.text('已暂停 · 已传 2 KB / 4 KB'), findsOneWidget);
+      expect(find.text('已暂停 · 已传 0 字节 / 1 KB'), findsOneWidget);
       expect(find.text('远程设备的版本不支持断点续传，当前文件将从头传输。'), findsOneWidget);
       await tester.tap(find.text('全部继续'));
       await tester.tap(_button('继续').first);
@@ -276,15 +276,13 @@ void main() {
       fakes.bind.localOptions[kOptionLeapgateFtQueueHeight] = '600';
       await _pumpQueue(tester, jobs);
       expect(
-        find.text(
-          '45% · 610 MB / 1.32 GB · 3 / 12 个文件 · 1.20 MB/s · 剩余约 10 分钟',
-        ),
+        find.text('45% · 610 MB / 1.32 GB · 3 / 12 个文件 · 1.2 MB/s · 剩余约 10 分钟'),
         findsOneWidget,
       );
       // A screen reader gets the row in one sentence.
       expect(
         tester.widget<LgQueueRow>(find.byType(LgQueueRow).first).semanticLabel,
-        '下载 照片，45%，610 MB / 1.32 GB，3 / 12 个文件，1.20 MB/s，剩余约 10 分钟',
+        '下载 照片，45%，610 MB / 1.32 GB，3 / 12 个文件，1.2 MB/s，剩余约 10 分钟',
       );
       expect(find.text('正在统计文件…'), findsOneWidget);
       expect(find.text('正在删除… 37 / 120 个文件'), findsOneWidget);
@@ -416,7 +414,7 @@ void main() {
       );
       await tester.pump();
       expect(find.text('永久删除这 3 个项目？'), findsOneWidget);
-      expect(find.text('将从远程设备上删除 12 个文件（2.00 KB），无法恢复。'), findsOneWidget);
+      expect(find.text('将从远程设备上删除 12 个文件（2 KB），无法恢复。'), findsOneWidget);
       await tester.tap(find.text('删除'));
       await tester.pump();
       expect(await answer, true);

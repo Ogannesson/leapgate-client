@@ -13,6 +13,7 @@ import '../../theme/lg_tokens.dart';
 import '../../widgets/lg_file_queue.dart';
 import '../../widgets/lg_tooltip.dart';
 import 'file_dialogs.dart';
+import 'formats.dart';
 
 /// The expanded panel's height when none is saved, and its bounds.
 const kQueueDefaultHeight = 200.0;
@@ -228,7 +229,7 @@ class _Row extends StatelessWidget {
   /// What a transfer under way says after its percentage.
   List<String> _progressParts(AppLocalizations l10n) {
     final r = row;
-    String size(int b) => ftSize(l10n, b);
+    String size(int b) => formatFileSize(l10n, b);
     return [
       l10n.queueBytesOf(size(r.doneBytes), size(r.totalBytes)),
       if (r.fileCount > 1) l10n.queueFilesOf(r.fileIndex, r.fileCount),
@@ -241,7 +242,7 @@ class _Row extends StatelessWidget {
   /// on hover (the original error text).
   (String, String?) _status(AppLocalizations l10n) {
     final r = row;
-    String size(int b) => ftSize(l10n, b);
+    String size(int b) => formatFileSize(l10n, b);
     switch (r.status) {
       case FileJobStatus.queued:
         return (l10n.queueStatusQueued, null);

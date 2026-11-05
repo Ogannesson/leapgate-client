@@ -19,11 +19,19 @@ class FileDrag {
 
 /// Where a drag would land in a pane.
 class FileDropSpot {
-  const FileDropSpot.into(this.folder, {this.to}) : accepted = true;
+  const FileDropSpot.into(this.folder, {this.to, this.fromSystem = false})
+    : accepted = true;
 
-  const FileDropSpot.refused() : accepted = false, folder = '', to = null;
+  const FileDropSpot.refused()
+    : accepted = false,
+      folder = '',
+      to = null,
+      fromSystem = false;
 
   final bool accepted;
+
+  /// Files from the system's file manager: no label follows them, the pane says where they go.
+  final bool fromSystem;
 
   /// The folder or drive row it is over; null for the pane's own folder.
   final String? to;
@@ -61,7 +69,11 @@ class PaneDropArea {
     }
     final row = rowAt?.call(global);
     if (row != null && (row.isDirectory || row.isDrive)) {
-      return FileDropSpot.into(row.name, to: row.path);
+      return FileDropSpot.into(
+        row.name,
+        to: row.path,
+        fromSystem: source == null,
+      );
     }
     if (pane.path.isEmpty || pane.isThisPc) {
       return const FileDropSpot.refused();
