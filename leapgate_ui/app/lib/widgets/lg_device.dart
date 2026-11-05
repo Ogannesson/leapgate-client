@@ -952,14 +952,26 @@ class LgEmptyState extends StatelessWidget {
     this.actionLabel,
     this.actionIcon,
     this.onAction,
-  }) : assert(actionLabel == null || onAction != null);
+    this.secondaryActionLabel,
+    this.onSecondaryAction,
+    this.iconBackground,
+  }) : assert(actionLabel == null || onAction != null),
+       assert(secondaryActionLabel == null || onSecondaryAction != null);
 
   final String text;
   final LgIcons icon;
   final Color? iconColor;
+
+  /// The ground of the icon's tile; the neutral one by default (the error tint for the pane of
+  /// a file list that could not be opened).
+  final Color? iconBackground;
   final String? actionLabel;
   final LgIcons? actionIcon;
   final VoidCallback? onAction;
+
+  /// A second way out, an outlined button before the main one ("转到主文件夹" before "重试").
+  final String? secondaryActionLabel;
+  final VoidCallback? onSecondaryAction;
 
   @override
   Widget build(BuildContext context) {
@@ -983,7 +995,7 @@ class LgEmptyState extends StatelessWidget {
             height: 44,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: c.surface2,
+              color: iconBackground ?? c.surface2,
               borderRadius: BorderRadius.circular(LgRadius.r12),
             ),
             child: LgIcon(icon, size: 24, color: iconColor ?? c.text2),
@@ -999,11 +1011,23 @@ class LgEmptyState extends StatelessWidget {
           ),
           if (actionLabel != null) ...[
             const SizedBox(height: LgSpace.s3),
-            LgButton(
-              label: actionLabel!,
-              icon: actionIcon,
-              kind: LgButtonKind.primary,
-              onPressed: onAction,
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (secondaryActionLabel != null) ...[
+                  LgButton(
+                    label: secondaryActionLabel!,
+                    onPressed: onSecondaryAction,
+                  ),
+                  const SizedBox(width: LgSpace.s2),
+                ],
+                LgButton(
+                  label: actionLabel!,
+                  icon: actionIcon,
+                  kind: LgButtonKind.primary,
+                  onPressed: onAction,
+                ),
+              ],
             ),
           ],
         ],
