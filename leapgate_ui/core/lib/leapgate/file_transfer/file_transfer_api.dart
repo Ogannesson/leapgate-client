@@ -1,6 +1,7 @@
 // The one place the file transfer view reaches the M7a exports (`LEAPGATE.md` §10.15). The file
 // transfer models call [fileTransferApi] only; tests set a fake (`test/file_transfer_fakes.dart`).
 // The calls the copied models make to block 1 (`bind.session*`) stay where they are.
+import 'dart:async';
 import 'dart:convert';
 
 import '../../common.dart';
@@ -85,18 +86,19 @@ class RustFileTransferApi implements FileTransferApi {
           isRemote: isRemote,
           isDirLink: isDirLink);
 
-  // TODO(M7b 整合): `lgBind.leapgateFtEvents().listen((_) {})`, kept for the process's life.
+  /// The subscription is the switch (`LEAPGATE.md` §10.17); the stream carries nothing.
   @override
   void turnOnEvents() =>
-      throw UnimplementedError('TODO(M7b 整合): leapgate_ft_events');
+      _ftSwitch ??= lgBind.leapgateFtEvents().listen((_) {});
 
-  // TODO(M7b 整合): `lgBind.leapgateFtPause(sessionId: sessionId, id: id)`.
   @override
   Future<void> pause(SessionID sessionId, int id) =>
-      throw UnimplementedError('TODO(M7b 整合): leapgate_ft_pause');
+      lgBind.leapgateFtPause(sessionId: sessionId, id: id);
 
-  // TODO(M7b 整合): `lgBind.leapgateFtResume(sessionId: sessionId, id: id)`.
   @override
   Future<void> resume(SessionID sessionId, int id) =>
-      throw UnimplementedError('TODO(M7b 整合): leapgate_ft_resume');
+      lgBind.leapgateFtResume(sessionId: sessionId, id: id);
 }
+
+/// Kept for the process's life.
+StreamSubscription<String>? _ftSwitch;
