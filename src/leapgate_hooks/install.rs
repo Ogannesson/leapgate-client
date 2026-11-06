@@ -18,8 +18,8 @@ const CHILD_ARG: &str = "--leapgate-install";
 /// Installs (`install`) or upgrades (`upgrade`) in a child and exits on success; the failure
 /// otherwise, as `leapgate::install::failure`.
 ///
-/// On success the child has started the installed copy (2 s after the script) and its tray; this
-/// process is usually gone by then, killed by the script's `taskkill` or by the new `--server`.
+/// On success the child has started the installed copy and its tray; this process is usually gone
+/// by then, killed by the script's `taskkill`.
 #[cfg(windows)]
 pub(crate) fn install(kind: &str) -> String {
     use std::io::Read;
@@ -34,8 +34,7 @@ pub(crate) fn install(kind: &str) -> String {
         Ok(child) => child,
         Err(e) => return leapgate::install::failure(&format!("{e}")),
     };
-    // Waited for before reading: on success the installed copy inherits the child's stdout and
-    // keeps it open; on failure nothing does, and the child has written its one line.
+    // The child writes its one line only on failure, and exits right after.
     let status = child.wait();
     if matches!(&status, Ok(s) if s.success()) {
         log::info!("leapgate install: {kind} done, exiting");
@@ -61,17 +60,34 @@ pub(crate) fn install(kind: &str) -> String {
     leapgate::install::failure(&format!("{kind} is not supported on this platform"))
 }
 
-/// `core_main`'s hook: returns unless the arguments are the child's; the child installs, prints
-/// the failure on stdout and exits 1, or exits 0.
+/// `core_main`'s hook: returns unless the arguments are the child's; the child installs, writes
+/// the failure to the UI process's pipe and exits 1, or exits 0.
 ///
-/// Not `silent`: upstream starts the installed copy 2 s after the script (`run_after_run_cmds`)
-/// and its tray at once. The script's `taskkill` leaves the child alone
-/// (`get_uninstall(false, …)`).
+/// Not `silent`: upstream starts the installed copy and its tray (`run_after_run_cmds`). The
+/// script's `taskkill` leaves the child alone (`get_uninstall(false, …)`).
 #[cfg(windows)]
 pub(crate) fn child(args: &[String]) {
+    use std::{ffi::c_void, io::Write, os::windows::io::FromRawHandle};
+    extern "system" {
+        fn GetStdHandle(std_handle: u32) -> *mut c_void;
+        fn SetStdHandle(std_handle: u32, handle: *mut c_void) -> i32;
+        fn SetHandleInformation(handle: *mut c_void, mask: u32, flags: u32) -> i32;
+    }
+    const STD_OUTPUT_HANDLE: u32 = -11i32 as u32;
+    const HANDLE_FLAG_INHERIT: u32 = 1;
+
     if args.first().map(String::as_str) != Some(CHILD_ARG) {
         return;
     }
+    // The pipe leaves the standard handles before anything is started: the installed copy and its
+    // tray would inherit it as their stdout, and once the UI process is gone a `println!` there
+    // (e.g. the clipboard's on the last session's end) fails and aborts them.
+    let pipe = unsafe {
+        let pipe = GetStdHandle(STD_OUTPUT_HANDLE);
+        SetHandleInformation(pipe, HANDLE_FLAG_INHERIT, 0);
+        SetStdHandle(STD_OUTPUT_HANDLE, std::ptr::null_mut());
+        pipe
+    };
     let kind = args.get(1).map(String::as_str).unwrap_or_default();
     let (options, path) = if kind == "upgrade" {
         (
@@ -88,7 +104,8 @@ pub(crate) fn child(args: &[String]) {
         }
         Err(e) => {
             log::warn!("leapgate install: {kind} failed: {e:#}");
-            println!("{}", leapgate::install::failure(&format!("{e:#}")));
+            let mut pipe = unsafe { std::fs::File::from_raw_handle(pipe) };
+            writeln!(pipe, "{}", leapgate::install::failure(&format!("{e:#}"))).ok();
             std::process::exit(1);
         }
     }

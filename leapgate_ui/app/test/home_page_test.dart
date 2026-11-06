@@ -1,6 +1,8 @@
 import 'dart:async';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart' show Scrollable;
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/bridge.dart';
 import 'package:flutter_hbb/leapgate/local_status.dart';
@@ -286,5 +288,45 @@ void main() {
       );
       await unmount(tester);
     });
+
+    // 01 §2.1: with a card the column scrolls, the account area stays at the bottom.
+    for (final size in const [Size(1280, 760), Size(960, 560)]) {
+      testWidgets('the mouse wheel brings the navigation into view at $size', (
+        tester,
+      ) async {
+        await pumpHome(
+          tester,
+          id: '135792468',
+          size: size,
+          setUp: (m) => m.installed = false,
+        );
+        final column = find
+            .ancestor(
+              of: find.textContaining('建议安装 Leapgate'),
+              matching: find.byType(Scrollable),
+            )
+            .first;
+        final mouse = TestPointer(1, PointerDeviceKind.mouse);
+        await tester.sendEventToBinding(
+          mouse.hover(tester.getCenter(find.textContaining('建议安装 Leapgate'))),
+        );
+        await tester.sendEventToBinding(mouse.scroll(const Offset(0, 1000)));
+        await tester.pump();
+        final viewport = tester.getRect(column);
+        final login = tester.getRect(find.text('登录'));
+        for (final label in ['设备', '出口', '设置']) {
+          final item = tester.getRect(
+            find.descendant(of: column, matching: find.text(label)),
+          );
+          expect(viewport.contains(item.topLeft), isTrue, reason: label);
+          expect(viewport.contains(item.bottomRight), isTrue, reason: label);
+          expect(item.bottom, lessThanOrEqualTo(login.top), reason: label);
+        }
+        await tester.tap(find.text('出口'));
+        await tester.pump();
+        expect(find.text('出口'), findsNWidgets(2));
+        await unmount(tester);
+      });
+    }
   });
 }

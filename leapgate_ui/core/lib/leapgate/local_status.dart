@@ -160,8 +160,9 @@ class LocalStatusModel extends ChangeNotifier {
     return null;
   }
 
-  /// Installs or upgrades in this process (M8-1). Returns only on failure: on success Rust exits
-  /// and the installed copy starts. A second click while it runs does nothing; the export
+  /// Installs or upgrades in a child process that Rust waits for (M8-1). Returns only on failure:
+  /// on success this process is ended (by the install script, or by Rust) and the installed copy
+  /// starts. A second click while it runs does nothing; the export
   /// throwing or answering something unreadable counts as `failed` with the error's text.
   Future<void> install(InstallCard card) async {
     if (installing) return;
