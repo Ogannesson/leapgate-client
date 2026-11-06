@@ -1649,7 +1649,7 @@ pub fn install_me(options: &str, path: String, silent: bool, debug: bool) -> Res
     let mut version_major = "0";
     let mut version_minor = "0";
     let mut version_build = "0";
-    let versions: Vec<&str> = crate::VERSION.split(".").collect();
+    let versions: Vec<&str> = leapgate::ui::VERSION.split(".").collect(); // leapgate: M8-5
     if versions.len() > 0 {
         version_major = versions[0];
     }
@@ -1803,7 +1803,7 @@ copy /Y \"{tmp_path}\\Uninstall {app_name}.lnk\" \"{path}\\\"
     ",
         display_icon = shortcut_icon_location.as_deref().unwrap_or(exe.as_str()),
         nested_exe = escape_nested_cmd_ampersands(&exe),
-        version = crate::VERSION.replace("-", "."),
+        version = leapgate::ui::VERSION.replace("-", "."), // leapgate: M8-5
         build_date = crate::BUILD_DATE,
         after_install = get_after_install(
             &exe,

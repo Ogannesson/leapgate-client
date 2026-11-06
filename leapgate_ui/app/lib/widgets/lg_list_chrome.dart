@@ -446,6 +446,8 @@ class LgLocalNotice extends StatelessWidget {
     this.icon,
     this.actionLabel,
     this.onAction,
+    this.actionBusy = false,
+    this.actionError,
   }) : assert(actionLabel == null || onAction != null);
 
   final LgTone tone;
@@ -453,6 +455,12 @@ class LgLocalNotice extends StatelessWidget {
   final LgIcons? icon;
   final String? actionLabel;
   final VoidCallback? onAction;
+
+  /// The action is on its way: the button is busy and [actionLabel] says so.
+  final bool actionBusy;
+
+  /// Why the action failed, in red under the button; null for none.
+  final String? actionError;
 
   @override
   Widget build(BuildContext context) {
@@ -495,7 +503,15 @@ class LgLocalNotice extends StatelessWidget {
             ),
             if (actionLabel != null) ...[
               const SizedBox(height: LgSpace.s3),
-              LgButton(label: actionLabel!, onPressed: onAction),
+              LgButton(
+                label: actionLabel!,
+                busy: actionBusy,
+                onPressed: actionBusy ? null : onAction,
+              ),
+            ],
+            if (actionError != null) ...[
+              const SizedBox(height: LgSpace.s2),
+              Text(actionError!, style: t.textS.copyWith(color: c.error)),
             ],
           ],
         ),

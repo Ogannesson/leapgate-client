@@ -332,14 +332,14 @@ class _LgTitleBarState extends State<LgTitleBar> {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Placeholder app mark (`.appmark`), no interaction.
-              Container(
-                width: 16,
-                height: 16,
-                margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-                decoration: BoxDecoration(
-                  color: c.borderStrong,
-                  borderRadius: BorderRadius.circular(4),
+              // The app mark (`.appmark`), no interaction; decoration to a screen reader.
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+                child: Image.asset(
+                  'assets/app_icon.png',
+                  width: 16,
+                  height: 16,
+                  excludeFromSemantics: true,
                 ),
               ),
               Expanded(

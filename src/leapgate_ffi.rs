@@ -402,3 +402,13 @@ pub fn leapgate_ft_remove_link(
         is_dir_link,
     );
 }
+
+// ---- Install (M8) ----
+// `LEAPGATE.md` §10.16.
+
+/// The home page's cards: `kind` is `install` (the default path and options) or `upgrade` (the
+/// installed path and options). Does not return on success: this process exits and the
+/// installed copy starts. A failure is `{"result":"uac_denied"|"failed","text":…}`.
+pub fn leapgate_install(kind: String) -> String {
+    crate::leapgate_hooks::install::install(&kind)
+}

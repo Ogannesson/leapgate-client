@@ -1371,5 +1371,21 @@
   "filesSearchFiltering": "搜索当前文件夹，正在过滤",
   "filesSortAscending": "升序",
   "filesSortDescending": "降序",
-  "queueStatusPausedOnly": "已暂停"
+  "queueStatusPausedOnly": "已暂停",
+  "homeInstallText": "本机被远程控制时，便携版可能无法正常工作，例如对方无法操作用户账户控制（UAC）窗口。建议安装 Leapgate。",
+  "homeInstallButton": "安装",
+  "homeInstalling": "正在安装…",
+  "homeInstallUacDenied": "未获得管理员权限，未安装。",
+  "homeInstallFailed": "安装失败。",
+  "homeInstallFailedText": "安装失败：{text}",
+  "homeUpgradeText": "已安装的 Leapgate 版本低于当前版本。",
+  "homeUpgradeButton": "升级",
+  "homeUpgrading": "正在升级…",
+  "homeUpgradeUacDenied": "未获得管理员权限，未升级。",
+  "homeUpgradeFailed": "升级失败。",
+  "homeUpgradeFailedText": "升级失败：{text}",
+  "linkUnsupportedPortForward": "暂不支持打开端口转发会话。",
+  "linkUnsupportedRdp": "暂不支持打开 RDP 会话。",
+  "linkUnsupportedCamera": "暂不支持打开摄像头会话。",
+  "linkUnsupportedTerminal": "暂不支持打开终端会话。"
 }

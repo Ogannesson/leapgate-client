@@ -27,6 +27,15 @@ class _StatusBind implements RustdeskImpl {
   @override
   Future<String> mainGetTemporaryPassword({dynamic hint}) async => 'a1b2c3';
 
+  bool installed = true;
+  bool lowerVersion = false;
+
+  @override
+  bool mainIsInstalled({dynamic hint}) => installed;
+
+  @override
+  bool mainIsInstalledLowerVersion({dynamic hint}) => lowerVersion;
+
   @override
   Future<String> mainGetOption({required String key, dynamic hint}) async =>
       options[key] ?? '';
@@ -114,6 +123,16 @@ void main() {
           '{"remote":0,"file_transfer":1,"port_forward":0,"exit":0,"camera":0,"terminal":1}';
       model = await poll();
       expect(model.incoming, const IncomingSessions(2, controlled: true));
+    });
+
+    test('the install card (01 P1 block B): portable, older installed, error first', () async {
+      expect((await poll()).installCard, isNull);
+      bind.lowerVersion = true;
+      expect((await poll()).installCard, InstallCard.upgrade);
+      bind.installed = false;
+      expect((await poll()).installCard, InstallCard.install);
+      bind.error = 'Failed to write the config file';
+      expect((await poll()).installCard, isNull);
     });
   });
 

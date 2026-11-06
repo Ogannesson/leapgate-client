@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
+import 'package:flutter_hbb/leapgate/bridge.dart';
 import 'package:flutter_hbb/leapgate/local_status.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:leapgate_ui/pages/home/password_row.dart';
@@ -234,4 +237,54 @@ void main() {
       await unmount(tester);
     },
   );
+
+  group('install card (01 P1 block B, M8)', () {
+    testWidgets('portable: "安装" is busy while it runs, then says why it failed', (
+      tester,
+    ) async {
+      // Made in the test's zone, so its answer arrives on the next pump.
+      final lg = lgBind as FakeLeapgate..installAnswer = Completer();
+      await pumpHome(tester, id: '135792468', setUp: (m) => m.installed = false);
+      expect(find.textContaining('建议安装 Leapgate'), findsOneWidget);
+      await tester.tap(find.text('安装'));
+      await tester.pump();
+      expect(lg.installs, ['install']);
+      expect(find.text('正在安装…'), findsOneWidget);
+
+      lg.installAnswer.complete(
+        '{"result":"uac_denied","text":"The operation was canceled by the user. (0x800704C7)"}',
+      );
+      await tester.pump();
+      expect(find.text('未获得管理员权限，未安装。'), findsOneWidget);
+      expect(find.text('安装'), findsOneWidget);
+      await unmount(tester);
+    });
+
+    testWidgets('an older installed version: "升级", a failure with its text', (
+      tester,
+    ) async {
+      // Made in the test's zone, so its answer arrives on the next pump.
+      final lg = lgBind as FakeLeapgate..installAnswer = Completer();
+      await pumpHome(
+        tester,
+        id: '135792468',
+        setUp: (m) => m.installedLowerVersion = true,
+      );
+      expect(find.text('已安装的 Leapgate 版本低于当前版本。'), findsOneWidget);
+      await tester.tap(find.text('升级'));
+      await tester.pump();
+      expect(lg.installs, ['upgrade']);
+      lg.installAnswer.complete(
+        '{"result":"failed","text":"Cannot install the EXE package over an existing MSI installation"}',
+      );
+      await tester.pump();
+      expect(
+        find.text(
+          '升级失败：Cannot install the EXE package over an existing MSI installation',
+        ),
+        findsOneWidget,
+      );
+      await unmount(tester);
+    });
+  });
 }

@@ -9,6 +9,7 @@ pub(crate) mod dns;
 pub mod exit;
 pub mod ft_reason;
 pub mod ice;
+pub mod install;
 pub mod ipc;
 pub mod lan;
 pub mod lang;

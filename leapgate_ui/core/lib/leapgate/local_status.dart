@@ -39,6 +39,22 @@ enum PasswordRow {
   unavailable,
 }
 
+/// The hint card with a button (01 P1 block B, M8): installing the portable version, or
+/// upgrading an installed one built earlier than this program.
+enum InstallCard { install, upgrade }
+
+/// Why the last "安装" or "升级" failed (`leapgate_install`, `LEAPGATE.md` §10.16).
+@immutable
+class InstallFailure {
+  const InstallFailure({required this.uacDenied, required this.text});
+
+  /// Administrator permission was not granted.
+  final bool uacDenied;
+
+  /// The installer's error otherwise, as it is; may be empty.
+  final String text;
+}
+
 /// The sessions into this device (C1): how many, and whether one of them operates it (a remote
 /// desktop or a terminal); the others (file transfer, camera, port forwarding, exit) do not.
 @immutable
@@ -91,6 +107,18 @@ class LocalStatusModel extends ChangeNotifier {
   /// hint card (01 P1 block B); empty when nothing is.
   String systemError = '';
 
+  /// Whether Leapgate is installed (`main_is_installed`), and built earlier than this program
+  /// (`main_is_installed_lower_version`, the build time, 11 §4.4). True and false until the first
+  /// poll, so no card shows before it.
+  bool installed = true;
+  bool installedLowerVersion = false;
+
+  /// "安装" or "升级" was clicked and the installer runs; on success this process exits.
+  bool installing = false;
+
+  /// The last failure, shown on the card until the next click.
+  InstallFailure? installFailure;
+
   /// Authorized sessions into this device of every type (C1, 06 M3-1): "正在被远程控制（N 个
   /// 会话）" while one of them is a remote desktop or a terminal, "‹N› 个传入会话进行中"
   /// otherwise (01 P1 block A).
@@ -113,6 +141,31 @@ class LocalStatusModel extends ChangeNotifier {
       kUseTemporaryPassword => PasswordRow.oneTime,
       _ => PasswordRow.both,
     };
+  }
+
+  /// The card with a button (01 P1 block B): one at a time, the system error first, as
+  /// upstream's `desktop_home_page.dart` `buildHelpCards`.
+  InstallCard? get installCard {
+    if (systemError.isNotEmpty) return null;
+    if (!installed) return InstallCard.install;
+    if (installedLowerVersion) return InstallCard.upgrade;
+    return null;
+  }
+
+  /// Installs or upgrades in this process (M8-1). Returns only on failure: on success Rust exits
+  /// and the installed copy starts.
+  Future<void> install(InstallCard card) async {
+    installing = true;
+    installFailure = null;
+    notifyListeners();
+    final failure = jsonDecode(await lgBind.leapgateInstall(kind: card.name))
+        as Map<String, dynamic>;
+    installing = false;
+    installFailure = InstallFailure(
+      uacDenied: failure['result'] == 'uac_denied',
+      text: failure['text'] as String? ?? '',
+    );
+    notifyListeners();
   }
 
   void start() {
@@ -200,6 +253,9 @@ class LocalStatusModel extends ChangeNotifier {
     final verificationMethod =
         await bind.mainGetOption(key: kOptionVerificationMethod);
     final systemError = await bind.mainGetError();
+    final installed = bind.mainIsInstalled();
+    final installedLowerVersion =
+        installed && bind.mainIsInstalledLowerVersion();
     final networkWarning = await _readNetworkWarning();
     final status = stopped
         ? ServiceStatus.stopped
@@ -217,6 +273,8 @@ class LocalStatusModel extends ChangeNotifier {
         approveMode != this.approveMode ||
         verificationMethod != this.verificationMethod ||
         systemError != this.systemError ||
+        installed != this.installed ||
+        installedLowerVersion != this.installedLowerVersion ||
         networkWarning != this.networkWarning) {
       this.id = id;
       this.status = status;
@@ -224,6 +282,8 @@ class LocalStatusModel extends ChangeNotifier {
       this.approveMode = approveMode;
       this.verificationMethod = verificationMethod;
       this.systemError = systemError;
+      this.installed = installed;
+      this.installedLowerVersion = installedLowerVersion;
       this.networkWarning = networkWarning;
       notifyListeners();
     }

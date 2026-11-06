@@ -193,6 +193,16 @@ class FakeLeapgate implements lg.Leapgate {
   @override
   Stream<String> leapgateCmEvents({dynamic hint}) => cmEvents.stream;
 
+  /// `leapgate_install` calls by kind, and what they answer (Rust exits on success instead).
+  final installs = <String>[];
+  Completer<String> installAnswer = Completer();
+
+  @override
+  Future<String> leapgateInstall({required String kind, dynamic hint}) {
+    installs.add(kind);
+    return installAnswer.future;
+  }
+
   @override
   dynamic noSuchMethod(Invocation invocation) =>
       super.noSuchMethod(invocation);
