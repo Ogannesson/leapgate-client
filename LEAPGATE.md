@@ -1314,10 +1314,10 @@ Telegram 机器人设置改成两步（`leapgate_bot_lookup` 只查、什么都�
 | 项 | 结果 |
 |---|---|
 | "安装"卡：卡片文案、点后进行中 | 通过。`8769ee3ce` 构建：点后卡片变"正在安装…"，便携版窗口一直在，服务起来的同一秒便携版退出。`57c0087fd` 便携单文件：采样（每 0.7 秒）见便携版进程活到约 3.5 秒，服务 Running 后约 0.5 秒退出；点击后的卡片文字没采到（第一次点击的采样起得太晚） |
-| "安装"卡：装完安装版接手 | **不通过（`57c0087fd`）**。`57c0087fd` 的"安装"（便携单文件）和"升级"（zip 目录），共 4 次，装完 60 秒内都**没有界面进程、没有托盘进程**，只有 `--service`、`--server`；`8769ee3ce` 的"安装"同样流程装完约 1 秒内界面（无参数）和 `--tray` 都起来了。手动起安装版的界面正常，托盘随后由连接管理小窗等触发起来，开机自启的快捷方式在。界面日志没有可看的线索。差别在两个提交之间（"点过的卡保持在、`install()` 加固"），交回修改 |
+| "安装"卡：装完安装版接手 | **复测通过（`fb1acefa2`）**。`57c0087fd` 不通过：便携单文件"安装"、zip 目录"升级"共 4 次，装完 60 秒内都没有界面和托盘进程，只有 `--service`、`--server`（`8769ee3ce` 那次能起来是竞速碰巧赢了，根因见 §10.16"在子进程里装"）。改成在子进程里装以后，用 `fb1acefa2` 的构建在测试虚拟机上复测（2026-11-06 22:00~22:09）：<br>"安装" 4 次（zip 目录 3 次、便携单文件 1 次），"升级" 3 次（先 `--silent-install` 装 `8769ee3ce`，构建时间 18:27，停掉它的服务和进程后起便携版；zip 目录 2 次、便携单文件 1 次）。每次点击后约 0.7 秒内便携版界面被脚本的 `taskkill` 结束，约 3.5 秒时安装版的界面（有窗口）和 `--tray` 同时起来，服务 Running，子进程退出 0。升级后卸载项 `BuildDate` 是新的（21:44）、`DisplayVersion` 0.4.0。<br>失败回卡片：从路径带 `%` 的目录起便携版点"安装"，卡片下出现"安装失败：Installer path or name contains characters unsafe for cmd.exe"，便携版还在。<br>做法：WMI 进程跟踪看父子进程和退出码，每 0.5 秒采一次进程和窗口（手册 §25） |
 | 服务、开机自启、快捷方式、防火墙、卸载项 | 通过。服务 `Leapgate`（显示名 `Leapgate Service`，自启，`--service`，Running）；`Startup\Leapgate Tray.lnk`；开始菜单 `Leapgate\` 下 `Leapgate.lnk`、`Uninstall Leapgate.lnk`；公共桌面快捷方式；防火墙 `Leapgate Service` 入站、出站各一条（程序是安装目录里的）；`HKCR\leapgate`（带 `URL Protocol`）；卸载项 `DisplayVersion` = `0.4.0`（M8-5），`InstallLocation` = `C:\Program Files\Leapgate`；管道 `\\.\pipe\Leapgate\query`、`query_service`；服务配置目录有 `Leapgate.toml`、`Leapgate2.toml`、`log\server\`。第二期清单 §4 第 3 条起各条都过 |
 | 设置沿用 | 通过。装完服务配置目录的 `Leapgate.toml`、`Leapgate2.toml` 大小和便携版用户配置一致（`--import-config` 带过去）；安装版界面里 ID 和便携版相同；便携版里设的固定密码，A 用原密码连安装版成功（出现新界面连接管理小窗）；ID 服务器、Key 也在（能注册、能连）。固定密码、一次性密码都不打印 |
-| "升级"卡 | 通过。装 `8769ee3ce`（构建时间 18:27）后跑 `57c0087fd` 便携版，主页出现"已安装的 Leapgate 版本低于当前版本。"和"升级"；点后"正在升级…"，便携版窗口一直在；完成后卸载项 `BuildDate` 是新的（20:21）、`libleapgate.dll` 哈希是新的。再测自定义路径：用旧界面（`-Ui upstream`）的安装页（安装路径用文件夹选择框改成非默认路径）装在自定义路径，再跑便携版"升级"：安装路径、服务路径、卸载项都留在自定义路径，默认路径没有被创建。装完同样没有界面接手（见上一条） |
+| "升级"卡 | 通过。装 `8769ee3ce`（构建时间 18:27）后跑 `57c0087fd` 便携版，主页出现"已安装的 Leapgate 版本低于当前版本。"和"升级"；点后"正在升级…"，便携版窗口一直在；完成后卸载项 `BuildDate` 是新的（20:21）、`libleapgate.dll` 哈希是新的。再测自定义路径：用旧界面（`-Ui upstream`）的安装页（安装路径用文件夹选择框改成非默认路径）装在自定义路径，再跑便携版"升级"：安装路径、服务路径、卸载项都留在自定义路径，默认路径没有被创建。装完同样没有界面接手（`57c0087fd`；`fb1acefa2` 复测通过，见上一条。改后点了以后便携版窗口不再"一直在"，脚本卸载那一步就把它结束） |
 | 覆盖安装 | 通过。旧界面安装版（自定义路径）→ 新界面"升级"：目录里没有旧界面独有的文件（`desktop_multi_window_plugin.dll`、`file_selector_windows_plugin.dll`、`url_launcher_windows_plugin.dll`、`window_size_plugin.dll`），服务、托盘是新界面的。反过来用旧界面的安装页装回去：装在已装的自定义路径，没有 `dartjni.dll` 等新界面文件，旧界面（`FLUTTER_RUNNER_WIN32_WINDOW`）正常起来，托盘也起来。注意：从空机器上用新界面"安装"卡装在旧界面安装版上这一条，没有单独测（旧界面装着时主页显示的是"升级"卡） |
 | 托盘"打开" | 通过。关主窗口：窗口隐藏（`vis=False`）、进程都在；对托盘图标做 UI Automation 的调用（等于单击），窗口回来；不带参数再启一次同一个 exe 也让隐藏窗口回来，没有新进程 |
 | 来访小窗 | 通过。A 连进来时测试虚拟机弹出的是 `LEAPGATE_UI_CM`，进程是 `--cm`；会话关闭后进程也消失 |
@@ -1332,12 +1332,12 @@ Telegram 机器人设置改成两步（`leapgate_bot_lookup` 只查、什么都�
 | 打印机 | 未验证（构建不带驱动，没装打印机） |
 
 **新发现**
-1. **装完不起界面（`57c0087fd`）**：见"安装"卡第二行。`57c0087fd` 的便携版点"安装"或"升级"后，便携版退出、服务起来，但没有安装版的界面和托盘；`8769ee3ce` 的同一操作会起。
-2. **旧界面的构建时间没刷新**：`-Ui upstream` 的构建（`build.py` 路径）日志里没有刷新 `build.rs` 的动作，装出来卸载项 `BuildDate` 是 `2026-11-05 05:51`（前一天的残留），新界面构建的是当次的（`2026-11-06 20:21`）。结果：旧界面构建出来的便携版是否提示"升级"，不取决于当次构建时间（11 §4.4 的副作用比预想的更不可控）。
-3. **旧界面安装的卸载项版本是 `1.5.1`**：旧界面的安装页（`--install`）装出来 `DisplayVersion` 是上游版本，新界面"安装"卡装出来是 `0.4.0`。M8-5 的版本挂钩只对新界面的安装生效，还是旧界面的 Rust 没带挂钩，没追，需要时回头查。
+1. **装完不起界面（`57c0087fd`，`fb1acefa2` 已修）**：见"安装"卡第二行。`57c0087fd` 的便携版点"安装"或"升级"后，便携版退出、服务起来，但没有安装版的界面和托盘；`8769ee3ce` 的同一操作会起。根因是新服务的 `--server` 拿不到主 IPC，结束了正在等安装脚本的便携版（§10.16"在子进程里装"）。
+2. **旧界面的构建时间没刷新**：`-Ui upstream` 的构建（`build.py` 路径）日志里没有刷新 `build.rs` 的动作，装出来卸载项 `BuildDate` 是 `2026-11-05 05:51`（前一天的残留），新界面构建的是当次的（`2026-11-06 20:21`）。结果：旧界面构建出来的便携版是否提示"升级"，不取决于当次构建时间（11 §4.4 的副作用比预想的更不可控）。coder 查过：原因见第 3 条，那份产物的 `libleapgate.dll` 是旧的；脚本在两种界面的 cargo 之前都改 `build.rs` 的修改时间，重编 `-Ui upstream` 时构建时间是当次的。
+3. **旧界面安装的卸载项版本是 `1.5.1`**：旧界面的安装页（`--install`）装出来 `DisplayVersion` 是上游版本，新界面"安装"卡装出来是 `0.4.0`。M8-5 的版本挂钩只对新界面的安装生效，还是旧界面的 Rust 没带挂钩，没追，需要时回头查。**coder 查过（2026-11-06）**：是那份旧界面产物里的 `libleapgate.dll` 是旧的。它里面的构建时间是 `2026-11-05 05:51`（构建 worktree 05:42 检出过 M6b 的 `8efb531f0`），也找不到任何 M8 的代码（例如 `leapgate install: ` 这段日志文字），所以 `install_me` 里没有 M8-5 的挂钩。第 2 条"构建时间没刷新"也是同一个原因。用同一个构建脚本在 `fb1acefa2` 上重编 `-Ui upstream`，`flutter\build\…\Release\libleapgate.dll` 和 `target\release\librustdesk.dll` 是同一份，构建时间是当次的（22:12），带 M8 的代码。旧 DLL 怎么进了那份产物没查出来，构建脚本本身没发现问题。
 4. 旧界面的安装页默认路径是**已装的路径**（自定义路径装着时再进安装页，路径框是自定义路径），不是 `Program Files`。上游行为。
 5. 便携单文件第二次双击不重新解压：解压目录里 `leapgate.exe`、`libleapgate.dll` 的修改时间在 21:15 的第二次启动后仍是第一次的 20:29（顺带观察，便携包那一节由便携版验收做）。
-6. 便携版从 `%LOCALAPPDATA%\leapgate` 起时进程路径是 `…\leapgate\.\leapgate.exe`（带 `.\`），`scripts/e2e/leapgate-uia.ps1` 和 `leapgate-post-input.ps1` 按路径精确比较会找不到进程；测试虚拟机上的副本改成了先 `GetFullPath`，公开仓库里的两份没改。
+6. 便携版从 `%LOCALAPPDATA%\leapgate` 起时进程路径是 `…\leapgate\.\leapgate.exe`（带 `.\`），`scripts/e2e/leapgate-uia.ps1` 和 `leapgate-post-input.ps1` 按路径精确比较会找不到进程；测试虚拟机上的副本改成了先 `GetFullPath`。总仓库 `ui/m8` 里的两份已改成比较前把进程路径也规范化。
 
 **环境说明**：测试虚拟机没有回滚，留在安装了 `57c0087fd` 新界面的状态（路径 `C:\Program Files\Leapgate`，固定密码是测试值），由主会话回滚；A 的配置文件和测前备份逐个哈希一致，A 上的 Leapgate 已停。测试虚拟机上本机 ID 是 10 位（第三期 01 的锁定规则，同 M7a 记录）；原版在测试虚拟机上装完又卸载了。证据在 A 的 `C:\leapgate-e2e\evidence\m8-1106\`（`build-new.log`、`build-new2.log`、`build-up.log`、旧界面安装页截图、`tools\`）。
 
@@ -2304,16 +2304,20 @@ Telegram 机器人设置改成两步（`leapgate_bot_lookup` 只查、什么都�
 
 | 导出 | 参数 | 返回 |
 |---|---|---|
-| `leapgate_install` | `kind: String`：`install` 或 `upgrade` | 非 `SyncReturn`（frb 在工作线程里跑，Dart 拿到 `Future<String>`）。**成功时不返回**：照上游 `ui_interface::install_me` 的做法在 `platform::install_me` 返回 `Ok` 之后 `std::process::exit(0)`。失败时返回 JSON `{"result":"uac_denied"\|"failed","text":"‹原文›"}` |
+| `leapgate_install` | `kind: String`：`install` 或 `upgrade` | 非 `SyncReturn`（frb 在工作线程里跑，Dart 拿到 `Future<String>`）。**成功时不返回**：安装在子进程里跑（见下），子进程退出码是 0 时本进程 `std::process::exit(0)`。失败时返回 JSON `{"result":"uac_denied"\|"failed","text":"‹原文›"}` |
 
 - `install`：路径传空串（`install_me` 用 `get_default_install_info()` 的默认路径，`src/platform/windows.rs:1641-1647`），选项是默认的开始菜单和桌面快捷方式、**不装打印机**（构建里没带驱动）。选项照上游安装页的写法：不是 JSON，是空格分隔的词（`install_page.dart:286-288` 拼成 `startmenu desktopicon printer` 的子集，`install_me` 用 `contains` 认），所以"安装"传 `startmenu desktopicon`（`leapgate::install::INSTALL_OPTIONS`）。
 - `upgrade`：路径 `ui_interface::install_path()`，选项由 `platform::get_install_options()`（`:1377`，注册表值的 JSON `STARTMENUSHORTCUTS`、`DESKTOPSHORTCUTS`、`PRINTER`）照安装页的读法换成上面的词（`leapgate::install::upgrade_options`：快捷方式没记 `"0"` 就要，打印机记了 `"1"` 才要；安装页另外会实查打印机装没装，这里不查）。
-- `silent` 传 `false`：装完 `run_after_run_cmds` 等 2 秒再起安装版（`:3976-3989`），所以成功后要马上退出，否则安装版按窗口类名找到本进程的窗口、把自己交过来后退出（11 §4.1）。安装脚本杀 `leapgate.exe` 时按 PID 放过本进程（`get_uninstall(false, …)`，`:1640`、`:1837-1858`），失败时界面还活着。
+- **在子进程里装**（验收后改，`fb1acefa2`；原来在界面进程里直接调 `install_me`）：界面进程起 `leapgate.exe --leapgate-install ‹kind›`（stdout 接管道），等它退出。子进程在 `core_main` 里被一行 `leapgate:` 挂钩（`leapgate_hooks::install::child`）接走：算路径和选项、调 `install_me(…, silent = false, …)`，成功退出 0，失败把上面的 JSON 打到 stdout、退出 1。界面进程见 0 就退出，否则把 stdout 原样交回卡片（空的时候是 `failed`，原文写退出码）。先等退出再读 stdout：成功时安装版和托盘继承了这条管道、一直不关。
+  - 根因：便携版的界面进程持有主 IPC（`\\.\pipe\Leapgate\query`）。脚本 `sc start` 之后，新服务起的 `--server`（SYSTEM，用户会话里）拿不到这个管道，就走 `server.rs` `stop_main_window_process` → `platform::try_kill_rustdesk_main_window_process`，用 `NtTerminateProcess(…, 1)` 结束"同名、命令行只有一个参数、用户不同"的进程，也就是正在等脚本的界面进程。这时脚本还剩 `reg add …SoftwareSASGeneration` 和 `--uninstall-remote-printer` 两步，`run_cmds` 没返回，`run_after_run_cmds` 起安装版和托盘的那几行就没机会跑。测试虚拟机上用 WMI 进程跟踪（`Win32_ProcessStartTrace` / `StopTrace`）和服务的 `log\server\` 对上了：`--server` 起来约 50 ms 后记 `ipc is occupied by another process, try kill it`、`terminate process ‹便携版 PID› success`，便携版退出码 1，此后没有任何由它起的进程。`8769ee3ce` 那次能起来，是这场竞速碰巧赢了（两个提交的 Rust 完全一样）。
+  - 子进程没有主 IPC，命令行也不止一个参数，`--server` 的那一步放过它（上游的安装页 `--install` 也是这样躲开的）。脚本开头的 `taskkill`（`get_uninstall(false, …)`，`:1837-1858`）按 PID 只放过子进程，界面进程在卸载那一步就被结束：点了以后便携版窗口先消失，几秒后安装版起来。
+  - 失败回卡片：提权被取消、`install_me` 在提权前报的错（MSI、路径校验）都发生在脚本开跑之前，界面进程还在，照旧回到卡片。脚本已开跑后才失败（少见）的回不到卡片，界面已被 `taskkill` 结束；改之前这种情况界面也会被 `--server` 结束，一样回不来。
+- `silent` 传 `false`：`run_after_run_cmds`（`:3976-3989`）起 `--tray` 和安装版。安装版本该等 2 秒（`cmd /c timeout /t 2 & ‹exe›`），实测 `timeout.exe` 当场退出 1（继承来的标准输入不是控制台），安装版和托盘同时起来。那时便携版界面已被 `taskkill` 结束，安装版找不到它的窗口，不会把自己交过去（11 §4.1 担心的情况）。
 - `uac_denied`：提权被取消。`installer_shell.rs` `run_elevated_and_wait` 的 `ShellExecuteExW` 返回 `ERROR_CANCELLED`（1223），windows-rs 的错误文字是"‹系统语言的说明› (0x800704C7)"，`installer_handoff.rs` `run_cmds` 把它格式化进新错误（原错误链丢了，没法 downcast），所以按文字里的 `0x800704C7` 判（`leapgate::install::failure`）；其余一律 `failed`，带原文（`{e:#}`）。MSI 装过的机器上 `install_me` 直接报错（`:1636-1639`），也是 `failed`。
 - 配置：安装脚本建服务时带 `--import-config ‹当前用户的配置文件›`（`get_import_config`，`:3938-3950`），读码看便携版的 ID、固定密码、服务器会带进安装版；验收实测（11 §5.3）。
 - 单测：原因码映射；`upgrade` 取路径和选项的那层（不真的装）。
 
-**上游文件**：`install_me` 里版本号的两处（`:1652` 拆主次版本号、`:1806` 的 DisplayVersion）改用 Leapgate 的版本（`leapgate::ui::VERSION`，0.4.0），各一行，带 `leapgate:` 注释（M8-5；11 原写"一行"，读码后是同一函数里的两行）。`update_me`（`:3452` 起）不改：官方更新已关，Leapgate 不走它。
+**上游文件**：`install_me` 里版本号的两处（`:1652` 拆主次版本号、`:1806` 的 DisplayVersion）改用 Leapgate 的版本（`leapgate::ui::VERSION`，0.4.0），各一行，带 `leapgate:` 注释（M8-5；11 原写"一行"，读码后是同一函数里的两行）。`update_me`（`:3452` 起）不改：官方更新已关，Leapgate 不走它。`src/core_main.rs` Windows 参数分派的开头加一行 `leapgate:` 挂钩，把 `--leapgate-install` 交给 `leapgate_hooks::install::child`（见上"在子进程里装"）。
 
 **Dart**
 
@@ -2338,7 +2342,7 @@ Telegram 机器人设置改成两步（`leapgate_bot_lookup` 只查、什么都�
 **已知限制**
 - `--install`（exe 或便携包名以 `install.exe` 结尾、手动带参数）在第三轮安装页之前仍是写日志后退出（M8-2）。
 - 切换后保留的旧界面便携版如果构建时间晚于装着的新界面，会显示"升级"卡，点了会装回旧界面（11 §4.4，不改旧界面）。
-- 便携版点"安装"会断开所有会话和出口（安装脚本停服务、杀进程）。
+- 便携版点"安装"会断开所有会话和出口（安装脚本停服务、杀进程）；装的过程中便携版窗口先消失，安装版几秒后起来。
 
 **测试**
 - Rust：原因码映射、`upgrade` 取值；`cargo test -p leapgate`、根 crate 的 `leapgate_hooks` 测试照跑。
