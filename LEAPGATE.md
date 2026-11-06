@@ -2472,3 +2472,70 @@ Telegram 机器人设置改成两步（`leapgate_bot_lookup` 只查、什么都�
 - Rust：原因码映射、`upgrade` 取值；`cargo test -p leapgate`、根 crate 的 `leapgate_hooks` 测试照跑。
 - Dart：卡片的出现条件（便携、已装且较旧、系统错误优先）和失败态（假导出）；链接分派（`file-transfer` 打开文件传输、第三轮几种出轻提示）。
 - 合入前：`git diff main -- flutter/` 为空；core analyze 不超出 91 条 info 的基线，app 0 条；新界面和旧界面都要能编（Rust 改了 `install_me`）。
+
+### 10.17 M7b 的分工约定
+
+依据：总仓库 `docs/新界面/12-M7b拆法.md`（下称"12"；维护者 2026-11-07 把 M7b-1~M7b-9 全部按推荐定）。界面行为以 02 §2.2 区块 H、§2.4.5~§2.4.7、§3.1 为准（M7b 的决定已回写）；样稿 `A-P7-文件传输-菜单与其他状态.html` 的队列展开画框。12 §6 列的不做：修上游的传输缺陷、扩展协议、恢复行的字节数、手机端、符号链接附注。
+
+**先后**（12 §3）：第一段 Rust 只做总开关、事件流和两个方向的暂停（FT3）；tester 用开发构建实测 12 §5.1 第 2、3 条，成立以后 Rust 再做失败保留和跳过（FT4、FT5）。Dart 一次做完，全部对着假实现写。
+
+**分支和文件边界**（都从 `ui/m7b` 切，做完合回 `ui/m7b`；整合 worktree 是 `.wt/ui-m4`，块 2 的桥和 pub 缓存在它里面）
+
+| 分支 | 谁 | 只改这些 |
+|---|---|---|
+| `ui/rust-m7b` | Rust coder | 新文件 `libs/leapgate/src/ft*.rs`（总开关、失败去重、上传读循环、按原因码分"跳过 / 整任务停"、续传起点、4 GiB 规则，纯逻辑带单测）、`libs/leapgate/src/lib.rs`（加 mod）；`src/leapgate_hooks/file_transfer.rs`（和会话、`Remote`、`fs` 打交道的部分）；`src/leapgate_ffi.rs`（末尾追加 M7b 一段）；上游只下面"具名例外"列的六处；本节的 Rust 部分 |
+| `ui/m7b-dart` | Dart coder | core `leapgate/file_transfer/` 的 `jobs.dart`、`file_model.dart`、`file_transfer_api.dart`；`leapgate/session.dart`（事件分发）、`leapgate/session_registry.dart`（加按会话 ID 查找）、应用启动时订阅事件流的那一处；app `pages/files/queue_panel.dart`；`gallery_m7.dart`（只把"部分未传输"行的按钮改成"重试未传输的文件"）；ARB（新键以 `queue` 开头，加在末尾，中英同加，改完 `flutter gen-l10n`）；core、app 的 `test/file_transfer_fakes.dart`（两份同步改、内容相同）；测试。复制件 `core/lib/models/file_model.dart` 不改（只删界面调用那一档），只用它现成的 `updateJobStatus`、`resumeJob`、`cancelJob`、`JobID.next()` |
+
+- 块 2 的新导出在 Rust 合入、重新生成桥之前不存在：`RustFileTransferApi` 的新方法先抛 `UnimplementedError`（`TODO(M7b 整合)`），整合时由主会话换成真实调用；Dart 的测试一律用 `FakeFileTransferApi`。
+- 组件不动（12 §2.1）；画廊和组件测试里已有的状态够用。真要动组件先报主会话。
+
+**上游文件的具名例外**（03 §7.5 定 FT3~FT5 在 `io_loop.rs` 只占三处，M7b 实际要五处，按 12 §1.2 列在这里；每处带 `// leapgate:` 注释，只调 `crate::leapgate_hooks::file_transfer::…`）
+
+| 文件 | 位置 | 做什么 | 行数上限 |
+|---|---|---|---|
+| `src/client.rs` | `Data` 枚举末尾 | 加 `Leapgate(crate::leapgate_hooks::file_transfer::Command)` | 1 |
+| `src/client/io_loop.rs` | `handle_msg_from_ui` 的 `match`，`_ => {}` 之前 | `Data::Leapgate(c)` 交给挂钩（暂停、上传软暂停的继续） | 3 |
+| `src/client/io_loop.rs` | 调 `fs::handle_read_jobs` 的那一行（约 `:322`） | 开关关着照旧调上游，开着调 Leapgate 版上传读循环 | 3 |
+| `src/client/io_loop.rs` | 下载 digest 出错、取消任务之前（约 `:1965`） | 挂钩认领了就 `return true`（回"跳过"给对端） | 2 |
+| `src/client/io_loop.rs` | 写数据块之前（约 `:1981`、`:1990`） | 先存下 `block.file_num`，写失败时交给挂钩，认领了就不走取消 | 3 |
+| `src/client/io_loop.rs` | 收到 `FileTransferError`、删任务之前（约 `:2052`） | 挂钩认领了就 `return true`（单文件错误、对端拒绝、整任务失败分开处理） | 2 |
+
+开关关着时每个挂钩都不认领，走上游原来的路（旧界面便携版因此不受影响）；取消路径（`cancel_transfer_job`）不动。
+
+**总开关**：`leapgate_ft_events` 被订阅时打开（进程内一个原子量，新订阅替换旧的 sink），新界面在应用启动时订阅一次，不在视图打开时订阅。
+
+**Rust 导出（块 2）**
+
+| 导出 | 参数 | 返回 |
+|---|---|---|
+| `leapgate_ft_events` | `sink: StreamSink<String>` | 每条一个 JSON（下表）；照 `leapgate_exit_events` 的写法 |
+| `leapgate_ft_pause` | `session_id: SessionID`、`id: i32` | 异步、没有返回值；结果是一条 `paused` 事件。任务不在、已结束、对端低于 1.4.2 时什么也不做 |
+| `leapgate_ft_resume` | `session_id: SessionID`、`id: i32` | 异步、没有返回值；只用于本次会话里软暂停的上传任务（把它从"等待"改回来）。下载暂停后的继续、关闭视图后恢复的任务，照旧用上游的 `sessionResumeJob(新 ID)` |
+
+**事件**（`leapgate_ft_events`，每条都带 `session_id`（字符串，和 Dart 的 `SessionID` 同值）、`kind`、`id`（事件说的那个 Rust 任务 ID））
+
+| `kind` | 其余字段 | 含义和界面要做的 |
+|---|---|---|
+| `paused` | `new_id`、`soft`（bool）、`resume_from`（下一次从第几个文件开始，0 起）、`restart_file`（bool） | 暂停生效。下载：Rust 已删掉原任务、放好一个 `new_id` 的等待任务（关闭视图时照常保存）；上传：`soft` 为真、`new_id == id`，任务原地等待。界面把行改成已暂停、行对应的任务 ID 换成 `new_id` |
+| `kept` | `resume_from`、`err`（原文）、`side`（`local` / `remote`）、`restart_file` | 整任务出错停下（磁盘满、写失败等），Rust 里已经没有这个任务、也不保存；临时文件留着。界面显示失败，"重试"时用 `JobID.next()` 取新 ID，`sessionAddJob(…, fileNum: resume_from)` 加 `sessionResumeJob` |
+| `continue_from` | `resume_from` | 单个文件出错、任务停下（下载时对端读失败、本机写数据阶段失败），要从 `resume_from` 接着传；前面必有这个文件的 `file_failed`。界面立刻用新 ID 重新发起，同一行；同一行连续 20 次就不再接着传、整行显示失败（12 M7b-3，计数在 Dart） |
+| `file_failed` | `file_num`（出错文件在任务里的序号，0 起）、`name`（相对任务根的路径，分隔符 `/`）、`err`、`side` | 记一个没传的文件。任务没停的（下载 digest 阶段回了"跳过"、上传本机读失败、上传对端写失败）后面照常有进度和 `job_done` |
+
+- `restart_file`：下载接着传之前，本机临时文件已超过 4 GiB 的已被删掉，这个文件从头传（12 M7b-5），行上加一条附注。
+- 一个任务结束时照旧收到上游的 `job_done` / `job_error`。认领过的错误不再发上游的 `job_error`（避免一行同时收到两种失败）。
+- 原文经 `leapgate_ft_reason` 归类，`side` 照传。
+
+**Dart 侧的规则**（12 §4）
+- 行不变、Rust 任务 ID 会变：`FileTransferJobs` 维护"行 → 当前任务 ID"，一行先后对应的 ID 都认（进度、`job_done`、`job_error` 按任何一个找到同一行）。
+- 断线重连时，本次会话里用户暂停过的任务 ID（含 `paused` 的 `new_id`）收到带 `auto_start` 的 `load_last_job` 时照不自动开始处理（12 §4.1）。
+- 恢复后的排队序号：行记一个序号，恢复（继续、重试、接着传）时取当前最大值加一；同一方向上序号最小、还没结束的是进行中（12 §4.4）。
+- 替换确认发给 Rust 的"记住选择"一律传否，界面按勾选自己逐个回答，用户选"跳过"的计入已跳过（12 §4.5）。
+- "重试未传输的文件"：为每个原因能重试的未传输文件各建一个单文件任务，挂在原来那一行，行回到进行中，进度合计，全部结束后重新判定（12 §4.3）。
+- 详情最多 50 个文件，后面一行"另有 ‹k› 个文件"（12 §4.6）；"已完成，部分未传输"的行"清除已完成"不清（M7b-7）；全是用户跳过的写"已跳过"、不画重试（M7b-8）；失败行不加详情（M7b-9）。
+- 删除的部分失败和重试只在 Dart（02 §2.4.7）。
+- 远程设备低于 1.4.2 时不画"暂停"（02）。
+
+**测试**
+- Rust：开关关着时每个挂钩都不认领；下载续传起点（"上一个刚改名、下一个还没开始"的空档）；上传读方序号；按原因码分跳过和整任务停；4 GiB 规则。`cargo test -p leapgate` 和根 crate 的 `leapgate_hooks` 测试照跑。
+- Dart：12 §5.2 列的各条。
+- 合入前：`git diff main -- flutter/` 为空；core analyze 不超出 91 条 info 的基线，app 0 条；新界面和旧界面都要能编（Rust 改了 `io_loop.rs`）。
