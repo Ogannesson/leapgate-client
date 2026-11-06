@@ -1,18 +1,177 @@
-//! The file transfer view's Rust items (`LEAPGATE.md` §10.15) that need upstream's sessions and
-//! `fs`: reading a local folder with the error kept, and removing a link without following it.
-//! FT2 itself is in `libs/leapgate` (`ft_reason`).
+//! The file transfer view's Rust items that need upstream's sessions and `fs`: reading a local
+//! folder with the error kept, and removing a link without following it (`LEAPGATE.md` §10.15);
+//! the event stream and pausing (§10.17). FT2 and M7b's rules are in `libs/leapgate` (`ft_reason`,
+//! `ft`).
 
 use crate::{
     client::{Data, Interface as _},
     common::make_fd_to_json,
     flutter::sessions,
     flutter_ffi::SessionID,
-    ui_session_interface::InvokeUiSession as _,
+    ui_session_interface::{InvokeUiSession, Session},
 };
 use base::{
     fs,
-    message_proto::{FileAction, FileRemoveDir, FileRemoveFile, Message},
+    message_proto::{FileAction, FileRemoveDir, FileRemoveFile, FileTransferCancel, Message},
 };
+use flutter_rust_bridge::StreamSink;
+use hbb_common::{allow_err, get_version_number, log, Stream};
+use leapgate::ft::{Command, Paused};
+use std::sync::Mutex;
+
+static EVENTS: Mutex<Option<StreamSink<String>>> = Mutex::new(None);
+
+/// `leapgate_ft_events`: a new subscription replaces the previous one; the first turns the
+/// switch on.
+pub(crate) fn set_events(sink: StreamSink<String>) {
+    *EVENTS.lock().unwrap() = Some(sink);
+    leapgate::ft::enable();
+}
+
+fn push(event: String) {
+    if let Some(sink) = EVENTS.lock().unwrap().as_ref() {
+        sink.add(event);
+    }
+}
+
+/// `leapgate_ft_pause`, `leapgate_ft_resume`: handled in the session's loop (`command`).
+pub(crate) fn send(session_id: SessionID, command: Command) {
+    if let Some(session) = sessions::get_session_by_session_id(&session_id) {
+        session.send(Data::Leapgate(command));
+    }
+}
+
+/// `Data::Leapgate` in the session's loop (`io_loop.rs`).
+pub(crate) async fn command<T: InvokeUiSession>(
+    command: Command,
+    handler: &Session<T>,
+    read_jobs: &mut Vec<fs::TransferJob>,
+    write_jobs: &mut Vec<fs::TransferJob>,
+    peer: &mut Stream,
+) {
+    let version = handler.lc.read().unwrap().version;
+    let Some((session_id, id, paused)) = handle(
+        leapgate::ft::enabled(),
+        command,
+        version,
+        read_jobs,
+        write_jobs,
+    ) else {
+        return;
+    };
+    if !paused.soft {
+        let mut file_action = FileAction::new();
+        file_action.set_cancel(FileTransferCancel {
+            id,
+            ..Default::default()
+        });
+        let mut msg = Message::new();
+        msg.set_file_action(file_action);
+        allow_err!(peer.send(&msg).await);
+    }
+    push(leapgate::ft::paused_event(&session_id, id, &paused));
+}
+
+/// The jobs' side of a command; `Some` for a pause that took effect. A pause needs a peer at
+/// 1.4.2 or later (02), and a job that is running.
+fn handle(
+    enabled: bool,
+    command: Command,
+    version: i64,
+    read_jobs: &mut [fs::TransferJob],
+    write_jobs: &mut Vec<fs::TransferJob>,
+) -> Option<(String, i32, Paused)> {
+    if !enabled {
+        return None;
+    }
+    match command {
+        Command::Pause { session_id, id } => {
+            if version < get_version_number("1.4.2") {
+                return None;
+            }
+            let paused = match fs::get_job(id, read_jobs) {
+                Some(job) => pause_upload(job)?,
+                None => pause_download(id, write_jobs, version)?,
+            };
+            Some((session_id, id, paused))
+        }
+        Command::Resume { id } => {
+            if let Some(job) = fs::get_job(id, read_jobs) {
+                job.is_last_job = false;
+            }
+            None
+        }
+    }
+}
+
+/// M7b-4: the read loop skips a waiting job, so the peer hears nothing and keeps its side as it
+/// is. Closing the view saves the job like any other unfinished one.
+fn pause_upload(job: &mut fs::TransferJob) -> Option<Paused> {
+    if job.is_last_job {
+        return None;
+    }
+    job.is_last_job = true;
+    Some(Paused {
+        new_id: job.id(),
+        soft: true,
+        resume_from: job.file_num(),
+        restart_file: false,
+    })
+}
+
+/// Drops the job, keeping its `.download` and `.digest`, and puts a waiting job with a new ID in
+/// its place, as `Data::AddJob` would: blocks still on their way for the old ID would land in a
+/// job of the same ID and cancel it ("Wrong file number"). The caller tells the peer to cancel.
+fn pause_download(
+    id: i32,
+    write_jobs: &mut Vec<fs::TransferJob>,
+    version: i64,
+) -> Option<Paused> {
+    let job = fs::get_job_immutable(id, write_jobs)?;
+    if job.is_last_job || job.r#type != fs::JobType::Generic {
+        return None;
+    }
+    let fs::DataSource::FilePath(to) = &job.data_source else {
+        return None;
+    };
+    let to = to.clone();
+    let file_num = job.file_num();
+    let finished = job
+        .files()
+        .get(file_num as usize)
+        .zip(job.download_target(file_num).ok())
+        .is_some_and(|(entry, target)| {
+            leapgate::ft::download_finished(&target, entry.size, entry.modified_time)
+        });
+    let resume_from = file_num + i32::from(finished);
+    let target = job.download_target(resume_from).ok();
+    let mut new_job = fs::TransferJob::new_write(
+        fs::get_next_job_id(),
+        job.r#type,
+        job.remote.clone(),
+        fs::DataSource::FilePath(to),
+        resume_from,
+        job.show_hidden,
+        job.is_remote,
+        fs::can_enable_overwrite_detection(version),
+    );
+    new_job.is_last_job = true;
+    // Closes the staged file before it may be removed.
+    drop(fs::remove_job(id, write_jobs));
+    let restart_file = target.is_some_and(|t| leapgate::ft::restart_past_resume_offset(&t));
+    log::info!(
+        "leapgate ft: paused download {id} as {} from file {resume_from}",
+        new_job.id()
+    );
+    let paused = Paused {
+        new_id: new_job.id(),
+        soft: false,
+        resume_from,
+        restart_file,
+    };
+    write_jobs.push(new_job);
+    Some(paused)
+}
 
 /// M7a-4: what upstream's `session_read_local_dir_sync` returns, or `{"error","reason"}` where
 /// it returns an empty string.
@@ -271,5 +430,140 @@ mod tests {
                 other => panic!("{platform}: {other:?}"),
             }
         }
+    }
+
+    const MODIFIED: u64 = 1_700_000_000;
+
+    fn entry(name: &str, size: u64) -> base::message_proto::FileEntry {
+        base::message_proto::FileEntry {
+            name: name.to_owned(),
+            size,
+            modified_time: MODIFIED,
+            ..Default::default()
+        }
+    }
+
+    fn running_download(id: i32, dir: &PathBuf) -> fs::TransferJob {
+        let mut job = fs::TransferJob::new_write(
+            id,
+            fs::JobType::Generic,
+            "/remote/folder".to_owned(),
+            fs::DataSource::FilePath(dir.clone()),
+            0,
+            false,
+            true,
+            true,
+        )
+        .with_files(vec![entry("a.txt", 3), entry("b.txt", 5)])
+        .unwrap();
+        job.is_last_job = false;
+        job
+    }
+
+    fn running_upload(id: i32, dir: &PathBuf) -> fs::TransferJob {
+        sfs::write(dir.join("up.txt"), b"up").unwrap();
+        let mut job = fs::TransferJob::new_read(
+            id,
+            fs::JobType::Generic,
+            "/remote/folder".to_owned(),
+            fs::DataSource::FilePath(dir.clone()),
+            0,
+            false,
+            false,
+            true,
+        )
+        .unwrap();
+        job.is_last_job = false;
+        job
+    }
+
+    fn pause(id: i32) -> Command {
+        Command::Pause {
+            session_id: "s".to_owned(),
+            id,
+        }
+    }
+
+    fn v142() -> i64 {
+        get_version_number("1.4.2")
+    }
+
+    /// With the switch off (the old UI), a command changes nothing.
+    #[test]
+    fn switch_off_claims_nothing() {
+        let dir = scratch("off");
+        let mut reads = vec![running_upload(1, &dir)];
+        let mut writes = vec![running_download(2, &dir.join("down"))];
+        for command in [pause(1), pause(2), Command::Resume { id: 1 }] {
+            assert!(handle(false, command, v142(), &mut reads, &mut writes).is_none());
+        }
+        assert!(!reads[0].is_last_job);
+        assert_eq!((writes.len(), writes[0].id(), writes[0].is_last_job), (1, 2, false));
+        let older = get_version_number("1.4.1");
+        assert!(handle(true, pause(2), older, &mut reads, &mut writes).is_none());
+        assert_eq!(writes[0].id(), 2);
+        sfs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A paused download waits under a new ID and resumes at the file it was writing, or past
+    /// one it had just renamed (resuming there would ask to replace it).
+    #[test]
+    fn paused_download_resumes_past_a_finished_file() {
+        let dir = scratch("pause-down");
+        let finished = dir.join("a.txt");
+        sfs::write(&finished, b"abc").unwrap();
+        sfs::File::options()
+            .write(true)
+            .open(&finished)
+            .unwrap()
+            .set_modified(
+                std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(MODIFIED),
+            )
+            .unwrap();
+        let staged = scratch("pause-down-staged");
+        sfs::write(staged.join("a.txt.download"), b"ab").unwrap();
+        for (dir, resume_from) in [(&dir, 1), (&staged, 0)] {
+            let mut writes = vec![running_download(10, dir)];
+            let (session_id, id, paused) =
+                handle(true, pause(10), v142(), &mut [], &mut writes).unwrap();
+            assert_eq!((session_id.as_str(), id), ("s", 10));
+            assert_eq!(
+                (paused.soft, paused.resume_from, paused.restart_file),
+                (false, resume_from, false)
+            );
+            assert_ne!(paused.new_id, 10);
+            assert_eq!(writes.len(), 1);
+            let job = &writes[0];
+            assert_eq!(
+                (job.id(), job.is_last_job, job.file_num()),
+                (paused.new_id, true, resume_from)
+            );
+            assert!(job.files().is_empty());
+        }
+        assert!(staged.join("a.txt.download").exists());
+        sfs::remove_dir_all(&dir).unwrap();
+        sfs::remove_dir_all(&staged).unwrap();
+    }
+
+    /// An upload pauses in place and resumes the same job.
+    #[test]
+    fn upload_pauses_softly_and_resumes() {
+        let dir = scratch("pause-up");
+        let mut reads = vec![running_upload(20, &dir)];
+        let (_, _, paused) = handle(true, pause(20), v142(), &mut reads, &mut vec![]).unwrap();
+        assert_eq!(
+            paused,
+            Paused {
+                new_id: 20,
+                soft: true,
+                resume_from: 0,
+                restart_file: false
+            }
+        );
+        assert!(reads[0].is_last_job);
+        assert!(handle(true, pause(20), v142(), &mut reads, &mut vec![]).is_none());
+        assert!(handle(true, Command::Resume { id: 20 }, v142(), &mut reads, &mut vec![]).is_none());
+        assert!(!reads[0].is_last_job);
+        sfs::remove_dir_all(&dir).unwrap();
     }
 }

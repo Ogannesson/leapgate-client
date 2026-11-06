@@ -403,6 +403,35 @@ pub fn leapgate_ft_remove_link(
     );
 }
 
+// ---- File transfer (M7b) ----
+// `LEAPGATE.md` §10.17.
+
+/// One JSON per event. Subscribing turns on Leapgate's handling of file transfers in every
+/// session (the old UI never subscribes and keeps upstream's); a new subscription replaces the
+/// previous one.
+pub fn leapgate_ft_events(sink: StreamSink<String>) -> ResultType<()> {
+    crate::leapgate_hooks::file_transfer::set_events(sink);
+    Ok(())
+}
+
+/// The result is a `paused` event; nothing happens for a job that is not running or a peer
+/// before 1.4.2.
+pub fn leapgate_ft_pause(session_id: SessionID, id: i32) {
+    crate::leapgate_hooks::file_transfer::send(
+        session_id,
+        leapgate::ft::Command::Pause {
+            session_id: session_id.to_string(),
+            id,
+        },
+    );
+}
+
+/// Resumes an upload paused in this session. Any other job resumes with upstream's
+/// `session_resume_job` under a new ID.
+pub fn leapgate_ft_resume(session_id: SessionID, id: i32) {
+    crate::leapgate_hooks::file_transfer::send(session_id, leapgate::ft::Command::Resume { id });
+}
+
 // ---- Install (M8) ----
 // `LEAPGATE.md` §10.16.
 

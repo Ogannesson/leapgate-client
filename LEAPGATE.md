@@ -2493,8 +2493,8 @@ Telegram 机器人设置改成两步（`leapgate_bot_lookup` 只查、什么都�
 
 | 文件 | 位置 | 做什么 | 行数上限 |
 |---|---|---|---|
-| `src/client.rs` | `Data` 枚举末尾 | 加 `Leapgate(crate::leapgate_hooks::file_transfer::Command)` | 1 |
-| `src/client/io_loop.rs` | `handle_msg_from_ui` 的 `match`，`_ => {}` 之前 | `Data::Leapgate(c)` 交给挂钩（暂停、上传软暂停的继续） | 3 |
+| `src/client.rs` | `Data` 枚举末尾 | 加 `Leapgate(leapgate::ft::Command)`（`Data` 不带 flutter 也要编，命令类型放 `libs/leapgate`） | 1 |
+| `src/client/io_loop.rs` | `handle_msg_from_ui` 的 `match`，`_ => {}` 之前 | `Data::Leapgate(c)` 交给挂钩（暂停、上传软暂停的继续）；分支带 flutter 的 `cfg`，不带 flutter 时落进 `_ => {}` | 3 |
 | `src/client/io_loop.rs` | 调 `fs::handle_read_jobs` 的那一行（约 `:322`） | 开关关着照旧调上游，开着调 Leapgate 版上传读循环 | 3 |
 | `src/client/io_loop.rs` | 下载 digest 出错、取消任务之前（约 `:1965`） | 挂钩认领了就 `return true`（回"跳过"给对端） | 2 |
 | `src/client/io_loop.rs` | 写数据块之前（约 `:1981`、`:1990`） | 先存下 `block.file_num`，写失败时交给挂钩，认领了就不走取消 | 3 |
@@ -2524,6 +2524,12 @@ Telegram 机器人设置改成两步（`leapgate_bot_lookup` 只查、什么都�
 - `restart_file`：下载接着传之前，本机临时文件已超过 4 GiB 的已被删掉，这个文件从头传（12 M7b-5），行上加一条附注。
 - 一个任务结束时照旧收到上游的 `job_done` / `job_error`。认领过的错误不再发上游的 `job_error`（避免一行同时收到两种失败）。
 - 原文经 `leapgate_ft_reason` 归类，`side` 照传。
+
+**第一段的实现**（`ui/rust-m7b`）
+- 开关、命令、`paused` 事件、"刚改名的文件"判断和 4 GiB 规则在 `libs/leapgate/src/ft.rs`；sink、命令处理在 `src/leapgate_hooks/file_transfer.rs`。`io_loop.rs` 第一段只用了 `handle_msg_from_ui` 那一处，上传读循环那一处（约 `:322`）留到第二段。
+- 下载暂停：找到运行中（不是等待中）的普通下载任务才动；续传起点是任务当前的 `file_num`，这个文件已经改名、没有 `.download`、大小和修改时间和列表一致时加一；新任务照 `AddJob` 用 `new_write` 建、`is_last_job`、文件列表为空（继续时对端重发列表）；先丢掉旧任务（关掉临时文件）再看起点那个文件的 `.download` 是否超过 `u32::MAX`，超过就删 `.download`、`.digest`。然后给对端发取消、推 `paused`。
+- 上传暂停：运行中的读任务标 `is_last_job`，`resume_from` 是读方当前的 `file_num`。暂停期间进度事件照常每秒一条（速度 0）。`leapgate_ft_resume` 只是把 `is_last_job` 改回来，不核对这个任务是不是软暂停的（关闭视图后恢复、还没 `ResumeJob` 的等待任务不要调它）。
+- 已知的空档：下载暂停时对端可能已经发出旧 ID 的 `Done` 或错误（取消还没到），上游收到不认识 ID 的 `Done`、`FileTransferError` 也照发旧 ID 的 `job_done` / `job_error`，这时旧任务已删、最后一个文件可能没写完，新任务照常等继续。
 
 **Dart 侧的规则**（12 §4）
 - 行不变、Rust 任务 ID 会变：`FileTransferJobs` 维护"行 → 当前任务 ID"，一行先后对应的 ID 都认（进度、`job_done`、`job_error` 按任何一个找到同一行）。
