@@ -43,16 +43,19 @@ pub struct Paused {
     pub restart_file: bool,
 }
 
-/// The fields of the `paused` event, for the session's `push_event`.
-pub fn paused_event(id: i32, paused: &Paused) -> [(&'static str, serde_json::Value); 6] {
-    [
-        ("kind", "paused".into()),
-        ("id", id.into()),
-        ("new_id", paused.new_id.into()),
-        ("soft", paused.soft.into()),
-        ("resume_from", paused.resume_from.into()),
-        ("restart_file", paused.restart_file.into()),
-    ]
+/// The `paused` event's `value`: one JSON object, as upstream's `load_last_job` sends its job.
+/// Not the event's own fields: upstream writes the event name into `name`, which `file_failed`
+/// uses for the path.
+pub fn paused_event(id: i32, paused: &Paused) -> String {
+    serde_json::json!({
+        "kind": "paused",
+        "id": id,
+        "new_id": paused.new_id,
+        "soft": paused.soft,
+        "resume_from": paused.resume_from,
+        "restart_file": paused.restart_file,
+    })
+    .to_string()
 }
 
 /// Whether a download already finished `target`: renamed from its `.download` and given the
@@ -147,6 +150,22 @@ mod tests {
         assert!(!download_finished(&target, 3, modified));
         assert!(!download_finished(&dir.join("missing"), 0, modified));
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn paused_event_reads_as_documented() {
+        let paused = Paused {
+            new_id: 8,
+            soft: false,
+            resume_from: 3,
+            restart_file: true,
+        };
+        let v: serde_json::Value = serde_json::from_str(&paused_event(7, &paused)).unwrap();
+        assert_eq!(
+            v,
+            serde_json::json!({"kind": "paused", "id": 7, "new_id": 8, "soft": false,
+                "resume_from": 3, "restart_file": true})
+        );
     }
 
     /// A staged part of `u32::MAX` bytes resumes; one byte more restarts, with its digest gone.

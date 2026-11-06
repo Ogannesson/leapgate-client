@@ -29,11 +29,12 @@ pub(crate) fn set_events(sink: StreamSink<String>) {
     leapgate::ft::enable();
 }
 
-/// On the session's own event stream; nothing for a session that is not the app's.
-fn push<T: InvokeUiSession>(handler: &Session<T>, event: &[(&str, serde_json::Value)]) {
+/// On the session's own event stream as `{"name":"leapgate_ft","value":<event>}`; nothing for a
+/// session that is not the app's.
+fn push<T: InvokeUiSession>(handler: &Session<T>, event: &str) {
     let ui = &handler.ui_handler as &dyn std::any::Any;
     if let Some(ui) = ui.downcast_ref::<crate::flutter::FlutterHandler>() {
-        ui.push_event(leapgate::ft::EVENT, event, &[]);
+        ui.push_event(leapgate::ft::EVENT, &[("value", event)], &[]);
     }
 }
 
