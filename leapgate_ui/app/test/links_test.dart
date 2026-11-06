@@ -23,6 +23,12 @@ class _Navigation implements MainNavigation {
 
   @override
   void showSettings(SettingsSectionId section, {String? item}) {}
+
+  @override
+  void openFileTransfer(String id,
+      {String password = '',
+      bool isSharedPassword = false,
+      bool forceRelay = false}) {}
 }
 
 void main() {

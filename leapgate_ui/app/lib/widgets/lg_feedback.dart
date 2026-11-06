@@ -507,6 +507,11 @@ class LgDialogScrim extends StatelessWidget {
 /// is about in [subtitle], what follows in [body] (with a small [bodyIcon]),
 /// any further controls in [children] (check boxes, options, a list of what
 /// will be closed), and the buttons, right aligned.
+///
+/// [leading] is something at the start of the button row, away from the answers
+/// (`.acts2 .mv`; the "取消传输" of a replace question): a text button or a link.
+/// It is built as in `LgFormDialog.leading` and is not one of [actions], so
+/// Enter never runs it.
 class LgConfirmDialog extends StatelessWidget {
   const LgConfirmDialog({
     super.key,
@@ -517,6 +522,7 @@ class LgConfirmDialog extends StatelessWidget {
     this.bodyIcon,
     this.children = const [],
     this.width = 440,
+    this.leading,
   });
 
   final String title;
@@ -526,6 +532,7 @@ class LgConfirmDialog extends StatelessWidget {
   final List<Widget> children;
   final List<LgDialogAction> actions;
   final double width;
+  final Widget? leading;
 
   @override
   Widget build(BuildContext context) {
@@ -534,6 +541,22 @@ class LgConfirmDialog extends StatelessWidget {
     final defaultAction = actions
         .where((a) => a.isDefault && a.onPressed != null && !a.busy)
         .firstOrNull;
+    final buttons = Wrap(
+      alignment: WrapAlignment.end,
+      spacing: LgSpace.s3,
+      runSpacing: LgSpace.s3,
+      children: [
+        for (final a in actions)
+          LgButton(
+            label: a.label,
+            semanticLabel: a.semanticLabel,
+            kind: a.kind,
+            busy: a.busy,
+            autofocus: a == defaultAction,
+            onPressed: a.onPressed,
+          ),
+      ],
+    );
     return Semantics(
       scopesRoute: true,
       namesRoute: true,
@@ -606,22 +629,17 @@ class LgConfirmDialog extends StatelessWidget {
                     child,
                   ],
                   const SizedBox(height: LgSpace.s6),
-                  Wrap(
-                    alignment: WrapAlignment.end,
-                    spacing: LgSpace.s3,
-                    runSpacing: LgSpace.s3,
-                    children: [
-                      for (final a in actions)
-                        LgButton(
-                          label: a.label,
-                          semanticLabel: a.semanticLabel,
-                          kind: a.kind,
-                          busy: a.busy,
-                          autofocus: a == defaultAction,
-                          onPressed: a.onPressed,
-                        ),
-                    ],
-                  ),
+                  if (leading == null)
+                    buttons
+                  else
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Flexible(child: leading!),
+                        const SizedBox(width: LgSpace.s3),
+                        buttons,
+                      ],
+                    ),
                 ],
               ),
             ),

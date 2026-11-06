@@ -17,13 +17,13 @@ import '../pages/home/home_page.dart';
 import '../pages/session/connection_panel.dart';
 import '../pages/session/reasons.dart';
 import '../pages/session/session_names.dart';
-import '../pages/session/session_page.dart';
 import '../widgets/lg_feedback.dart';
 import '../widgets/lg_status.dart';
 import '../widgets/lg_tab_tip.dart';
 import '../widgets/lg_title_bar.dart';
 import 'keep_display_on.dart';
 import 'navigation.dart';
+import 'session_views.dart';
 import 'tab_menu.dart';
 import 'tab_overlays.dart';
 import 'tab_shortcuts.dart';
@@ -58,6 +58,9 @@ class _MainWindowState extends State<MainWindow>
   /// The tabs as last seen, to pick a neighbour when the selected one closes.
   List<String> _devices = const [];
   String? _title;
+
+  /// The view each tab shows, by device; a tab whose view closed shows its first one.
+  final _current = <String, FFI>{};
 
   @override
   void initState() {
@@ -133,8 +136,17 @@ class _MainWindowState extends State<MainWindow>
     for (final d in _devices) {
       if (!devices.contains(d)) _overlays.forget(d);
     }
+    _current.removeWhere((d, _) => !devices.contains(d));
     _devices = devices;
     _keepDisplayOn();
+    // The remote desktop in full screen closed and its tab now shows the file view, which has
+    // no way out of full screen.
+    if (selected != null &&
+        selected == _selected &&
+        stateGlobal.fullscreen.isTrue &&
+        isFileView(_currentOf(selected))) {
+      stateGlobal.setFullscreen(false);
+    }
     _select(selected);
   }
 
@@ -162,6 +174,29 @@ class _MainWindowState extends State<MainWindow>
     if (device != null) settingsUnlock.lock();
     _dropComposition();
     if (mounted) setState(() => _selected = device);
+    // Once the tab takes focus again (its `ExcludeFocus` lifts with this frame).
+    if (device != null) {
+      WidgetsBinding.instance
+          .addPostFrameCallback((_) => _overlays.refocus(device));
+    }
+  }
+
+  /// Shows [view] in its tab and selects the tab: a view just opened, or one picked in the view
+  /// switch. Full screen belongs to the remote desktop view, and an IME composition to the view
+  /// being left, as for a tab ([_select]).
+  void _show(FFI view) {
+    if (_selected == view.id && _currentOf(view.id) != view) {
+      if (stateGlobal.fullscreen.isTrue) stateGlobal.setFullscreen(false);
+      _dropComposition();
+    }
+    _current[view.id] = view;
+    _select(view.id);
+  }
+
+  FFI _currentOf(String device) {
+    final views = appCore.sessions.sessionsOf(device);
+    final current = _current[device];
+    return views.contains(current) ? current! : views.first;
   }
 
   /// An IME composition in the tab being left is dropped, not typed (04-M2a §4 item 4): losing
@@ -197,12 +232,29 @@ class _MainWindowState extends State<MainWindow>
     // "/r" alone leaves nothing to connect to.
     if (id.isEmpty) return;
     forceRelay = id != oldId || forceRelay;
-    appCore.sessions.open(id, ConnType.defaultConn,
+    _show(appCore.sessions.open(id, ConnType.defaultConn,
         forceRelay: forceRelay,
         password: password,
         isSharedPassword: isSharedPassword,
-        switchUuid: switchUuid);
-    _select(id);
+        switchUuid: switchUuid));
+  }
+
+  /// As [connect], for the file transfer view (02 §2.1.1).
+  @override
+  Future<void> openFileTransfer(String id,
+      {String password = '',
+      bool isSharedPassword = false,
+      bool forceRelay = false}) async {
+    id = id.replaceAll(' ', '');
+    if (id.isEmpty) return;
+    final oldId = id;
+    id = await bind.mainHandleRelayId(id: id);
+    if (id.isEmpty) return;
+    forceRelay = id != oldId || forceRelay;
+    _show(appCore.sessions.open(id, ConnType.fileTransfer,
+        forceRelay: forceRelay,
+        password: password,
+        isSharedPassword: isSharedPassword));
   }
 
   @override
@@ -219,9 +271,6 @@ class _MainWindowState extends State<MainWindow>
     settingsPageRequests.request(section, item: item);
   }
 
-  // M2a opens one view per tab, the remote desktop.
-  FFI _viewOf(String device) => appCore.sessions.sessionsOf(device).first;
-
   /// Next or previous tab, wrapping around; home is the first (01 §2.1).
   void _selectBy(int step) {
     final devices = appCore.sessions.devices;
@@ -230,50 +279,86 @@ class _MainWindowState extends State<MainWindow>
     _select(next == 0 ? null : devices[next - 1]);
   }
 
-  /// The tab's status mark and hover content (01 §2.1, P2 block A).
-  LgSessionTab _tabOf(FFI s, AppLocalizations l10n) {
-    final conn = s.connection;
+  /// The tab's status mark and hover content (01 §2.1, P2 block A), over the tab's [views]: the
+  /// worst of them shows, an error first, then "connecting", then the connection method
+  /// (unencrypted worst, relayed next); the hover has a line per view with its method. Unread
+  /// messages are the remote desktop's; the ring and the reminder mark are the file transfer's
+  /// (02 §3.2).
+  LgSessionTab _tabOf(List<FFI> views, AppLocalizations l10n) {
+    final s = views.first;
     final name = deviceName(s);
     Widget status;
     var disconnected = false;
     final lines = <String>[];
-    final tipViews = <(String, Widget)>[];
-    if (conn.stage == ConnStage.failed) {
+    final routed = [
+      for (final v in views)
+        if (showsRoute(v.connection)) v
+    ];
+    LgRouteMark mark(bool direct, bool encrypted, {bool worstOnly = false}) =>
+        LgRouteMark(
+          route: direct ? LgRoute.direct : LgRoute.relay,
+          label: direct ? l10n.sessionDirect : l10n.sessionRelayed,
+          encrypted: encrypted,
+          unencryptedLabel: l10n.sessionUnencrypted,
+          worstOnly: worstOnly,
+        );
+    final failed = views
+        .where((v) => v.connection.stage == ConnStage.failed)
+        .firstOrNull;
+    if (failed != null) {
+      final conn = failed.connection;
       final reason = conn.reason!;
-      lines.add(failureText(l10n, s));
+      lines.add(failureText(l10n, failed));
       final countdown = conn.retryCountdown;
       if (countdown != null) {
         status = LgStatusText(LgStatus.warning, l10n.sessionInterrupted);
         lines.add(l10n.connRetryIn(countdown, conn.retryAttempt));
       } else if (isDisconnected(reason)) {
         status = LgStatusText(LgStatus.offline, l10n.sessionDisconnected);
-        disconnected = true;
+        // The name greys once every view has ended.
+        disconnected = views.every((v) =>
+            v.connection.stage == ConnStage.failed &&
+            isDisconnected(v.connection.reason!));
       } else {
         status = LgStatusText(LgStatus.warning, l10n.sessionFailed);
       }
-    } else if (!showsRoute(conn)) {
+    } else if (routed.length < views.length) {
       status = LgStatusText(LgStatus.connecting, l10n.sessionConnecting);
     } else {
-      LgRouteMark mark({bool worstOnly = false}) => LgRouteMark(
-            route: conn.direct! ? LgRoute.direct : LgRoute.relay,
-            label: conn.direct! ? l10n.sessionDirect : l10n.sessionRelayed,
-            encrypted: conn.secure != false,
-            unencryptedLabel: l10n.sessionUnencrypted,
-            worstOnly: worstOnly,
-          );
-      status = mark(worstOnly: true);
-      tipViews.add((l10n.toolbarRemoteDesktop, mark()));
+      status = mark(routed.every((v) => v.connection.direct!),
+          routed.every((v) => v.connection.secure != false),
+          worstOnly: true);
     }
+    final remote = views.where((v) => !isFileView(v)).firstOrNull;
+    final files = views.where(isFileView).firstOrNull;
+    final summary =
+        files == null ? null : fileTransferFor(files).jobs.summary;
     return LgSessionTab(
       name: name,
       identity: identityGroup(s.id),
       status: status,
-      unread: tabUnread(s),
+      unread: remote == null ? 0 : tabUnread(remote),
       disconnected: disconnected,
+      progress: summary?.progress,
+      alert: (summary?.waitingConfirm ?? 0) > 0,
+      markLabel: summary == null ? null : transferMarkLabel(l10n, summary),
       tooltip: LgTabTip(
-          name: name, id: formatPeerId(s.id), views: tipViews, lines: lines),
+        name: name,
+        id: formatPeerId(s.id),
+        views: [
+          for (final v in routed)
+            (
+              viewName(l10n, v.connType),
+              mark(v.connection.direct!, v.connection.secure != false)
+            ),
+        ],
+        lines: lines,
+      ),
     );
   }
+
+  Future<void> _closeTab(String device) =>
+      closeSessionTab(_overlays, device, show: () => _select(device));
 
   /// The taskbar title follows the selected tab (01 §2.1).
   void _syncTitle(String title) {
@@ -310,19 +395,25 @@ class _MainWindowState extends State<MainWindow>
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final devices = appCore.sessions.devices;
-    final views = [for (final d in devices) _viewOf(d)];
+    final tabs = [for (final d in devices) appCore.sessions.sessionsOf(d)];
+    final views = tabs.expand((t) => t);
     final selectedIndex =
         _selected == null ? 0 : devices.indexOf(_selected!) + 1;
 
     final titleBar = ListenableBuilder(
       listenable: Listenable.merge([
-        for (final s in views) ...[s.connection, s.ffiModel, s.chatModel],
+        for (final s in views) ...[
+          s.connection,
+          s.ffiModel,
+          s.chatModel,
+          if (isFileView(s)) fileTransferFor(s).jobs,
+        ],
         appCore.exitNodes,
       ]),
       builder: (context, _) {
         _syncTitle(_selected == null
             ? l10n.appName
-            : l10n.sessionWindowTitle(deviceName(_viewOf(_selected!))));
+            : l10n.sessionWindowTitle(deviceName(_currentOf(_selected!))));
         final exits = appCore.exitNodes.runningCount;
         return LgTitleBar(
           labels: LgTitleBarLabels(
@@ -335,7 +426,7 @@ class _MainWindowState extends State<MainWindow>
             restore: l10n.restore,
             close: l10n.close,
           ),
-          sessions: [for (final s in views) _tabOf(s, l10n)],
+          sessions: [for (final t in tabs) _tabOf(t, l10n)],
           selected: selectedIndex,
           // The exit nodes running and whether one waits for the user (M5-8).
           homeBadge: exits,
@@ -346,10 +437,15 @@ class _MainWindowState extends State<MainWindow>
               ? l10n.exitHomeLabelAttention(exits)
               : l10n.exitHomeLabel(exits),
           onSelect: (i) => _select(i == 0 ? null : devices[i - 1]),
-          onCloseTab: (i) => appCore.sessions.closeDevice(devices[i - 1]),
+          onCloseTab: (i) => _closeTab(devices[i - 1]),
           onNewTab: () => showHome(focusConnectBox: true),
-          onTabContextMenu: (i, position) =>
-              showSessionTabMenu(context, devices[i - 1], position),
+          onTabContextMenu: (i, position) => showSessionTabMenu(
+            context,
+            devices[i - 1],
+            position,
+            onClose: () => _closeTab(devices[i - 1]),
+            onCloseOthers: () => closeOtherTabs(_overlays, devices[i - 1]),
+          ),
           maximized: _maximized,
           onMinimize: windowManager.minimize,
           onToggleMaximize: _toggleMaximize,
@@ -364,9 +460,15 @@ class _MainWindowState extends State<MainWindow>
       },
     );
 
+    final selected = _selected;
     return TabShortcuts(
       onNext: () => _selectBy(1),
       onPrevious: () => _selectBy(-1),
+      // The file transfer view has no session shortcuts of its own; the remote desktop's
+      // "关闭标签" is its session's (`toolbar/session_shortcuts.dart`).
+      onCloseTab: selected != null && isFileView(_currentOf(selected))
+          ? () => _closeTab(selected)
+          : null,
       child: Scaffold(
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -389,15 +491,16 @@ class _MainWindowState extends State<MainWindow>
                   children: [
                     _scope(null, _selected == null,
                         HomePage(status: widget.status, overlays: _overlays)),
-                    for (final s in views)
+                    for (final d in devices)
                       KeyedSubtree(
-                        key: ObjectKey(s),
+                        key: ValueKey(d),
                         child: _scope(
-                          s.id,
-                          s.id == _selected,
-                          SessionPage(
-                              ffi: s,
-                              active: s.id == _selected,
+                          d,
+                          d == _selected,
+                          SessionTabView(
+                              views: appCore.sessions.sessionsOf(d),
+                              current: _currentOf(d),
+                              selected: d == _selected,
                               overlays: _overlays),
                         ),
                       ),

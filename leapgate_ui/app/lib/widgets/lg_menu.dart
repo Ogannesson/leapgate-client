@@ -438,8 +438,11 @@ class LgMenuItem extends StatelessWidget {
       // Material's menu rows are buttons only on the web; the Windows engine
       // reads a row without the flag as plain text, with no Invoke for UI
       // Automation or the screen reader. The flag merges into the row's node.
+      // The row with the check mark says so, as the framework's own check box
+      // and radio rows of a menu do; the other rows say nothing.
       child: Semantics(
         button: true,
+        checked: checked == true ? true : null,
         child: _ItemRow(
           label: label,
           description: description,

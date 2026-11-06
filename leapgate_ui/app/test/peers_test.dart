@@ -194,6 +194,15 @@ void main() {
       await unmount(tester);
     }, variant: _windows);
 
+    testWidgets('"文件传输" opens the file transfer view (M7a)', (tester) async {
+      await pumpPeers(tester, recent: [_shufang]);
+      await openMenu(tester);
+      await tapText(tester, '文件传输');
+      expect(nav.fileTransfers, ['123456789']);
+      expect(nav.connects, isEmpty);
+      await unmount(tester);
+    }, variant: _windows);
+
     testWidgets('Favorites: "Remove from favorites", nothing to delete', (
       tester,
     ) async {

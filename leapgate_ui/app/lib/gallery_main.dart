@@ -21,6 +21,7 @@ import 'widgets/lg_account.dart';
 import 'widgets/lg_add_device_dialog.dart';
 import 'widgets/lg_banner.dart';
 import 'widgets/lg_book_switcher.dart';
+import 'widgets/lg_breadcrumb.dart';
 import 'widgets/lg_button.dart';
 import 'widgets/lg_canvas_parts.dart';
 import 'widgets/lg_chat.dart';
@@ -42,6 +43,10 @@ import 'widgets/lg_device_parts.dart';
 import 'widgets/lg_exit_card.dart';
 import 'widgets/lg_exit_page.dart';
 import 'widgets/lg_feedback.dart';
+import 'widgets/lg_file_list.dart';
+import 'widgets/lg_file_marks.dart';
+import 'widgets/lg_file_pane.dart';
+import 'widgets/lg_file_queue.dart';
 import 'widgets/lg_form_dialog.dart';
 import 'widgets/lg_list_chrome.dart';
 import 'widgets/lg_login_dialog.dart';
@@ -69,12 +74,14 @@ import 'widgets/lg_text_field.dart';
 import 'widgets/lg_title_bar.dart';
 import 'widgets/lg_tooltip.dart';
 import 'widgets/lg_trusted_devices.dart';
+import 'widgets/lg_view_bar.dart';
 
 part 'gallery_cm_chat.dart';
 part 'gallery_m2b.dart';
 part 'gallery_m4.dart';
 part 'gallery_m5.dart';
 part 'gallery_m6.dart';
+part 'gallery_m7.dart';
 
 const _exportDir = String.fromEnvironment('LG_GALLERY_EXPORT');
 
@@ -765,6 +772,7 @@ List<Specimen> buildSpecimens() {
   list.addAll(_m4Specimens());
   list.addAll(_m5Specimens());
   list.addAll(_m6Specimens());
+  list.addAll(_m7Specimens());
   return list;
 }
 

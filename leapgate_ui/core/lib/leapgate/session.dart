@@ -7,7 +7,6 @@ import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/generated_bridge.dart';
 import 'package:flutter_hbb/models/chat_model.dart';
 import 'package:flutter_hbb/models/desktop_render_texture.dart';
-import 'package:flutter_hbb/models/file_model.dart';
 import 'package:flutter_hbb/models/input_model.dart';
 import 'package:flutter_hbb/models/model.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
@@ -18,6 +17,7 @@ import 'package:uuid/uuid.dart';
 import 'app_core.dart';
 import 'bridge.dart';
 import 'connection.dart';
+import 'file_transfer/file_model.dart';
 import 'latency.dart';
 import 'notices.dart';
 import 'options.dart';
@@ -87,6 +87,9 @@ class FFI {
       }
       stage = connection.stage;
     });
+    if (connType == ConnType.fileTransfer) {
+      connection.addListener(fileModel.jobs.onConnectionChanged);
+    }
   }
 
   /// The events of the copied models (upstream `FfiModel.startEventListener`,
@@ -97,14 +100,7 @@ class FFI {
     events.on('empty_dirs', (evt) => fileModel.receiveEmptyDirs(evt));
     events.on('job_progress',
         (evt) => fileModel.jobController.tryUpdateJobProgress(evt));
-    events.on('job_done', (evt) async {
-      bool? refresh = await fileModel.jobController.jobDone(evt);
-      if (refresh == true) {
-        // many job done for delete directory
-        // todo: refresh may not work when confirm delete local directory
-        fileModel.refreshAll();
-      }
-    });
+    events.on('job_done', (evt) => fileModel.onJobDone(evt));
     events.on('job_error', (evt) => fileModel.handleJobError(evt));
     events.on('override_file_confirm',
         (evt) => fileModel.postOverrideFileConfirm(evt));

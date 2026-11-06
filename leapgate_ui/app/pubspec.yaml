@@ -38,6 +38,10 @@ dependencies:
   # The QR code of the "turn on 2FA" dialog (widgets/lg_qr_code.dart); the version upstream
   # pins (flutter/pubspec.yaml), pure Dart (09-M6拆法.md "不用定、写进约定就行的")
   qr_flutter: 4.1.0
+  # Files dropped from the system's file manager onto the file transfer view
+  # (pages/files/); the version upstream's flutter/pubspec.lock pins (10-M7a拆法.md §2.4).
+  # Its Windows plugin is registered by the code `flutter pub get` generates.
+  desktop_drop: 0.4.4
 
 dev_dependencies:
   flutter_test:

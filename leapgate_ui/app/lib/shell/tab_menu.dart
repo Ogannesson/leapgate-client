@@ -1,22 +1,31 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/session.dart';
 
 import '../l10n/app_localizations.dart';
+import '../widgets/lg_button.dart';
+import '../widgets/lg_feedback.dart';
 import '../widgets/lg_menu.dart';
+import 'navigation.dart';
+import 'session_views.dart';
+import 'tab_overlays.dart';
 
 /// Unread chat messages shown on a session tab (01 §2.1).
 int tabUnread(FFI view) => view.chatModel.unread;
 
-/// The session tab's context menu at the pointer (01 P2 block A, `tabs-ctx`): "复制设备 ID",
-/// "关闭其他标签", "关闭". Opening another view of the device comes with those views (M7a, round
-/// 3). Closing goes as the tab's "×" and upstream's "Close others" do, without asking.
+/// The session tab's context menu at the pointer (01 P2 block A, `tabs-ctx`): "打开文件传输"
+/// while the tab has no file transfer view, "复制设备 ID", "关闭其他标签", "关闭". [onClose] and
+/// [onCloseOthers] confirm as the tab's "×" does ([closeSessionTab], [closeOtherTabs]). The
+/// terminal and the camera come with their views (round 3).
 void showSessionTabMenu(
   BuildContext context,
   String device,
-  Offset globalPosition,
-) {
+  Offset globalPosition, {
+  required VoidCallback onClose,
+  required VoidCallback onCloseOthers,
+}) {
   final l10n = AppLocalizations.of(context)!;
   final overlay = Overlay.of(context);
   late final OverlayEntry entry;
@@ -27,6 +36,11 @@ void showSessionTabMenu(
   }
 
   final items = [
+    if (!appCore.sessions.sessionsOf(device).any(isFileView))
+      LgMenuItem(
+        label: l10n.tabMenuOpenFileTransfer,
+        onPressed: () => run(() => mainNavigation.openFileTransfer(device)),
+      ),
     LgMenuItem(
       label: l10n.tabMenuCopyId,
       onPressed: () => run(() {
@@ -38,15 +52,11 @@ void showSessionTabMenu(
       label: l10n.tabMenuCloseOthers,
       onPressed: appCore.sessions.devices.length < 2
           ? null
-          : () => run(() {
-                for (final d in appCore.sessions.devices) {
-                  if (d != device) appCore.sessions.closeDevice(d);
-                }
-              }),
+          : () => run(onCloseOthers),
     ),
     LgMenuItem(
       label: l10n.tabMenuClose,
-      onPressed: () => run(() => appCore.sessions.closeDevice(device)),
+      onPressed: () => run(onClose),
     ),
   ];
   final box = overlay.context.findRenderObject() as RenderBox;
@@ -75,4 +85,97 @@ void showSessionTabMenu(
     ]),
   );
   overlay.insert(entry);
+}
+
+/// The tabs whose [closeSessionTab] question is open, by their first view: another "×" meanwhile
+/// does nothing. Keyed by the session rather than the device ID, so a question whose tab went
+/// away unanswered (its overlay goes with it) cannot block a later tab of the same device.
+final _asking = Expando<bool>();
+
+/// The tab's "×", "关闭" and the "关闭标签" shortcut (01 §3.2 block G, 02 §3.1): one view closes
+/// at once, unless it is a file transfer view with unfinished transfers, which asks as its "断开"
+/// does; several views ask "断开与此设备的 ‹N› 个会话？", with the transfers sentence when there
+/// are any. With "关闭窗口前确认断开会话" off, several views close at once too, and unfinished
+/// transfers still ask, with that sentence alone. [show] selects the tab first, so the question
+/// is seen over it.
+Future<void> closeSessionTab(TabOverlays overlays, String device,
+    {required VoidCallback show}) async {
+  final views = appCore.sessions.sessionsOf(device);
+  if (views.isEmpty || views.any((v) => _asking[v] == true)) return;
+  final unfinished = unfinishedTransfers(views);
+  final confirm = views.length > 1 &&
+      appCore.options.local.getBool(kOptionEnableConfirmClosingTabs);
+  if (!confirm && unfinished == 0) return appCore.sessions.closeDevice(device);
+  show();
+  final asking = views.first;
+  _asking[asking] = true;
+  try {
+    if (views.length == 1) return await disconnectFileView(views.single);
+    final ok = await overlays.show<bool>(
+      device,
+      (context, close) {
+        final l10n = AppLocalizations.of(context)!;
+        return LgDialogScrim(
+          onEscape: () => close(null),
+          child: LgConfirmDialog(
+            title: confirm
+                ? l10n.tabCloseViewsTitle(views.length)
+                : l10n.tabCloseTitle,
+            body: unfinished > 0 ? l10n.ftUnfinished(unfinished) : null,
+            actions: [
+              LgDialogAction(
+                  label: l10n.connCancel, onPressed: () => close(null)),
+              LgDialogAction(
+                label: confirm ? l10n.closingDisconnect : l10n.closingClose,
+                kind: LgButtonKind.primary,
+                isDefault: true,
+                onPressed: () => close(true),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    if (ok == true) await appCore.sessions.closeDevice(device);
+  } finally {
+    _asking[asking] = null;
+  }
+}
+
+/// "关闭其他标签": asks once, over the whole window, only when the other tabs have unfinished
+/// transfers (01 §3.2 block G).
+Future<void> closeOtherTabs(TabOverlays overlays, String device) async {
+  final others = [
+    for (final d in appCore.sessions.devices)
+      if (d != device) d
+  ];
+  final unfinished =
+      unfinishedTransfers(others.expand(appCore.sessions.sessionsOf));
+  if (unfinished > 0) {
+    final ok = await overlays.show<bool>(
+      kWindowScope,
+      (context, close) {
+        final l10n = AppLocalizations.of(context)!;
+        return LgDialogScrim(
+          onEscape: () => close(null),
+          child: LgConfirmDialog(
+            title: l10n.tabCloseOthersTitle,
+            body: l10n.ftUnfinished(unfinished),
+            actions: [
+              LgDialogAction(
+                  label: l10n.connCancel, onPressed: () => close(null)),
+              LgDialogAction(
+                label: l10n.closingClose,
+                kind: LgButtonKind.primary,
+                isDefault: true,
+                onPressed: () => close(true),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    if (ok != true) return;
+  }
+  await Future.wait(others.map(appCore.sessions.closeDevice));
 }

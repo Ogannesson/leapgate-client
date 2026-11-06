@@ -36,13 +36,19 @@ class SessionPage extends StatefulWidget {
       {super.key,
       required this.ffi,
       required this.active,
-      required this.overlays});
+      required this.overlays,
+      this.lastView = true});
 
   final FFI ffi;
 
-  /// This tab is the selected one.
+  /// This tab is the selected one and this view the one it shows (M7a: a tab can also hold the
+  /// file transfer view, `shell/session_views.dart`).
   final bool active;
   final TabOverlays overlays;
+
+  /// No other view is open in the tab, for the connection panel's close button
+  /// (`ConnectionPanel.lastView`).
+  final bool lastView;
 
   @override
   State<SessionPage> createState() => _SessionPageState();
@@ -339,7 +345,8 @@ class _SessionPageState extends State<SessionPage>
             // The panel dims the last frame itself while the remote device restarts.
             if (conn.stage != ConnStage.connected) ...[
               const ModalBarrier(dismissible: false),
-              ConnectionPanel(ffi: _ffi, active: widget.active),
+              ConnectionPanel(
+                  ffi: _ffi, active: widget.active, lastView: widget.lastView),
             ],
           ],
         );

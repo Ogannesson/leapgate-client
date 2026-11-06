@@ -274,9 +274,14 @@ void main() {
             windows: true,
             peerWindows: peerWindows)
         .first;
-    expect(connect(true),
-        [PeerAction.remoteDesktop, PeerAction.useAsExit, PeerAction.viaRelay]);
-    expect(connect(false), [PeerAction.remoteDesktop, PeerAction.viaRelay]);
+    expect(connect(true), [
+      PeerAction.remoteDesktop,
+      PeerAction.fileTransfer,
+      PeerAction.useAsExit,
+      PeerAction.viaRelay
+    ]);
+    expect(connect(false),
+        [PeerAction.remoteDesktop, PeerAction.fileTransfer, PeerAction.viaRelay]);
   });
 
   test('an exit takes a device ID or ID@server', () {

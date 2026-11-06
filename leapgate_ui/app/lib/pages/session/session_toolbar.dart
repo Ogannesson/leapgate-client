@@ -11,6 +11,7 @@ import 'package:window_manager/window_manager.dart';
 
 import '../../icons/lg_icon.dart';
 import '../../l10n/app_localizations.dart';
+import '../../shell/session_views.dart';
 import '../../shell/tab_overlays.dart';
 import '../../shell/tab_shortcuts.dart';
 import '../../theme/lg_tokens.dart';
@@ -364,16 +365,7 @@ class _SessionToolbarState extends State<SessionToolbar> {
       noteSide: _ffi.notices.items.isEmpty ? null : LgNoteSide.left,
       groups: [
         [
-          LgToolbarMenuButton(
-            label: l10n.toolbarRemoteDesktop,
-            icon: LgIcons.monitor,
-            items: [
-              LgMenuItem(
-                  label: l10n.toolbarRemoteDesktop,
-                  checked: true,
-                  onPressed: () {}),
-            ],
-          ),
+          SessionViewSwitch(ffi: _ffi),
           ...monitorToolbarItems(env),
         ],
         [

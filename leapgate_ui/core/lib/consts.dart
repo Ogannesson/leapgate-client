@@ -596,3 +596,22 @@ const String kOptionD3DRender = "allow-d3d-render";
 
 /// Config, read by both sides.
 const String kOptionEnableHwcodec = "enable-hwcodec";
+
+// M7a: the file transfer view's own LocalConfig keys start with `leapgate-ft-` (`LEAPGATE.md`
+// §10.15). Each lane appends its keys under its heading.
+
+// M7a core (coder A): the sort of each pane.
+const kLeapgateFtSortLocal = 'leapgate-ft-sort-local';
+const kLeapgateFtSortRemote = 'leapgate-ft-sort-remote';
+
+// M7a shell (coder B): the queue panel.
+/// The queue panel's height in logical pixels while expanded, for every device.
+const String kOptionLeapgateFtQueueHeight = 'leapgate-ft-queue-height';
+
+// M7a panes (coder C): column widths, the divider between the panes.
+
+/// The widths of the date, type and size columns, "140,104,76"; both panes share them.
+const String kOptionFtColumns = "leapgate-ft-columns";
+
+/// Where the divider between the panes is, the local pane's share of the width ("0.5").
+const String kOptionFtDivider = "leapgate-ft-divider";

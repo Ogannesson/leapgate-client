@@ -18,6 +18,7 @@ import 'lg_banner.dart';
 import 'lg_button.dart';
 import 'lg_menu.dart';
 import 'lg_pressable.dart';
+import 'lg_tooltip.dart';
 
 /// One category tab ("最近").
 class LgCategory<T> {
@@ -99,9 +100,28 @@ class LgCategoryTabs<T> extends StatelessWidget {
   }
 }
 
+/// Tells the tools below it ([LgListToolButton], [LgListToolMenu]) to draw their icon alone, the
+/// word going into a hover tooltip (the name a screen reader reads does not change). A row that
+/// is too narrow for its tools' words sets it (the file view's row of actions); everywhere else it
+/// is not there and the tools are as they were. Listens to [iconOnly]: the tools below follow it.
+class LgToolsIconOnly extends InheritedNotifier<ValueNotifier<bool>> {
+  const LgToolsIconOnly({
+    super.key,
+    required ValueNotifier<bool> iconOnly,
+    required super.child,
+  }) : super(notifier: iconOnly);
+
+  static bool of(BuildContext context) =>
+      context
+          .dependOnInheritedWidgetOfExactType<LgToolsIconOnly>()
+          ?.notifier
+          ?.value ??
+      false;
+}
+
 /// A tool beside the tabs (`.tool`): an icon and a word, "视图", "多选". With
 /// [active] it is tinted and bold: its menu is open, or the mode it switches
-/// is on.
+/// is on. Under [LgToolsIconOnly] it is the icon alone.
 class LgListToolButton extends StatelessWidget {
   const LgListToolButton({
     super.key,
@@ -118,7 +138,8 @@ class LgListToolButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return LgPressable(
+    final iconOnly = LgToolsIconOnly.of(context);
+    final button = LgPressable(
       onPressed: onPressed,
       semanticLabel: label,
       toggled: active ? true : null,
@@ -127,8 +148,10 @@ class LgListToolButton extends StatelessWidget {
         label: label,
         states: states,
         active: active || states.contains(WidgetState.selected),
+        iconOnly: iconOnly,
       ),
     );
+    return iconOnly ? LgTooltip(message: label, child: button) : button;
   }
 }
 
@@ -152,27 +175,32 @@ class LgListToolMenu extends StatelessWidget {
     return LgMenuAnchor(
       items: items,
       width: width,
-      builder: (context, controller) => LgPressable(
-        onPressed: () {
-          if (controller.isOpen) {
-            controller.close();
-            return;
-          }
-          // The right edge of the menu under the right edge of the tool.
-          final size = (context.findRenderObject()! as RenderBox).size;
-          controller.open(
-            position: Offset(size.width - width, size.height + LgSpace.s1),
-          );
-        },
-        semanticLabel: label,
-        toggled: controller.isOpen,
-        builder: (context, states) => _ToolFace(
-          icon: icon,
-          label: label,
-          states: states,
-          active: controller.isOpen || states.contains(WidgetState.selected),
-        ),
-      ),
+      builder: (context, controller) {
+        final iconOnly = LgToolsIconOnly.of(context);
+        final tool = LgPressable(
+          onPressed: () {
+            if (controller.isOpen) {
+              controller.close();
+              return;
+            }
+            // The right edge of the menu under the right edge of the tool.
+            final size = (context.findRenderObject()! as RenderBox).size;
+            controller.open(
+              position: Offset(size.width - width, size.height + LgSpace.s1),
+            );
+          },
+          semanticLabel: label,
+          toggled: controller.isOpen,
+          builder: (context, states) => _ToolFace(
+            icon: icon,
+            label: label,
+            states: states,
+            active: controller.isOpen || states.contains(WidgetState.selected),
+            iconOnly: iconOnly,
+          ),
+        );
+        return iconOnly ? LgTooltip(message: label, child: tool) : tool;
+      },
     );
   }
 }
@@ -183,12 +211,14 @@ class _ToolFace extends StatelessWidget {
     required this.label,
     required this.states,
     required this.active,
+    this.iconOnly = false,
   });
 
   final LgIcons icon;
   final String label;
   final Set<WidgetState> states;
   final bool active;
+  final bool iconOnly;
 
   @override
   Widget build(BuildContext context) {
@@ -204,28 +234,36 @@ class _ToolFace extends StatelessWidget {
         radius: radius,
         child: Container(
           height: t.sizes.button,
-          padding: const EdgeInsets.symmetric(horizontal: LgSpace.s3),
+          width: iconOnly ? t.sizes.button : null,
+          alignment: iconOnly ? Alignment.center : null,
+          padding: iconOnly
+              ? null
+              : const EdgeInsets.symmetric(horizontal: LgSpace.s3),
           decoration: BoxDecoration(
             color: active ? c.active : overlay,
             borderRadius: radius,
           ),
           child: ExcludeSemantics(
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                LgIcon(icon, size: t.sizes.icon, color: fg),
-                const SizedBox(width: LgSpace.s2),
-                Text(
-                  label,
-                  maxLines: 1,
-                  softWrap: false,
-                  style: t.text.copyWith(
-                    color: fg,
-                    fontWeight: active ? FontWeight.w700 : FontWeight.w400,
+            child: iconOnly
+                ? LgIcon(icon, size: t.sizes.icon, color: fg)
+                : Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      LgIcon(icon, size: t.sizes.icon, color: fg),
+                      const SizedBox(width: LgSpace.s2),
+                      Text(
+                        label,
+                        maxLines: 1,
+                        softWrap: false,
+                        style: t.text.copyWith(
+                          color: fg,
+                          fontWeight: active
+                              ? FontWeight.w700
+                              : FontWeight.w400,
+                        ),
+                      ),
+                    ],
                   ),
-                ),
-              ],
-            ),
           ),
         ),
       ),

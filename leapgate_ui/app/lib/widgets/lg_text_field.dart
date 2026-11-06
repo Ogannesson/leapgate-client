@@ -67,6 +67,7 @@ class LgTextField extends StatefulWidget {
     this.maxLength,
     this.inputFormatters = const [],
     this.showErrorText = true,
+    this.quiet = false,
   });
 
   final TextEditingController? controller;
@@ -104,6 +105,11 @@ class LgTextField extends StatefulWidget {
   /// accessible name still say [errorText]: the caller shows the text itself,
   /// wider than the field (the port of an exit card).
   final bool showErrorText;
+
+  /// The field of a bar (the search of a file list, `.sf`, and the path input, `.bc.inp`): at
+  /// rest it is a tint of the window's ground with no frame; focused or with an error it is the
+  /// ordinary field; its corners are 10 where the ordinary field's are 12. Best with [dense].
+  final bool quiet;
 
   @override
   State<LgTextField> createState() => _LgTextFieldState();
@@ -147,7 +153,11 @@ class _LgTextFieldState extends State<LgTextField> {
         (_node.hasFocus ||
             LgStateOverride.of(context).contains(WidgetState.focused));
     final error = widget.errorText != null;
-    final radius = BorderRadius.circular(LgRadius.r12);
+    // A quiet field is the search and the path of a bar, `.sf` and `.bc.inp`: 10 like the
+    // breadcrumb it stands beside.
+    final radius = BorderRadius.circular(
+      widget.quiet ? LgRadius.r10 : LgRadius.r12,
+    );
     final Border? border;
     if (!widget.enabled) {
       border = null;
@@ -155,9 +165,14 @@ class _LgTextFieldState extends State<LgTextField> {
       border = Border.all(color: c.error, width: 2);
     } else if (focused) {
       border = Border.all(color: c.accent, width: 2);
+    } else if (widget.quiet) {
+      // No frame, but still a frame's worth of decoration: when the frame appears with the focus
+      // the field's subtree must not be rebuilt under a new parent, or it loses the keyboard.
+      border = Border.all(color: Colors.transparent, width: 2);
     } else {
       border = Border.all(color: c.borderStrong, width: 1.5);
     }
+    final atRest = widget.quiet && !focused && !error;
     final base = widget.dense ? t.textM : t.text;
     final form = LgFormFieldInfo.maybeOf(context);
     final named = widget.semanticLabel != null || form != null;
@@ -173,7 +188,9 @@ class _LgTextFieldState extends State<LgTextField> {
         horizontal: widget.dense ? LgSpace.s3 : LgSpace.s4,
       ),
       decoration: BoxDecoration(
-        color: widget.enabled || flat ? c.surface : c.disabled,
+        color: atRest && widget.enabled
+            ? c.bg
+            : (widget.enabled || flat ? c.surface : c.disabled),
         borderRadius: radius,
       ),
       foregroundDecoration: border == null
