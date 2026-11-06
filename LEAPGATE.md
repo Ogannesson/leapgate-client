@@ -1341,6 +1341,17 @@ Telegram 机器人设置改成两步（`leapgate_bot_lookup` 只查、什么都�
 
 **环境说明**：测试虚拟机没有回滚，留在安装了 `57c0087fd` 新界面的状态（路径 `C:\Program Files\Leapgate`，固定密码是测试值），由主会话回滚；A 的配置文件和测前备份逐个哈希一致，A 上的 Leapgate 已停。测试虚拟机上本机 ID 是 10 位（第三期 01 的锁定规则，同 M7a 记录）；原版在测试虚拟机上装完又卸载了。证据在 A 的 `C:\leapgate-e2e\evidence\m8-1106\`（`build-new.log`、`build-new2.log`、`build-up.log`、旧界面安装页截图、`tools\`）。
 
+#### M8 切换，安装版：覆盖安装回归（测试虚拟机，2026-11-07 01:25~01:35，旧界面 `fb1acefa2`、新界面 `4e6d0a3ed`）
+
+上一轮旧界面那份产物里混进了旧 DLL（见上"新发现"第 3 条），所以用新编的旧界面重测两个方向。没有回滚、没有关机。旧界面 `libleapgate.dll` `96DFA9F7…`（构建时间 22:15，zip 解开后和目录版哈希一致），新界面便携目录 `libleapgate.dll` `ED8FDE17…`。每步前先 `Stop-Service Leapgate` 加结束全部 `leapgate.exe`，再起下一个。
+
+| 方向 | 结果 |
+|---|---|
+| 旧界面装在新界面上（旧界面自己的安装页：`leapgate.exe --install`，800×600，点"同意并安装"） | 通过。约 6 秒后服务 Running、4 个进程。安装目录 94 个文件 = 旧界面目录 92 个 + `RuntimeBroker_leapgate.exe` + `Uninstall Leapgate.lnk`（这两个是安装脚本生成的），逐个哈希与旧界面目录一致、0 个不符；新界面独有的 `dartjni.dll`、`meta.toml`、字体和 `app_icon` 资源都没了。进程：服务 `--service`、`--server`、`--tray`、旧界面主窗口，都来自 `C:\Program Files\Leapgate`。卸载项 `DisplayVersion` = `0.4.0`、`BuildDate` = `2026-11-06 22:12`（上一轮那份旧 DLL 装出来的是前一天的时间，这次对了）。A 的新界面连进来后，起的是安装目录里的 `leapgate.exe --cm`（旧界面的小窗；窗口类这次没查） |
+| 新界面便携版的"升级"卡装回新界面 | 通过。关干净后从 zip 解开的目录起新界面便携版，主页出现"已安装的 Leapgate 版本低于当前版本。/ 升级"（UIA 读到）。点"升级"后 4.1 秒便携版退出，安装版界面窗口和托盘出现，服务 Running。安装目录 33 个文件 = 新界面目录 31 个 + 上面那两个生成的，哈希 0 个不符；旧界面独有的 `desktop_multi_window_plugin.dll`、`file_selector_windows_plugin.dll`、`url_launcher_windows_plugin.dll`、`window_size_plugin.dll` 都没有。卸载项 `DisplayVersion` = `0.4.0`、`BuildDate` = `2026-11-06 22:58`，`libleapgate.dll` `ED8FDE17…`，进程同上（`--service`、`--server`、`--tray`、界面） |
+
+测试虚拟机停在装着 `4e6d0a3ed` 的状态，服务、界面、托盘都在跑。中途 telechir 对它约 40 分钟没有响应（01:00 前后到 01:24，`machines` 一度显示不可用），自己恢复，期间发出的 `exec_admin` 没有执行，恢复后重发。
+
 #### M8 切换，便携版（两台端点，2026-11-06 22:18~23:45，被测 `fb1acefa2`）
 
 按 11 §5.2 前五条（压力项、最新 stable 留给下一轮）。构建：新界面目录 `app-ui-m8-fb1acefa2`（`libleapgate.dll` `BFE63945…`、`flutter_windows.dll` `8667024A…`）、便携单文件 `leapgate-0.4.0-fb1acefa2.exe`（`5AFCB7F4…`）和同名 zip；旧界面（`-Ui upstream`）`libleapgate.dll` `96DFA9F7…`（构建时间 22:15，带 M8 的代码，字符串 `leapgate install: ` 在里面；`leapgate.exe` `7F7BFDD1…` 与以前的旧界面相同）。端点 A（台式机）、B（笔记本）各一份。期间端点 B 两次长时间联系不上（约 22:20~22:35、23:12~23:35），后半段互连的另一端改用测试虚拟机的安装版（`4e6d0a3ed`），见下表标注。
@@ -1372,6 +1383,28 @@ Telegram 机器人设置改成两步（`leapgate_bot_lookup` 只查、什么都�
 **没做**：压力项和最新 stable 检查（下一轮）；清单 §7 的 4K 场景（端点 B 现在是 1366×768 的一块屏）；§8 的"升级"卡不点；§13 登录后的各条、§15、§16 的功能细项、§17 的暂停重试跳过等、§18 的第四期挪来几项、§19 压力项。
 
 **环境**：A、B 的配置文件和测前备份逐个哈希一致（A 8 个、B 4 个），两端 Leapgate 都停，`task\` 空，没有残留计划任务和包内副本，原版 RustDesk 和 mihomo 没碰；A 的便携包解出目录 `%LOCALAPPDATA%\leapgate`、`zip-test`、测试数据都已删。测试虚拟机：固定密码被我重设成了 `pw.txt` 里那个值（hash 与 A 的 `pw-vm110-m8.txt` 一致），没回滚、没关机、没卸载，它上面的界面当时有一个连向 A 的会话标签（A 停止后随之结束）。证据在 A 的 `C:\leapgate-e2e\evidence\m8-1106-portable\`。
+
+#### M8 切换，压力项和最新 stable（2026-11-06 23:41~2026-11-07 02:00，被测 `4e6d0a3ed`）
+
+按 11 §5.2 第二条（03 §8.7 第 2 段，清单 §19）和 03 §8.8。控制端是端点 A（台式机）上的新界面便携版（`app-ui-m8-4e6d0a3ed`，计划任务启动），被控端是端点 B（笔记本）上的新界面便携版（目录 `app-ui-m8-fb1acefa2`，后半段换成同一个 `4e6d0a3ed`，见下面第 1 条发现）；第二个会话标签的对端是测试虚拟机的安装版（它没有显示输出，只有 1280 宽的基本显示适配器）。脚本和原始数据在 A 的 `C:\leapgate-e2e\evidence\m8-1106-stress\`（`tools\stress50.ps1`、`dlgloop.ps1`、`uiapoll.ps1`，`stress50-run1~4.csv`、`dlgloop.csv`、`uiapoll.csv`、`v1-cpu-gpu*.txt`、`80-`~`82-` stable）。
+
+| 项 | 结果 |
+|---|---|
+| 会话标签开关 50 次（清单 §19 第 1 条） | **句柄不通过，内存和崩溃通过**。每轮：`--connect` 开标签、等工具栏、停 3 秒、点"关闭标签"、等 15 秒（`stress50-run4.csv`，50 轮全部连上、关闭都成功，连上平均 3.6 秒）。A 控制端进程（单进程，pid 不变）：句柄 1425 → 1519（线性，斜率 **+2.02 个/轮**，前半 1.98、后半 2.05，即每开关一个会话标签约多 2 个句柄不还）；私有内存 255 → 280 MB（斜率 +0.27 MB/轮，前半 0.47、后半 0.11，在收敛）；工作集 445 → 505 MB（+0.37 MB/轮，后半 0.27）；线程 206 不变。Windows 应用程序日志没有 `leapgate.exe` 的 1000 事件，没有崩溃。另两次间隔短的运行（`run1`、`run3`）上涨的句柄斜率同量级（1.9、约 1.6） |
+| 开着 UIA 客户端反复开关标签和对话框（§19 第 2 条） | 通过。`uiapoll.ps1` 用原生 COM 的 IUIAutomation（`leapgate-uia.ps1 -Op Dump`）连续轮询 14 分钟，共 575 次，退出码全 0，从没拿不到树；同时 `dlgloop.ps1` 做 20 轮"开标签 → 点关闭出'断开全部 1 个会话并关闭窗口？'→ 取消 → 开'新建连接'标签 → 关标签"，每一步全部成功、进程一直在、没有 1000 事件。元素数随界面状态变（主页 13~15、会话 54~56、对话框 30~31）；有 6 次（约 1%）读到元素在但名字全空（对话框切换的瞬间），下一次轮询就恢复，树没有消失 |
+| 3~4 个会话标签同时开着的 CPU、GPU（§19 第 3 条） | **只做了 2 个会话标签 + 主页，结论不明显**。端点只有一台有画面（B），第二个标签连测试虚拟机，4 个标签凑不出来。A 的进程 CPU（占一个核的百分比，30 秒均值，各两轮）：停在主页 11.5 / 13.2，停在 B 的标签 16.5 / 14.9，停在测试虚拟机的标签 13.1 / 13.0；GPU 3D 0.4% / 0.9% / 0.5%，视频解码 0.7% 不变。B 桌面基本不动，画面变化少，主页略低于 B 的标签，但差距在测量噪声（第一轮主页 31%、同样的主页第二轮 12%）里，不能证明"明显低于"。V1 的有效判据是 M2a 当时的验收，这里没有重做 |
+| 最新 stable 检查（03 §8.8） | **Flutter 3.47.9 仍是最新 stable**（发布 2026-10-29；2026-11-07 读 `storage.googleapis.com/flutter_infra_release/releases/releases_windows.json` 的 `current_release.stable`）。官方 SDK、官方引擎，Impeller 开（stderr `Using the Impeller rendering backend (OpenGLESSDF)`）：①`build-client.ps1 -Steps bridge,build -ForceBridge -FlutterRoot … -AllowOfficialEngine` 通过（`flutter_windows.dll` `30494FB0…`、`app.so` `BCD54FB1…`；第一次尝试在 cargo 编 `libc` 时报 `0xc0000043`（文件共享冲突）失败，重试通过，没追原因）；②analyze：core 96 条（含上游复制件 `file_model.dart` 的 5 条 warning，和 M7a 同数），app 1 条 warning（`file_dialogs.dart:269` 参数 `unchanged` 没人传）；③core 305、app 1186 个测试通过（app 2 个跳过）；④画廊导出 2972 个文件，3.47.9 和 3.44.9 各一份；⑤上屏：A 起 3.47.9 的构建连 B（1920×1080 屏），5 分钟，每分钟窗口截图（只记哈希，图已删）每次不同、大小 430~440 KB，进程一直在、句柄 1500 左右、工作集 172~234 MB，没有崩溃事件，stderr 只有那一行 Impeller。**4K 上屏未验证**：端点 B 只有 1920×1080 的物理屏和 1366×768 的虚拟屏（GameViewer），没有 4K 的源 |
+| 复原 | 构建 worktree `.wt/ui-m0-build` 停在 `4e6d0a3ed`，锁文件和 `analysis_options.yaml` 已还原，只剩构建产生的未跟踪 `libs/portable/app_metadata.toml`。用 3.44.9 加自编引擎重编（`-ForceBridge`），`flutter_windows.dll` `8667024A…`（带补丁 0003）、`data\app.so` `C24D4907…`（与 `app-ui-m8-4e6d0a3ed` 一致）；`libleapgate.dll`、`leapgate.exe` 是重新编的，哈希和当时那份不同（时间戳等） |
+
+**新发现**
+1. **被控端新界面便携版在两次连入间隔很短时，连接管理小窗起不来，之后一段时间连不上**。A 每轮收尾只等 2 秒就开下一轮（上一个会话的小窗进程还在退出的几秒里）：`run1` 第 26 轮起、`run3` 第 23 轮起、`run2` 第 7 轮起，之后每一次都是 A 报"对方已断开连接"。B 的日志（主日志）：新连入 `Connection opened` 后马上 `Connection closed: connection manager`、`ipc to connection manager exit: expected`，此后没有 `Start cm`，也没有新的 `--cm` 进程（B 上只剩一个主进程）；小窗日志里最后一次 `Got new connection … cm ipc connection closed from connection request`。`run1` 里手动点"重新连接"（约 8 分钟后）就好了，B 重启也好。没有崩溃事件。换 B 为 `4e6d0a3ed` 同样出现（`run3`），所以不是 `fb1acefa2` 的问题。每轮间隔拉到 15 秒（`run4`）50 轮零失败。真实使用里"断开后几秒内重连"就会撞上，建议 coder 查小窗进程退出和新连入的竞争（可能是小窗的命名管道正在关闭时收到新连接，之后主进程认为小窗还在、不再拉起）。复现：A、B 都是新界面便携版，A 用 `leapgate.exe --connect ‹B› --password …` 开标签、3 秒后关标签，间隔约 5 秒循环，多半在 20~30 轮内出现
+2. **控制端每开关一个会话标签多留约 2 个句柄**（上表第一行），线性、不收敛，每天几千次才碰到上限，不急；没有查来源，也没有拿旧界面做对照
+3. 测试虚拟机失联约 40 分钟（见上"覆盖安装回归"），`vm110` 的 `exec` 在失联期间不返回，`machines` 也报不可用；这一类留给环境说明
+4. 工具：`leapgate-e2e.ps1 -InTask` 在 A 上这轮起不来任务（`task … did not finish within 120 s`，计划任务没把程序拉起来，原因没查），改用 `run-task.ps1` 加 `m-start-new.cmd`。`run-task.ps1 -Arg 'a','b'` 经 `pwsh -File` 调用时逗号数组被当成一个字符串，要在脚本里再包一层
+
+**没做**：4 个会话标签同时开着（只有 2 个对端）；4K 上屏（没有 4K 的源）；用旧界面做句柄斜率对照。
+
+**环境**：A 的 Leapgate 配置 8 个文件和测前备份（`backup\pre-m8s-1106`）逐个哈希一致（`99-A-config-after.txt`），B 4 个配置文件一致（`Leapgate2.toml` 前 12 位 `93916754BB49`）；两端我起的 Leapgate 都已停，`task\` 空，没有残留计划任务，没有包内副本；B 上我传的新界面 zip 和解开的目录已删；原版 RustDesk（A、B）、mihomo 没碰。测试虚拟机的临时文件（旧界面解开目录、zip、截图、清单）已删，留装着 `4e6d0a3ed` 的安装版。
 
 ### 10.6 core 的结构（M1）
 
