@@ -146,8 +146,9 @@ bool handleLaunchArgs(List<String> args, String uriPrefix) {
   return _open(linkArgs);
 }
 
-/// A link that a later launch handed to this window. Anything but a new connection is only
-/// logged, by scheme and host: the path or the query may hold a password.
+/// A link that a later launch handed to this window: a remote desktop or a file transfer opens,
+/// the third round's kinds get a toast. A link that is not a connection is only logged, by
+/// scheme and host: the path or the query may hold a password.
 bool handleLink(Uri uri) {
   final args = linkToArgs(uri);
   if (args == null) {

@@ -462,7 +462,8 @@ class _InstallNotice extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final install = card == InstallCard.install;
-    final failure = status.installFailure;
+    final failure =
+        status.installFailure?.card == card ? status.installFailure : null;
     return LgLocalNotice(
       tone: LgTone.info,
       text: install ? l10n.homeInstallText : l10n.homeUpgradeText,

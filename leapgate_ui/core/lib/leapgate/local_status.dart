@@ -46,7 +46,11 @@ enum InstallCard { install, upgrade }
 /// Why the last "安装" or "升级" failed (`leapgate_install`, `LEAPGATE.md` §10.16).
 @immutable
 class InstallFailure {
-  const InstallFailure({required this.uacDenied, required this.text});
+  const InstallFailure(
+      {required this.card, required this.uacDenied, required this.text});
+
+  /// The card it failed on; another card does not show it.
+  final InstallCard card;
 
   /// Administrator permission was not granted.
   final bool uacDenied;
@@ -113,10 +117,11 @@ class LocalStatusModel extends ChangeNotifier {
   bool installed = true;
   bool installedLowerVersion = false;
 
-  /// "安装" or "升级" was clicked and the installer runs; on success this process exits.
-  bool installing = false;
+  /// The card whose button was clicked while the installer runs; on success this process exits.
+  InstallCard? _installing;
+  bool get installing => _installing != null;
 
-  /// The last failure, shown on the card until the next click.
+  /// The last failure, shown on its card until the next click.
   InstallFailure? installFailure;
 
   /// Authorized sessions into this device of every type (C1, 06 M3-1): "正在被远程控制（N 个
@@ -144,8 +149,11 @@ class LocalStatusModel extends ChangeNotifier {
   }
 
   /// The card with a button (01 P1 block B): one at a time, the system error first, as
-  /// upstream's `desktop_home_page.dart` `buildHelpCards`.
+  /// upstream's `desktop_home_page.dart` `buildHelpCards`. While the installer runs it stays
+  /// the card that was clicked: the script uninstalls, copies and writes the build time in
+  /// turn, so the registry passes through the other card and no card.
   InstallCard? get installCard {
+    if (_installing case final card?) return card;
     if (systemError.isNotEmpty) return null;
     if (!installed) return InstallCard.install;
     if (installedLowerVersion) return InstallCard.upgrade;
@@ -153,18 +161,28 @@ class LocalStatusModel extends ChangeNotifier {
   }
 
   /// Installs or upgrades in this process (M8-1). Returns only on failure: on success Rust exits
-  /// and the installed copy starts.
+  /// and the installed copy starts. A second click while it runs does nothing; the export
+  /// throwing or answering something unreadable counts as `failed` with the error's text.
   Future<void> install(InstallCard card) async {
-    installing = true;
+    if (installing) return;
+    _installing = card;
     installFailure = null;
     notifyListeners();
-    final failure = jsonDecode(await lgBind.leapgateInstall(kind: card.name))
-        as Map<String, dynamic>;
-    installing = false;
-    installFailure = InstallFailure(
-      uacDenied: failure['result'] == 'uac_denied',
-      text: failure['text'] as String? ?? '',
-    );
+    InstallFailure failure;
+    try {
+      final answer = jsonDecode(await lgBind.leapgateInstall(kind: card.name))
+          as Map<String, dynamic>;
+      failure = InstallFailure(
+        card: card,
+        uacDenied: answer['result'] == 'uac_denied',
+        text: answer['text'] as String? ?? '',
+      );
+    } catch (e) {
+      failure = InstallFailure(card: card, uacDenied: false, text: '$e');
+    } finally {
+      _installing = null;
+    }
+    installFailure = failure;
     notifyListeners();
   }
 

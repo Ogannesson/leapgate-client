@@ -175,6 +175,30 @@ void main() {
     });
   });
 
+  test('while installing the clicked card stays, and a failure stays with it', () async {
+    final lg = FakeLeapgate();
+    setLgBindForTesting(lg);
+    final model = LocalStatusModel()..installedLowerVersion = true;
+    final done = model.install(InstallCard.upgrade);
+    // The script uninstalls first, then writes the new build time.
+    model.installed = false;
+    expect(model.installCard, InstallCard.upgrade);
+    model
+      ..installed = true
+      ..installedLowerVersion = false;
+    expect(model.installCard, InstallCard.upgrade);
+    // A second click sends nothing.
+    await model.install(InstallCard.upgrade);
+    expect(lg.installs, ['upgrade']);
+
+    lg.installAnswer.completeError(StateError('no answer'));
+    await done;
+    expect(model.installing, isFalse);
+    expect(model.installFailure?.card, InstallCard.upgrade);
+    expect(model.installFailure?.uacDenied, isFalse);
+    expect(model.installFailure?.text, contains('no answer'));
+  });
+
   group('LocalStatusModel.passwordRow (01 P1 block A)', () {
     PasswordRow row(
             {ServiceStatus status = ServiceStatus.ready,
