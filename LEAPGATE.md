@@ -467,7 +467,7 @@ Leapgate 自己的文件里和挂钩配套的：`report/heartbeat.rs` 在开关�
 
 - 新界面 runner 的窗口类：主窗口 `LEAPGATE_UI_MAIN`，CM（`--cm`）`LEAPGATE_UI_CM`，安装页（`--install`）`LEAPGATE_UI_INSTALL`。三者分开，按主窗口类名找时不会找到另外两个。主窗口的类名（`leapgate_ui/app/windows/runner/main.cpp` 的 `kMainWindowClass`）和 `libs/leapgate/src/ui.rs` 的 `MAIN_WINDOW_CLASS` 要一致；另外两个 Rust 不找，只在 runner 里。
 - 合并上游时核对：`core_main_invoke_new_connection` 的 Windows 分支仍按 `send_message_to_hnwd` 加 `WM_USER + 2` 把链接交给已有窗口（`uni_links_desktop` 认这个消息号）；上游有没有新增按 `FLUTTER_RUNNER_WIN32_WINDOW_CLASS` 或窗口标题找窗口的地方（`git grep -n "FLUTTER_RUNNER_WIN32_WINDOW\|FindWindow"`）。
-- 已知限制：新界面还没有安装页（第三轮）。exe 名以 `install.exe` 结尾时，core_main 会注入 `--install`、不起服务，runner 按安装页处理，新界面目前写一行日志后退出。M0 只出名叫 `leapgate.exe` 的便携目录，碰不到；做便携打包（03 §1.7 第 5 步）或安装页时处理。
+- 已知限制：新界面还没有安装页（第三轮）。exe 名以 `install.exe` 结尾时，core_main 会注入 `--install`、不起服务，runner 按安装页处理，新界面写一行日志后退出。M8 起构建脚本出的便携单文件叫 `leapgate-‹版本›-x86_64.exe`，不带 `install`（M8-2），只有用户自己把 exe 或便携包改名成以 `install.exe` 结尾、或者手动带 `--install` 才会碰到；安装改由主页的"安装"提示卡发起（§10.16）。安装页做出来以前保持这样。
 - `Msg`（`libs/leapgate/src/ipc.rs`）按 `name` 字段区分，`snake_case`；CM 的事件就是 `Msg` 本身的 JSON，所以改名等于同时改进程间消息和界面事件。以后 Leapgate 的进程间消息都追加在 `Msg` 里，不改已有变体的顺序和含义。
 - C1、C2、S7 的已知限制：新旧版本的进程短暂同时在跑时，旧进程收到 `Data::Leapgate` 解码失败（上游 `next()` 返回 `Ok(None)`，两头都静默忽略），C1 返回 `{}`、C2 和 S7 没有效果。新界面便携版和旧界面不同时运行（03 §7.1），日常碰不到。`ShowCm` 在 CM 页面订阅之前到达时丢掉，不补发。
 - C1、C2、S7 合并上游时核对：`Data` 枚举末尾有没有新变体（`Leapgate` 要留在最后，冲突固定在这一处）；`ipc.rs` 的 `handle`、`ui_cm_interface.rs` 的 `IpcTaskRunner::run` 两处消息循环仍以兜底的 `_ => {}` 结尾、分发仍在里面；`AUTHED_CONNS`、`AuthConnType`（新增类型要在 `src/leapgate_hooks/ipc.rs` 的映射和 `Counts` 里加）、`Connection::alive_conns()`、`send_to_cm` 有没有变；`connect_port_forward_if_needed` 的复用分支是否仍是出口登录唯一建 mux 的地方。
