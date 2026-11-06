@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:leapgate_ui/icons/lg_icon.dart';
 import 'package:leapgate_ui/widgets/lg_banner.dart';
+import 'package:leapgate_ui/widgets/lg_button.dart';
 import 'package:leapgate_ui/widgets/lg_feedback.dart';
 import 'package:leapgate_ui/widgets/lg_list_chrome.dart';
 import 'package:leapgate_ui/widgets/lg_menu.dart';
@@ -249,7 +250,41 @@ void main() {
           child: LgLocalNotice(tone: LgTone.error, text: '无法写入配置文件'),
         ),
       );
-      expect(find.text('无法写入配置文件'), findsOneWidget);
+      // The text is one rich text (the icon leads it), so it is found by what it contains.
+      expect(find.textContaining('无法写入配置文件'), findsOneWidget);
+      handle.dispose();
+    });
+
+    testWidgets('the icon leads the text; text and button start at one edge', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      const text = '安装后，对方远程控制本机时也能操作用户账户控制（UAC）窗口。';
+      await pumpLg(
+        tester,
+        SizedBox(
+          width: 192,
+          child: LgLocalNotice(
+            tone: LgTone.info,
+            text: text,
+            actionLabel: '安装',
+            onAction: () {},
+          ),
+        ),
+      );
+      // Read out as the text, then the button; the icon says nothing.
+      expect(
+        tester.getSemantics(find.byType(LgLocalNotice)).label,
+        '$text\n安装',
+      );
+      // The text fills the card inside its padding (192 - 2 * 16) and starts where the button
+      // does, not after a column of the icon's.
+      final paragraph = find.textContaining('安装后');
+      expect(tester.getSize(paragraph).width, 160);
+      expect(
+        tester.getTopLeft(paragraph).dx,
+        tester.getTopLeft(find.byType(LgButton)).dx,
+      );
       handle.dispose();
     });
 

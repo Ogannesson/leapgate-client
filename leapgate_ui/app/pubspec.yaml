@@ -51,6 +51,10 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   generate: true
+  assets:
+    # The title bar's app mark from runner/resources/app_icon.ico (M8): 32 × 32, with 64 × 64
+    # (2.0x/) and 96 × 96 (3.0x/, from its 128 × 128) beside it for high DPI.
+    - assets/app_icon.png
   fonts:
     - family: Atkinson Hyperlegible Next
       fonts:

@@ -266,7 +266,7 @@ class _NameDialog extends StatefulWidget {
     required this.submit,
     required this.failed,
     required this.close,
-    this.unchanged,
+    required this.unchanged,
   });
 
   _NameDialog.newFolder(
@@ -282,6 +282,7 @@ class _NameDialog extends StatefulWidget {
          submit: p.submit,
          failed: (l10n, reason) => l10n.ftNewFolderFailed(reason),
          close: close,
+         unchanged: null,
        );
 
   _NameDialog.rename(FtRenamePrompt p, {required void Function(String?) close})

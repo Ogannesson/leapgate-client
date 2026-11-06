@@ -1,3 +1,4 @@
+import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:leapgate_ui/shell/links.dart';
 import 'package:leapgate_ui/shell/navigation.dart';
@@ -24,11 +25,14 @@ class _Navigation implements MainNavigation {
   @override
   void showSettings(SettingsSectionId section, {String? item}) {}
 
+  final fileTransfers = <String>[];
+
   @override
   void openFileTransfer(String id,
-      {String password = '',
-      bool isSharedPassword = false,
-      bool forceRelay = false}) {}
+          {String password = '',
+          bool isSharedPassword = false,
+          bool forceRelay = false}) =>
+      fileTransfers.add('$id|$password|$forceRelay');
 }
 
 void main() {
@@ -69,9 +73,31 @@ void main() {
     expect(navigation.connected, ['100200300|pw-1|false|', '400500600/r||false|']);
   });
 
-  test('other kinds are left for their blocks', () {
-    expect(handleLaunchArgs(['--file-transfer', '100200300'], 'leapgate://'), false);
+  test('a file transfer opens its view, with the password and the relay', () {
+    expect(
+        handleLaunchArgs(
+            ['--file-transfer', '100200300', '--password', 'pw-1'], 'leapgate://'),
+        true);
+    expect(
+        handleLink(Uri.parse('leapgate://file-transfer/400500600?relay=true')),
+        true);
+    expect(navigation.fileTransfers, ['100200300|pw-1|false', '400500600||true']);
     expect(navigation.connected, isEmpty);
+  });
+
+  test('the third round\'s kinds open nothing and say so in a toast', () {
+    for (final (kind, toast) in [
+      ('port-forward', 'linkUnsupportedPortForward'),
+      ('rdp', 'linkUnsupportedRdp'),
+      ('view-camera', 'linkUnsupportedCamera'),
+      ('terminal', 'linkUnsupportedTerminal'),
+      ('terminal-admin', 'linkUnsupportedTerminal'),
+    ]) {
+      expect(handleLink(Uri.parse('leapgate://$kind/100200300')), false);
+      expect(appCore.toasts.current?.key, toast);
+    }
+    expect(navigation.connected, isEmpty);
+    expect(navigation.fileTransfers, isEmpty);
   });
 
   test('config and password links open nothing, and the log keeps only scheme and host', () {

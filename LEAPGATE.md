@@ -467,7 +467,7 @@ Leapgate 自己的文件里和挂钩配套的：`report/heartbeat.rs` 在开关�
 
 - 新界面 runner 的窗口类：主窗口 `LEAPGATE_UI_MAIN`，CM（`--cm`）`LEAPGATE_UI_CM`，安装页（`--install`）`LEAPGATE_UI_INSTALL`。三者分开，按主窗口类名找时不会找到另外两个。主窗口的类名（`leapgate_ui/app/windows/runner/main.cpp` 的 `kMainWindowClass`）和 `libs/leapgate/src/ui.rs` 的 `MAIN_WINDOW_CLASS` 要一致；另外两个 Rust 不找，只在 runner 里。
 - 合并上游时核对：`core_main_invoke_new_connection` 的 Windows 分支仍按 `send_message_to_hnwd` 加 `WM_USER + 2` 把链接交给已有窗口（`uni_links_desktop` 认这个消息号）；上游有没有新增按 `FLUTTER_RUNNER_WIN32_WINDOW_CLASS` 或窗口标题找窗口的地方（`git grep -n "FLUTTER_RUNNER_WIN32_WINDOW\|FindWindow"`）。
-- 已知限制：新界面还没有安装页（第三轮）。exe 名以 `install.exe` 结尾时，core_main 会注入 `--install`、不起服务，runner 按安装页处理，新界面目前写一行日志后退出。M0 只出名叫 `leapgate.exe` 的便携目录，碰不到；做便携打包（03 §1.7 第 5 步）或安装页时处理。
+- 已知限制：新界面还没有安装页（第三轮）。exe 名以 `install.exe` 结尾时，core_main 会注入 `--install`、不起服务，runner 按安装页处理，新界面写一行日志后退出。M8 起构建脚本出的便携单文件叫 `leapgate-‹版本›-x86_64.exe`，不带 `install`（M8-2），只有用户自己把 exe 或便携包改名成以 `install.exe` 结尾、或者手动带 `--install` 才会碰到；安装改由主页的"安装"提示卡发起（§10.16）。安装页做出来以前保持这样。
 - `Msg`（`libs/leapgate/src/ipc.rs`）按 `name` 字段区分，`snake_case`；CM 的事件就是 `Msg` 本身的 JSON，所以改名等于同时改进程间消息和界面事件。以后 Leapgate 的进程间消息都追加在 `Msg` 里，不改已有变体的顺序和含义。
 - C1、C2、S7 的已知限制：新旧版本的进程短暂同时在跑时，旧进程收到 `Data::Leapgate` 解码失败（上游 `next()` 返回 `Ok(None)`，两头都静默忽略），C1 返回 `{}`、C2 和 S7 没有效果。新界面便携版和旧界面不同时运行（03 §7.1），日常碰不到。`ShowCm` 在 CM 页面订阅之前到达时丢掉，不补发。
 - C1、C2、S7 合并上游时核对：`Data` 枚举末尾有没有新变体（`Leapgate` 要留在最后，冲突固定在这一处）；`ipc.rs` 的 `handle`、`ui_cm_interface.rs` 的 `IpcTaskRunner::run` 两处消息循环仍以兜底的 `_ => {}` 结尾、分发仍在里面；`AUTHED_CONNS`、`AuthConnType`（新增类型要在 `src/leapgate_hooks/ipc.rs` 的映射和 `Counts` 里加）、`Connection::alive_conns()`、`send_to_cm` 有没有变；`connect_port_forward_if_needed` 的复用分支是否仍是出口登录唯一建 mux 的地方。
@@ -1307,6 +1307,148 @@ Telegram 机器人设置改成两步（`leapgate_bot_lookup` 只查、什么都�
 
 **环境说明**：测试虚拟机测完回滚到 `m6-admin` 并强制关机（`stopped`）；A 的配置文件和测前备份逐个哈希一致，A 上的一次性数据已删；Mac 上的测试目录已删，Mac 的 RustDesk 和配置没动。测试虚拟机上装好、改了服务器以后本机 ID 从 9 位变成 10 位：测试服务上这个 9 位 ID 被以前几轮装的（不同密钥的）安装版锁过公钥，新装的换了密钥，注册回 `UUID_MISMATCH`，客户端随机换了 ID（第三期 01 的锁定规则，整机回滚的环境才会碰到）。证据在 A 的 `C:\leapgate-e2e\evidence\m7a-p2-1106\`（`results.txt`、`shots\`、`tools\`）。
 
+#### M8 切换，安装版（测试虚拟机，2026-11-06 20:00~21:25，被测 `57c0087fd`）
+
+按 11 §5.3。构建：新界面（`-Ui leapgate`）`leapgate.exe` `A1FA2192…`、`libleapgate.dll` `570E2E52…`、便携单文件 `leapgate-0.4.0-x86_64.exe` `CF5EFA8F…`、发布目录 zip `204B25C1…`；旧界面（`-Ui upstream`，同一提交）`leapgate.exe` `7F7BFDD1…`、`libleapgate.dll` `26FF0C84…`；"构建时间早"的对照是 `8769ee3ce` 的新界面构建（`libleapgate.dll` `609FDC3A…`）。端点 A 当控制端（新界面便携版），测试虚拟机当被控端（先回滚快照；快照里管理员提权不弹框）。
+
+| 项 | 结果 |
+|---|---|
+| "安装"卡：卡片文案、点后进行中 | 通过。`8769ee3ce` 构建：点后卡片变"正在安装…"，便携版窗口一直在，服务起来的同一秒便携版退出。`57c0087fd` 便携单文件：采样（每 0.7 秒）见便携版进程活到约 3.5 秒，服务 Running 后约 0.5 秒退出；点击后的卡片文字没采到（第一次点击的采样起得太晚） |
+| "安装"卡：装完安装版接手 | **复测通过（`fb1acefa2`）**。`57c0087fd` 不通过：便携单文件"安装"、zip 目录"升级"共 4 次，装完 60 秒内都没有界面和托盘进程，只有 `--service`、`--server`（`8769ee3ce` 那次能起来是竞速碰巧赢了，根因见 §10.16"在子进程里装"）。改成在子进程里装以后，用 `fb1acefa2` 的构建在测试虚拟机上复测（2026-11-06 22:00~22:09）：<br>"安装" 4 次（zip 目录 3 次、便携单文件 1 次），"升级" 3 次（先 `--silent-install` 装 `8769ee3ce`，构建时间 18:27，停掉它的服务和进程后起便携版；zip 目录 2 次、便携单文件 1 次）。每次点击后约 0.7 秒内便携版界面被脚本的 `taskkill` 结束，约 3.5 秒时安装版的界面（有窗口）和 `--tray` 同时起来，服务 Running，子进程退出 0。升级后卸载项 `BuildDate` 是新的（21:44）、`DisplayVersion` 0.4.0。<br>失败回卡片：从路径带 `%` 的目录起便携版点"安装"，卡片下出现"安装失败：Installer path or name contains characters unsafe for cmd.exe"，便携版还在。<br>做法：WMI 进程跟踪看父子进程和退出码，每 0.5 秒采一次进程和窗口（手册 §25）。<br>**审查后复测（`4e6d0a3ed`，2026-11-06 23:13~23:22）**：管道不再留给安装版和托盘（§10.16）。"安装" 2 次（zip 目录、便携单文件各 1 次），"升级" 2 次（先装 `8769ee3ce`；zip 目录、便携单文件各 1 次），每次安装版界面和 `--tray` 都起来，升级后 `BuildDate` 22:58、`DisplayVersion` 0.4.0。审查给的触发路径在装完和升级完各走一遍：关主窗口 → 托盘打开（还是原来的界面）→ 用链接连本机 ID → 输入密码处"取消"；再结束界面进程 → 托盘打开（新界面，父进程是托盘）→ 同样连一次再取消。4 次界面进程都还在。同一路径在 `fb1acefa2` 上，托盘开的新界面在会话结束时中止 |
+| 服务、开机自启、快捷方式、防火墙、卸载项 | 通过。服务 `Leapgate`（显示名 `Leapgate Service`，自启，`--service`，Running）；`Startup\Leapgate Tray.lnk`；开始菜单 `Leapgate\` 下 `Leapgate.lnk`、`Uninstall Leapgate.lnk`；公共桌面快捷方式；防火墙 `Leapgate Service` 入站、出站各一条（程序是安装目录里的）；`HKCR\leapgate`（带 `URL Protocol`）；卸载项 `DisplayVersion` = `0.4.0`（M8-5），`InstallLocation` = `C:\Program Files\Leapgate`；管道 `\\.\pipe\Leapgate\query`、`query_service`；服务配置目录有 `Leapgate.toml`、`Leapgate2.toml`、`log\server\`。第二期清单 §4 第 3 条起各条都过 |
+| 设置沿用 | 通过。装完服务配置目录的 `Leapgate.toml`、`Leapgate2.toml` 大小和便携版用户配置一致（`--import-config` 带过去）；安装版界面里 ID 和便携版相同；便携版里设的固定密码，A 用原密码连安装版成功（出现新界面连接管理小窗）；ID 服务器、Key 也在（能注册、能连）。固定密码、一次性密码都不打印 |
+| "升级"卡 | 通过。装 `8769ee3ce`（构建时间 18:27）后跑 `57c0087fd` 便携版，主页出现"已安装的 Leapgate 版本低于当前版本。"和"升级"；点后"正在升级…"，便携版窗口一直在；完成后卸载项 `BuildDate` 是新的（20:21）、`libleapgate.dll` 哈希是新的。再测自定义路径：用旧界面（`-Ui upstream`）的安装页（安装路径用文件夹选择框改成非默认路径）装在自定义路径，再跑便携版"升级"：安装路径、服务路径、卸载项都留在自定义路径，默认路径没有被创建。装完同样没有界面接手（`57c0087fd`；`fb1acefa2` 复测通过，见上一条。改后点了以后便携版窗口不再"一直在"，脚本卸载那一步就把它结束） |
+| 覆盖安装 | 通过。旧界面安装版（自定义路径）→ 新界面"升级"：目录里没有旧界面独有的文件（`desktop_multi_window_plugin.dll`、`file_selector_windows_plugin.dll`、`url_launcher_windows_plugin.dll`、`window_size_plugin.dll`），服务、托盘是新界面的。反过来用旧界面的安装页装回去：装在已装的自定义路径，没有 `dartjni.dll` 等新界面文件，旧界面（`FLUTTER_RUNNER_WIN32_WINDOW`）正常起来，托盘也起来。注意：从空机器上用新界面"安装"卡装在旧界面安装版上这一条，没有单独测（旧界面装着时主页显示的是"升级"卡） |
+| 托盘"打开" | 通过。关主窗口：窗口隐藏（`vis=False`）、进程都在；对托盘图标做 UI Automation 的调用（等于单击），窗口回来；不带参数再启一次同一个 exe 也让隐藏窗口回来，没有新进程 |
+| 来访小窗 | 通过。A 连进来时测试虚拟机弹出的是 `LEAPGATE_UI_CM`，进程是 `--cm`；会话关闭后进程也消失 |
+| 交换控制方向 | 通过（至今第一次有记录）。A 连测试虚拟机，"操作 > 交换控制方向"，确认框"远程设备将改为控制本机，此会话将关闭。"；点"交换"后 A 的标签关闭，A 主页显示"正在被远程控制（1 个会话）"，测试虚拟机的界面出现到 A 的会话标签（直连）；测试虚拟机日志 `Connection closed: switch sides` |
+| 链接 | 通过（有限）。`leapgate://‹ID›` 开远程桌面标签（带密码输入）；`/r`、`connection/new/`、`file-transfer/` 各开一个标签（用不存在的 ID，标签出现"未找到 ID 为 … 的设备"，文件传输的面板比其余的高一行；用已开着的同一个对端 ID 时不新开标签）；`--file-transfer ‹ID›` 在主窗口已开着时交给主窗口，新开标签，进程不增加。**没能分清的**：用不存在的 ID 时看不出标签类型（远程桌面还是文件传输）和 `/r` 是否真走中继，只有文件传输面板高度不同这一条间接证据。四种第三轮的（`port-forward`、`rdp`、`view-camera`、`terminal`）各出一条全局轻提示，文案分别是"暂不支持打开端口转发会话。""暂不支持打开 RDP 会话。""暂不支持打开摄像头会话。""暂不支持打开终端会话。"，不开标签 |
+| 主页密码行"修改"先要解锁 | 通过（部分）。设置里把密码方式改成"仅固定密码"后，主页出现"修改固定密码"，点后打开"设置固定密码"对话框，离开设置页再进设置页各小节都重新"已锁定"。快照里 UAC 不弹框，所以**看不出**这次修改是否真的走了解锁，只能确认设置页的解锁、上锁本身（"解锁"一点即解开）。PIN 路径没测 |
+| 卸载 | 通过。`--uninstall`：服务、`HKCR\leapgate`、`HKCR\.leapgate`、防火墙规则、卸载项、安装目录、开始菜单文件夹、`Leapgate Tray.lnk`、公共桌面快捷方式都没了，进程全停；服务配置目录和用户配置目录（含日志）保留 |
+| 与原版共存（M8-10） | 通过。上游 1.4.9 安装包在测试虚拟机上下载，大小 24,472,432 字节、sha256 `eaedeb00…6274`，与指定值一致；先装 Leapgate（便携"安装"卡）、再 `--silent-install` 原版：两个服务都 Running、安装目录、配置目录（`ServiceProfiles\LocalService\AppData\Roaming\Leapgate` 与 `…\RustDesk`）、`HKCR`、卸载项、管道、托盘快捷方式各自独立；两个 ID 不同（原版 9 位，Leapgate 10 位，见环境说明）；A 的新界面分别连两个都成功（各自的连接管理小窗弹出）；改 Leapgate 固定密码并重启 Leapgate 服务后，原版的 4 个进程 PID 不变，原版原密码的会话不受影响。卸载 Leapgate 时原版服务、PID、卸载项、协议、防火墙规则不变；再装回 Leapgate（原版在）正常；卸载原版时 Leapgate 的服务、PID、ID 不变 |
+| 外呼（第二期 §5） | 部分通过。打开 DNS 客户端日志后（20:55~21:08，含服务重启、设置各页、登录对话框、安装、升级、连接、交换控制方向）共 170 条查询，**没有 `rustdesk` 开头或包含的名字**；能看到 4 个 STUN 服务器（`stun.antisip.com`、`stun.cloudflare.com`、`stun.l.google.com`、`stun.nextcloud.com`）。没做：10 分钟连续使用、登录（只开了登录框，没提交）、"Auto update"那条（新界面没有这个选项） |
+| 卸载（第二期 §9） | 通过：卸载后各项都清掉（见"卸载"行）；卸载后原版 Running、ID 和配置没变（同"共存"行）；重装 Leapgate 再卸原版，Leapgate 不受影响。没做：虚拟显示驱动那条 |
+| 取消 UAC | 未验证（快照不弹框，按 11 §5.4 留给维护者） |
+| 打印机 | 未验证（构建不带驱动，没装打印机） |
+
+**新发现**
+1. **装完不起界面（`57c0087fd`，`fb1acefa2` 已修）**：见"安装"卡第二行。`57c0087fd` 的便携版点"安装"或"升级"后，便携版退出、服务起来，但没有安装版的界面和托盘；`8769ee3ce` 的同一操作会起。根因是新服务的 `--server` 拿不到主 IPC，结束了正在等安装脚本的便携版（§10.16"在子进程里装"）。
+2. **旧界面的构建时间没刷新**：`-Ui upstream` 的构建（`build.py` 路径）日志里没有刷新 `build.rs` 的动作，装出来卸载项 `BuildDate` 是 `2026-11-05 05:51`（前一天的残留），新界面构建的是当次的（`2026-11-06 20:21`）。结果：旧界面构建出来的便携版是否提示"升级"，不取决于当次构建时间（11 §4.4 的副作用比预想的更不可控）。coder 查过：原因见第 3 条，那份产物的 `libleapgate.dll` 是旧的；脚本在两种界面的 cargo 之前都改 `build.rs` 的修改时间，重编 `-Ui upstream` 时构建时间是当次的。
+3. **旧界面安装的卸载项版本是 `1.5.1`**：旧界面的安装页（`--install`）装出来 `DisplayVersion` 是上游版本，新界面"安装"卡装出来是 `0.4.0`。M8-5 的版本挂钩只对新界面的安装生效，还是旧界面的 Rust 没带挂钩，没追，需要时回头查。**coder 查过（2026-11-06）**：是那份旧界面产物里的 `libleapgate.dll` 是旧的。它里面的构建时间是 `2026-11-05 05:51`（构建 worktree 05:42 检出过 M6b 的 `8efb531f0`），也找不到任何 M8 的代码（例如 `leapgate install: ` 这段日志文字），所以 `install_me` 里没有 M8-5 的挂钩。第 2 条"构建时间没刷新"也是同一个原因。用同一个构建脚本在 `fb1acefa2` 上重编 `-Ui upstream`，`flutter\build\…\Release\libleapgate.dll` 和 `target\release\librustdesk.dll` 是同一份，构建时间是当次的（22:12），带 M8 的代码。旧 DLL 怎么进了那份产物没查出来，构建脚本本身没发现问题。
+4. 旧界面的安装页默认路径是**已装的路径**（自定义路径装着时再进安装页，路径框是自定义路径），不是 `Program Files`。上游行为。
+5. 便携单文件第二次双击不重新解压：解压目录里 `leapgate.exe`、`libleapgate.dll` 的修改时间在 21:15 的第二次启动后仍是第一次的 20:29（顺带观察，便携包那一节由便携版验收做）。
+6. 便携版从 `%LOCALAPPDATA%\leapgate` 起时进程路径是 `…\leapgate\.\leapgate.exe`（带 `.\`），`scripts/e2e/leapgate-uia.ps1` 和 `leapgate-post-input.ps1` 按路径精确比较会找不到进程；测试虚拟机上的副本改成了先 `GetFullPath`。总仓库 `ui/m8` 里的两份已改成比较前把进程路径也规范化。
+
+**环境说明**：测试虚拟机没有回滚，留在安装了 `57c0087fd` 新界面的状态（路径 `C:\Program Files\Leapgate`，固定密码是测试值），由主会话回滚；A 的配置文件和测前备份逐个哈希一致，A 上的 Leapgate 已停。测试虚拟机上本机 ID 是 10 位（第三期 01 的锁定规则，同 M7a 记录）；原版在测试虚拟机上装完又卸载了。证据在 A 的 `C:\leapgate-e2e\evidence\m8-1106\`（`build-new.log`、`build-new2.log`、`build-up.log`、旧界面安装页截图、`tools\`）。
+
+#### M8 切换，安装版：覆盖安装回归（测试虚拟机，2026-11-07 01:25~01:35，旧界面 `fb1acefa2`、新界面 `4e6d0a3ed`）
+
+上一轮旧界面那份产物里混进了旧 DLL（见上"新发现"第 3 条），所以用新编的旧界面重测两个方向。没有回滚、没有关机。旧界面 `libleapgate.dll` `96DFA9F7…`（构建时间 22:15，zip 解开后和目录版哈希一致），新界面便携目录 `libleapgate.dll` `ED8FDE17…`。每步前先 `Stop-Service Leapgate` 加结束全部 `leapgate.exe`，再起下一个。
+
+| 方向 | 结果 |
+|---|---|
+| 旧界面装在新界面上（旧界面自己的安装页：`leapgate.exe --install`，800×600，点"同意并安装"） | 通过。约 6 秒后服务 Running、4 个进程。安装目录 94 个文件 = 旧界面目录 92 个 + `RuntimeBroker_leapgate.exe` + `Uninstall Leapgate.lnk`（这两个是安装脚本生成的），逐个哈希与旧界面目录一致、0 个不符；新界面独有的 `dartjni.dll`、`meta.toml`、字体和 `app_icon` 资源都没了。进程：服务 `--service`、`--server`、`--tray`、旧界面主窗口，都来自 `C:\Program Files\Leapgate`。卸载项 `DisplayVersion` = `0.4.0`、`BuildDate` = `2026-11-06 22:12`（上一轮那份旧 DLL 装出来的是前一天的时间，这次对了）。A 的新界面连进来后，起的是安装目录里的 `leapgate.exe --cm`（旧界面的小窗；窗口类这次没查） |
+| 新界面便携版的"升级"卡装回新界面 | 通过。关干净后从 zip 解开的目录起新界面便携版，主页出现"已安装的 Leapgate 版本低于当前版本。/ 升级"（UIA 读到）。点"升级"后 4.1 秒便携版退出，安装版界面窗口和托盘出现，服务 Running。安装目录 33 个文件 = 新界面目录 31 个 + 上面那两个生成的，哈希 0 个不符；旧界面独有的 `desktop_multi_window_plugin.dll`、`file_selector_windows_plugin.dll`、`url_launcher_windows_plugin.dll`、`window_size_plugin.dll` 都没有。卸载项 `DisplayVersion` = `0.4.0`、`BuildDate` = `2026-11-06 22:58`，`libleapgate.dll` `ED8FDE17…`，进程同上（`--service`、`--server`、`--tray`、界面） |
+
+测试虚拟机停在装着 `4e6d0a3ed` 的状态，服务、界面、托盘都在跑。中途 telechir 对它约 40 分钟没有响应（01:00 前后到 01:24，`machines` 一度显示不可用），自己恢复，期间发出的 `exec_admin` 没有执行，恢复后重发。
+
+#### M8 切换，便携版（两台端点，2026-11-06 22:18~23:45，被测 `fb1acefa2`）
+
+按 11 §5.2 前五条（压力项、最新 stable 留给下一轮）。构建：新界面目录 `app-ui-m8-fb1acefa2`（`libleapgate.dll` `BFE63945…`、`flutter_windows.dll` `8667024A…`）、便携单文件 `leapgate-0.4.0-fb1acefa2.exe`（`5AFCB7F4…`）和同名 zip；旧界面（`-Ui upstream`）`libleapgate.dll` `96DFA9F7…`（构建时间 22:15，带 M8 的代码，字符串 `leapgate install: ` 在里面；`leapgate.exe` `7F7BFDD1…` 与以前的旧界面相同）。端点 A（台式机）、B（笔记本）各一份。期间端点 B 两次长时间联系不上（约 22:20~22:35、23:12~23:35），后半段互连的另一端改用测试虚拟机的安装版（`4e6d0a3ed`），见下表标注。
+
+| 项 | 结果 |
+|---|---|
+| 冒烟 §2 启动 | 通过。窗口类 `LEAPGATE_UI_MAIN`，左栏三位一组的 ID、密码行、"已就绪"，日志 `leapgate ui: version 0.4.0` 和 `this device id`；再启动一次：只剩一个进程，隐藏的窗口回到前台 |
+| §3 连接框 | 通过（点到即止）。输入设备名出"搜索结果"、第一行"连接到 ‹输入›"、结果带"最近"标；"修改 ID"回主页并把 ID 填进框；不存在的 ID 出"未找到 ID 为 … 的设备。…"、"关闭标签""修改 ID"。`/r` 后缀没验成（输入时前面残留了字符，连了一个错的 ID），`--relay` 在下面验了 |
+| §4 连接过程 | 通过：A→B 自研 ICE 胜出直连（`leapgate ice: selected`，标签"直连"）；`--relay` 经中继（只有 `Relay` 行、没有 ICE 行，标"经中继"）；要密码（两步进度、密码框有焦点）；密码错（"密码错误"）；输对加"记住密码"，之后不带密码直接进。未验证：2FA、等对方接受、选用户会话、不安全连接、自动重试、对方重启、1.5 秒唤醒（本轮没做，按"未验证"记） |
+| §5 标签和输入、工具栏 | 通过（点到即止）：标签、"×"关闭、工具栏展开，画面、输入、操作、会话四个菜单都能打开并列出项（`20-session-menus.txt`）。键盘、全屏、V1 未验证 |
+| §6 关闭 | 通过。有会话时关窗出"断开全部 1 个会话并关闭窗口？"，选"在后台运行"并"断开"：会话断开、窗口隐藏、进程留着；再启动一次程序窗口回来 |
+| §11 主页和设置 | 通过（部分）。设置的 19 个小节逐个打开都有内容（`30-settings-sections.txt`）；关于页：版本 0.4.0、"基于 RustDesk 1.5.1"、构建日期、指纹。其余各条未验证 |
+| §12 被控端连接管理小窗 | 通过（部分）。B→A、测试虚拟机安装版→A 连入后，A 起 `--cm` 进程，日志 `Start cm`。小窗里的各项未验证 |
+| §13 账号 | 部分。登录对话框打开；密码错出"用户名或密码错误"、对话框不关；取消后回到原页。空用户名、空密码的两条提示没读到（读屏里没有对应文字，可能脚本时机问题），登录成功后各项、地址簿、共享簿、同组设备都没做（没有账号） |
+| §14 出口 | 通过（经中继）。B 开"允许作为出口"，A 出口页"按 ID 指定出口"输 B 的 ID、"使用"：卡片"可用 · 经中继"（那台的对端配置里有始终经中继），`socks5h` 和 HTTP CONNECT 访问 https 站点都是 200；"停止"后监听关闭（curl 失败）。其余各条未验证 |
+| §15、§16 设置 | 见 §11 行，只验了小节能打开 |
+| §17 文件传输 | 通过（部分）。A→B：上传 3 MB、下载 2 MB，两边哈希一致，队列显示"已完成"。其余各条未验证 |
+| 默认 ID 加盐（新界面便携版，空配置目录） | 通过。日志 `Generated id 471945469`：9 位，大于等于 268435456。旧界面同一做法得同一个数（由 MAC 决定，是确定的）。配置挪开再放回，哈希一致 |
+| 冷启动 `--connect` | 通过，但有一个观察。新界面没运行时 `leapgate.exe --connect ‹ID› --password …` 起来后本进程就是主进程（一个进程），会话连上；回到主页，本机区 ID 对，但一次性密码一直是"正在生成…"，状态行写"无法连接服务器，正在自动重试。请检查网络连接。"（等了 1 分钟以上不变），因为按 `core_main.rs` 这条路径本进程不起服务。服务器其实可达，文案对用户有误导；这台这时也不能被连。以"如实记录"，是否算问题请主会话定 |
+| 旧界面五项（两端旧界面，22:58~23:17） | 通过。①带密码连接：自研 ICE 直连，`handle_peer_info`；②`--relay`：中继，无 ICE 行；③文件传输窗口：上传、下载各一个 2 MB 文件，两边哈希一致；④TCP 端口转发（本地端口到 example.com:80）：curl 200；⑤出口（B 开 `leapgate-allow-exit`）：socks5h、HTTP CONNECT 访问 https 站点都是 200。顺带：空配置目录起一次，`Generated id 471945469` |
+| 便携包（清单 §20） | 通过。①双击单文件：2 秒内解到 `%LOCALAPPDATA%\leapgate`（33 个文件，含一个以前就有的 `RuntimeBroker_leapgate.exe`，不是这次解出的）并起来，`libleapgate.dll` 哈希和目录版一致；②第二次双击：已在运行时不新开进程；结束后再双击，数据文件的修改时间不变（没重解），只有 `meta.toml` 被重写；③进程路径是 `…\leapgate\.\leapgate.exe`（已知）；④zip 解开直接能跑，主窗口 UIA 读到树 |
+| 测试虚拟机安装版当对端（`4e6d0a3ed`，端点 B 离线期间） | 通过。A（新界面便携版）→ 安装版：直连（`host/v4`），工具栏出来；安装版 → A：连入后 A 起小窗。安装版的固定密码和手上的测试文件对不上（先"密码错误"），我用该机的 `--password`（`exec_admin`）重设成同一个测试值才连上；A→安装版第一次重连还出现过一次"对方已断开连接"（服务端日志 `closed: connection manager`），点"重新连接"后连上，没再复现 |
+
+**新发现**
+1. **便携版主页左栏在默认窗口下，"安装"卡显示时导航被挤到栏底之外**（默认窗口约 1290×800 逻辑像素，密码行显示"也可使用固定密码"那一行时）：UIA 里"出口"高度只剩 17、"设置"在栏底之外，截图只看得到"设备"。左栏本身能滚，要把真实光标放到左栏上再滚才行（投递的滚轮消息 Flutter 不认其坐标），所以是"有安装卡时要滚一下才看得到出口和设置"，不是点不到；观感上这个首屏不太好，留给外观检查看（`shots/a-home-left.png`，截图里一次性密码已遮）。
+2. **冷启动 `--connect` 后主页状态误导**：见上表。
+3. 脚本：`leapgate-uia.ps1 -Op Dump` 会原样打出主页的一次性密码，要自己遮；`CloseSessions` 对旧界面要调两次才关掉远程桌面窗口；`m-ft.cmd` 这类 `.cmd` 会等被起的进程退出，旧界面起文件传输窗口时进程不退出，计划任务超时被 `/end` 杀掉，要换成"detached 启动、立刻写完成标记"的 `.cmd`。
+
+**没做**：压力项和最新 stable 检查（下一轮）；清单 §7 的 4K 场景（端点 B 现在是 1366×768 的一块屏）；§8 的"升级"卡不点；§13 登录后的各条、§15、§16 的功能细项、§17 的暂停重试跳过等、§18 的第四期挪来几项、§19 压力项。
+
+**环境**：A、B 的配置文件和测前备份逐个哈希一致（A 8 个、B 4 个），两端 Leapgate 都停，`task\` 空，没有残留计划任务和包内副本，原版 RustDesk 和 mihomo 没碰；A 的便携包解出目录 `%LOCALAPPDATA%\leapgate`、`zip-test`、测试数据都已删。测试虚拟机：固定密码被我重设成了 `pw.txt` 里那个值（hash 与 A 的 `pw-vm110-m8.txt` 一致），没回滚、没关机、没卸载，它上面的界面当时有一个连向 A 的会话标签（A 停止后随之结束）。证据在 A 的 `C:\leapgate-e2e\evidence\m8-1106-portable\`。
+
+#### M8 切换，压力项和最新 stable（2026-11-06 23:41~2026-11-07 02:00，被测 `4e6d0a3ed`）
+
+按 11 §5.2 第二条（03 §8.7 第 2 段，清单 §19）和 03 §8.8。控制端是端点 A（台式机）上的新界面便携版（`app-ui-m8-4e6d0a3ed`，计划任务启动），被控端是端点 B（笔记本）上的新界面便携版（目录 `app-ui-m8-fb1acefa2`，后半段换成同一个 `4e6d0a3ed`，见下面第 1 条发现）；第二个会话标签的对端是测试虚拟机的安装版（它没有显示输出，只有 1280 宽的基本显示适配器）。脚本和原始数据在 A 的 `C:\leapgate-e2e\evidence\m8-1106-stress\`（`tools\stress50.ps1`、`dlgloop.ps1`、`uiapoll.ps1`，`stress50-run1~4.csv`、`dlgloop.csv`、`uiapoll.csv`、`v1-cpu-gpu*.txt`、`80-`~`82-` stable）。
+
+| 项 | 结果 |
+|---|---|
+| 会话标签开关 50 次（清单 §19 第 1 条） | **句柄不通过，内存和崩溃通过**。每轮：`--connect` 开标签、等工具栏、停 3 秒、点"关闭标签"、等 15 秒（`stress50-run4.csv`，50 轮全部连上、关闭都成功，连上平均 3.6 秒）。A 控制端进程（单进程，pid 不变）：句柄 1425 → 1519（线性，斜率 **+2.02 个/轮**，前半 1.98、后半 2.05，即每开关一个会话标签约多 2 个句柄不还）；私有内存 255 → 280 MB（斜率 +0.27 MB/轮，前半 0.47、后半 0.11，在收敛）；工作集 445 → 505 MB（+0.37 MB/轮，后半 0.27）；线程 206 不变。Windows 应用程序日志没有 `leapgate.exe` 的 1000 事件，没有崩溃。另两次间隔短的运行（`run1`、`run3`）上涨的句柄斜率同量级（1.9、约 1.6） |
+| 开着 UIA 客户端反复开关标签和对话框（§19 第 2 条） | 通过。`uiapoll.ps1` 用原生 COM 的 IUIAutomation（`leapgate-uia.ps1 -Op Dump`）连续轮询 14 分钟，共 575 次，退出码全 0，从没拿不到树；同时 `dlgloop.ps1` 做 20 轮"开标签 → 点关闭出'断开全部 1 个会话并关闭窗口？'→ 取消 → 开'新建连接'标签 → 关标签"，每一步全部成功、进程一直在、没有 1000 事件。元素数随界面状态变（主页 13~15、会话 54~56、对话框 30~31）；有 6 次（约 1%）读到元素在但名字全空（对话框切换的瞬间），下一次轮询就恢复，树没有消失 |
+| 3~4 个会话标签同时开着的 CPU、GPU（§19 第 3 条） | **只做了 2 个会话标签 + 主页，结论不明显**。端点只有一台有画面（B），第二个标签连测试虚拟机，4 个标签凑不出来。A 的进程 CPU（占一个核的百分比，30 秒均值，各两轮）：停在主页 11.5 / 13.2，停在 B 的标签 16.5 / 14.9，停在测试虚拟机的标签 13.1 / 13.0；GPU 3D 0.4% / 0.9% / 0.5%，视频解码 0.7% 不变。B 桌面基本不动，画面变化少，主页略低于 B 的标签，但差距在测量噪声（第一轮主页 31%、同样的主页第二轮 12%）里，不能证明"明显低于"。V1 的有效判据是 M2a 当时的验收，这里没有重做 |
+| 最新 stable 检查（03 §8.8） | **Flutter 3.47.9 仍是最新 stable**（发布 2026-10-29；2026-11-07 读 `storage.googleapis.com/flutter_infra_release/releases/releases_windows.json` 的 `current_release.stable`）。官方 SDK、官方引擎，Impeller 开（stderr `Using the Impeller rendering backend (OpenGLESSDF)`）：①`build-client.ps1 -Steps bridge,build -ForceBridge -FlutterRoot … -AllowOfficialEngine` 通过（`flutter_windows.dll` `30494FB0…`、`app.so` `BCD54FB1…`；第一次尝试在 cargo 编 `libc` 时报 `0xc0000043`（文件共享冲突）失败，重试通过，没追原因）；②analyze：core 96 条（含上游复制件 `file_model.dart` 的 5 条 warning，和 M7a 同数），app 1 条 warning（`file_dialogs.dart:269` 参数 `unchanged` 没人传；其实 `_NameDialog.rename` 经重定向构造函数传了，3.47.9 的 analyzer 不算这种传法。`c8ce376a2` 把它改成 `required`、新建文件夹那条显式传 `null`，3.47.9 的 `dart analyze` 对这个文件 0 条，3.44.9 下 app 照旧 0 条）；③core 305、app 1186 个测试通过（app 2 个跳过）；④画廊导出 2972 个文件，3.47.9 和 3.44.9 各一份；⑤上屏：A 起 3.47.9 的构建连 B（1920×1080 屏），5 分钟，每分钟窗口截图（只记哈希，图已删）每次不同、大小 430~440 KB，进程一直在、句柄 1500 左右、工作集 172~234 MB，没有崩溃事件，stderr 只有那一行 Impeller。**4K 上屏未验证**：端点 B 只有 1920×1080 的物理屏和 1366×768 的虚拟屏（GameViewer），没有 4K 的源 |
+| 复原 | 构建 worktree `.wt/ui-m0-build` 停在 `4e6d0a3ed`，锁文件和 `analysis_options.yaml` 已还原，只剩构建产生的未跟踪 `libs/portable/app_metadata.toml`。用 3.44.9 加自编引擎重编（`-ForceBridge`），`flutter_windows.dll` `8667024A…`（带补丁 0003）、`data\app.so` `C24D4907…`（与 `app-ui-m8-4e6d0a3ed` 一致）；`libleapgate.dll`、`leapgate.exe` 是重新编的，哈希和当时那份不同（时间戳等） |
+
+**新发现**
+1. **被控端新界面便携版在两次连入间隔很短时，连接管理小窗起不来，之后一段时间连不上**。A 每轮收尾只等 2 秒就开下一轮（上一个会话的小窗进程还在退出的几秒里）：`run1` 第 26 轮起、`run3` 第 23 轮起、`run2` 第 7 轮起，之后每一次都是 A 报"对方已断开连接"。B 的日志（主日志）：新连入 `Connection opened` 后马上 `Connection closed: connection manager`、`ipc to connection manager exit: expected`，此后没有 `Start cm`，也没有新的 `--cm` 进程（B 上只剩一个主进程）；小窗日志里最后一次 `Got new connection … cm ipc connection closed from connection request`。`run1` 里手动点"重新连接"（约 8 分钟后）就好了，B 重启也好。没有崩溃事件。换 B 为 `4e6d0a3ed` 同样出现（`run3`），所以不是 `fb1acefa2` 的问题。每轮间隔拉到 15 秒（`run4`）50 轮零失败。真实使用里"断开后几秒内重连"就会撞上，建议 coder 查小窗进程退出和新连入的竞争（可能是小窗的命名管道正在关闭时收到新连接，之后主进程认为小窗还在、不再拉起）。复现：A、B 都是新界面便携版，A 用 `leapgate.exe --connect ‹B› --password …` 开标签、3 秒后关标签，间隔约 5 秒循环，多半在 20~30 轮内出现
+   - **结论（coder，2026-11-07，已修，`c8ce376a2`）**：B 只关掉了一个连接，"之后一直连不上"在 A 和测试脚本。
+     - **B 那一次**：新界面小窗在最后一个来访断开后还活 6~6.5 秒（复制件丢了上游 `onRemoveId` 的当场关窗，只剩 500 ms 轮询数 12 次的兜底，见 10.10"没有来访后退出"）。下一次连入正好落在这段末尾：轮询请求关窗，页面 `onWindowClose` 的 `closeAll` 拿到刚登记的新来访，`cmCloseConnection` 把它关掉，控制端收到不重试的"Closed manually by the peer"，然后小窗进程退出。`run1` 的证据：上一个连接 `#1324` 23:54:43.585 关，`#1327` 50.037 连入（相隔 6.45 秒），小窗 50.097 收到它的登记、50.143 `closed from connection request`，主日志同刻 `#1327 Connection closed: connection manager`；`run3` 的 `#2028` 同样。2026-11-07 用 `fb1acefa2` 当 B、`-Gap 3` 重现了两次：`#222`、`#231` 分别在上一个关闭后 6.40、6.46 秒连入，85~95 ms 后被关。2 秒间隔那一轮这次是 5.2~5.4 秒就重连，13 轮里没撞上（2 秒还是 3 秒撞得上，取决于 A 每轮的耗时）；那一轮第 14 轮起是另一回事：会话照常连上，A 的 UIA 脚本却报主窗口下没有 `FLUTTERVIEW`，A 进程句柄一下多了约 230、线程多了 45（当时同机在编构建），原因没查，重启 A 后之后 150 轮没再出现。
+     - **"之后每次都失败"不在 B**：`run1` 从 23:55:05 到手动重连的 00:03:23，B 主日志里一个连入都没有；A 的日志只有 `link received leapgate://connect`，没有新会话。A 的会话标签停在"对方已断开连接"，脚本等不到工具栏、点不到工具栏上的"关闭标签"，标签一直留着；之后的 `--connect` 打到同一台设备时，注册表返回已有的视图、不重新连（`core/lib/leapgate/session_registry.dart` 的 `open`，和上游 `DesktopTabController.add` 已有标签就跳过去一致）。"手动点重新连接就好了""重启 B 也好"都是因为换掉了这个死标签。真实使用里用户看得到"对方已断开连接"，点"重新连接"即可。
+     - **上游对照**：B 换旧界面便携版 `fb1acefa2`（`libleapgate.dll` 22:19 构建，`96DFA9F7…`），A 照旧是新界面 `4e6d0a3ed`，2 秒间隔 50 轮零失败；B 日志 50 次连入、50 次 `Start cm`、0 次 `connection manager`：每个会话结束后小窗进程当场退出，下一次连入起新的。
+     - **改法**：core `models/server_model.dart` 的 `onClientRemove`，列表因关闭变空时当场 `window.close()`（上游 `onRemoveId` 的对应），测试 `core/test/cm_server_model_test.dart` 改一条、加一条。
+     - **验证**：B 用新构建 `app-ui-m8-c8ce376a2`（A 照旧 `4e6d0a3ed`），`-Gap 2` 50 轮、`-Gap 3` 50 轮都零失败；两轮里 B 日志 100 次连入、100 次 `Start cm`、0 次 `connection manager`；`-Gap 3` 那一轮有 38 次重连落在上一个关闭后 5.9~6.6 秒（修之前被关的正是这一段）。证据在 A 的 `C:\leapgate-e2e\evidence\m8-1107-cmrace\`（`up-b-gap2.csv`、`new-fb1-b-gap2.csv`、`new-fb1-b-gap3.csv`、`fix-b-gap2.csv`、`fix-b-gap3.csv`）
+2. **控制端每开关一个会话标签多留约 2 个句柄**（上表第一行），线性、不收敛，每天几千次才碰到上限，不急；没有查来源，也没有拿旧界面做对照
+   - **结论（coder，2026-11-07）：上游也这样，只记录、不修**。A 换旧界面便携版 `fb1acefa2` 当控制端（B 是修好的新界面），同样 50 轮"`--connect` 开会话、停约 6 秒、关窗、等 10 秒"：句柄斜率 **+2.05 个/轮**（1327 → 1422），和新界面当控制端同一晚的三轮（+2.24、+2.28、+1.92）同量级。旧界面的远程窗口没有 UIA 树，脚本按窗口类 `RustdeskMultiWindow` 找、发 `WM_CLOSE` 关（`m8-1107-cmrace\tools\old-ctl50.ps1`，数据 `up-a-ctl.csv`）；关窗后上游的窗口不隐藏，所以表里"关上"一列全是 0，B 日志 50 次连入、50 次 `Peer close`，会话确实都关了。来源在两个界面共用的部分（Rust 会话或引擎、驱动），没往下查
+3. 测试虚拟机失联约 40 分钟（见上"覆盖安装回归"），`vm110` 的 `exec` 在失联期间不返回，`machines` 也报不可用；这一类留给环境说明
+4. 工具：`leapgate-e2e.ps1 -InTask` 在 A 上这轮起不来任务（`task … did not finish within 120 s`，计划任务没把程序拉起来，原因没查），改用 `run-task.ps1` 加 `m-start-new.cmd`。`run-task.ps1 -Arg 'a','b'` 经 `pwsh -File` 调用时逗号数组被当成一个字符串，要在脚本里再包一层
+
+**没做**：4 个会话标签同时开着（只有 2 个对端）；4K 上屏（没有 4K 的源）；用旧界面做句柄斜率对照。
+
+**环境**：A 的 Leapgate 配置 8 个文件和测前备份（`backup\pre-m8s-1106`）逐个哈希一致（`99-A-config-after.txt`），B 4 个配置文件一致（`Leapgate2.toml` 前 12 位 `93916754BB49`）；两端我起的 Leapgate 都已停，`task\` 空，没有残留计划任务，没有包内副本；B 上我传的新界面 zip 和解开的目录已删；原版 RustDesk（A、B）、mihomo 没碰。测试虚拟机的临时文件（旧界面解开目录、zip、截图、清单）已删，留装着 `4e6d0a3ed` 的安装版。
+
+#### M8 切换，最终外观检查和最终构建冒烟（2026-11-07 03:50~04:30，被测 `d3073a33d`）
+
+对象是准备合入 main 的提交 `d3073a33d`（相对 `4e6d0a3ed` 改了：安装卡文案缩短、左栏提示卡图标改成文字第一行行首的内联元素并把文字到按钮的间距从 12 改成 8、来访小窗最后一个来访离开时当场退出；Rust 没改）。这一版有意偏离样稿 `A-P1.html` 的 `.pcard`（样稿里图标单独一列），所以按新排版判断，没有把"和样稿不同"本身算成问题。
+
+**构建**（`.wt\ui-m0-build` 检出 `d3073a33d`，`build-client.ps1 -Source` 编新界面，等到"产物："一行才拷）：目录 A 的 `C:\leapgate-e2e\app-ui-m8-d3073a33d\`，单文件 `leapgate-0.4.0-d3073a33d.exe`、zip `leapgate-0.4.0-d3073a33d.zip`（同在 `C:\leapgate-e2e\`）。
+
+| 文件 | sha256 |
+|---|---|
+| `leapgate-0.4.0-d3073a33d.exe` | `7078c1342fbb491f9d59fd1babc7a23467949ae1e1d924d83898d4e61508a60f` |
+| `leapgate-0.4.0-d3073a33d.zip` | `f5e6637f441000b70c195e08103414b584ee1837f4f8db6f01c986ce2375a07c` |
+| `leapgate.exe` | `b25544ab2fc67f60158b35974339df333108b09df43871b6d705c299ca309303` |
+| `libleapgate.dll` | `b68535e246d2ed59ebf9249ab1562c0c2358a1351400cb330538ff3e5a584ebb` |
+| `data\app.so` | `4c71fd445541af71ac0c417e8305379e9168ddafdf2b2984b1270723096344cf` |
+| `flutter_windows.dll` | `8667024a358cb83d352278dd649d929c59492d54b04bef022d08668baa480c50`（带补丁 0003） |
+
+`libleapgate.dll` 和上一版 `4e6d0a3ed`（`ED8FDE17…`）不同，是新编的，不是旧产物。
+
+**结论**（图在 A 的 `C:\leapgate-e2e\evidence\m8-1106-visual\shots\`；真机用 PrintWindow 或整屏截图，A 是 150% 缩放，一次性密码区已盖色块）
+
+| # | 项 | 结论 | 依据 |
+|---|---|---|---|
+| 1 | 主页左栏安装卡，A，默认窗口，浅色、深色 | **通过** | `a-light-0.png`、`a-dark-0.png`（放大 `a-light-card-zoom.png`）。文字第二、三行、"安装"按钮左边缘同在 x=115（放大图），图标在第一行行首、和文字间留一个字宽；没有难看的折行，只有"用户/账户控制"在行尾行首断开（读起来是"用户 / 账户控制"，小问题，见下）。"设备 / 出口 / 设置"三项导航在默认窗口里不滚动、完整可见（UIA 里三项都在窗口内，登录按钮和下方说明也在）。A 上没点"安装" |
+| 2 | 升级卡、"正在升级…"，vm110 | **通过** | `vm-upgrade-light.png`（窗口最大化后重绘的整屏，100% 缩放）：卡片"已安装的 Leapgate 版本低于当前版本。"、"升级"按钮，文字和按钮左边缘对齐（图标 x=41、文字 x=40、按钮 x=40）。点击后 `vm-upgrading-s12.png`：按钮变成带转圈的"正在升级…"（灰），宽度比"升级"大但仍在卡片内、左对齐。约 3 秒后便携版退出，安装版界面（`vm-after-s59.png`）和托盘起来了 |
+| 2' | 升级后核对（最终构建冒烟） | **通过** | 升级前卸载项 `BuildDate` 2026-11-06 22:58、`libleapgate.dll` `ED8FDE17…`（`4e6d0a3ed`）；升级后 `BuildDate` 2026-11-07 03:51、`libleapgate.dll` `B68535E2…`、`app.so` `4C71FD44…` 都和这次构建一致；进程是 `--service`（会话 0）、`--server`、`--tray`、界面各一个，服务 Running，`DisplayVersion` 0.4.0 |
+| 3 | 失败态、系统错误卡 | **通过**（看画廊） | 画廊 `local-notice_*` 浅色深色各一组拼图 `gallery-local-notice-light.png`、`-dark.png`：失败态"安装失败：…"红字和文字、按钮同一左边缘，"安装"按钮还在、可以重试；错误卡（红底）、信息卡、警告卡（带"启动服务"）都对齐。真机没造失败态。画廊导出（3.44.9）2980 张，没有 RenderFlex 溢出 |
+| 4 | 全局轻提示，vm110 安装版触发 `leapgate://port-forward/123456789` | **通过，有一条小建议** | `vm-toast-link.png`：窗口底部居中的白色圆角条，"暂不支持打开端口转发会话。"，阴影清楚、不压住登录区。建议：它用的是绿色对勾（成功）图标，"暂不支持"不是成功，画廊里有警告变体（`toast_warning_*`），建议这类提示改用警告或中性图标 |
+| 5 | 标题栏图标，主窗口和会话标签页，浅色和深色 | **通过** | `a-light-icon-zoom.png`、`a-dark-icon-zoom.png`（主窗口，A 150%，放大 4 倍：青绿色圆角方块里一扇白门，边缘清楚），`a-session-light-0.png`、`a-session-dark-0.png`（会话标签页，图标同位同大小）；vm110 100% 的 `vm-scr1.png` 左上角也清楚。画廊 `title-bar_*` 没有异常 |
+| 6 | 来访小窗当场退出，A 连 vm110 安装版再断开 | **通过** | 连上后 vm110 起 `--cm`（`Start cm`）；A 关标签后 vm110 日志 `Connection closed: Peer close` 04:19:00.468，每 100 ms 采样的进程表在 04:19:00.677 就没有 `--cm` 了（约 0.2 秒）。再测一轮：关标签（04:20:28.416）→ `--cm` 消失（04:20:28.568，0.15 秒）→ 1.5 秒后重新 `--connect`（A 的脚本记 04:20:30.06）→ vm110 04:20:30.495 新连入、04:20:30.614 `Start cm`、04:20:30.695 新 `--cm` 进程，A 上会话工具栏出来，`vm-cm-again.png` 里小窗重新出来（"11967 正在远程控制本机 断开"）。没有"对方已断开连接" |
+
+**小问题（都不挡合入）**
+1. 全局轻提示的图标语义（上表第 4 项）。
+2. 安装卡文字在"用户 / 账户控制"处折行，"用户账户控制"这个词被拆开；可以把文案改成"……也能操作用户账户控制（UAC）窗口"之外的断句，或接受（Flutter 对中文按字折行，没法按词）。
+3. 画廊里错误卡的"无法写入配置文/件：拒绝访问（错误/5）。"折行难看（"文件"、"错误 5"被拆开）。是样例文字加窄卡片（280 宽）造成，真机没造出这类错误；不是这一版改的。
+
+**环境**：A 的 Leapgate 配置 8 个文件和测前备份（`backup\pre-m8v-1107`，和 `pre-m8s-1106` 一致）逐个哈希一致（`99-A-config-after.txt`），A 上 `task\` 空、没有残留计划任务、我起的 Leapgate 已停；主题测试用应用内"外观"（只改 Leapgate 配置，已还原）。vm110 没回滚、没关机：停在装着 `d3073a33d` 的安装版（服务、界面、托盘都在跑）。vm110 的新界面窗口第一帧会一直是白的（整屏截图和 PrintWindow 都白），要触发一次重绘（UIA 点"最大化"或有状态变化）才画出来，之后正常。
+
 ### 10.6 core 的结构（M1）
 
 03 §3.3 第 1、2、4、5、6、8 条在 `core/lib/leapgate/` 落成下面几个文件，复制进来的 models 和改写的 `FfiModel` 接在这上面。
@@ -1595,7 +1737,7 @@ Telegram 机器人设置改成两步（`leapgate_bot_lookup` 只查、什么都�
 **CM 页面（CM coder，第一段）**
 
 - 初始化：`--cm` 分支照上游 `flutter/lib/main.dart:285-302`：先建 `AppCore`，再按 CM 初始化平台接口（`kAppTypeConnectionManager`，它会调 Rust 的 `cm_init`，`core/lib/models/native_model.dart` 里已有这一处），登记 CM 的全局事件 `add_connection`、`on_client_remove`、`show_elevation`、`update_voice_call_state`（登记在 `appCore.events`，10.6；`theme`、`language` 不登记，见下面"主题、语言"），第二段加了 `chat_server_mode`、`cm_file_transfer_log`（见下面"第二段"）。不读 `hide_cm`（03 §5.2 M3）。
-- 复制件：`flutter/lib/models/server_model.dart` 复制进 core，CM 用到的部分按"只删界面调用"保留（客户端列表、`addConnection`、`onClientRemove`、接受和拒绝、断开、提权、撤销交换、语音状态、关闭全部、500 ms 的轮询和约 6 秒退出），主窗口和 Android 的部分（密码、ID、起停服务）整段删掉，来源行写明删了什么。标签不用上游的 `DesktopTabController`，用自己的列表。一条连接的两次 `add_connection`、`on_client_remove` 的关闭标记、同一个人重连时删旧的那条，照上游的规则（06 §4.2）。
+- 复制件：`flutter/lib/models/server_model.dart` 复制进 core，CM 用到的部分按"只删界面调用"保留（客户端列表、`addConnection`、`onClientRemove`、接受和拒绝、断开、提权、撤销交换、语音状态、关闭全部、500 ms 的轮询和约 6 秒退出；最后一个来访离开时当场关窗，见下面"没有来访后退出"），主窗口和 Android 的部分（密码、ID、起停服务）整段删掉，来源行写明删了什么。标签不用上游的 `DesktopTabController`，用自己的列表。一条连接的两次 `add_connection`、`on_client_remove` 的关闭标记、同一个人重连时删旧的那条，照上游的规则（06 §4.2）。
 - 窗口：紧凑态 320×500、贴主显示器工作区右上角、置顶、不能改大小；展开侧栏时向左展开到 700×500（2026-10-31 组件审查后定：样稿是 320×500，01 §3.3 写"约 300~320 宽"，选 320；外框 320 含不可见缩放边框，客户区 150% 下约 309，组件按最窄客户区 304 设计，见 §10.5 M3 必修项的修法；尺寸用组件里的 `kLgCmWidth`、`kLgCmHeight`、`kLgCmExpandedWidth`，不另写一套）；隐藏照上游用透明加隐藏、不销毁；runner 里 CM 的初值（现在 800×600）改成和 Dart 一致。
 - 贴边小条：同一个窗口缩成一条，贴主显示器上边、靠右，沿上边左右拖动、位置只在本次运行内记住（记在 `LgCmWindow` 的内存里，不写 LocalConfig：CM 进程的 LocalConfig 是启动时读的快照，写任何一个键都会把整份旧配置存回文件，盖掉主窗口之后改过的本地配置；第一段原来写的 `leapgate-cm-strip-offset` 键第二段审查后去掉）；授权后自动收起的时机和取消条件照上游 `server_model.dart:571-590`、`server_page.dart:180-186`（01 §3.3 改成"收成小条"而不是最小化）；新来访时恢复成完整小窗并置顶。
 - 远程点击保护：照上游 `server_page.dart:1237-1253`，被拦下时在按钮旁提示"无法远程执行此操作"；`allow-remote-cm-modification` 开着时放行。小条上的"断开"同样受保护。
@@ -1607,6 +1749,13 @@ Telegram 机器人设置改成两步（`leapgate_bot_lookup` 只查、什么都�
 - core：客户端列表的增删和两次事件、已断开的保留和清理、自动收起的取消条件、没有来访时退出的计时（用假时钟），各有单测；Rust：C1 的分类（含出口表清理）、`Msg` 的编解码。app：06 §5.1 列的每种状态一个行为测试。
 - 合入前：`git diff main -- flutter/` 为空；core 的 `flutter analyze --no-fatal-infos` 在 3.44.9 下不超出 92 条 info 的基线，新复制的 `server_model` 带来的上游提示单列；app 0 条；复制件不跑格式化；改已有文件时不对整个文件跑 `dart format`。
 - 审查重点：Rust 看两头分发都在、出口计数和清理、旧界面的 CM 不受影响；CM 看事件处理和上游规则一致、窗口和小条的状态切换、远程点击保护；组件看样稿必修项。
+
+**没有来访后退出**（M8 压力测试后改，2026-11-07，`c8ce376a2`）
+
+- 上游有两条关窗的路：标签控制器移除最后一个标签时 `server_page.dart` 的 `onRemoveId` 当场 `windowManager.close()`（`onClientRemove` 以关闭移除、`sendLoginResponse` 拒绝时都走它）；500 ms 轮询里空着数到 12 次再关是兜底。复制件不用标签控制器，第一条路跟着丢了，小窗进程在最后一个来访断开后还要活 6~6.5 秒。
+- 后果：同一台控制端约 6 秒后再连进来，登录正好落在轮询请求关窗和 `onWindowClose` 之间，`closeAll` 把这个新来访一起关掉（服务端 `Connection closed: connection manager`，控制端收到不重试的"Closed manually by the peer"）。详见 10.5"M8 切换，压力项"新发现 1 的结论。
+- 改法：`onClientRemove` 里列表因关闭（`close` 为真）变空时，隐藏之后当场 `window.close()`（带 `leapgate:` 注释），对应上游的 `onRemoveId`。拒绝时上游也当场关；这里拒绝后服务端随即结束连接、发来 `close` 为真的 `on_client_remove`，同样走这一行。轮询的 6 秒计数保留，只管上游也只靠它的情形：启动后一直没有来访、轮询发现和服务进程的列表对不上并重读成空表。
+- 剩下的竞争窗口和上游一样：另一台控制端恰好在这一台断开后的几十毫秒内登录，仍会被 `closeAll` 带走。
 
 **CM 的已知限制**
 
@@ -2259,3 +2408,67 @@ Telegram 机器人设置改成两步（`leapgate_bot_lookup` 只查、什么都�
 - B：外壳的多视图（切换、键盘归属、远程桌面不在前台时 V1）、各种确认（标签 ×、右键关闭、关闭其他标签、关窗、视图断开）、标签上的进度环和提醒标记、各个入口；队列面板各状态和对话框各态，用 `FakeFileJobs` 和假的提问。
 - C：02 §2.2"P7 桌面要画的状态"里两栏那几组每组一个行为测试，用 `FakeFileTransferModel`；拖放按坐标判断落点。
 - 合入前：`git diff main -- flutter/` 为空；core `flutter analyze --no-fatal-infos` 在 3.44.9 下不超出 92 条 info 的基线，app 0 条；复制件不跑格式化；改已有文件时不对整个文件跑 `dart format`，只格式化新文件。远程桌面的冒烟照跑（改的是它每天都走的外壳，10 §4.1）。
+
+### 10.16 M8 的分工约定
+
+依据：总仓库 `docs/新界面/11-M8拆法.md`（下称"11"；维护者 2026-11-06 把 M8-1~M8-10 全部按推荐定）。提示卡的行为以 01 P1 区块 B 为准（已回写），文案按 01 §7.6。
+
+**分支**：只有一个 coder，直接在 `ui/m8`（从 main `7c8490a1e` 切）上做，整合 worktree 是 `.wt/ui-m4`（块 2 的桥和 pub 缓存在它里面）。`git add` 只加自己改的文件（`libs/hbb_common` 在这个 worktree 里有换行符造成的假改动，不要提交它）。writer 同时改总仓库里的文档，不碰这个仓库。
+
+**Rust 导出（块 2，`src/leapgate_ffi.rs` 加 `src/leapgate_hooks/` 新文件 `install.rs`）**
+
+| 导出 | 参数 | 返回 |
+|---|---|---|
+| `leapgate_install` | `kind: String`：`install` 或 `upgrade` | 非 `SyncReturn`（frb 在工作线程里跑，Dart 拿到 `Future<String>`）。**成功时不返回**：安装在子进程里跑（见下），子进程退出码是 0 时本进程 `std::process::exit(0)`。失败时返回 JSON `{"result":"uac_denied"\|"failed","text":"‹原文›"}` |
+
+- `install`：路径传空串（`install_me` 用 `get_default_install_info()` 的默认路径，`src/platform/windows.rs:1641-1647`），选项是默认的开始菜单和桌面快捷方式、**不装打印机**（构建里没带驱动）。选项照上游安装页的写法：不是 JSON，是空格分隔的词（`install_page.dart:286-288` 拼成 `startmenu desktopicon printer` 的子集，`install_me` 用 `contains` 认），所以"安装"传 `startmenu desktopicon`（`leapgate::install::INSTALL_OPTIONS`）。
+- `upgrade`：路径 `ui_interface::install_path()`，选项由 `platform::get_install_options()`（`:1377`，注册表值的 JSON `STARTMENUSHORTCUTS`、`DESKTOPSHORTCUTS`、`PRINTER`）照安装页的读法换成上面的词（`leapgate::install::upgrade_options`：快捷方式没记 `"0"` 就要，打印机记了 `"1"` 才要；安装页另外会实查打印机装没装，这里不查）。
+- **在子进程里装**（验收后改，`fb1acefa2`；原来在界面进程里直接调 `install_me`）：界面进程起 `leapgate.exe --leapgate-install ‹kind›`（stdout 接管道），等它退出。子进程在 `core_main` 里被一行 `leapgate:` 挂钩（`leapgate_hooks::install::child`）接走：算路径和选项、调 `install_me(…, silent = false, …)`，成功退出 0，失败把上面的 JSON 写进管道、退出 1。界面进程见 0 就退出，否则把管道里的内容原样交回卡片（空的时候是 `failed`，原文写退出码）。
+  - 管道不留给孙进程（审查必须改，`4e6d0a3ed`）：子进程一开头就把管道句柄设成不可继承，并把自己的标准输出换成空句柄，失败时经留下的句柄写结果。原先 `run_after_run_cmds` 起的 `cmd /c … & ‹exe›` 和 `--tray` 都把这条管道当标准输出继承下去，托盘之后用 `run_me` 开的界面也一样。便携版被结束后管道只剩写端，这些进程里一执行 `println!` 就报 os error 232 而 panic，release 是 `panic = 'abort'`，整个进程中止。触发路径之一：断开最后一个会话 → `ContextSend::enable(false)` → `libs/clipboard/src/platform/windows.rs` 的 `println!("Succeeded to uninit cliprdr")`。测试虚拟机上用 `fb1acefa2` 复现了：结束原界面、从托盘打开一个新界面（父进程是托盘），用链接连本机 ID、在输入密码处点"取消"，日志 `clipboard context for file transfer destroyed.` 之后界面进程就没了。由 `cmd /c` 起的那个原界面同样操作没有中止（推断：经 cmd 起的图形程序没拿到这条管道，没有查证）。
+  - 根因：便携版的界面进程持有主 IPC（`\\.\pipe\Leapgate\query`）。脚本 `sc start` 之后，新服务起的 `--server`（SYSTEM，用户会话里）拿不到这个管道，就走 `server.rs` `stop_main_window_process` → `platform::try_kill_rustdesk_main_window_process`，用 `NtTerminateProcess(…, 1)` 结束"同名、命令行只有一个参数、用户不同"的进程，也就是正在等脚本的界面进程。这时脚本还剩 `reg add …SoftwareSASGeneration` 和 `--uninstall-remote-printer` 两步，`run_cmds` 没返回，`run_after_run_cmds` 起安装版和托盘的那几行就没机会跑。测试虚拟机上用 WMI 进程跟踪（`Win32_ProcessStartTrace` / `StopTrace`）和服务的 `log\server\` 对上了：`--server` 起来约 50 ms 后记 `ipc is occupied by another process, try kill it`、`terminate process ‹便携版 PID› success`，便携版退出码 1，此后没有任何由它起的进程。`8769ee3ce` 那次能起来，是这场竞速碰巧赢了（两个提交的 Rust 完全一样）。
+  - 子进程没有主 IPC，命令行也不止一个参数，`--server` 的那一步放过它（上游的安装页 `--install` 也是这样躲开的）。脚本开头的 `taskkill`（`get_uninstall(false, …)`，`:1837-1858`）按 PID 只放过子进程，界面进程在卸载那一步就被结束：点了以后便携版窗口先消失，几秒后安装版起来。
+  - 失败回卡片：提权被取消、`install_me` 在提权前报的错（MSI、路径校验）都发生在脚本开跑之前，界面进程还在，照旧回到卡片。脚本已开跑后才失败（少见）的回不到卡片，界面已被 `taskkill` 结束；改之前这种情况界面也会被 `--server` 结束，一样回不来。
+- `silent` 传 `false`：`run_after_run_cmds`（`:3976-3989`）起 `--tray` 和安装版。安装版本该等 2 秒（`cmd /c timeout /t 2 & ‹exe›`），实测 `timeout.exe` 当场退出 1（继承来的标准输入不是控制台），安装版和托盘同时起来。那时便携版界面已被 `taskkill` 结束，安装版找不到它的窗口，不会把自己交过去（11 §4.1 担心的情况）。
+- `uac_denied`：提权被取消。`installer_shell.rs` `run_elevated_and_wait` 的 `ShellExecuteExW` 返回 `ERROR_CANCELLED`（1223），windows-rs 的错误文字是"‹系统语言的说明› (0x800704C7)"，`installer_handoff.rs` `run_cmds` 把它格式化进新错误（原错误链丢了，没法 downcast），所以按文字里的 `0x800704C7` 判（`leapgate::install::failure`）；其余一律 `failed`，带原文（`{e:#}`）。MSI 装过的机器上 `install_me` 直接报错（`:1636-1639`），也是 `failed`。
+- 配置：安装脚本建服务时带 `--import-config ‹当前用户的配置文件›`（`get_import_config`，`:3938-3950`），读码看便携版的 ID、固定密码、服务器会带进安装版；验收实测（11 §5.3）。
+- 单测：原因码映射；`upgrade` 取路径和选项的那层（不真的装）。
+
+**上游文件**：`install_me` 里版本号的两处（`:1652` 拆主次版本号、`:1806` 的 DisplayVersion）改用 Leapgate 的版本（`leapgate::ui::VERSION`，0.4.0），各一行，带 `leapgate:` 注释（M8-5；11 原写"一行"，读码后是同一函数里的两行）。`update_me`（`:3452` 起）不改：官方更新已关，Leapgate 不走它。`src/core_main.rs` Windows 参数分派的开头加一行 `leapgate:` 挂钩，把 `--leapgate-install` 交给 `leapgate_hooks::install::child`（见上"在子进程里装"）。
+
+**Dart**
+
+- 提示卡（`app/lib/pages/home/home_page.dart` 的本机区，`LgLocalNotice` 带按钮）：
+  - 条件：系统错误优先；否则便携版（`!bind.mainIsInstalled()`）显示"安装"卡；否则 `is_installed_lower_version`（现有绑定，coder 找对应的 `bind.main…`）为真时显示"升级"卡。一次一张。状态放 core 的本机状态 model（`leapgate/local_status.dart`），页面只画。
+  - 点了：按钮变进行中（`LgButton` 的 busy），卡片其余不变；`Future` 回来（只会是失败）时卡片下写一行原因，按钮恢复。`uac_denied` 写"未获得管理员权限，未安装。"（升级卡写"……未升级。"），`failed` 写"安装失败：‹原文›"（升级卡"升级失败：‹原文›"）。原文为空时只写"安装失败。"。实现：`LgLocalNotice` 加了 `actionBusy`（按钮文字换成"正在安装…""正在升级…"）和 `actionError`（按钮下一行红字，在卡片里，和"启动服务"失败的写法一样）。
+  - 便携版连着别人或有出口在跑时点"安装"：不另加确认（上游也不问；安装会断开所有会话，写进已知限制）。
+- 链接（`app/lib/shell/links.dart`）：`file-transfer`（`--file-transfer` 和 `leapgate://file-transfer/…`）接到 `navigation.dart` 的 `openFileTransfer`，参数和 `connection/new` 的密码、中继一样带过去；`port-forward`、`rdp`、`view-camera`、`terminal`、`terminal-admin` 发全局轻提示（`appCore.toasts`），文案"暂不支持打开‹端口转发 / RDP / 摄像头 / 终端›会话。"，日志照旧。`links_test.dart` 跟着改。
+- 标题栏（`app/lib/widgets/lg_title_bar.dart:335-344`）：占位方块换成应用图标，从 `app/windows/runner/resources/app_icon.ico` 导出 32×32 的 PNG 放 `app/assets/`，按 16 逻辑像素画；读屏不读它（装饰）。
+- ARB：新键以 `homeInstall`、`homeUpgrade`、`linkUnsupported` 开头。
+
+**构建脚本（`scripts/windows/build-client.ps1`、`setup-toolchain.ps1`，总仓库）**
+
+- 这几项在总仓库：coder 在总仓库的 worktree `.wt/leapgate-m8`（分支 `ui/m8`）里改、提交，不碰总仓库主检出，主会话合。
+- `-Ui` 默认值改成 `leapgate`；`-Ui upstream` 保留（旧界面便携版）。
+- 新界面加便携打包：第 3 步之后调 `client/libs/portable/generate.py`（参数照 `build.py:969-997`），包名 `leapgate-‹libs/leapgate 版本›-x86_64.exe`，放在产物目录旁边；产物核对加上它；同时打一个发布目录的 zip（M8-3）。dpiAware 那一行先不删，验收看高 DPI 下的表现再定。
+- `setup-toolchain.ps1` 装 brotli（`generate.py` 要它）；`build-client.ps1` 开头检查有没有，没有就报错并提示跑 setup。
+- 构建前强制刷新构建时间（`BUILD_DATE`，"升级"卡比的就是它，11 §4.4）：根 crate 的 `build.rs` 只声明了 `rerun-if-changed`（`build.rs`、`Cargo.toml`、`windows.cc`），没有可借的环境变量，所以脚本在 cargo 之前把 `build.rs` 的修改时间改成现在（内容不动，git 看不出改动），两种界面都这样。
+- 默认服务器不注入（M8-4）：脚本开头打印 `LEAPGATE_RENDEZVOUS_SERVER` 等几个变量是否设了，空着就写"未注入默认服务器"。
+- 发布 worktree（M8-9）由主会话建，脚本里不写死路径。
+
+**已知限制**
+- `--install`（exe 或便携包名以 `install.exe` 结尾、手动带参数）在第三轮安装页之前仍是写日志后退出（M8-2）。
+- 切换后保留的旧界面便携版如果构建时间晚于装着的新界面，会显示"升级"卡，点了会装回旧界面（11 §4.4，不改旧界面）。
+- 便携版点"安装"会断开所有会话和出口（安装脚本停服务、杀进程）；装的过程中便携版窗口先消失，安装版几秒后起来。
+- 默认窗口（约 1280×800）下有安装卡时，左栏的导航原来要滚一下才看得到（卡片文字在左栏里折成 7~8 行）。维护者定缩短文案（`82bbe721b`），提示卡改成图标在文字第一行行首（`5dc677b02`）以后，安装卡、升级卡都不用滚（安装卡正好放满，没有余量）；安装失败、最小窗口仍要滚，左栏没有常显的滚动条。
+- 便携版没在运行时用 `--connect` 冷启动：会话照常连，但这个进程不起服务（`src/core_main.rs` 带参数时不走 `start_server`），主页本机区一直是"正在生成…"和"无法连接服务器，正在自动重试。请检查网络连接。"，这台也连不进来。上游这时只有远程窗口、没有主页，所以不暴露。只有便携版从命令行冷启动才会碰到：安装版有服务，链接只有安装版注册。文案有误导，修要加状态，按罕见情况不修（2026-11-07）。
+- 第三轮链接（端口转发、RDP、摄像头、终端）的"暂不支持打开……会话。"轻提示和其他全局轻提示一样带成功图标：`Toasts` 没有分语气，失败类的轻提示（网络设置导入失败、Wayland 重置失败等）从 M2b 起就是这样。记进 `docs/新界面/待调.md`。
+
+**左栏"滚不动"的核查（便携版 tester 报，2026-11-06）**：报告是左栏导航被挤出栏底、"设置"和"登录"叠在一起、滚轮滚不动。核查下来左栏是能滚的，代码就是 01 §2.1 的写法：账号区固定在底部，其余部分在一个 `SingleChildScrollView` 里。
+- 真机（测试虚拟机，`fb1acefa2` 便携版，窗口 1168×685，有安装卡）：把真实光标放到左栏上发滚轮，"设备""出口""设置"三项都滚到"登录"上面、完整可见。光标停在右侧内容区、只往视图投递带左栏坐标的滚轮消息时，左栏不动：Flutter 的 Windows 嵌入层按真实光标的位置分派滚轮，不看消息里的坐标。投递消息的自动化脚本因此滚不动左栏；"叠在一起"是 UI Automation 报的未滚动前视口外的节点位置。
+- 组件测试（真实字体，浅色、深色，1280×760 和 960×560 两种主页尺寸，安装卡、升级卡、安装失败三种状态）滚动前后的截图在 `C:\leapgate-e2e\evidence\m8-1106\left-column\`，滚动后三项都在账号区上方。
+- 回归测试：`app/test/home_page_test.dart`"the mouse wheel brings the navigation into view"，两种尺寸各一条：有安装卡时滚轮把三项导航滚进视口、在"登录"上方，点"出口"能切过去。
+
+**测试**
+- Rust：原因码映射、`upgrade` 取值；`cargo test -p leapgate`、根 crate 的 `leapgate_hooks` 测试照跑。
+- Dart：卡片的出现条件（便携、已装且较旧、系统错误优先）和失败态（假导出）；链接分派（`file-transfer` 打开文件传输、第三轮几种出轻提示）。
+- 合入前：`git diff main -- flutter/` 为空；core analyze 不超出 91 条 info 的基线，app 0 条；新界面和旧界面都要能编（Rust 改了 `install_me`）。

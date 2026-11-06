@@ -1,5 +1,10 @@
+import 'dart:async';
+
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart' show Scrollable;
 import 'package:flutter_hbb/leapgate/app_core.dart';
+import 'package:flutter_hbb/leapgate/bridge.dart';
 import 'package:flutter_hbb/leapgate/local_status.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:leapgate_ui/pages/home/password_row.dart';
@@ -234,4 +239,94 @@ void main() {
       await unmount(tester);
     },
   );
+
+  group('install card (01 P1 block B, M8)', () {
+    testWidgets('portable: "安装" is busy while it runs, then says why it failed', (
+      tester,
+    ) async {
+      // Made in the test's zone, so its answer arrives on the next pump.
+      final lg = lgBind as FakeLeapgate..installAnswer = Completer();
+      await pumpHome(tester, id: '135792468', setUp: (m) => m.installed = false);
+      expect(find.textContaining('安装后，对方远程控制本机时'), findsOneWidget);
+      await tester.tap(find.text('安装'));
+      await tester.pump();
+      expect(lg.installs, ['install']);
+      expect(find.text('正在安装…'), findsOneWidget);
+
+      lg.installAnswer.complete(
+        '{"result":"uac_denied","text":"The operation was canceled by the user. (0x800704C7)"}',
+      );
+      await tester.pump();
+      expect(find.text('未获得管理员权限，未安装。'), findsOneWidget);
+      expect(find.text('安装'), findsOneWidget);
+      await unmount(tester);
+    });
+
+    testWidgets('an older installed version: "升级", a failure with its text', (
+      tester,
+    ) async {
+      // Made in the test's zone, so its answer arrives on the next pump.
+      final lg = lgBind as FakeLeapgate..installAnswer = Completer();
+      await pumpHome(
+        tester,
+        id: '135792468',
+        setUp: (m) => m.installedLowerVersion = true,
+      );
+      expect(find.textContaining('已安装的 Leapgate 版本低于当前版本。'), findsOneWidget);
+      await tester.tap(find.text('升级'));
+      await tester.pump();
+      expect(lg.installs, ['upgrade']);
+      lg.installAnswer.complete(
+        '{"result":"failed","text":"Cannot install the EXE package over an existing MSI installation"}',
+      );
+      await tester.pump();
+      expect(
+        find.text(
+          '升级失败：Cannot install the EXE package over an existing MSI installation',
+        ),
+        findsOneWidget,
+      );
+      await unmount(tester);
+    });
+
+    // 01 §2.1: with a card the column scrolls, the account area stays at the bottom.
+    for (final size in const [Size(1280, 760), Size(960, 560)]) {
+      testWidgets('the mouse wheel brings the navigation into view at $size', (
+        tester,
+      ) async {
+        await pumpHome(
+          tester,
+          id: '135792468',
+          size: size,
+          setUp: (m) => m.installed = false,
+        );
+        final column = find
+            .ancestor(
+              of: find.textContaining('安装后，对方远程控制本机时'),
+              matching: find.byType(Scrollable),
+            )
+            .first;
+        final mouse = TestPointer(1, PointerDeviceKind.mouse);
+        await tester.sendEventToBinding(
+          mouse.hover(tester.getCenter(find.textContaining('安装后，对方远程控制本机时'))),
+        );
+        await tester.sendEventToBinding(mouse.scroll(const Offset(0, 1000)));
+        await tester.pump();
+        final viewport = tester.getRect(column);
+        final login = tester.getRect(find.text('登录'));
+        for (final label in ['设备', '出口', '设置']) {
+          final item = tester.getRect(
+            find.descendant(of: column, matching: find.text(label)),
+          );
+          expect(viewport.contains(item.topLeft), isTrue, reason: label);
+          expect(viewport.contains(item.bottomRight), isTrue, reason: label);
+          expect(item.bottom, lessThanOrEqualTo(login.top), reason: label);
+        }
+        await tester.tap(find.text('出口'));
+        await tester.pump();
+        expect(find.text('出口'), findsNWidgets(2));
+        await unmount(tester);
+      });
+    }
+  });
 }

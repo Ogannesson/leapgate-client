@@ -27,6 +27,15 @@ class _StatusBind implements RustdeskImpl {
   @override
   Future<String> mainGetTemporaryPassword({dynamic hint}) async => 'a1b2c3';
 
+  bool installed = true;
+  bool lowerVersion = false;
+
+  @override
+  bool mainIsInstalled({dynamic hint}) => installed;
+
+  @override
+  bool mainIsInstalledLowerVersion({dynamic hint}) => lowerVersion;
+
   @override
   Future<String> mainGetOption({required String key, dynamic hint}) async =>
       options[key] ?? '';
@@ -115,6 +124,16 @@ void main() {
       model = await poll();
       expect(model.incoming, const IncomingSessions(2, controlled: true));
     });
+
+    test('the install card (01 P1 block B): portable, older installed, error first', () async {
+      expect((await poll()).installCard, isNull);
+      bind.lowerVersion = true;
+      expect((await poll()).installCard, InstallCard.upgrade);
+      bind.installed = false;
+      expect((await poll()).installCard, InstallCard.install);
+      bind.error = 'Failed to write the config file';
+      expect((await poll()).installCard, isNull);
+    });
   });
 
   group('LocalStatusModel.networkWarning (M6-4)', () {
@@ -154,6 +173,30 @@ void main() {
       expect(model.status, ServiceStatus.ready);
       expect(model.networkWarning, isNull);
     });
+  });
+
+  test('while installing the clicked card stays, and a failure stays with it', () async {
+    final lg = FakeLeapgate();
+    setLgBindForTesting(lg);
+    final model = LocalStatusModel()..installedLowerVersion = true;
+    final done = model.install(InstallCard.upgrade);
+    // The script uninstalls first, then writes the new build time.
+    model.installed = false;
+    expect(model.installCard, InstallCard.upgrade);
+    model
+      ..installed = true
+      ..installedLowerVersion = false;
+    expect(model.installCard, InstallCard.upgrade);
+    // A second click sends nothing.
+    await model.install(InstallCard.upgrade);
+    expect(lg.installs, ['upgrade']);
+
+    lg.installAnswer.completeError(StateError('no answer'));
+    await done;
+    expect(model.installing, isFalse);
+    expect(model.installFailure?.card, InstallCard.upgrade);
+    expect(model.installFailure?.uacDenied, isFalse);
+    expect(model.installFailure?.text, contains('no answer'));
   });
 
   group('LocalStatusModel.passwordRow (01 P1 block A)', () {

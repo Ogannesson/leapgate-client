@@ -224,17 +224,33 @@ void main() {
       async.elapse(const Duration(milliseconds: 500));
       expect(window.count('hide'), 1);
 
-      // A visitor in between starts the count again.
+      // A visitor in between starts the count again; one turned away here leaves without an
+      // event of its own.
       async.elapse(const Duration(seconds: 3));
       send(async, added(client(1)));
       async.elapse(const Duration(milliseconds: 500));
-      send(async, removed(1, close: true));
+      model.sendLoginResponse(model.clients.single, false);
 
       async.elapse(const Duration(seconds: 6));
       expect(window.count('close'), 0);
       async.elapse(const Duration(milliseconds: 500));
       expect(window.count('close'), 1);
       async.elapse(const Duration(seconds: 5));
+      expect(window.count('close'), 1);
+      model.dispose();
+    });
+  });
+
+  test('the last visitor gone closes the window at once; a disconnected one keeps it', () {
+    fakeAsync((async) {
+      final model = start();
+      send(async, added(client(1, authorized: true)));
+      send(async, removed(1, close: false));
+      expect(window.count('close'), 0);
+
+      send(async, added(client(2, authorized: true)));
+      send(async, removed(2, close: true));
+      expect(model.clients, isEmpty);
       expect(window.count('close'), 1);
       model.dispose();
     });

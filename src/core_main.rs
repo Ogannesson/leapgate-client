@@ -234,6 +234,7 @@ pub fn core_main() -> Option<CoreMainAction> {
         #[cfg(windows)]
         {
             use crate::platform;
+            crate::leapgate_hooks::install::child(&args); // leapgate: M8-1, LEAPGATE.md §10.16
             if args[0] == "--uninstall" {
                 if let Err(err) = platform::uninstall_me(true) {
                     log::error!("Failed to uninstall: {}", err);

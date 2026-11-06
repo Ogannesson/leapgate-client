@@ -8,8 +8,6 @@
 // Everything here only draws: the texts come from the caller (localised) and
 // the callbacks are the caller's.
 
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 
 import '../icons/lg_icon.dart';
@@ -446,6 +444,8 @@ class LgLocalNotice extends StatelessWidget {
     this.icon,
     this.actionLabel,
     this.onAction,
+    this.actionBusy = false,
+    this.actionError,
   }) : assert(actionLabel == null || onAction != null);
 
   final LgTone tone;
@@ -454,10 +454,17 @@ class LgLocalNotice extends StatelessWidget {
   final String? actionLabel;
   final VoidCallback? onAction;
 
+  /// The action is on its way: the button is busy and [actionLabel] says so.
+  final bool actionBusy;
+
+  /// Why the action failed, in red under the button; null for none.
+  final String? actionError;
+
   @override
   Widget build(BuildContext context) {
     final t = LgTokens.of(context);
     final c = t.colors;
+    final textStyle = t.textM.copyWith(color: c.text);
     final bg = switch (tone) {
       LgTone.warning => c.warningBg,
       LgTone.error => c.errorBg,
@@ -476,26 +483,55 @@ class LgLocalNotice extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: EdgeInsets.only(top: math.max(0, (t.sizes.lhM - 20) / 2)),
-                  child: LgIcon(
-                    icon ?? lgToneIcon(tone),
-                    size: 20,
-                    color: lgToneColor(c, tone),
-                  ),
+            // The icon leads the first line of the text instead of taking a column of its
+            // own: the 240 column leaves a card about 160 wide inside, and a column for the
+            // icon took 32 of it from every line. Now only the first line gives it up; the
+            // lines after it, the button and the failure line all start at the card's
+            // padding. Read out as one text; the icon is not announced.
+            SizedBox(
+              width: double.infinity,
+              child: Text.rich(
+                TextSpan(
+                  children: [
+                    WidgetSpan(
+                      alignment: PlaceholderAlignment.middle,
+                      child: Padding(
+                        padding: const EdgeInsets.only(right: LgSpace.s3),
+                        child: LgIcon(
+                          icon ?? lgToneIcon(tone),
+                          size: 20,
+                          color: lgToneColor(c, tone),
+                        ),
+                      ),
+                    ),
+                    TextSpan(text: text),
+                  ],
                 ),
-                const SizedBox(width: LgSpace.s3),
-                Expanded(
-                  child: Text(text, style: t.textM.copyWith(color: c.text)),
+                semanticsLabel: text,
+                style: textStyle,
+                // Every line the height of the text style: the icon's slot would make the
+                // first one 1 to 3 taller, and lines with a Latin digit among the Chinese
+                // 1 taller too.
+                strutStyle: StrutStyle.fromTextStyle(
+                  textStyle,
+                  forceStrutHeight: true,
                 ),
-              ],
+              ),
             ),
             if (actionLabel != null) ...[
-              const SizedBox(height: LgSpace.s3),
-              LgButton(label: actionLabel!, onPressed: onAction),
+              // As far from the text as the failure line is from the button (s2). The
+              // sample's s3 (`.pcard` gap) would leave the navigation 4 short of the
+              // default window with the install card showing.
+              const SizedBox(height: LgSpace.s2),
+              LgButton(
+                label: actionLabel!,
+                busy: actionBusy,
+                onPressed: actionBusy ? null : onAction,
+              ),
+            ],
+            if (actionError != null) ...[
+              const SizedBox(height: LgSpace.s2),
+              Text(actionError!, style: t.textS.copyWith(color: c.error)),
             ],
           ],
         ),

@@ -381,10 +381,14 @@ class _SideColumn extends StatelessWidget {
                         onView: status.showConnectionManager,
                       ),
                     ],
-                    // The hint card (01 P1 block B): only the system error in M2b.
+                    // The hint card (01 P1 block B): the system error, or installing or
+                    // upgrading (M8).
                     if (status.systemError.isNotEmpty) ...[
                       SizedBox(height: short ? LgSpace.s2 : LgSpace.s3),
                       LgLocalNotice(tone: LgTone.error, text: status.systemError),
+                    ] else if (status.installCard case final card?) ...[
+                      SizedBox(height: short ? LgSpace.s2 : LgSpace.s3),
+                      _InstallNotice(status: status, card: card),
                     ],
                   ],
                 ),
@@ -441,6 +445,46 @@ class _SideColumn extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// "安装" on the portable version, "升级" over an older installed one (01 P1 block B, M8-1):
+/// busy while the installer runs, the reason under the button when it failed. On success
+/// this process exits.
+class _InstallNotice extends StatelessWidget {
+  const _InstallNotice({required this.status, required this.card});
+
+  final LocalStatusModel status;
+  final InstallCard card;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final install = card == InstallCard.install;
+    final failure =
+        status.installFailure?.card == card ? status.installFailure : null;
+    return LgLocalNotice(
+      tone: LgTone.info,
+      text: install ? l10n.homeInstallText : l10n.homeUpgradeText,
+      actionLabel: switch ((install, status.installing)) {
+        (true, false) => l10n.homeInstallButton,
+        (true, true) => l10n.homeInstalling,
+        (false, false) => l10n.homeUpgradeButton,
+        (false, true) => l10n.homeUpgrading,
+      },
+      onAction: () => status.install(card),
+      actionBusy: status.installing,
+      actionError: switch (failure) {
+        null => null,
+        InstallFailure(uacDenied: true) =>
+          install ? l10n.homeInstallUacDenied : l10n.homeUpgradeUacDenied,
+        InstallFailure(text: '') =>
+          install ? l10n.homeInstallFailed : l10n.homeUpgradeFailed,
+        InstallFailure(:final text) => install
+            ? l10n.homeInstallFailedText(text)
+            : l10n.homeUpgradeFailedText(text),
+      },
     );
   }
 }

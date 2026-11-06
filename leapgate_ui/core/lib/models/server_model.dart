@@ -197,6 +197,10 @@ class ServerModel with ChangeNotifier {
       }
       if (desktopType == DesktopType.cm && _clients.isEmpty) {
         window.hide();
+        // leapgate: upstream closes here through its tab controller (`tabController.remove` →
+        // `server_page.dart` `onRemoveId`). Left to the 6 s count, the closing window's `closeAll`
+        // would end a visitor who reconnects about 6 s later.
+        if (close) window.close();
       }
       notifyListeners();
     } catch (e) {

@@ -254,7 +254,7 @@ void main() {
       systemError: '无法写入配置文件',
     );
     expect(find.text('正在被远程控制（2 个会话）'), findsOneWidget);
-    expect(find.text('无法写入配置文件'), findsOneWidget);
+    expect(find.textContaining('无法写入配置文件'), findsOneWidget);
     await unmount(tester);
 
     // Only a file transfer and an exit: nobody operates this device (06 M3-1).

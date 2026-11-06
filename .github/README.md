@@ -13,6 +13,7 @@ Leapgate has not been released and there is no installer to download. Only Windo
 - Leapgate's code lives in `libs/leapgate`: branding, default options, LAN address candidates for direct connections under a TUN-mode proxy, signed reports to the Leapgate API, and relay latency measurement. Upstream files only get short hooks marked `// leapgate:`.
 - The app is renamed (`leapgate.exe`, `libleapgate.dll`, its own configuration directory) so that it can sit next to RustDesk on the same machine. The official update check is disabled.
 - `libs/hbb_common` is the submodule [leapgate-cardo](https://github.com/Ogannesson/leapgate-cardo), branch `leapgate/client`. Default servers are injected at build time; a build without them never falls back to RustDesk's public servers.
+- A redesigned UI lives in `leapgate_ui/`, a separate Flutter project (packages `core` and `app`) that shares the Rust core with upstream's UI in `flutter/`. It is the UI the build produces by default. It does not have TCP tunnels, the terminal, the camera viewer or an install page yet; until it does, upstream's UI can still be built as a portable copy for those.
 
 ### Building on Windows
 
@@ -30,7 +31,8 @@ pwsh -File scripts\windows\build-client.ps1 -Source client
 - `setup-toolchain.ps1` installs pinned versions of Rust, LLVM, Flutter and vcpkg into `C:\leapgate-build`, or into `LEAPGATE_BUILD_ROOT` if set.
 - `LEAPGATE_RENDEZVOUS_SERVER` and `LEAPGATE_RS_PUB_KEY` set the default server and its public key. `LEAPGATE_API_SERVER` is optional; without it the API address is derived from the rendezvous server. If no server is injected, the client waits for the user to enter one.
 - `build-client.ps1` modifies tracked files in the source tree, so point `-Source` at a worktree used only for building if you plan to commit.
-- The output is in `flutter\build\windows\x64\runner\Release\`.
+- By default `build-client.ps1` builds the new UI. The release folder is `leapgate_ui\app\build\windows\x64\runner\Release\`. Next to it, in `runner\`, are a portable single-file `leapgate-<version>-x86_64.exe` and a zip of the release folder, `leapgate-<version>-x86_64.zip`. The version comes from `libs/leapgate` (currently 0.4.0).
+- `-Ui upstream` builds upstream's UI as a portable copy, for TCP tunnels, the terminal and the camera viewer until the new UI has them. Its output is in `flutter\build\windows\x64\runner\Release\`, with no single-file exe or zip.
 
 ### Documentation
 
@@ -51,6 +53,7 @@ Leapgate 还没有发布，没有可下载的安装包。目前只支持 Windows
 - Leapgate 的代码放在 `libs/leapgate`：品牌、默认选项、开 TUN 代理时用于局域网直连的候选地址、向 Leapgate API 签名上报、到各中继的延迟测量。上游文件里只加简短的挂钩，用 `// leapgate:` 标出。
 - 程序改了名（`leapgate.exe`、`libleapgate.dll`、独立的配置目录），目的是能和 RustDesk 装在同一台机器上。官方的更新检查已关闭。
 - `libs/hbb_common` 是子模块 [leapgate-cardo](https://github.com/Ogannesson/leapgate-cardo) 的 `leapgate/client` 分支。默认服务器在构建时注入，没有注入的构建不会退回到 RustDesk 的公共服务器。
+- 重新设计的界面在 `leapgate_ui/`，是独立的 Flutter 工程（`core`、`app` 两个包），和上游 `flutter/` 里的界面共用 Rust 核心，构建默认编的就是它。它还没有 TCP 隧道、终端、摄像头查看和安装页；补上之前，仍可以把上游界面编成便携版来用这几项。
 
 ### 在 Windows 上构建
 
@@ -59,7 +62,8 @@ Leapgate 还没有发布，没有可下载的安装包。目前只支持 Windows
 - `setup-toolchain.ps1` 把钉住版本的 Rust、LLVM、Flutter 和 vcpkg 装到 `C:\leapgate-build`；设置了 `LEAPGATE_BUILD_ROOT` 时装到它指定的目录。
 - `LEAPGATE_RENDEZVOUS_SERVER` 和 `LEAPGATE_RS_PUB_KEY` 指定默认服务器和它的公钥。`LEAPGATE_API_SERVER` 可选，不设时由会合服务器地址推出 API 地址。没有注入服务器时，客户端会等用户填好再连接。
 - `build-client.ps1` 会改动源码目录里被跟踪的文件，打算提交代码的话，`-Source` 应指向专门用来构建的 worktree。
-- 产物在 `flutter\build\windows\x64\runner\Release\` 下。
+- `build-client.ps1` 默认编新界面，发布目录是 `leapgate_ui\app\build\windows\x64\runner\Release\`。它旁边（`runner\` 下）有便携单文件 `leapgate-<版本>-x86_64.exe` 和发布目录的 zip `leapgate-<版本>-x86_64.zip`，版本取 `libs/leapgate` 的版本（现在是 0.4.0）。
+- `-Ui upstream` 把上游界面编成便携版，新界面补上 TCP 隧道、终端、摄像头之前用它跑这几项。产物在 `flutter\build\windows\x64\runner\Release\` 下，不出便携单文件和 zip。
 
 ### 文档
 

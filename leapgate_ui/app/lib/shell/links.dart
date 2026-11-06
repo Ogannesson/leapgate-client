@@ -7,15 +7,16 @@ import 'navigation.dart';
 // `leapgate://` links. The Rust core hands a later launch's arguments to the running main window
 // as a `leapgate://` link (`src/core_main.rs` `core_main_invoke_new_connection`, W1); a launch
 // that finds no main window keeps them on its own command line. The parsing follows upstream
-// `flutter/lib/common.dart:2256-2523` (`handleUriLink`, `urlLinkToCmdArgs`); M2a opens only a
-// remote desktop, the other kinds are logged.
+// `flutter/lib/common.dart:2256-2523` (`handleUriLink`, `urlLinkToCmdArgs`). A remote desktop and
+// a file transfer open (M8-7); the third round's kinds are logged and say so in a toast.
 
-/// A remote desktop to open.
+/// A remote desktop, or with [fileTransfer] a file transfer, to open.
 typedef ConnectLink = ({
   String id,
   String password,
   String switchUuid,
   bool forceRelay,
+  bool fileTransfer,
 });
 
 /// Upstream `urlLinkToCmdArgs` without the phone-only parts (`config`, `password`, the direct
@@ -73,13 +74,14 @@ List<String>? linkToArgs(Uri uri) {
   ];
 }
 
-/// The remote desktop that [args] ask for (upstream `handleUriLink`'s loop); null for anything
-/// else.
+/// The remote desktop or file transfer that [args] ask for (upstream `handleUriLink`'s loop);
+/// null for anything else. A kind of the third round is logged and gets a toast.
 ConnectLink? connectLinkOf(List<String> args) {
   String? id;
   var password = '';
   var switchUuid = '';
   var forceRelay = false;
+  var fileTransfer = false;
   String? other;
   for (var i = 0; i < args.length; i++) {
     final next = i + 1 < args.length ? args[i + 1] : null;
@@ -89,6 +91,9 @@ ConnectLink? connectLinkOf(List<String> args) {
         id = next;
         i++;
       case '--file-transfer':
+        id = next;
+        fileTransfer = true;
+        i++;
       case '--view-camera':
       case '--port-forward':
       case '--rdp':
@@ -107,8 +112,15 @@ ConnectLink? connectLinkOf(List<String> args) {
     }
   }
   if (other != null) {
-    // M2a opens remote desktops only; the other views come with their blocks.
+    // Port forwarding, RDP, camera and terminal come with the third round.
     lgBind.leapgateLog(level: 3, msg: 'leapgate ui: link not handled: $other');
+    appCore.toasts.show(switch (other) {
+      '--port-forward' => 'linkUnsupportedPortForward',
+      '--rdp' => 'linkUnsupportedRdp',
+      '--view-camera' => 'linkUnsupportedCamera',
+      _ => 'linkUnsupportedTerminal',
+    });
+    appCore.window.bringToFront();
     return null;
   }
   if (id == null) return null;
@@ -116,12 +128,13 @@ ConnectLink? connectLinkOf(List<String> args) {
     id: id,
     password: password,
     switchUuid: switchUuid,
-    forceRelay: forceRelay
+    forceRelay: forceRelay,
+    fileTransfer: fileTransfer,
   );
 }
 
 /// The arguments of a launch, or of a link handed over by a later launch: opens the remote
-/// desktop they ask for and brings the window up. [uriPrefix] is `bind.mainUriPrefixSync()`
+/// desktop or file transfer they ask for and brings the window up. [uriPrefix] is `bind.mainUriPrefixSync()`
 /// (`leapgate://`). Returns whether there was something to handle.
 bool handleLaunchArgs(List<String> args, String uriPrefix) {
   if (args.isEmpty) return false;
@@ -133,8 +146,9 @@ bool handleLaunchArgs(List<String> args, String uriPrefix) {
   return _open(linkArgs);
 }
 
-/// A link that a later launch handed to this window. Anything but a new connection is only
-/// logged, by scheme and host: the path or the query may hold a password.
+/// A link that a later launch handed to this window: a remote desktop or a file transfer opens,
+/// the third round's kinds get a toast. A link that is not a connection is only logged, by
+/// scheme and host: the path or the query may hold a password.
 bool handleLink(Uri uri) {
   final args = linkToArgs(uri);
   if (args == null) {
@@ -154,10 +168,15 @@ bool _open(List<String>? args) {
   }
   final link = connectLinkOf(args);
   if (link == null) return false;
-  mainNavigation.connect(link.id,
-      password: link.password,
-      switchUuid: link.switchUuid,
-      forceRelay: link.forceRelay);
+  if (link.fileTransfer) {
+    mainNavigation.openFileTransfer(link.id,
+        password: link.password, forceRelay: link.forceRelay);
+  } else {
+    mainNavigation.connect(link.id,
+        password: link.password,
+        switchUuid: link.switchUuid,
+        forceRelay: link.forceRelay);
+  }
   appCore.window.bringToFront();
   return true;
 }
