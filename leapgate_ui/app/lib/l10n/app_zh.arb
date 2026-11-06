@@ -1372,7 +1372,7 @@
   "filesSortAscending": "升序",
   "filesSortDescending": "降序",
   "queueStatusPausedOnly": "已暂停",
-  "homeInstallText": "本机被远程控制时，便携版可能无法正常工作，例如对方无法操作用户账户控制（UAC）窗口。建议安装 Leapgate。",
+  "homeInstallText": "安装后，对方远程控制本机时也能操作用户账户控制（UAC）窗口。",
   "homeInstallButton": "安装",
   "homeInstalling": "正在安装…",
   "homeInstallUacDenied": "未获得管理员权限，未安装。",

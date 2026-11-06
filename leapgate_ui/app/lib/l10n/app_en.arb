@@ -1588,7 +1588,7 @@
   "filesSortAscending": "ascending",
   "filesSortDescending": "descending",
   "queueStatusPausedOnly": "Paused",
-  "homeInstallText": "The portable version may not work correctly while this device is controlled remotely; for example, the remote user can't interact with User Account Control (UAC) prompts. We recommend installing Leapgate.",
+  "homeInstallText": "Once installed, the remote user can also interact with User Account Control (UAC) prompts on this device.",
   "homeInstallButton": "Install",
   "homeInstalling": "Installing…",
   "homeInstallUacDenied": "Administrator permission was not granted. Leapgate was not installed.",

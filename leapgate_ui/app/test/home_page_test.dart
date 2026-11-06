@@ -247,7 +247,7 @@ void main() {
       // Made in the test's zone, so its answer arrives on the next pump.
       final lg = lgBind as FakeLeapgate..installAnswer = Completer();
       await pumpHome(tester, id: '135792468', setUp: (m) => m.installed = false);
-      expect(find.textContaining('建议安装 Leapgate'), findsOneWidget);
+      expect(find.textContaining('安装后，对方远程控制本机时'), findsOneWidget);
       await tester.tap(find.text('安装'));
       await tester.pump();
       expect(lg.installs, ['install']);
@@ -302,13 +302,13 @@ void main() {
         );
         final column = find
             .ancestor(
-              of: find.textContaining('建议安装 Leapgate'),
+              of: find.textContaining('安装后，对方远程控制本机时'),
               matching: find.byType(Scrollable),
             )
             .first;
         final mouse = TestPointer(1, PointerDeviceKind.mouse);
         await tester.sendEventToBinding(
-          mouse.hover(tester.getCenter(find.textContaining('建议安装 Leapgate'))),
+          mouse.hover(tester.getCenter(find.textContaining('安装后，对方远程控制本机时'))),
         );
         await tester.sendEventToBinding(mouse.scroll(const Offset(0, 1000)));
         await tester.pump();
