@@ -19,18 +19,21 @@ use hbb_common::{allow_err, get_version_number, log, Stream};
 use leapgate::ft::{Command, Paused};
 use std::sync::Mutex;
 
-static EVENTS: Mutex<Option<StreamSink<String>>> = Mutex::new(None);
+/// Held so the UI's stream stays open; nothing is sent on it.
+static SUBSCRIPTION: Mutex<Option<StreamSink<String>>> = Mutex::new(None);
 
 /// `leapgate_ft_events`: a new subscription replaces the previous one; the first turns the
 /// switch on.
 pub(crate) fn set_events(sink: StreamSink<String>) {
-    *EVENTS.lock().unwrap() = Some(sink);
+    *SUBSCRIPTION.lock().unwrap() = Some(sink);
     leapgate::ft::enable();
 }
 
-fn push(event: String) {
-    if let Some(sink) = EVENTS.lock().unwrap().as_ref() {
-        sink.add(event);
+/// On the session's own event stream; nothing for a session that is not the app's.
+fn push<T: InvokeUiSession>(handler: &Session<T>, event: &[(&str, serde_json::Value)]) {
+    let ui = &handler.ui_handler as &dyn std::any::Any;
+    if let Some(ui) = ui.downcast_ref::<crate::flutter::FlutterHandler>() {
+        ui.push_event(leapgate::ft::EVENT, event, &[]);
     }
 }
 
@@ -50,7 +53,7 @@ pub(crate) async fn command<T: InvokeUiSession>(
     peer: &mut Stream,
 ) {
     let version = handler.lc.read().unwrap().version;
-    let Some((session_id, id, paused)) = handle(
+    let Some((id, paused)) = handle(
         leapgate::ft::enabled(),
         command,
         version,
@@ -69,7 +72,7 @@ pub(crate) async fn command<T: InvokeUiSession>(
         msg.set_file_action(file_action);
         allow_err!(peer.send(&msg).await);
     }
-    push(leapgate::ft::paused_event(&session_id, id, &paused));
+    push(handler, &leapgate::ft::paused_event(id, &paused));
 }
 
 /// The jobs' side of a command; `Some` for a pause that took effect. A pause needs a peer at
@@ -80,12 +83,12 @@ fn handle(
     version: i64,
     read_jobs: &mut [fs::TransferJob],
     write_jobs: &mut Vec<fs::TransferJob>,
-) -> Option<(String, i32, Paused)> {
+) -> Option<(i32, Paused)> {
     if !enabled {
         return None;
     }
     match command {
-        Command::Pause { session_id, id } => {
+        Command::Pause { id } => {
             if version < get_version_number("1.4.2") {
                 return None;
             }
@@ -93,7 +96,7 @@ fn handle(
                 Some(job) => pause_upload(job)?,
                 None => pause_download(id, write_jobs, version)?,
             };
-            Some((session_id, id, paused))
+            Some((id, paused))
         }
         Command::Resume { id } => {
             if let Some(job) = fs::get_job(id, read_jobs) {
@@ -478,10 +481,7 @@ mod tests {
     }
 
     fn pause(id: i32) -> Command {
-        Command::Pause {
-            session_id: "s".to_owned(),
-            id,
-        }
+        Command::Pause { id }
     }
 
     fn v142() -> i64 {
@@ -524,9 +524,9 @@ mod tests {
         sfs::write(staged.join("a.txt.download"), b"ab").unwrap();
         for (dir, resume_from) in [(&dir, 1), (&staged, 0)] {
             let mut writes = vec![running_download(10, dir)];
-            let (session_id, id, paused) =
-                handle(true, pause(10), v142(), &mut [], &mut writes).unwrap();
-            assert_eq!((session_id.as_str(), id), ("s", 10));
+            let old = writes[0].gen_meta();
+            let (id, paused) = handle(true, pause(10), v142(), &mut [], &mut writes).unwrap();
+            assert_eq!(id, 10);
             assert_eq!(
                 (paused.soft, paused.resume_from, paused.restart_file),
                 (false, resume_from, false)
@@ -539,6 +539,11 @@ mod tests {
                 (paused.new_id, true, resume_from)
             );
             assert!(job.files().is_empty());
+            let new = job.gen_meta();
+            assert_eq!(
+                (new.remote, new.to, new.show_hidden, new.is_remote, job.r#type),
+                (old.remote, old.to, old.show_hidden, old.is_remote, fs::JobType::Generic)
+            );
         }
         assert!(staged.join("a.txt.download").exists());
         sfs::remove_dir_all(&dir).unwrap();
@@ -550,7 +555,7 @@ mod tests {
     fn upload_pauses_softly_and_resumes() {
         let dir = scratch("pause-up");
         let mut reads = vec![running_upload(20, &dir)];
-        let (_, _, paused) = handle(true, pause(20), v142(), &mut reads, &mut vec![]).unwrap();
+        let (_, paused) = handle(true, pause(20), v142(), &mut reads, &mut vec![]).unwrap();
         assert_eq!(
             paused,
             Paused {

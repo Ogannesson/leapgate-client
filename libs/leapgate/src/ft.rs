@@ -24,10 +24,14 @@ pub fn enable() {
 /// `Data::Leapgate`: what the UI asks a file transfer session's loop to do.
 #[derive(Clone, Debug)]
 pub enum Command {
-    Pause { session_id: String, id: i32 },
+    Pause { id: i32 },
     /// Only for an upload paused in this session.
     Resume { id: i32 },
 }
+
+/// The session's own event stream carries M7b's events under this name, so they keep their
+/// order with upstream's `job_done` and `job_progress`.
+pub const EVENT: &str = "leapgate_ft";
 
 /// A pause that took effect: `new_id` is the job that now waits in its place (`id` itself for a
 /// soft pause), `resume_from` the file it starts at (0-based).
@@ -39,23 +43,23 @@ pub struct Paused {
     pub restart_file: bool,
 }
 
-pub fn paused_event(session_id: &str, id: i32, paused: &Paused) -> String {
-    serde_json::json!({
-        "session_id": session_id,
-        "kind": "paused",
-        "id": id,
-        "new_id": paused.new_id,
-        "soft": paused.soft,
-        "resume_from": paused.resume_from,
-        "restart_file": paused.restart_file,
-    })
-    .to_string()
+/// The fields of the `paused` event, for the session's `push_event`.
+pub fn paused_event(id: i32, paused: &Paused) -> [(&'static str, serde_json::Value); 6] {
+    [
+        ("kind", "paused".into()),
+        ("id", id.into()),
+        ("new_id", paused.new_id.into()),
+        ("soft", paused.soft.into()),
+        ("resume_from", paused.resume_from.into()),
+        ("restart_file", paused.restart_file.into()),
+    ]
 }
 
 /// Whether a download already finished `target`: renamed from its `.download` and given the
-/// listing's size and modified time (Unix seconds). Upstream renames a file only when the next
-/// file's digest arrives, so until the next file's first block the job's file number still
-/// points at the finished file, and resuming there would ask to replace it.
+/// listing's size and modified time (Unix seconds; FAT32 keeps it to 2 seconds). Upstream renames
+/// a file only when the next file's digest arrives, so until the next file's first block the
+/// job's file number still points at the finished file, and resuming there would ask to replace
+/// it.
 pub fn download_finished(target: &Path, size: u64, modified: u64) -> bool {
     if staging(target, "download").exists() {
         return false;
@@ -68,7 +72,7 @@ pub fn download_finished(target: &Path, size: u64, modified: u64) -> bool {
         .ok()
         .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
         .map(|d| d.as_secs());
-    meta.is_file() && meta.len() == size && mtime == Some(modified)
+    meta.is_file() && meta.len() == size && mtime.is_some_and(|t| t.abs_diff(modified) <= 2)
 }
 
 /// M7b-5: the resume offset is 32 bits (`OffsetBlk`), so a staged part past it cannot resume.
@@ -120,8 +124,8 @@ mod tests {
         dir
     }
 
-    /// A file renamed and stamped like upstream's `finish_download` counts as finished; one
-    /// still staged, or another file of the same name, does not.
+    /// A file renamed and stamped like upstream's `finish_download` counts as finished, to
+    /// FAT32's 2 seconds; one still staged, or another file of the same name, does not.
     #[test]
     fn finished_download_is_told_from_a_staged_one() {
         let dir = scratch("finished");
@@ -136,23 +140,30 @@ mod tests {
             .unwrap();
         assert!(download_finished(&target, 3, modified));
         assert!(!download_finished(&target, 4, modified));
-        assert!(!download_finished(&target, 3, modified + 1));
+        assert!(download_finished(&target, 3, modified + 1));
+        assert!(download_finished(&target, 3, modified - 2));
+        assert!(!download_finished(&target, 3, modified + 3));
         fs::write(dir.join("a.txt.download"), b"ab").unwrap();
         assert!(!download_finished(&target, 3, modified));
         assert!(!download_finished(&dir.join("missing"), 0, modified));
         fs::remove_dir_all(&dir).unwrap();
     }
 
+    /// A staged part of `u32::MAX` bytes resumes; one byte more restarts, with its digest gone.
     #[test]
     fn only_a_part_past_32_bits_restarts() {
-        assert!(!past_resume_offset(u64::from(u32::MAX)));
-        assert!(past_resume_offset(u64::from(u32::MAX) + 1));
         let dir = scratch("offset");
         let target = dir.join("big.bin");
-        fs::write(dir.join("big.bin.download"), b"part").unwrap();
-        fs::write(dir.join("big.bin.digest"), b"{}").unwrap();
+        let download = dir.join("big.bin.download");
+        let digest = dir.join("big.bin.digest");
+        let staged = |len: u64| fs::File::create(&download).unwrap().set_len(len).unwrap();
+        staged(u64::from(u32::MAX));
+        fs::write(&digest, b"{}").unwrap();
         assert!(!restart_past_resume_offset(&target));
-        assert!(dir.join("big.bin.download").exists() && dir.join("big.bin.digest").exists());
+        assert!(download.exists() && digest.exists());
+        staged(u64::from(u32::MAX) + 1);
+        assert!(restart_past_resume_offset(&target));
+        assert!(!download.exists() && !digest.exists());
         fs::remove_dir_all(&dir).unwrap();
     }
 }

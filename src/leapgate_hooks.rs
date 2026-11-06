@@ -4,7 +4,7 @@
 pub(crate) mod exit;
 #[cfg(any(target_os = "android", target_os = "ios", feature = "flutter"))]
 pub(crate) mod file_transfer;
-#[cfg(any(target_os = "android", target_os = "ios", feature = "flutter"))]
+#[cfg(any(windows, target_os = "android", target_os = "ios", feature = "flutter"))]
 pub(crate) mod install;
 pub(crate) mod ipc;
 #[cfg(any(target_os = "android", target_os = "ios", feature = "flutter"))]

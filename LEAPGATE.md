@@ -2502,17 +2502,17 @@ Telegram 机器人设置改成两步（`leapgate_bot_lookup` 只查、什么都�
 
 开关关着时每个挂钩都不认领，走上游原来的路（旧界面便携版因此不受影响）；取消路径（`cancel_transfer_job`）不动。
 
-**总开关**：`leapgate_ft_events` 被订阅时打开（进程内一个原子量，新订阅替换旧的 sink），新界面在应用启动时订阅一次，不在视图打开时订阅。
+**总开关**：`leapgate_ft_events` 被订阅时打开（进程内一个原子量，新订阅替换旧的 sink），新界面在应用启动时订阅一次，不在视图打开时订阅。这个流只当开关，上面不推任何东西（sink 留着，Dart 那头的流不会结束）；事件走各会话自己的事件流（下面）。
 
 **Rust 导出（块 2）**
 
 | 导出 | 参数 | 返回 |
 |---|---|---|
-| `leapgate_ft_events` | `sink: StreamSink<String>` | 每条一个 JSON（下表）；照 `leapgate_exit_events` 的写法 |
+| `leapgate_ft_events` | `sink: StreamSink<String>` | 只当开关，流上没有事件 |
 | `leapgate_ft_pause` | `session_id: SessionID`、`id: i32` | 异步、没有返回值；结果是一条 `paused` 事件。任务不在、已结束、对端低于 1.4.2 时什么也不做 |
 | `leapgate_ft_resume` | `session_id: SessionID`、`id: i32` | 异步、没有返回值；只用于本次会话里软暂停的上传任务（把它从"等待"改回来）。下载暂停后的继续、关闭视图后恢复的任务，照旧用上游的 `sessionResumeJob(新 ID)` |
 
-**事件**（`leapgate_ft_events`，每条都带 `session_id`（字符串，和 Dart 的 `SessionID` 同值）、`kind`、`id`（事件说的那个 Rust 任务 ID））
+**事件**（会话自己的事件流，和上游的 `job_done`、`job_progress` 同一条、先后顺序一致；事件名 `name` 是 `leapgate_ft`，每条都带 `kind`、`id`（事件说的那个 Rust 任务 ID）。和上游事件不同，数值和 bool 字段是 JSON 的数和 bool，不是字符串。Rust 拿不到 `FlutterHandler`（不是 flutter 会话）时不推）
 
 | `kind` | 其余字段 | 含义和界面要做的 |
 |---|---|---|
@@ -2526,13 +2526,13 @@ Telegram 机器人设置改成两步（`leapgate_bot_lookup` 只查、什么都�
 - 原文经 `leapgate_ft_reason` 归类，`side` 照传。
 
 **第一段的实现**（`ui/rust-m7b`）
-- 开关、命令、`paused` 事件、"刚改名的文件"判断和 4 GiB 规则在 `libs/leapgate/src/ft.rs`；sink、命令处理在 `src/leapgate_hooks/file_transfer.rs`。`io_loop.rs` 第一段只用了 `handle_msg_from_ui` 那一处，上传读循环那一处（约 `:322`）留到第二段。
-- 下载暂停：找到运行中（不是等待中）的普通下载任务才动；续传起点是任务当前的 `file_num`，这个文件已经改名、没有 `.download`、大小和修改时间和列表一致时加一；新任务照 `AddJob` 用 `new_write` 建、`is_last_job`、文件列表为空（继续时对端重发列表）；先丢掉旧任务（关掉临时文件）再看起点那个文件的 `.download` 是否超过 `u32::MAX`，超过就删 `.download`、`.digest`。然后给对端发取消、推 `paused`。
+- 开关、命令、`paused` 事件的字段、"刚改名的文件"判断和 4 GiB 规则在 `libs/leapgate/src/ft.rs`；sink、命令处理、推事件（`ui_handler` downcast 成 `FlutterHandler` 后调 `push_event`）在 `src/leapgate_hooks/file_transfer.rs`。`io_loop.rs` 第一段只用了 `handle_msg_from_ui` 那一处，上传读循环那一处（约 `:322`）留到第二段。
+- 下载暂停：找到运行中（不是等待中）的普通下载任务才动；续传起点是任务当前的 `file_num`，这个文件已经改名、没有 `.download`、大小和列表一致、修改时间和列表差 2 秒以内（FAT32 只有 2 秒精度）时加一；新任务照 `AddJob` 用 `new_write` 建、`is_last_job`、文件列表为空（继续时对端重发列表）；先丢掉旧任务（关掉临时文件）再看起点那个文件的 `.download` 是否超过 `u32::MAX`，超过就删 `.download`、`.digest`。然后给对端发取消、推 `paused`。
 - 上传暂停：运行中的读任务标 `is_last_job`，`resume_from` 是读方当前的 `file_num`。暂停期间进度事件照常每秒一条（速度 0）。`leapgate_ft_resume` 只是把 `is_last_job` 改回来，不核对这个任务是不是软暂停的（关闭视图后恢复、还没 `ResumeJob` 的等待任务不要调它）。
-- 已知的空档：下载暂停时对端可能已经发出旧 ID 的 `Done` 或错误（取消还没到），上游收到不认识 ID 的 `Done`、`FileTransferError` 也照发旧 ID 的 `job_done` / `job_error`，这时旧任务已删、最后一个文件可能没写完，新任务照常等继续。
+- 下载暂停时对端可能已经发出旧 ID 的 `Done` 或错误（取消还没到），上游收到不认识 ID 的 `Done`、`FileTransferError` 也照发旧 ID 的 `job_done` / `job_error`。这时旧任务已删、最后一个文件可能没写完，新任务照常等继续。`paused` 和它们在同一条流上，界面一定先收到 `paused`，按下面第一条规则忽略这些旧 ID 的事件。
 
 **Dart 侧的规则**（12 §4）
-- 行不变、Rust 任务 ID 会变：`FileTransferJobs` 维护"行 → 当前任务 ID"，一行先后对应的 ID 都认（进度、`job_done`、`job_error` 按任何一个找到同一行）。
+- 行不变、Rust 任务 ID 会变：`FileTransferJobs` 维护"行 → 当前任务 ID"。进度只认当前 ID；`job_done`、`job_error`、`override_file_confirm` 只认当前 ID，旧 ID 一律忽略；已暂停的行不认进度事件（软暂停的上传暂停期间每秒仍有一条速度为 0 的进度）。
 - 断线重连时，本次会话里用户暂停过的任务 ID（含 `paused` 的 `new_id`）收到带 `auto_start` 的 `load_last_job` 时照不自动开始处理（12 §4.1）。
 - 恢复后的排队序号：行记一个序号，恢复（继续、重试、接着传）时取当前最大值加一；同一方向上序号最小、还没结束的是进行中（12 §4.4）。
 - 替换确认发给 Rust 的"记住选择"一律传否，界面按勾选自己逐个回答，用户选"跳过"的计入已跳过（12 §4.5）。
