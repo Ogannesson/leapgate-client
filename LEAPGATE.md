@@ -2259,3 +2259,54 @@ Telegram 机器人设置改成两步（`leapgate_bot_lookup` 只查、什么都�
 - B：外壳的多视图（切换、键盘归属、远程桌面不在前台时 V1）、各种确认（标签 ×、右键关闭、关闭其他标签、关窗、视图断开）、标签上的进度环和提醒标记、各个入口；队列面板各状态和对话框各态，用 `FakeFileJobs` 和假的提问。
 - C：02 §2.2"P7 桌面要画的状态"里两栏那几组每组一个行为测试，用 `FakeFileTransferModel`；拖放按坐标判断落点。
 - 合入前：`git diff main -- flutter/` 为空；core `flutter analyze --no-fatal-infos` 在 3.44.9 下不超出 92 条 info 的基线，app 0 条；复制件不跑格式化；改已有文件时不对整个文件跑 `dart format`，只格式化新文件。远程桌面的冒烟照跑（改的是它每天都走的外壳，10 §4.1）。
+
+### 10.16 M8 的分工约定
+
+依据：总仓库 `docs/新界面/11-M8拆法.md`（下称"11"；维护者 2026-11-06 把 M8-1~M8-10 全部按推荐定）。提示卡的行为以 01 P1 区块 B 为准（已回写），文案按 01 §7.6。
+
+**分支**：只有一个 coder，直接在 `ui/m8`（从 main `7c8490a1e` 切）上做，整合 worktree 是 `.wt/ui-m4`（块 2 的桥和 pub 缓存在它里面）。`git add` 只加自己改的文件（`libs/hbb_common` 在这个 worktree 里有换行符造成的假改动，不要提交它）。writer 同时改总仓库里的文档，不碰这个仓库。
+
+**Rust 导出（块 2，`src/leapgate_ffi.rs` 加 `src/leapgate_hooks/` 新文件 `install.rs`）**
+
+| 导出 | 参数 | 返回 |
+|---|---|---|
+| `leapgate_install` | `kind: String`：`install` 或 `upgrade` | 非 `SyncReturn`（frb 在工作线程里跑，Dart 拿到 `Future<String>`）。**成功时不返回**：照上游 `ui_interface::install_me` 的做法在 `platform::install_me` 返回 `Ok` 之后 `std::process::exit(0)`。失败时返回 JSON `{"result":"uac_denied"\|"failed","text":"‹原文›"}` |
+
+- `install`：路径传空串（`install_me` 用 `get_default_install_info()` 的默认路径，`src/platform/windows.rs:1641-1647`），选项是默认的开始菜单和桌面快捷方式、**不装打印机**（构建里没带驱动）。选项键照上游安装页的写法（`flutter/lib/desktop/pages/install_page.dart` 拼的 JSON），coder 读码后写进本节。
+- `upgrade`：路径 `ui_interface::install_path()`，选项 `platform::get_install_options()`（`:1377`）。
+- `silent` 传 `false`：装完 `run_after_run_cmds` 等 2 秒再起安装版（`:3976-3989`），所以成功后要马上退出，否则安装版按窗口类名找到本进程的窗口、把自己交过来后退出（11 §4.1）。安装脚本杀 `leapgate.exe` 时按 PID 放过本进程（`get_uninstall(false, …)`，`:1640`、`:1837-1858`），失败时界面还活着。
+- `uac_denied`：提权被取消（`installer_handoff.rs` 里 runas 的取消，Windows 是 1223），coder 读码确认判法；其余一律 `failed`，带原文。MSI 装过的机器上 `install_me` 直接报错（`:1636-1639`），也是 `failed`。
+- 配置：安装脚本建服务时带 `--import-config ‹当前用户的配置文件›`（`get_import_config`，`:3938-3950`），读码看便携版的 ID、固定密码、服务器会带进安装版；验收实测（11 §5.3）。
+- 单测：原因码映射；`upgrade` 取路径和选项的那层（不真的装）。
+
+**上游文件**：`install_me` 里版本号的两处（`:1652` 拆主次版本号、`:1806` 的 DisplayVersion）改用 Leapgate 的版本（`leapgate::ui::VERSION`，0.4.0），各一行，带 `leapgate:` 注释（M8-5；11 原写"一行"，读码后是同一函数里的两行）。`update_me`（`:3452` 起）不改：官方更新已关，Leapgate 不走它。
+
+**Dart**
+
+- 提示卡（`app/lib/pages/home/home_page.dart` 的本机区，`LgLocalNotice` 带按钮）：
+  - 条件：系统错误优先；否则便携版（`!bind.mainIsInstalled()`）显示"安装"卡；否则 `is_installed_lower_version`（现有绑定，coder 找对应的 `bind.main…`）为真时显示"升级"卡。一次一张。状态放 core 的本机状态 model（`leapgate/local_status.dart`），页面只画。
+  - 点了：按钮变进行中（`LgButton` 的 busy），卡片其余不变；`Future` 回来（只会是失败）时卡片下写一行原因，按钮恢复。`uac_denied` 写"未获得管理员权限，未安装。"（升级卡写"……未升级。"），`failed` 写"安装失败：‹原文›"（升级卡"升级失败：‹原文›"）。原文为空时只写"安装失败。"。
+  - 便携版连着别人或有出口在跑时点"安装"：不另加确认（上游也不问；安装会断开所有会话，写进已知限制）。
+- 链接（`app/lib/shell/links.dart`）：`file-transfer`（`--file-transfer` 和 `leapgate://file-transfer/…`）接到 `navigation.dart` 的 `openFileTransfer`，参数和 `connection/new` 的密码、中继一样带过去；`port-forward`、`rdp`、`view-camera`、`terminal`、`terminal-admin` 发全局轻提示（`appCore.toasts`），文案"暂不支持打开‹端口转发 / RDP / 摄像头 / 终端›会话。"，日志照旧。`links_test.dart` 跟着改。
+- 标题栏（`app/lib/widgets/lg_title_bar.dart:335-344`）：占位方块换成应用图标，从 `app/windows/runner/resources/app_icon.ico` 导出 32×32 的 PNG 放 `app/assets/`，按 16 逻辑像素画；读屏不读它（装饰）。
+- ARB：新键以 `homeInstall`、`homeUpgrade`、`linkUnsupported` 开头。
+
+**构建脚本（`scripts/windows/build-client.ps1`、`setup-toolchain.ps1`，总仓库）**
+
+- 这几项在总仓库：coder 在总仓库的 worktree `.wt/leapgate-m8`（分支 `ui/m8`）里改、提交，不碰总仓库主检出，主会话合。
+- `-Ui` 默认值改成 `leapgate`；`-Ui upstream` 保留（旧界面便携版）。
+- 新界面加便携打包：第 3 步之后调 `client/libs/portable/generate.py`（参数照 `build.py:969-997`），包名 `leapgate-‹libs/leapgate 版本›-x86_64.exe`，放在产物目录旁边；产物核对加上它；同时打一个发布目录的 zip（M8-3）。dpiAware 那一行先不删，验收看高 DPI 下的表现再定。
+- `setup-toolchain.ps1` 装 brotli（`generate.py` 要它）；`build-client.ps1` 开头检查有没有，没有就报错并提示跑 setup。
+- 构建前强制刷新构建时间（`BUILD_DATE`，"升级"卡比的就是它，11 §4.4）：让根 crate 的 `build.rs` 重跑，做法由 coder 定（例如设一个 `build.rs` 里 `rerun-if-env-changed` 的变量），不改上游 `build.rs` 的内容；做不到就报回主会话。
+- 默认服务器不注入（M8-4）：脚本开头打印 `LEAPGATE_RENDEZVOUS_SERVER` 等几个变量是否设了，空着就写"未注入默认服务器"。
+- 发布 worktree（M8-9）由主会话建，脚本里不写死路径。
+
+**已知限制**
+- `--install`（exe 或便携包名以 `install.exe` 结尾、手动带参数）在第三轮安装页之前仍是写日志后退出（M8-2）。
+- 切换后保留的旧界面便携版如果构建时间晚于装着的新界面，会显示"升级"卡，点了会装回旧界面（11 §4.4，不改旧界面）。
+- 便携版点"安装"会断开所有会话和出口（安装脚本停服务、杀进程）。
+
+**测试**
+- Rust：原因码映射、`upgrade` 取值；`cargo test -p leapgate`、根 crate 的 `leapgate_hooks` 测试照跑。
+- Dart：卡片的出现条件（便携、已装且较旧、系统错误优先）和失败态（假导出）；链接分派（`file-transfer` 打开文件传输、第三轮几种出轻提示）。
+- 合入前：`git diff main -- flutter/` 为空；core analyze 不超出 91 条 info 的基线，app 0 条；新界面和旧界面都要能编（Rust 改了 `install_me`）。
