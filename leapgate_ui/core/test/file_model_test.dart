@@ -42,6 +42,8 @@ class FtBind extends FakeBind {
         return Future<String>.value(
             peerOptions[invocation.namedArguments[#name]] ?? '');
       case #sessionSendFiles:
+      case #sessionAddJob:
+      case #sessionResumeJob:
       case #sessionCreateDir:
       case #sessionReadRemoteDir:
       case #sessionReadRemoteEmptyDirsRecursiveSync:
@@ -123,7 +125,8 @@ void main() {
 
   group('overwrite confirmation (file_model.dart:166-213 overrideFileConfirm)', () {
     final cases = <(String, OverwriteAnswer?, bool?, bool)>[
-      // (answer, prompter's answer, needOverride sent or null for "cancelled", remember)
+      // (answer, prompter's answer, needOverride sent or null for "cancelled", the batch
+      // remembers it; Rust is never told to, 12 §4.5)
       ('overwrite', (choice: OverwriteChoice.overwrite, forAll: false), true, false),
       ('overwrite for all', (choice: OverwriteChoice.overwrite, forAll: true), true, true),
       ('skip', (choice: OverwriteChoice.skip, forAll: false), false, false),
@@ -154,7 +157,11 @@ void main() {
           final args = sent.single.namedArguments;
           expect(args[#actId], id);
           expect(args[#needOverride], needOverride);
-          expect(args[#remember], remember);
+          expect(args[#remember], isFalse);
+          expect(
+              jobs.isTransferConflictRememberBatch(
+                  jobs.transferConflictBatchId(id)),
+              remember);
         }
       });
     }
@@ -445,6 +452,322 @@ void main() {
     });
   });
 
+  group('pause, retry and files left out (M7b, 12 §5.2)', () {
+    _Setup ft() => _session();
+
+    /// A folder download waits for the remote device's empty folders, which never come here.
+    Future<void> download(_Setup t, List<Entry> items) async {
+      unawaited(t.s.fileModel.remoteController.transfer(items, to: 'C:\\dl'));
+      await settle();
+    }
+
+    /// A `leapgate_ft` event on the session's stream, the fields as JSON in `value`.
+    void push(_Setup t, String kind, int id, [Map<String, Object?> rest = const {}]) =>
+        t.s.events.dispatch({
+          'name': 'leapgate_ft',
+          'value': jsonEncode({'kind': kind, 'id': id, ...rest}),
+        });
+
+    /// The last `sessionAddJob`, and whether a `sessionResumeJob` followed it with its id.
+    ({int id, Map<Symbol, dynamic> args, bool resumed}) lastAdded(_Setup t) {
+      final args = t.bind.callsTo(#sessionAddJob).last.namedArguments;
+      final id = args[#actId] as int;
+      return (
+        id: id,
+        args: args,
+        resumed: _args(t.bind, #sessionResumeJob, #actId).contains(id),
+      );
+    }
+
+    test('a download paused takes Rust\'s new id: the old id\'s events are dropped, and it '
+        'resumes with that id at the end of its line (12 §4.1, §4.4)', () async {
+      final t = ft();
+      final model = t.s.fileModel;
+      await model.remoteController.transfer(
+          [_entry('/r/a.bin', size: 100), _entry('/r/b.bin', size: 100)],
+          to: 'C:\\dl');
+      final [a, b] = model.jobs.rows;
+      expect((a.canPause, b.canPause), (true, false), reason: 'b is queued');
+
+      Map<String, dynamic> progress(int id, int bytes) =>
+          {'id': '$id', 'file_num': '0', 'speed': '0', 'finished_size': '$bytes'};
+      model.onJobProgress(progress(a.id, 30));
+      model.jobs.pause(a.id);
+      expect(t.api.paused.single.id, a.id);
+      expect(model.jobs.rows[0].status, FileJobStatus.inProgress,
+          reason: 'until Rust says so');
+      push(t, 'paused', a.id, {'new_id': 900, 'soft': false, 'resume_from': 0});
+      expect(model.jobs.rows.map((r) => (r.id, r.status)), [
+        (a.id, FileJobStatus.paused),
+        (b.id, FileJobStatus.inProgress),
+      ]);
+      // The peer's answer to the old id, sent before it got the cancel; the job waiting in its
+      // place at 0.
+      await model.onJobDone({'id': '${a.id}', 'file_num': '0'});
+      model.handleJobError({'id': '${a.id}', 'err': 'x', 'file_num': '0'});
+      model.onJobProgress(progress(a.id, 50));
+      model.onJobProgress(progress(900, 0));
+      expect((model.jobs.rows[0].status, model.jobs.rows[0].doneBytes),
+          (FileJobStatus.paused, 30));
+
+      model.jobs.resume(a.id);
+      expect(_args(t.bind, #sessionResumeJob, #actId), [900]);
+      expect(t.api.resumed, isEmpty);
+      expect(model.jobs.rows.map((r) => r.status),
+          [FileJobStatus.queued, FileJobStatus.inProgress]);
+      model.onJobProgress(progress(900, 40));
+      expect(model.jobs.rows[0].doneBytes, 40);
+      await model.onJobDone({'id': '${b.id}', 'file_num': '0'});
+      expect(model.jobs.rows[0].status, FileJobStatus.inProgress);
+      await model.onJobDone({'id': '900', 'file_num': '0'});
+      expect(model.jobs.rows[0].status, FileJobStatus.done);
+    });
+
+    test('an upload paused softly stays paused through its progress events and goes on with '
+        'leapgate_ft_resume', () async {
+      final t = ft();
+      final model = t.s.fileModel;
+      await model.localController.transfer([_entry('C:\\a.bin', size: 100)], to: '/home/u');
+      final id = model.jobs.rows.single.id;
+      model.jobs.pause(id);
+      push(t, 'paused', id, {'new_id': id, 'soft': true, 'resume_from': 0});
+      model.onJobProgress(
+          {'id': '$id', 'file_num': '0', 'speed': '0', 'finished_size': '30'});
+      expect(model.jobs.rows.single.status, FileJobStatus.paused);
+
+      model.jobs.resume(id);
+      expect(t.api.resumed.single.id, id);
+      expect(t.bind.callsTo(#sessionResumeJob), isEmpty);
+      expect(model.jobs.rows.single.status, FileJobStatus.inProgress);
+    });
+
+    test('a paused download\'s replace confirmation closes unanswered; nothing is sent',
+        () async {
+      final t = ft();
+      final asked = Completer<void>();
+      final answer = Completer<OverwriteAnswer?>();
+      appCore.prompter = TestPrompter((q) {
+        final withdrawn = (q as FtOverwritePrompt).withdrawn!;
+        withdrawn.addListener(() {
+          if (withdrawn.value) answer.complete(null);
+        });
+        asked.complete();
+        return answer.future;
+      });
+      final model = t.s.fileModel;
+      await download(t, [_entry('/r/d', type: 0)]);
+      final id = model.jobs.rows.single.id;
+      final confirm = model.overrideFileConfirm(
+          _overwrite(id, 'C:\\dl\\d\\x.txt', upload: false));
+      await asked.future;
+      push(t, 'paused', id, {'new_id': 901, 'soft': false, 'resume_from': 1});
+      await confirm;
+      expect(t.bind.callsTo(#sessionSetConfirmOverrideFile), isEmpty);
+      expect(t.bind.callsTo(#sessionCancelJob), isEmpty);
+      expect(model.jobs.rows.single.status, FileJobStatus.paused);
+    });
+
+    test('after reconnecting, a job the user paused comes back unstarted; the others start',
+        () async {
+      final t = ft();
+      final model = t.s.fileModel;
+      await model.remoteController.transfer(
+          [_entry('/r/a.bin'), _entry('/r/b.bin')], to: 'C:\\dl');
+      final [a, b] = model.jobs.rows;
+      model.jobs.pause(a.id);
+      push(t, 'paused', a.id, {'new_id': 902, 'soft': false, 'resume_from': 0});
+      Map<String, dynamic> saved(int id, String name) => {
+            'value': jsonEncode({
+              'id': id,
+              'remote': '/r/$name',
+              'to': 'C:\\dl\\$name',
+              'show_hidden': true,
+              'file_num': 0,
+              'is_remote': true,
+              'auto_start': true,
+            })
+          };
+      t.s.connection.reconnect(false);
+      t.s.connection.onPeerInfo();
+      await model.onLoadLastJob(saved(902, 'a.bin'));
+      await model.onLoadLastJob(saved(b.id, 'b.bin'));
+      expect(_args(t.bind, #sessionAddJob, #actId), [902, b.id]);
+      expect(_args(t.bind, #sessionResumeJob, #actId), [b.id]);
+      expect(model.jobs.rows.map((r) => (r.id, r.status)), [
+        (a.id, FileJobStatus.paused),
+        (b.id, FileJobStatus.inProgress),
+      ]);
+    });
+
+    test('kept: failed with FT2\'s reason for its side; 重试 goes on from where it stopped '
+        'under a new id, only when the reason can be retried', () async {
+      final t = ft();
+      final sides = <FtSide>[];
+      t.api.onReason = (text, platform, side) {
+        sides.add(side);
+        return FtError(text == 'gone' ? FtReason.notFound : FtReason.diskFull,
+            text: text);
+      };
+      final model = t.s.fileModel;
+      await download(t, [_entry('/r/d', type: 0), _entry('/r/e', type: 0)]);
+      final [d, e] = model.jobs.rows;
+      push(t, 'kept', d.id,
+          {'resume_from': 3, 'err': 'No space', 'side': 'local', 'restart_file': true});
+      push(t, 'kept', e.id, {'resume_from': 0, 'err': 'gone', 'side': 'remote'});
+      expect(sides, [FtSide.local, FtSide.remote]);
+      var rows = model.jobs.rows;
+      expect(rows.map((r) => (r.status, r.error?.reason, r.canRetry)), [
+        (FileJobStatus.failed, FtReason.diskFull, true),
+        (FileJobStatus.failed, FtReason.notFound, false),
+      ]);
+      expect(rows[0].notes.single, isA<RestartFile>());
+      expect(model.jobs.summary.failed, 2);
+
+      model.jobs.retry(d.id);
+      await settle();
+      final added = lastAdded(t);
+      expect(added.args[#fileNum], 3);
+      expect((added.args[#path], added.args[#to], added.args[#isRemote]),
+          ('/r/d', 'C:\\dl\\d', true));
+      expect(added.resumed, isTrue);
+      rows = model.jobs.rows;
+      expect((rows[0].id, rows[0].status), (d.id, FileJobStatus.inProgress));
+      expect(rows[0].notes.single, isA<RestartFile>(), reason: 'it starts over');
+      model.jobs.retry(e.id);
+      expect(t.bind.callsTo(#sessionAddJob), hasLength(1));
+    });
+
+    test('continue_from goes on at once from the next file; one file after the other more than '
+        '20 times and the row fails, and 重试 goes on from there (M7b-3)', () async {
+      final t = ft();
+      t.api.onReason = (text, platform, side) => FtError(FtReason.inUse, text: text);
+      final model = t.s.fileModel;
+      await download(t, [_entry('/r/d', type: 0)]);
+      final row = model.jobs.rows.single.id;
+      _dir(t.s, '/r/d', [for (var i = 0; i < 40; i++) _json('f$i')], id: row);
+      var id = row;
+      for (var i = 0; i < 20; i++) {
+        push(t, 'file_failed', id,
+            {'file_num': i, 'name': 'f$i', 'err': 'locked', 'side': 'remote'});
+        push(t, 'continue_from', id, {'resume_from': i + 1});
+        await settle();
+        final added = lastAdded(t);
+        expect((added.args[#fileNum], added.resumed), (i + 1, true));
+        id = added.id;
+        expect(model.jobs.rows.single.status, FileJobStatus.inProgress);
+      }
+      push(t, 'file_failed', id,
+          {'file_num': 20, 'name': 'f20', 'err': 'locked', 'side': 'remote'});
+      push(t, 'continue_from', id, {'resume_from': 21});
+      await settle();
+      expect(t.bind.callsTo(#sessionAddJob), hasLength(20));
+      final failed = model.jobs.rows.single;
+      expect((failed.id, failed.status, failed.error?.reason, failed.canRetry),
+          (row, FileJobStatus.failed, FtReason.inUse, true));
+
+      model.jobs.retry(row);
+      await settle();
+      expect(lastAdded(t).args[#fileNum], 21);
+      await model.onJobDone({'id': '${lastAdded(t).id}', 'file_num': '39'});
+      final done = model.jobs.rows.single;
+      expect((done.status, done.unsent.length),
+          (FileJobStatus.doneWithIssues, 21));
+    });
+
+    test('a file going wrong after one went through counts from one again', () async {
+      final t = ft();
+      final model = t.s.fileModel;
+      await download(t, [_entry('/r/d', type: 0)]);
+      final row = model.jobs.rows.single.id;
+      _dir(t.s, '/r/d', [for (var i = 0; i < 100; i++) _json('f$i')], id: row);
+      var id = row;
+      for (var i = 0; i < 25; i++) {
+        // Every other file fails.
+        push(t, 'continue_from', id, {'resume_from': 2 * i + 1});
+        await settle();
+        id = lastAdded(t).id;
+      }
+      expect(model.jobs.rows.single.status, FileJobStatus.inProgress);
+    });
+
+    test('files failed and skipped: done with issues, left by "清除已完成"; 重试未传输的文件 sends '
+        'each one that can be retried again under the row (12 §4.3, §4.5, M7b-7, M7b-8)',
+        () async {
+      final t = ft();
+      t.api.onReason = (text, platform, side) =>
+          FtError(text == 'gone' ? FtReason.notFound : FtReason.inUse, text: text);
+      appCore.prompter =
+          TestPrompter((_) => (choice: OverwriteChoice.skip, forAll: true));
+      final model = t.s.fileModel;
+      await model.localController
+          .transfer([_entry('C:\\p', type: 0, size: 0)], to: '/home/u');
+      final id = model.jobs.rows.single.id;
+      push(t, 'file_failed', id,
+          {'file_num': 1, 'name': 'sub/a.txt', 'err': 'locked', 'side': 'local'});
+      push(t, 'file_failed', id,
+          {'file_num': 2, 'name': 'b.txt', 'err': 'gone', 'side': 'local'});
+      await model.overrideFileConfirm(_overwrite(id, 'C:\\p\\c.txt'));
+      // The batch remembers it: the next one is skipped without asking, and counted.
+      await model.postOverrideFileConfirm(_overwrite(id, 'C:\\p\\d.txt'));
+      await settle();
+      expect(_args(t.bind, #sessionSetConfirmOverrideFile, #remember), [false, false]);
+      await model.onJobDone({'id': '$id', 'file_num': '4'});
+
+      var row = model.jobs.rows.single;
+      expect(row.status, FileJobStatus.doneWithIssues);
+      expect(row.unsent.map((u) => (u.path, u.error.reason, u.skipped)), [
+        ('p\\sub\\a.txt', FtReason.inUse, false),
+        ('p\\b.txt', FtReason.notFound, false),
+        ('p\\c.txt', FtReason.skipped, true),
+        ('p\\d.txt', FtReason.skipped, true),
+      ]);
+      expect((row.canRetryUnsent, row.canRetry), (true, false));
+      expect((model.jobs.summary.finished, model.jobs.summary.failed), (0, 0));
+      model.jobs.clearFinished();
+      expect(model.jobs.rows, hasLength(1));
+
+      model.jobs.retryUnsent(id);
+      await settle();
+      final retry = lastAdded(t);
+      expect(t.bind.callsTo(#sessionAddJob), hasLength(1));
+      expect(
+          (retry.args[#path], retry.args[#to], retry.args[#fileNum], retry.resumed),
+          ('C:\\p\\sub\\a.txt', '/home/u/p/sub/a.txt', 0, true));
+      row = model.jobs.rows.single;
+      expect((row.id, row.status, row.fileCount), (id, FileJobStatus.inProgress, 1));
+      expect(model.jobs.unfinished, 1);
+
+      await model.onJobDone({'id': '${retry.id}', 'file_num': '0'});
+      row = model.jobs.rows.single;
+      expect(row.status, FileJobStatus.doneWithIssues);
+      expect(row.unsent.map((u) => u.path), ['p\\b.txt', 'p\\c.txt', 'p\\d.txt']);
+      expect(row.canRetryUnsent, isFalse);
+      expect(model.jobController.jobTable, hasLength(1));
+    });
+
+    test('a file sent again that fails again is back in the list with its new reason',
+        () async {
+      final t = ft();
+      t.api.onReason = (text, platform, side) => FtError(
+          text == 'full' ? FtReason.diskFull : FtReason.inUse,
+          text: text);
+      final model = t.s.fileModel;
+      await download(t, [_entry('/r/p', type: 0)]);
+      final id = model.jobs.rows.single.id;
+      push(t, 'file_failed', id,
+          {'file_num': 0, 'name': 'a.txt', 'err': 'locked', 'side': 'remote'});
+      await model.onJobDone({'id': '$id', 'file_num': '1'});
+      model.jobs.retryUnsent(id);
+      await settle();
+      final retry = lastAdded(t);
+      expect((retry.args[#path], retry.args[#to]), ('/r/p/a.txt', 'C:\\dl\\p\\a.txt'));
+      push(t, 'kept', retry.id, {'resume_from': 0, 'err': 'full', 'side': 'local'});
+      final row = model.jobs.rows.single;
+      expect(row.status, FileJobStatus.doneWithIssues);
+      expect(row.unsent.single.error.reason, FtReason.diskFull);
+    });
+  });
+
   test('folders and drives come first whatever the column; drives are kept', () {
     final list = [
       _entry('b.txt', size: 5)..modifiedTime = 1,
@@ -688,9 +1011,11 @@ void main() {
   });
 
   group('delete (R2-Q23, M7a-3)', () {
-    /// Plays Rust until [done]: counts from [dirs], each removal answered done.
+    /// Plays Rust until [done]: counts from [dirs], each removal answered done, or with an
+    /// error for the paths in [failing].
     Future<void> drive(_Setup t, Future<void> done,
-        Map<String, List<Map<String, dynamic>>> dirs) async {
+        Map<String, List<Map<String, dynamic>>> dirs,
+        {Set<String> failing = const {}}) async {
       var finished = false;
       done.whenComplete(() => finished = true);
       var reads = 0, removes = 0, links = 0;
@@ -706,6 +1031,14 @@ void main() {
         final removeCalls = t.bind.callsTo(#sessionRemoveFile);
         for (; removes < removeCalls.length; removes++) {
           final args = removeCalls[removes].namedArguments;
+          if (failing.contains(args[#path])) {
+            t.s.fileModel.handleJobError({
+              'id': '${args[#actId]}',
+              'err': 'in use',
+              'file_num': '${args[#fileNum]}'
+            });
+            continue;
+          }
           await t.s.fileModel
               .onJobDone({'id': '${args[#actId]}', 'file_num': '${args[#fileNum]}'});
         }
@@ -765,6 +1098,45 @@ void main() {
       // for the link.
       expect(t.s.fileModel.jobs.rows.map((r) => (r.name, r.fileCount, r.totalBytes)),
           [('d1', 2, 5), ('f.txt', 1, 5), ('l', 0, 0)]);
+    });
+
+    test('files that could not be deleted are listed and the rest go; 重试 counts again and '
+        'deletes what is left (02 §2.4.7)', () async {
+      final t = _session();
+      t.api.onReason = (text, platform, side) => FtError(FtReason.inUse, text: text);
+      appCore.prompter = TestPrompter((q) => whenReady(q, true));
+      final jobs = t.s.fileModel.jobs;
+      await drive(
+          t,
+          t.s.fileModel.localController.delete([_entry('C:\\d', type: 0)]),
+          {'C:\\d': [_json('a'), _json('b'), _json('c')]},
+          failing: {'C:\\d\\a', 'C:\\d\\c'});
+      expect(_args(t.bind, #sessionRemoveFile, #path),
+          ['C:\\d\\a', 'C:\\d\\b', 'C:\\d\\c']);
+      var row = jobs.rows.single;
+      expect(row.status, FileJobStatus.doneWithIssues);
+      expect(row.unsent.map((u) => (u.path, u.error.reason)),
+          [('d\\a', FtReason.inUse), ('d\\c', FtReason.inUse)]);
+      expect(row.canRetry, isTrue);
+      jobs.clearFinished();
+      expect(jobs.rows, hasLength(1), reason: 'not finished (M7b-7)');
+
+      final id = row.id;
+      jobs.retry(id);
+      expect(jobs.rows.single.status, FileJobStatus.deleting);
+      await settle();
+      final read =
+          t.bind.callsTo(#sessionReadDirToRemoveRecursive).last.namedArguments;
+      _dir(t.s, 'C:\\d', [_json('c')], id: read[#actId] as int);
+      await settle();
+      final remove = t.bind.callsTo(#sessionRemoveFile).last.namedArguments;
+      expect(t.bind.callsTo(#sessionRemoveFile), hasLength(4));
+      expect(remove[#path], 'C:\\d\\c');
+      await t.s.fileModel
+          .onJobDone({'id': '${remove[#actId]}', 'file_num': '0'});
+      await settle();
+      row = jobs.rows.single;
+      expect((row.id, row.status, row.fileCount), (id, FileJobStatus.done, 1));
     });
 
     test('cancelled while counting: nothing is deleted', () async {

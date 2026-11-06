@@ -1,5 +1,5 @@
-// The same file is in core/test and app/test (`LEAPGATE.md` §10.15). A lane that needs more
-// subclasses these in its own test file; this file stays as step 0 wrote it.
+// The same file is in core/test and app/test (`LEAPGATE.md` §10.15, §10.17). A lane that needs
+// more subclasses these in its own test file.
 import 'package:flutter/foundation.dart';
 import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/leapgate/file_transfer/errors.dart';
@@ -45,6 +45,21 @@ class FakeFileTransferApi implements FileTransferApi {
       isDirLink: isDirLink
     ));
   }
+
+  var eventsOn = false;
+  final paused = <({SessionID sessionId, int id})>[];
+  final resumed = <({SessionID sessionId, int id})>[];
+
+  @override
+  void turnOnEvents() => eventsOn = true;
+
+  @override
+  Future<void> pause(SessionID sessionId, int id) async =>
+      paused.add((sessionId: sessionId, id: id));
+
+  @override
+  Future<void> resume(SessionID sessionId, int id) async =>
+      resumed.add((sessionId: sessionId, id: id));
 }
 
 /// [FilePane] for page tests: the test sets the fields (then [notifyListeners]) and reads the
@@ -178,6 +193,15 @@ class FakeFileJobs extends ChangeNotifier implements FileJobs {
 
   @override
   void resumeAll() => calls.add('resumeAll');
+
+  @override
+  void pause(int id) => calls.add('pause:$id');
+
+  @override
+  void retry(int id) => calls.add('retry:$id');
+
+  @override
+  void retryUnsent(int id) => calls.add('retryUnsent:$id');
 
   @override
   void remove(int id) => calls.add('remove:$id');

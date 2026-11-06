@@ -61,6 +61,10 @@ FileJobRow _row(
   Duration? remaining,
   FtError? error,
   List<FileJobNote> notes = const [],
+  List<FileJobUnsent> unsent = const [],
+  bool canPause = false,
+  bool canRetry = false,
+  bool canRetryUnsent = false,
 }) => FileJobRow(
   id: id,
   direction: direction,
@@ -76,6 +80,10 @@ FileJobRow _row(
   remaining: remaining,
   error: error,
   notes: notes,
+  unsent: unsent,
+  canPause: canPause,
+  canRetry: canRetry,
+  canRetryUnsent: canRetryUnsent,
 );
 
 Widget _app(Widget child) => MaterialApp(
@@ -380,6 +388,154 @@ void main() {
       expect(jobs.calls, ['cancel:1', 'remove:5']);
     });
 
+    testWidgets('"暂停" and "重试" only where the row allows them (M7b)', (
+      tester,
+    ) async {
+      final jobs = _Jobs()
+        ..rows = [
+          _row(1, FileJobStatus.inProgress, total: 10, canPause: true),
+          _row(2, FileJobStatus.inProgress, total: 10),
+          _row(
+            3,
+            FileJobStatus.failed,
+            error: const FtError(FtReason.inUse),
+            canRetry: true,
+          ),
+          _row(4, FileJobStatus.failed, error: const FtError(FtReason.notFound)),
+        ]
+        ..summary = _summary(active: 2, failed: 2);
+      await _pumpQueue(tester, jobs);
+      expect(_button('暂停'), findsOneWidget);
+      expect(_button('重试'), findsOneWidget);
+      // A failed row has no details (M7b-9).
+      expect(find.text('查看详情'), findsNothing);
+      await tester.tap(_button('暂停'));
+      await tester.tap(_button('重试'));
+      expect(jobs.calls, ['pause:1', 'retry:3']);
+    });
+
+    testWidgets(
+      'done with files left out: "查看详情" opens 50 of them, how many more and the notes; '
+      '"重试未传输的文件" (12 §4.6)',
+      (tester) async {
+        final jobs = _Jobs()
+          ..rows = [
+            _row(
+              1,
+              FileJobStatus.doneWithIssues,
+              direction: FileJobDirection.upload,
+              notes: const [
+                EmptyFoldersNotCreated(EmptyFoldersReason.unreadable),
+              ],
+              unsent: [
+                for (var i = 0; i < 53; i++)
+                  FileJobUnsent('照片\\f$i.jpg', const FtError(FtReason.inUse)),
+              ],
+              canRetryUnsent: true,
+            ),
+          ]
+          ..summary = _summary();
+        fakes.bind.localOptions[kOptionLeapgateFtQueueHeight] = '600';
+        await _pumpQueue(tester, jobs);
+        expect(find.text('已完成，53 个文件未传输'), findsOneWidget);
+        expect(find.text('清除已完成'), findsNothing);
+        expect(_rich('f0.jpg'), findsNothing);
+        expect(find.text('空文件夹未创建：未能读取。'), findsNothing, reason: 'closed');
+
+        await tester.tap(find.text('查看详情'));
+        await tester.pump();
+        expect(_rich('照片\\f0.jpg · 文件正被其他应用使用'), findsOneWidget);
+        expect(_rich('照片\\f49.jpg'), findsOneWidget);
+        expect(_rich('照片\\f50.jpg'), findsNothing);
+        expect(_rich('另有 3 个文件'), findsOneWidget);
+        expect(_rich('空文件夹未创建：未能读取。'), findsOneWidget);
+
+        await tester.tap(_button('重试未传输的文件'));
+        await tester.tap(_button('移除'));
+        expect(jobs.calls, ['retryUnsent:1', 'remove:1']);
+        await tester.tap(find.text('查看详情'));
+        await tester.pump();
+        expect(_rich('照片\\f0.jpg'), findsNothing);
+      },
+    );
+
+    testWidgets('the open details are counted in the list\'s height', (
+      tester,
+    ) async {
+      fakes.bind.localOptions[kOptionLeapgateFtQueueHeight] = '400';
+      final jobs = _Jobs()
+        ..rows = [
+          _row(1, FileJobStatus.queued),
+          _row(
+            2,
+            FileJobStatus.doneWithIssues,
+            unsent: [
+              for (var i = 0; i < 3; i++)
+                FileJobUnsent('照片\\f$i.jpg', const FtError(FtReason.inUse)),
+            ],
+          ),
+        ]
+        ..summary = _summary(queued: 1);
+      await _pumpQueue(tester, jobs);
+      await tester.tap(find.text('查看详情'));
+      await tester.pump();
+      final rows = tester
+          .widgetList(find.byType(LgQueueRow))
+          .map((w) => tester.getSize(find.byWidget(w)).height)
+          .fold(0.0, (a, b) => a + b);
+      expect(tester.getSize(find.byType(ListView)).height, rows + 2 * LgSpace.s1);
+      expect(
+        tester
+            .state<ScrollableState>(find.byType(Scrollable))
+            .position
+            .maxScrollExtent,
+        0,
+      );
+    });
+
+    testWidgets(
+      'all skipped by the user: "已跳过", nothing to retry (M7b-8); a delete that left items '
+      'retries as a whole',
+      (tester) async {
+        final jobs = _Jobs()
+          ..rows = [
+            _row(
+              1,
+              FileJobStatus.doneWithIssues,
+              unsent: const [
+                FileJobUnsent(
+                  '照片\\a.jpg',
+                  FtError(FtReason.skipped),
+                  skipped: true,
+                ),
+                FileJobUnsent(
+                  '照片\\b.jpg',
+                  FtError(FtReason.skipped),
+                  skipped: true,
+                ),
+              ],
+            ),
+            _row(
+              2,
+              FileJobStatus.doneWithIssues,
+              direction: FileJobDirection.delete,
+              unsent: const [
+                FileJobUnsent('照片\\c.jpg', FtError(FtReason.inUse)),
+                FileJobUnsent('照片\\d.jpg', FtError(FtReason.inUse)),
+              ],
+              canRetry: true,
+            ),
+          ]
+          ..summary = _summary();
+        await _pumpQueue(tester, jobs);
+        expect(find.text('已完成，2 个文件已跳过'), findsOneWidget);
+        expect(find.text('已完成，2 个项目未删除'), findsOneWidget);
+        expect(_button('重试未传输的文件'), findsNothing);
+        await tester.tap(_button('重试'));
+        expect(jobs.calls, ['retry:2']);
+      },
+    );
+
     testWidgets(
       'a new job expands it once; collapsed by hand it waits for the next',
       (tester) async {
@@ -475,6 +631,29 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pump();
       expect(await answer, isNull);
+    });
+
+    testWidgets('replace: closes unanswered once its job is paused (M7b)', (
+      tester,
+    ) async {
+      await pumpScope(tester);
+      final withdrawn = ValueNotifier(false);
+      final answer = showFilePrompt(
+        overlays,
+        'dev',
+        FtOverwritePrompt(
+          name: 'a.zip',
+          folder: r'D:\备份',
+          kind: FtOverwriteKind.existing,
+          withdrawn: withdrawn,
+        ),
+      );
+      await tester.pump();
+      expect(find.text('替换“a.zip”？'), findsOneWidget);
+      withdrawn.value = true;
+      await tester.pump();
+      expect(await answer, isNull);
+      expect(find.text('替换“a.zip”？'), findsNothing);
     });
 
     testWidgets('delete: counting, then the count and size; "删除" answers yes', (

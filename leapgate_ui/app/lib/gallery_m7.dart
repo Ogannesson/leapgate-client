@@ -531,7 +531,7 @@ List<Widget> _m7QueueRows(bool en, {int count = 12, bool details = true}) {
         LgQueueDetail(_x(en, r'项目资料\图表.png', r'Project files\chart.png'), reason: _x(en, '文件正被其他应用使用', 'File is in use by another app')),
       ],
       actions: [
-        LgQueueAction(icon: LgIcons.refresh, label: _x(en, '重试', 'Retry'), onPressed: _noop),
+        LgQueueAction(icon: LgIcons.refresh, label: _x(en, '重试未传输的文件', 'Retry files not transferred'), onPressed: _noop),
         _m7Remove(en),
       ],
     ),
