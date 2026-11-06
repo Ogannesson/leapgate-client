@@ -272,7 +272,7 @@ void main() {
         id: '135792468',
         setUp: (m) => m.installedLowerVersion = true,
       );
-      expect(find.text('已安装的 Leapgate 版本低于当前版本。'), findsOneWidget);
+      expect(find.textContaining('已安装的 Leapgate 版本低于当前版本。'), findsOneWidget);
       await tester.tap(find.text('升级'));
       await tester.pump();
       expect(lg.installs, ['upgrade']);

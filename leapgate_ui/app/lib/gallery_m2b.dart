@@ -1746,7 +1746,7 @@ List<Specimen> _m2bSpecimens() {
         'error',
         const Size(280, 140),
         (_) => const SizedBox(
-          width: 208,
+          width: 192,
           child: LgLocalNotice(
             tone: LgTone.error,
             text: '无法写入配置文件：拒绝访问（错误 5）。',
@@ -1760,7 +1760,7 @@ List<Specimen> _m2bSpecimens() {
         'warning-with-action',
         const Size(280, 220),
         (_) => const SizedBox(
-          width: 208,
+          width: 192,
           child: LgLocalNotice(
             tone: LgTone.warning,
             text: '服务已停止，无法接受连接。',
@@ -1776,8 +1776,42 @@ List<Specimen> _m2bSpecimens() {
         'info',
         const Size(280, 140),
         (_) => const SizedBox(
-          width: 208,
+          width: 192,
           child: LgLocalNotice(tone: LgTone.info, text: '当前以免安装方式运行。'),
+        ),
+      ),
+    )
+    ..add(
+      Specimen(
+        'local-notice',
+        'install',
+        const Size(240, 190),
+        (_) => const SizedBox(
+          width: 192,
+          child: LgLocalNotice(
+            tone: LgTone.info,
+            text: '安装后，对方远程控制本机时也能操作用户账户控制（UAC）窗口。',
+            actionLabel: '安装',
+            onAction: _noop,
+          ),
+        ),
+      ),
+    )
+    ..add(
+      Specimen(
+        'local-notice',
+        'install-failed',
+        const Size(240, 270),
+        (_) => const SizedBox(
+          width: 192,
+          child: LgLocalNotice(
+            tone: LgTone.info,
+            text: '安装后，对方远程控制本机时也能操作用户账户控制（UAC）窗口。',
+            actionLabel: '安装',
+            onAction: _noop,
+            actionError:
+                '安装失败：Cannot install the EXE package over an existing MSI installation',
+          ),
         ),
       ),
     )
