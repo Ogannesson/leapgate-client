@@ -120,6 +120,22 @@ class _OverwriteDialogState extends State<_OverwriteDialog> {
       widget.close((choice: choice, forAll: _forAll));
 
   @override
+  void initState() {
+    super.initState();
+    widget.prompt.withdrawn?.addListener(_onWithdrawn);
+  }
+
+  @override
+  void dispose() {
+    widget.prompt.withdrawn?.removeListener(_onWithdrawn);
+    super.dispose();
+  }
+
+  void _onWithdrawn() {
+    if (widget.prompt.withdrawn!.value) widget.close(null);
+  }
+
+  @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final p = widget.prompt;

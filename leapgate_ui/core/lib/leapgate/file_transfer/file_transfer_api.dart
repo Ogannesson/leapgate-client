@@ -29,6 +29,19 @@ abstract interface class FileTransferApi {
       required String path,
       required bool isRemote,
       required bool isDirLink});
+
+  /// Subscribes to `leapgate_ft_events` (M7b, §10.17), which turns M7b's handling in Rust on;
+  /// what comes on it is not used. The app does it once when it starts. The events themselves
+  /// come on each session's stream as `leapgate_ft`.
+  void turnOnEvents();
+
+  /// `leapgate_ft_pause`: the result is a `paused` event; nothing happens for a job that is
+  /// gone or ended, or a remote device older than 1.4.2.
+  Future<void> pause(SessionID sessionId, int id);
+
+  /// `leapgate_ft_resume`: only for an upload soft-paused in this session. Everything else
+  /// resumes with upstream's `sessionResumeJob`.
+  Future<void> resume(SessionID sessionId, int id);
 }
 
 /// Set by tests; the app keeps the default.
@@ -71,4 +84,19 @@ class RustFileTransferApi implements FileTransferApi {
           path: path,
           isRemote: isRemote,
           isDirLink: isDirLink);
+
+  // TODO(M7b 整合): `lgBind.leapgateFtEvents().listen((_) {})`, kept for the process's life.
+  @override
+  void turnOnEvents() =>
+      throw UnimplementedError('TODO(M7b 整合): leapgate_ft_events');
+
+  // TODO(M7b 整合): `lgBind.leapgateFtPause(sessionId: sessionId, id: id)`.
+  @override
+  Future<void> pause(SessionID sessionId, int id) =>
+      throw UnimplementedError('TODO(M7b 整合): leapgate_ft_pause');
+
+  // TODO(M7b 整合): `lgBind.leapgateFtResume(sessionId: sessionId, id: id)`.
+  @override
+  Future<void> resume(SessionID sessionId, int id) =>
+      throw UnimplementedError('TODO(M7b 整合): leapgate_ft_resume');
 }

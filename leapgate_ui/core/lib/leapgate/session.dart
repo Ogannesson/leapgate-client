@@ -98,14 +98,14 @@ class FFI {
   void _registerEvents() {
     events.on('file_dir', (evt) => fileModel.receiveFileDir(evt));
     events.on('empty_dirs', (evt) => fileModel.receiveEmptyDirs(evt));
-    events.on('job_progress',
-        (evt) => fileModel.jobController.tryUpdateJobProgress(evt));
+    events.on('job_progress', (evt) => fileModel.onJobProgress(evt));
     events.on('job_done', (evt) => fileModel.onJobDone(evt));
     events.on('job_error', (evt) => fileModel.handleJobError(evt));
     events.on('override_file_confirm',
         (evt) => fileModel.postOverrideFileConfirm(evt));
-    events.on(
-        'load_last_job', (evt) => fileModel.jobController.loadLastJob(evt));
+    events.on('load_last_job', (evt) => fileModel.onLoadLastJob(evt));
+    // M7b's pause, kept, continue_from and file_failed (`LEAPGATE.md` §10.17).
+    events.on('leapgate_ft', (evt) => fileModel.jobs.onEvent(evt));
     events.on('update_folder_files',
         (evt) => fileModel.jobController.updateFolderFiles(evt));
     events.on('update_quality_status', (evt) {

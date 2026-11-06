@@ -10,6 +10,7 @@ import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/bridge.dart';
 import 'package:flutter_hbb/leapgate/local_status.dart';
 import 'package:flutter_hbb/leapgate/options.dart';
+import 'package:flutter_hbb/leapgate/file_transfer/file_transfer_api.dart';
 import 'package:flutter_hbb/leapgate/settings/appearance.dart';
 import 'package:flutter_hbb/leapgate/ui_error_log.dart';
 import 'package:flutter_hbb/leapgate/ui_mode.dart';
@@ -46,6 +47,8 @@ Future<void> main(List<String> args) async {
     await windowManager.setPreventClose(true);
     appCore = AppCore(window: const LgAppWindow());
     await platformFFI.init(kAppTypeMain);
+    // M7b's handling in Rust, on before any transfer starts (LEAPGATE.md §10.17).
+    fileTransferApi.turnOnEvents();
     // Starts syncing options and the connection status with the service.
     await bind.mainCheckConnectStatus();
     // The stored sign-in, then the address book and the team devices (`LEAPGATE.md` §10.11).

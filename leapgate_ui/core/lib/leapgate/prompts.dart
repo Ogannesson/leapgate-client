@@ -49,7 +49,10 @@ enum FtOverwriteKind {
 /// 冲突执行相同操作".
 final class FtOverwritePrompt extends Prompt<OverwriteAnswer> {
   const FtOverwritePrompt(
-      {required this.name, required this.folder, required this.kind});
+      {required this.name,
+      required this.folder,
+      required this.kind,
+      this.withdrawn});
 
   /// The file's name, for the title.
   final String name;
@@ -57,6 +60,10 @@ final class FtOverwritePrompt extends Prompt<OverwriteAnswer> {
   /// The destination folder, for the text.
   final String folder;
   final FtOverwriteKind kind;
+
+  /// Once true the dialog closes unanswered: the job was paused, Rust would drop the answer
+  /// (M7b, `LEAPGATE.md` §10.17).
+  final ValueListenable<bool>? withdrawn;
 }
 
 /// What a delete confirmation shows (02 block J); the dialog follows [FtDeletePrompt.state].

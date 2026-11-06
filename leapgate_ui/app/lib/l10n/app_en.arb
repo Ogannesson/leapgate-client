@@ -1605,5 +1605,18 @@
   "linkUnsupportedPortForward": "Port forwarding sessions can't be opened yet.",
   "linkUnsupportedRdp": "RDP sessions can't be opened yet.",
   "linkUnsupportedCamera": "Camera sessions can't be opened yet.",
-  "linkUnsupportedTerminal": "Terminal sessions can't be opened yet."
+  "linkUnsupportedTerminal": "Terminal sessions can't be opened yet.",
+  "queuePause": "Pause",
+  "queueRetry": "Retry",
+  "queueRetryUnsent": "Retry files not transferred",
+  "queueDetails": "Details",
+  "queueDetailsMore": "{count, plural, =1{1 more file} other{{count} more files}}",
+  "@queueDetailsMore": {"placeholders": {"count": {"type": "int"}}},
+  "queueStatusDoneUnsent": "{count, plural, =1{Completed, 1 file not transferred} other{Completed, {count} files not transferred}}",
+  "@queueStatusDoneUnsent": {"placeholders": {"count": {"type": "int"}}},
+  "queueStatusDoneSkipped": "{count, plural, =1{Completed, 1 file skipped} other{Completed, {count} files skipped}}",
+  "@queueStatusDoneSkipped": {"placeholders": {"count": {"type": "int"}}},
+  "queueStatusDeleteUnsent": "{count, plural, =1{Completed, 1 item not deleted} other{Completed, {count} items not deleted}}",
+  "@queueStatusDeleteUnsent": {"placeholders": {"count": {"type": "int"}}},
+  "queueNoteRestartFile": "The current file is larger than 4 GB and can't be resumed. It will start over."
 }
