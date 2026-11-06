@@ -1232,6 +1232,9 @@ impl<T: InvokeUiSession> Remote<T> {
                 });
                 allow_err!(peer.send(&msg).await);
             }
+            // leapgate: M7b pause and resume, LEAPGATE.md §10.17.
+            #[cfg(any(target_os = "android", target_os = "ios", feature = "flutter"))]
+            Data::Leapgate(c) => crate::leapgate_hooks::file_transfer::command(c, &self.handler, &mut self.read_jobs, &mut self.write_jobs, peer).await,
             _ => {}
         }
         true

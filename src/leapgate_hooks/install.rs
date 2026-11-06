@@ -21,6 +21,7 @@ const CHILD_ARG: &str = "--leapgate-install";
 /// On success the child has started the installed copy and its tray; this process is usually gone
 /// by then, killed by the script's `taskkill`.
 #[cfg(windows)]
+#[cfg_attr(not(feature = "flutter"), allow(dead_code))]
 pub(crate) fn install(kind: &str) -> String {
     use std::io::Read;
     let child = std::env::current_exe().and_then(|exe| {

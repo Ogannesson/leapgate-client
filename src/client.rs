@@ -5032,6 +5032,7 @@ pub enum Data {
     ResetDecoder(Option<usize>),
     RenameFile((i32, String, String, bool)),
     TakeScreenshot((i32, String)),
+    Leapgate(leapgate::ft::Command), // leapgate: M7b, LEAPGATE.md §10.17
 }
 
 pub async fn confirm_insecure_connection(
