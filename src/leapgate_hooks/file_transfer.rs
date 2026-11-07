@@ -412,7 +412,8 @@ fn on_peer_error(
         return leapgate::ft::stopped(id);
     };
     let failed = e.file_num;
-    let first_unconfirmed = job.file_num() == 0 && !job.file_confirmed();
+    // Nothing sent yet, also in a job resumed from a later file: the peer refused the job.
+    let first_unconfirmed = !job.file_confirmed() && job.transferred() == 0;
     if fault == Fault::Upstream
         || failed < 0
         || failed as usize >= job.files().len()
@@ -1188,6 +1189,14 @@ mod tests {
         reads[0].set_file_confirmed(true);
         let mut fx = Effects::default();
         assert!(!on_peer_error(true, "Windows", &mut reads, &mut vec![], &peer_err(62, 0, DENIED), &mut fx));
+        // A job resumed from the second file, refused before anything was sent.
+        let mut resumed = upload(63);
+        resumed.file_num = 1;
+        let mut reads = vec![resumed];
+        reads[0].init_data_stream_for_cm().await.unwrap();
+        let mut fx = Effects::default();
+        assert!(!on_peer_error(true, "Windows", &mut reads, &mut vec![], &peer_err(63, 1, DENIED), &mut fx));
+        assert!(fx.msgs.is_empty() && fx.events.is_empty());
         sfs::remove_dir_all(&dir).unwrap();
         sfs::remove_dir_all(&single).unwrap();
     }

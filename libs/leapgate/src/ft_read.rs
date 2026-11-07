@@ -30,7 +30,8 @@ pub struct Step {
 
 /// One tick of upstream's loop: every job that is not waiting opens its current file (and sends
 /// its digest); the first such job, and only it, reads a block. An error that did not move the
-/// job past its file (nothing seen in practice) goes to the peer as upstream sends it.
+/// job past its file (a modified time the digest cannot express) goes to the peer as upstream
+/// sends it, and the job ends as upstream ends it.
 pub async fn step(jobs: &mut Vec<TransferJob>) -> Step {
     let mut step = Step::default();
     let mut not_open = Vec::new();
@@ -42,7 +43,11 @@ pub async fn step(jobs: &mut Vec<TransferJob>) -> Step {
             }
             Ok(None) => {}
             Err(err) => {
-                not_open.push(job.id());
+                // A job that did not move past the file (its digest failed) is upstream's: it
+                // is read in this tick and ends there.
+                if job.file_num() != file_num {
+                    not_open.push(job.id());
+                }
                 step.left_out(job, file_num, err.to_string());
             }
         }
@@ -164,10 +169,11 @@ mod tests {
 
     enum Out {
         Block(i32, i32, usize),
+        Error(i32),
         Done(i32),
     }
 
-    /// What went to the peer; an error or a skip fails the test.
+    /// What went to the peer; a skip fails the test.
     fn out(step: &Step) -> Vec<Out> {
         step.out
             .iter()
@@ -177,6 +183,7 @@ mod tests {
                         Out::Block(b.id, b.file_num, b.data.len())
                     }
                     Some(file_response::Union::Done(d)) => Out::Done(d.id),
+                    Some(file_response::Union::Error(e)) => Out::Error(e.id),
                     other => panic!("{other:?}"),
                 },
                 other => panic!("{other:?}"),
@@ -232,5 +239,46 @@ mod tests {
         for dir in [a, b, c] {
             sfs::remove_dir_all(&dir).unwrap();
         }
+    }
+
+    /// A file that opens but whose digest fails (modified before 1970) leaves the job on it:
+    /// that is upstream's, which reports the error and ends the job in the same tick. Leaving it
+    /// unread would send the error every tick and hold the session's uploads.
+    #[tokio::test(crate = "hbb_common::tokio")]
+    async fn a_failed_digest_ends_the_job_as_upstream_does() {
+        let dir = scratch("digest");
+        for name in ["a.txt", "b.txt"] {
+            sfs::write(dir.join(name), name.as_bytes()).unwrap();
+        }
+        let mut job = TransferJob::new_read(
+            80,
+            fs::JobType::Generic,
+            "/remote".to_owned(),
+            fs::DataSource::FilePath(dir.clone()),
+            1,
+            false,
+            false,
+            true,
+        )
+        .unwrap();
+        job.is_last_job = false;
+        let second = dir.join(&job.files()[1].name);
+        sfs::File::options()
+            .write(true)
+            .open(&second)
+            .unwrap()
+            .set_modified(std::time::SystemTime::UNIX_EPOCH - std::time::Duration::from_secs(86_400))
+            .unwrap();
+        let mut jobs = vec![job];
+        let mut sent = Vec::new();
+        let first = step(&mut jobs).await;
+        assert!(first.failed.is_empty());
+        sent.extend(out(&first));
+        assert!(jobs.is_empty());
+        for _ in 0..2 {
+            sent.extend(out(&step(&mut jobs).await));
+        }
+        assert!(matches!(sent.as_slice(), [Out::Error(80), Out::Done(80)]));
+        sfs::remove_dir_all(&dir).unwrap();
     }
 }
