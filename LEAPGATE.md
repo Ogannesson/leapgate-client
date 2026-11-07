@@ -2542,6 +2542,8 @@ Telegram 机器人设置改成两步（`leapgate_bot_lookup` 只查、什么都�
 
 开关关着时每个挂钩都不认领，走上游原来的路（旧界面便携版因此不受影响）；取消路径（`cancel_transfer_job`）不动。
 
+合上游时：`leapgate_set_download_files` 是把上游 `set_files` 重写了一遍（私有字段只能这样设），不是调用它。合并时比对上游 `set_files` 和 `validate_transfer_file_names` 有没有新增检查，有的话照样加进这个方法。
+
 **总开关**：`leapgate_ft_events` 被订阅时打开（进程内一个原子量，新订阅替换旧的 sink），新界面在应用启动时订阅一次，不在视图打开时订阅。这个流只当开关，上面不推任何东西（sink 留着，Dart 那头的流不会结束）；事件走各会话自己的事件流（下面）。
 
 **Rust 导出（块 2）**
@@ -2592,6 +2594,8 @@ Telegram 机器人设置改成两步（`leapgate_bot_lookup` 只查、什么都�
   - 下载时对端取修改时间失败、没跳到下一个文件：会白白接着传，直到 Dart 的 20 次上限。上游在这种情况下也是整任务停下。
   - 上传时对端 CM 写失败，还在路上的数据块仍可能写坏文件，或者把截短的文件改成正式名（上游原有的空档，宽度和上游一样）。
   - 名字里带控制字符（如 `c\x01d`）不算"在 Windows 上无效"：目标文件夹不存在时能一路过 `validated_target`，到写数据时才失败，走 `write_failed`（`file_failed` 后从下一个文件 `continue_from`），不写坏东西；目标文件夹已存在时照上游整张拒收。
+  - Windows 保留设备名（本机 Windows 11 实测 `NUL`；Windows 10 上大概还有 `CON`、`AUX`、`COMn`、`LPTn`，带不带扩展名都算）仍按上游整张拒收：`validate_component` 不拒它们，加进判据的话会一路通过 `validated_target`。
+  - 不发摘要的老对端碰上连续超过 20 个无效名时，每个都走 `write_failed` → `continue_from`，撞上 Dart 的 20 次上限，这一行整体失败。
   - 最后一个文件出错后界面会收到两次 `job_done`（Rust 发一次，不经 CM 的对端随后再发一次），Dart 已经处理（`ui/m7b-dart` `e02bd198b` 有测试）。
 - 验收时留意：断线重连时带"自动开始"的恢复沿用旧 ID，`HANDLED` 是按 ID 记的、进程里一直在。读码判断不会吞掉重连后的真实错误：只有上传会按文件去重，记下的是对端报过的文件 f；那时读方已经跳过 f 或早已过了 f，断线时保存的 `file_num` 至少是 f+1，重连后只会传 f 之后的文件，它们的序号都大于记下的值。被停掉的任务（`kept`、`continue_from`）已经从任务表删掉，不会保存，也就不会带旧 ID 恢复。验收时如果看到重连后某个文件出错却没有 `file_failed`，先查这一条。
 

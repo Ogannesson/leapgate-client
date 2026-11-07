@@ -1174,6 +1174,13 @@ mod tests {
         let mut job = new_download(60, &dir);
         set_files_on(true, &mut job, list()).unwrap();
         assert_eq!(job.files().len(), 4);
+        let f1 = FileTransferDigest {
+            id: 60,
+            file_num: 1,
+            ..Default::default()
+        };
+        let f1 = job.download_digest(true, &f1);
+        assert!(matches!(f1, Ok(fs::DigestCheckResult::NoSuchFile)));
         let mut writes = vec![job];
         for file_num in [0, 2, 3] {
             let digest = FileTransferDigest {
@@ -1188,6 +1195,7 @@ mod tests {
             assert_eq!(events(&fx)[0]["file_num"], file_num);
         }
         assert_eq!(writes.len(), 1);
+        assert_eq!(sfs::read_dir(&dir).unwrap().count(), 0);
         sfs::remove_dir_all(&dir).unwrap();
     }
 
