@@ -357,7 +357,7 @@ class _Row extends StatelessWidget {
               : r.unsent.every((u) => u.skipped)
               ? l10n.queueStatusDoneSkipped(n)
               : l10n.queueStatusDoneUnsent(n),
-          null,
+          _unclassified(),
         );
       case FileJobStatus.skipped:
         return (l10n.queueStatusSkipped, null);
@@ -402,28 +402,46 @@ class _Row extends StatelessWidget {
   List<LgQueueDetail> _details(AppLocalizations l10n) {
     final r = row;
     final n = r.unsent.length;
+    final delete = r.direction == FileJobDirection.delete;
     return [
       for (final u in r.unsent.take(kQueueDetailsMax))
         if (u.skipped)
           LgQueueDetail('${u.path} · ${l10n.queueStatusSkipped}')
         else
           LgQueueDetail(
-          u.path,
-          reason: ftReasonText(
-            l10n,
-            u.error,
-            name: u.path.split(RegExp(r'[\\/]')).last,
-            toLocal: switch (r.direction) {
-              FileJobDirection.download => true,
-              FileJobDirection.upload => false,
-              FileJobDirection.delete => null,
-            },
+            u.path,
+            // Not classified: the short sentence, the text behind the row (as a failed row).
+            reason: u.error.reason == FtReason.other
+                ? (delete ? l10n.queueStatusDeleteFailed : l10n.ftReasonOther)
+                : ftReasonText(
+                    l10n,
+                    u.error,
+                    name: u.path.split(RegExp(r'[\\/]')).last,
+                    toLocal: switch (r.direction) {
+                      FileJobDirection.download => true,
+                      FileJobDirection.upload => false,
+                      FileJobDirection.delete => null,
+                    },
+                  ),
           ),
-        ),
       if (n > kQueueDetailsMax)
-        LgQueueDetail(l10n.queueDetailsMore(n - kQueueDetailsMax)),
+        LgQueueDetail(
+          delete
+              ? l10n.queueDetailsMoreItems(n - kQueueDetailsMax)
+              : l10n.queueDetailsMore(n - kQueueDetailsMax),
+        ),
       for (final note in r.notes) LgQueueDetail(_note(l10n, note)),
     ];
+  }
+
+  /// The original texts of the files listed whose reason is not classified, one per line.
+  String? _unclassified() {
+    final texts = {
+      for (final u in row.unsent.take(kQueueDetailsMax))
+        if (!u.skipped && u.error.reason == FtReason.other && u.error.text.isNotEmpty)
+          u.error.text,
+    };
+    return texts.isEmpty ? null : texts.join('\n');
   }
 
   @override
