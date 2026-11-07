@@ -148,18 +148,29 @@ class FileModel implements FileTransferModel {
       }
       _completeRequest(evt);
     }
+    // `jobError` puts the error's file number in the job; a retry starts at the last progress's.
+    final i = jobController.getJob(id ?? -1);
+    final fileNum = i < 0 ? 0 : jobController.jobTable[i].fileNum;
     jobController.jobError(evt);
-    if (id != null) jobs.onJobError(id);
+    if (id != null) jobs.onJobError(id, fileNum: fileNum);
   }
 
   /// `load_last_job`. After reconnecting Rust gives back every saved job with `auto_start`; one
   /// the user paused in this session goes back to Rust under its id without starting, and its
-  /// row stays (12 §4.1). The rest is upstream's.
+  /// row stays (12 §4.1). The rest is upstream's; a row loaded paused that Rust starts so goes
+  /// under way with it.
   Future<void> onLoadLastJob(Map<String, dynamic> evt) async {
     final job = jsonDecode(evt['value']) as Map<String, dynamic>;
     final id = job['id'];
     if (job['auto_start'] != true || id is! int || !jobs.reloadPaused(id)) {
-      return jobController.loadLastJob(evt);
+      await jobController.loadLastJob(evt);
+      final i = id is int ? jobController.getJob(id) : -1;
+      if (job['auto_start'] == true &&
+          i >= 0 &&
+          jobController.jobTable[i].state == JobState.paused) {
+        jobController.updateJobStatus(id, state: JobState.inProgress);
+      }
+      return;
     }
     final String remote = job['remote'];
     final String to = job['to'];

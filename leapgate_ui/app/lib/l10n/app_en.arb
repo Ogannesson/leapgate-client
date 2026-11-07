@@ -1618,5 +1618,7 @@
   "@queueStatusDoneSkipped": {"placeholders": {"count": {"type": "int"}}},
   "queueStatusDeleteUnsent": "{count, plural, =1{Completed, 1 item not deleted} other{Completed, {count} items not deleted}}",
   "@queueStatusDeleteUnsent": {"placeholders": {"count": {"type": "int"}}},
-  "queueNoteRestartFile": "The current file is larger than 4 GB and can't be resumed. It will start over."
+  "queueNoteRestartFile": "The current file is larger than 4 GB and can't be resumed. It will start over.",
+  "queueDetailsMoreItems": "{count, plural, =1{1 more item} other{{count} more items}}",
+  "@queueDetailsMoreItems": {"placeholders": {"count": {"type": "int"}}}
 }

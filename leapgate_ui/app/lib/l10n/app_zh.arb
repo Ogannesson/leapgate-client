@@ -1396,5 +1396,6 @@
   "queueStatusDoneUnsent": "已完成，{count} 个文件未传输",
   "queueStatusDoneSkipped": "已完成，{count} 个文件已跳过",
   "queueStatusDeleteUnsent": "已完成，{count} 个项目未删除",
-  "queueNoteRestartFile": "当前文件超过 4 GB，不支持断点续传，将从头传输。"
+  "queueNoteRestartFile": "当前文件超过 4 GB，无法断点续传，将从头传输。",
+  "queueDetailsMoreItems": "另有 {count} 个项目"
 }

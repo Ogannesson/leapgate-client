@@ -583,30 +583,154 @@ void main() {
       expect(model.jobs.rows.single.status, FileJobStatus.inProgress);
     });
 
-    test('a paused download\'s replace confirmation closes unanswered; nothing is sent',
+    for (final (kind, status) in [
+      ('paused', FileJobStatus.paused),
+      ('kept', FileJobStatus.failed),
+    ]) {
+      test('a download $kind: its replace confirmation closes unanswered; nothing is sent',
+          () async {
+        final t = ft();
+        final asked = Completer<void>();
+        final answer = Completer<OverwriteAnswer?>();
+        appCore.prompter = TestPrompter((q) {
+          final withdrawn = (q as FtOverwritePrompt).withdrawn!;
+          withdrawn.addListener(() {
+            if (withdrawn.value) answer.complete(null);
+          });
+          asked.complete();
+          return answer.future;
+        });
+        final model = t.s.fileModel;
+        await download(t, [_entry('/r/d', type: 0)]);
+        final id = model.jobs.rows.single.id;
+        final confirm = model.overrideFileConfirm(
+            _overwrite(id, 'C:\\dl\\d\\x.txt', upload: false));
+        await asked.future;
+        push(t, kind, id,
+            {'new_id': 901, 'soft': false, 'resume_from': 1, 'err': 'full', 'side': 'local'});
+        await confirm;
+        expect(t.bind.callsTo(#sessionSetConfirmOverrideFile), isEmpty);
+        expect(t.bind.callsTo(#sessionCancelJob), isEmpty);
+        expect(model.jobs.rows.single.status, status);
+      });
+    }
+
+    test('events that crossed a cancel leave the row cancelled; a paused download\'s waiting '
+        'job is cancelled too', () async {
+      final t = ft();
+      final model = t.s.fileModel;
+      await download(t, [_entry('/r/d', type: 0), _entry('/r/a.bin', size: 100)]);
+      final [d, a] = model.jobs.rows;
+      _dir(t.s, '/r/d', [_json('f0'), _json('f1'), _json('f2')], id: d.id);
+      model.jobs.cancel(d.id);
+      push(t, 'file_failed', d.id,
+          {'file_num': 0, 'name': 'f0', 'err': 'x', 'side': 'remote'});
+      push(t, 'continue_from', d.id, {'resume_from': 1});
+      push(t, 'kept', d.id, {'resume_from': 1, 'err': 'x', 'side': 'remote'});
+      model.jobs.pause(a.id);
+      model.jobs.cancel(a.id);
+      push(t, 'paused', a.id, {'new_id': 903, 'soft': false, 'resume_from': 0});
+      await settle();
+      expect(t.bind.callsTo(#sessionAddJob), isEmpty);
+      expect(model.jobs.rows.map((r) => r.status),
+          [FileJobStatus.cancelled, FileJobStatus.cancelled]);
+      expect(_args(t.bind, #sessionCancelJob, #actId), [d.id, a.id, 903]);
+    });
+
+    test('an upstream job_error that can be retried: 重试 from the start of a single file, '
+        'from the last progress\'s file of a folder', () async {
+      final t = ft();
+      t.api.onReason = (text, platform, side) => FtError(
+          text == 'gone' ? FtReason.notFound : FtReason.inUse,
+          text: text);
+      final model = t.s.fileModel;
+      await model.localController.transfer(
+          [_entry('C:\\a.txt'), _entry('C:\\p', type: 0, size: 0), _entry('C:\\b.txt')],
+          to: '/home/u');
+      final [a, p, b] = model.jobs.rows;
+      model.handleJobError({'id': '${a.id}', 'err': 'locked', 'file_num': '1'});
+      model.onJobProgress(
+          {'id': '${p.id}', 'file_num': '4', 'speed': '0', 'finished_size': '9'});
+      model.handleJobError({'id': '${p.id}', 'err': 'locked', 'file_num': '5'});
+      model.handleJobError({'id': '${b.id}', 'err': 'gone', 'file_num': '1'});
+      // A late completion of the failed job is dropped, as after `kept`.
+      await model.onJobDone({'id': '${a.id}', 'file_num': '0'});
+      expect(model.jobs.rows.map((r) => (r.status, r.canRetry)), [
+        (FileJobStatus.failed, true),
+        (FileJobStatus.failed, true),
+        (FileJobStatus.failed, false),
+      ]);
+      model.jobs.retry(a.id);
+      model.jobs.retry(p.id);
+      await settle();
+      final added = t.bind.callsTo(#sessionAddJob).map((c) => c.namedArguments);
+      expect(added.map((c) => (c[#path], c[#fileNum])),
+          [('C:\\a.txt', 0), ('C:\\p', 4)]);
+    });
+
+    test('the 4 GB note shows while paused or failed, and goes once it goes on (M7b-5)',
         () async {
       final t = ft();
-      final asked = Completer<void>();
-      final answer = Completer<OverwriteAnswer?>();
-      appCore.prompter = TestPrompter((q) {
-        final withdrawn = (q as FtOverwritePrompt).withdrawn!;
-        withdrawn.addListener(() {
-          if (withdrawn.value) answer.complete(null);
-        });
-        asked.complete();
-        return answer.future;
-      });
       final model = t.s.fileModel;
       await download(t, [_entry('/r/d', type: 0)]);
       final id = model.jobs.rows.single.id;
-      final confirm = model.overrideFileConfirm(
-          _overwrite(id, 'C:\\dl\\d\\x.txt', upload: false));
-      await asked.future;
-      push(t, 'paused', id, {'new_id': 901, 'soft': false, 'resume_from': 1});
-      await confirm;
-      expect(t.bind.callsTo(#sessionSetConfirmOverrideFile), isEmpty);
-      expect(t.bind.callsTo(#sessionCancelJob), isEmpty);
+      _dir(t.s, '/r/d', [_json('f0'), _json('f1'), _json('f2')], id: id);
+      model.jobs.pause(id);
+      push(t, 'paused', id,
+          {'new_id': 904, 'soft': false, 'resume_from': 0, 'restart_file': true});
+      expect(model.jobs.rows.single.notes.single, isA<RestartFile>());
+      model.jobs.resume(id);
+      expect(model.jobs.rows.single.notes, isEmpty);
+      // Going on after a file failed shows none, and drops one left over.
+      push(t, 'continue_from', 904, {'resume_from': 1, 'restart_file': true});
+      await settle();
+      final now = lastAdded(t).id;
+      model.handleJobError({'id': '$now', 'err': 'x', 'file_num': '1'});
+      expect(model.jobs.rows.single.status, FileJobStatus.failed);
+      expect(model.jobs.rows.single.notes, isEmpty);
+    });
+
+    test('a row loaded paused that Rust starts after reconnecting goes on with it', () async {
+      final t = ft();
+      final model = t.s.fileModel;
+      Map<String, dynamic> saved(int id, bool auto) => {
+            'value': jsonEncode({
+              'id': id,
+              'remote': '/r/a.bin',
+              'to': 'C:\\dl\\a.bin',
+              'show_hidden': true,
+              'file_num': 0,
+              'is_remote': true,
+              if (auto) 'auto_start': true,
+            })
+          };
+      await model.onLoadLastJob(saved(1, false));
       expect(model.jobs.rows.single.status, FileJobStatus.paused);
+      final id = lastAdded(t).id;
+      t.s.connection.reconnect(false);
+      t.s.connection.onPeerInfo();
+      await model.onLoadLastJob(saved(id, true));
+      model.onJobProgress(
+          {'id': '$id', 'file_num': '0', 'speed': '0', 'finished_size': '50'});
+      final row = model.jobs.rows.single;
+      expect((row.status, row.doneBytes), (FileJobStatus.inProgress, 50));
+    });
+
+    test('a folder whose files left out the user all skipped is cleared as finished',
+        () async {
+      final t = ft();
+      appCore.prompter =
+          TestPrompter((_) => (choice: OverwriteChoice.skip, forAll: false));
+      final model = t.s.fileModel;
+      await model.localController
+          .transfer([_entry('C:\\p', type: 0, size: 0)], to: '/home/u');
+      final id = model.jobs.rows.single.id;
+      await model.overrideFileConfirm(_overwrite(id, 'C:\\p\\c.txt'));
+      await model.onJobDone({'id': '$id', 'file_num': '1'});
+      expect(model.jobs.rows.single.status, FileJobStatus.doneWithIssues);
+      expect(model.jobs.summary.finished, 1);
+      model.jobs.clearFinished();
+      expect(model.jobs.rows, isEmpty);
     });
 
     test('after reconnecting, a job the user paused comes back unstarted; the others start',
@@ -681,7 +805,7 @@ void main() {
       expect(added.resumed, isTrue);
       rows = model.jobs.rows;
       expect((rows[0].id, rows[0].status), (d.id, FileJobStatus.inProgress));
-      expect(rows[0].notes.single, isA<RestartFile>(), reason: 'it starts over');
+      expect(rows[0].notes, isEmpty, reason: 'it goes on again (M7b-5)');
       model.jobs.retry(e.id);
       expect(t.bind.callsTo(#sessionAddJob), hasLength(1));
     });

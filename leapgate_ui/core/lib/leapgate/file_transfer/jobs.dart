@@ -41,7 +41,7 @@ enum FileJobStatus {
   done,
 
   /// Done, but some files were not sent or skipped, or for a delete some items not deleted
-  /// ([FileJobRow.unsent]). "清除已完成" leaves it (M7b-7).
+  /// ([FileJobRow.unsent]). "清除已完成" leaves it unless the user skipped them all (M7b-7).
   doneWithIssues,
   skipped,
   cancelled,
@@ -177,7 +177,8 @@ typedef FileJobSummary = ({
   int paused,
   int interrupted,
 
-  /// Rows "清除已完成" removes: done, skipped, cancelled (not done with issues, M7b-7).
+  /// Rows "清除已完成" removes: done, skipped, cancelled, and done with only files the user
+  /// skipped (M7b-7).
   int finished,
 
   /// Over the active and queued rows whose size is known; null when there is none.
@@ -429,19 +430,26 @@ class FileTransferJobs extends ChangeNotifier implements FileJobs {
     notifyListeners();
   }
 
-  /// After the job table took a `job_error` for [id]. The first one fails a transfer for good:
-  /// a folder upload goes on with its other files and ends with a `job_done`, which must not
-  /// make the row done.
-  void onJobError(int id) {
+  /// After the job table took a `job_error` for [id]; [fileNum] is the file the job's last
+  /// progress was in. The first one fails a transfer for good: a folder upload goes on with its
+  /// other files and ends with a `job_done`, which must not make the row done. When its reason
+  /// can be retried, "重试" goes on from that file, from the start for a single file (as
+  /// `kept`).
+  void onJobError(int id, {required int fileNum}) {
     final i = _jobs.getJob(id);
     if (i < 0) return;
     final job = _jobs.jobTable[i];
-    if (job.type == JobType.transfer &&
-        job.state == JobState.error &&
-        job.err != 'cancel') {
-      _state(_key(id)).failure ??=
-          _Failure(job.err, _classify(job.err, FtSide.unknown));
+    if (job.type != JobType.transfer ||
+        job.state != JobState.error ||
+        job.err == 'cancel') {
+      return;
     }
+    final st = _state(_key(id));
+    if (st.failure != null) return;
+    final error = _classify(job.err, FtSide.unknown);
+    final folder = _info[_key(id)]?.isFolder ?? job.fileCount > 1;
+    st.failure = _Failure(
+        job.err, error, ftRetryable(error) ? (folder ? fileNum : 0) : null);
   }
 
   /// The user skipped [path] (as [_Unsent.path]) of the job [id] in a replace confirmation.
@@ -468,6 +476,15 @@ class FileTransferJobs extends ChangeNotifier implements FileJobs {
     final i = _jobs.getJob(id);
     if (i < 0) return;
     final job = _jobs.jobTable[i];
+    // Crossed a cancel: the row stays cancelled; a paused download's waiting job goes too, or
+    // closing the view would save it.
+    if (job.state == JobState.done && job.err == 'cancel') {
+      final waiting = evt['new_id'] as int?;
+      if (evt['kind'] == 'paused' && waiting != null && waiting != job.id) {
+        unawaited(_jobs.cancelJob(waiting));
+      }
+      return;
+    }
     switch (evt['kind']) {
       case 'paused':
         _onPaused(job, evt);
@@ -519,12 +536,13 @@ class FileTransferJobs extends ChangeNotifier implements FileJobs {
   void _onContinueFrom(JobProgress job, Map<String, dynamic> evt) {
     final from = evt['resume_from'] as int?;
     if (from == null) return;
+    // It goes on at once, or is done: no note (M7b-5).
+    final st = _state(_key(job.id))..restartFile = false;
     if (job.fileCount > 0 && from >= job.fileCount) {
       _jobs.unregisterTransferConflictJob(job.id);
       _jobs.updateJobStatus(job.id, state: JobState.done);
       return;
     }
-    final st = _state(_key(job.id));
     final last = st.continued;
     final count = last != null && from == last.from + 1 ? last.count + 1 : 1;
     st.continued = (from: from, count: count);
@@ -540,6 +558,7 @@ class FileTransferJobs extends ChangeNotifier implements FileJobs {
 
   void _fail(JobProgress job, String text) {
     _jobs.unregisterTransferConflictJob(job.id);
+    _withdrawn.remove(job.id)?.value = true;
     _jobs.updateJobStatus(job.id, error: text);
   }
 
@@ -567,7 +586,9 @@ class FileTransferJobs extends ChangeNotifier implements FileJobs {
     final key = _key(job.id);
     final id = JobController.jobID.next();
     _switchId(job, id);
-    _state(key).order = _nextOrder++;
+    _state(key)
+      ..order = _nextOrder++
+      ..restartFile = false;
     job.err = '';
     _jobs.updateJobStatus(id, state: JobState.inProgress);
     unawaited(_addAndResume(id,
@@ -761,12 +782,6 @@ class FileTransferJobs extends ChangeNotifier implements FileJobs {
     final unsent = status == FileJobStatus.doneWithIssues
         ? [for (final u in st!.unsent.values) _shown(job, u)]
         : const <FileJobUnsent>[];
-    final ended = const {
-      FileJobStatus.done,
-      FileJobStatus.doneWithIssues,
-      FileJobStatus.skipped,
-      FileJobStatus.cancelled,
-    }.contains(status);
     return FileJobRow(
       id: key,
       direction: !transfer
@@ -792,7 +807,10 @@ class FileTransferJobs extends ChangeNotifier implements FileJobs {
         if (info?.emptyFolders != null) info!.emptyFolders!,
         if (transfer && status == FileJobStatus.paused && _resumeUnsupported)
           const ResumeUnsupported(),
-        if (transfer && !ended && (st?.restartFile ?? false))
+        // Until it goes on again (M7b-5).
+        if ((status == FileJobStatus.paused ||
+                status == FileJobStatus.failed) &&
+            (st?.restartFile ?? false))
           const RestartFile(),
       ],
       unsent: unsent,
@@ -957,9 +975,9 @@ class FileTransferJobs extends ChangeNotifier implements FileJobs {
         case FileJobStatus.skipped:
         case FileJobStatus.cancelled:
           finished++;
-        // Neither finished nor failed (M7b-7).
+        // Not failed; finished only when the user skipped them all (M7b-7).
         case FileJobStatus.doneWithIssues:
-          break;
+          if (_isFinished(row)) finished++;
       }
       if ((row.status == FileJobStatus.inProgress ||
               row.status == FileJobStatus.counting ||
@@ -1026,7 +1044,9 @@ class FileTransferJobs extends ChangeNotifier implements FileJobs {
   void _resume(JobProgress job) {
     final st = _state(_key(job.id));
     if (job.isRemoteToLocal) st.order = _nextOrder++;
-    st.continued = null;
+    st
+      ..continued = null
+      ..restartFile = false;
     _userPaused.remove(job.id);
     final s = _session;
     if (st.soft && s != null) {
@@ -1122,14 +1142,21 @@ class FileTransferJobs extends ChangeNotifier implements FileJobs {
           row.status == FileJobStatus.failed));
 
   @override
-  void clearFinished() =>
-      _removeWhere((row) => _finished.contains(row.status));
+  void clearFinished() => _removeWhere(_isFinished);
 
   static const _finished = {
     FileJobStatus.done,
     FileJobStatus.skipped,
     FileJobStatus.cancelled,
   };
+
+  /// What "清除已完成" removes: also a row whose files left out the user all skipped, as a
+  /// single file skipped is (nothing to retry, 02 block H). Other rows done with issues stay
+  /// (M7b-7).
+  static bool _isFinished(FileJobRow row) =>
+      _finished.contains(row.status) ||
+      (row.status == FileJobStatus.doneWithIssues &&
+          row.unsent.every((u) => u.skipped));
 
   void _removeWhere(bool Function(FileJobRow row) test) {
     final gone = {

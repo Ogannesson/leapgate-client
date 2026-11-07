@@ -18,6 +18,7 @@ import 'package:leapgate_ui/theme/lg_theme.dart';
 import 'package:leapgate_ui/theme/lg_tokens.dart';
 import 'package:leapgate_ui/widgets/lg_button.dart';
 import 'package:leapgate_ui/widgets/lg_file_queue.dart';
+import 'package:leapgate_ui/widgets/lg_tooltip.dart';
 
 import 'file_transfer_fakes.dart';
 import 'session_fakes.dart' show AppFakes, installAppFakes;
@@ -456,6 +457,57 @@ void main() {
         await tester.tap(find.text('查看详情'));
         await tester.pump();
         expect(_rich('照片\\f0.jpg'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'a delete\'s details count items; a reason not classified reads "传输失败", the text '
+      'behind the row',
+      (tester) async {
+        final jobs = _Jobs()
+          ..rows = [
+            _row(
+              1,
+              FileJobStatus.doneWithIssues,
+              unsent: const [
+                FileJobUnsent(
+                  '照片\\a.jpg',
+                  FtError(FtReason.other, text: 'Wrong id'),
+                ),
+              ],
+            ),
+            _row(
+              2,
+              FileJobStatus.doneWithIssues,
+              direction: FileJobDirection.delete,
+              name: '临时',
+              unsent: [
+                for (var i = 0; i < 52; i++)
+                  FileJobUnsent('临时\\f$i', const FtError(FtReason.inUse)),
+              ],
+            ),
+          ]
+          ..summary = _summary();
+        fakes.bind.localOptions[kOptionLeapgateFtQueueHeight] = '600';
+        await _pumpQueue(tester, jobs);
+        await tester.tap(find.text('查看详情').first);
+        await tester.tap(find.text('查看详情').last);
+        await tester.pump();
+        final details = tester
+            .widget<LgQueueRow>(find.byType(LgQueueRow).first)
+            .details;
+        expect(details.single.reason, '传输失败');
+        final delete = tester
+            .widgetList<LgQueueRow>(find.byType(LgQueueRow))
+            .singleWhere((w) => w.name == '临时')
+            .details;
+        expect(delete.last.text, '另有 2 个项目');
+        expect(
+          tester
+              .widgetList<LgTooltip>(find.byType(LgTooltip))
+              .map((w) => w.message),
+          contains('Wrong id'),
+        );
       },
     );
 

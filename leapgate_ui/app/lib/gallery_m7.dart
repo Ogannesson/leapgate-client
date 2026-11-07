@@ -473,7 +473,7 @@ List<Widget> _m7QueueRows(bool en, {int count = 12, bool details = true}) {
       name: _x(en, '年度报告.docx', 'annual-report.docx'),
       path: r'C:\Users\zhangsan\Documents → D:\备份',
       state: LgQueueState.waitingConfirm,
-      status: _x(en, '等待确认：目标位置已有同名文件', 'Awaiting confirmation: a file with the same name exists at the destination'),
+      status: _x(en, '等待确认：目标位置已有同名文件', 'Awaiting confirmation: a file with the same name is at the destination'),
     ),
     _m7Row(
       en: en,
@@ -481,7 +481,7 @@ List<Widget> _m7QueueRows(bool en, {int count = 12, bool details = true}) {
       name: _x(en, '临时', 'temp'),
       path: r'D:\备份\临时',
       state: LgQueueState.deleting,
-      status: _x(en, '正在删除… 37 / 120 个文件', 'Deleting… 37 / 120 files'),
+      status: _x(en, '正在删除… 37 / 120 个文件', 'Deleting… 37 of 120 files'),
       progress: .31,
       actions: [_m7Cancel(en)],
     ),
@@ -527,7 +527,7 @@ List<Widget> _m7QueueRows(bool en, {int count = 12, bool details = true}) {
       detailsOpen: details,
       onToggleDetails: _noop,
       details: [
-        LgQueueDetail(_x(en, r'项目资料\草稿.docx', r'Project files\draft.docx'), reason: _x(en, '没有访问权限', 'No access permission')),
+        LgQueueDetail(_x(en, r'项目资料\草稿.docx', r'Project files\draft.docx'), reason: _x(en, '没有访问权限', 'Access is denied')),
         LgQueueDetail(_x(en, r'项目资料\图表.png', r'Project files\chart.png'), reason: _x(en, '文件正被其他应用使用', 'File is in use by another app')),
       ],
       actions: [
@@ -541,7 +541,7 @@ List<Widget> _m7QueueRows(bool en, {int count = 12, bool details = true}) {
       name: _x(en, '说明.txt', 'notes.txt'),
       path: r'C:\Users\zhangsan\Documents → D:\备份',
       state: LgQueueState.skipped,
-      status: _x(en, '已跳过：目标位置已有同名文件', 'Skipped: a file with the same name exists at the destination'),
+      status: _x(en, '已跳过：目标位置已有同名文件', 'Skipped: a file with the same name is at the destination'),
       actions: [_m7Remove(en)],
     ),
     _m7Row(
@@ -602,6 +602,98 @@ LgQueuePanel _m7Queue(
       ],
   rows: _m7QueueRows(en, count: count, details: details),
   onResize: grip ? (_) {} : null,
+);
+
+/// M7b's rows: all skipped, a delete that left items, details over the 50 shown, a paused row
+/// with the 4 GB note.
+List<Widget> _m7bQueueRows(bool en) => [
+  _m7Row(
+    en: en,
+    direction: LgQueueDirection.download,
+    name: _x(en, '照片', 'Photos'),
+    path: r'D:\备份\照片 → C:\Users\zhangsan\Pictures',
+    state: LgQueueState.doneWithIssues,
+    status: _x(en, '已完成，2 个文件已跳过', 'Completed, 2 files skipped'),
+    detailsLabel: _x(en, '查看详情', 'Details'),
+    detailsOpen: true,
+    onToggleDetails: _noop,
+    details: [
+      LgQueueDetail(_x(en, r'照片\IMG_0101.jpg · 已跳过：目标位置已有同名文件', r'Photos\IMG_0101.jpg · Skipped: a file with the same name is at the destination')),
+      LgQueueDetail(_x(en, r'照片\IMG_0102.jpg · 已跳过：目标位置已有同名文件', r'Photos\IMG_0102.jpg · Skipped: a file with the same name is at the destination')),
+    ],
+    actions: [_m7Remove(en)],
+  ),
+  _m7Row(
+    en: en,
+    direction: LgQueueDirection.delete,
+    name: _x(en, '临时', 'temp'),
+    path: r'D:\备份\临时',
+    state: LgQueueState.doneWithIssues,
+    status: _x(en, '已完成，1 个项目未删除', 'Completed, 1 item not deleted'),
+    detailsLabel: _x(en, '查看详情', 'Details'),
+    detailsOpen: true,
+    onToggleDetails: _noop,
+    details: [
+      LgQueueDetail(_x(en, r'临时\日志.txt', r'temp\log.txt'), reason: _x(en, '文件正被其他应用使用', 'The file is in use by another app')),
+    ],
+    actions: [
+      LgQueueAction(icon: LgIcons.refresh, label: _x(en, '重试', 'Retry'), onPressed: _noop),
+      _m7Remove(en),
+    ],
+  ),
+  _m7Row(
+    en: en,
+    direction: LgQueueDirection.upload,
+    name: _x(en, '素材库', 'Library'),
+    path: r'C:\Users\zhangsan\Videos → D:\备份',
+    state: LgQueueState.doneWithIssues,
+    status: _x(en, '已完成，53 个文件未传输', 'Completed, 53 files not transferred'),
+    detailsLabel: _x(en, '查看详情', 'Details'),
+    detailsOpen: true,
+    onToggleDetails: _noop,
+    details: [
+      for (var i = 1; i <= 3; i++)
+        LgQueueDetail(_x(en, '素材库\\片段$i.mov', 'Library\\clip$i.mov'), reason: _x(en, '没有访问权限', 'Access is denied')),
+      LgQueueDetail(_x(en, '另有 50 个文件', '50 more files')),
+    ],
+    actions: [
+      LgQueueAction(icon: LgIcons.refresh, label: _x(en, '重试未传输的文件', 'Retry files not transferred'), onPressed: _noop),
+      _m7Remove(en),
+    ],
+  ),
+  _m7Row(
+    en: en,
+    direction: LgQueueDirection.download,
+    name: _x(en, '系统镜像.iso', 'system.iso'),
+    path: r'D:\备份 → C:\Users\zhangsan\Downloads',
+    state: LgQueueState.paused,
+    status: _x(en, '已暂停 · 已传 4.6 GB / 6.2 GB', 'Paused · 4.6 GB of 6.2 GB transferred'),
+    progress: .74,
+    detailsOpen: true,
+    details: [
+      LgQueueDetail(_x(en, '当前文件超过 4 GB，无法断点续传，将从头传输。', "The current file is larger than 4 GB and can't be resumed. It will start over.")),
+    ],
+    actions: [
+      LgQueueAction(icon: LgIcons.play, label: _x(en, '继续', 'Resume'), onPressed: _noop),
+      _m7Cancel(en),
+    ],
+  ),
+];
+
+LgQueuePanel _m7bQueue(bool en) => LgQueuePanel(
+  title: _x(en, '传输', 'Transfers'),
+  spans: [LgQueueSpan(_x(en, '1 个已暂停', '1 paused'))],
+  progress: null,
+  percentText: null,
+  expanded: true,
+  toggleLabel: _x(en, '收起', 'Collapse'),
+  onToggle: _noop,
+  actions: [
+    LgQueueSummaryAction(label: _x(en, '全部继续', 'Resume all'), icon: LgIcons.play, onPressed: _noop),
+    LgQueueSummaryAction(label: _x(en, '清除已完成', 'Clear completed'), onPressed: _noop),
+  ],
+  rows: _m7bQueueRows(en),
+  onResize: (_) {},
 );
 
 // ---- the specimens ------------------------------------------------------------------
@@ -1157,6 +1249,8 @@ List<Specimen> _m7Specimens() {
   // The queue -------------------------------------------------------------------------------------
   add('file-queue', 'expanded-all-states', const Size(1272, 596), (_) => SizedBox(width: 1240, height: 560, child: _m7Queue(false)));
   add('file-queue', 'expanded-all-states-english', const Size(1272, 596), (_) => SizedBox(width: 1240, height: 560, child: _m7Queue(true)));
+  add('file-queue', 'm7b-states', const Size(1272, 520), (_) => SizedBox(width: 1240, height: 484, child: _m7bQueue(false)));
+  add('file-queue', 'm7b-states-english', const Size(1272, 520), (_) => SizedBox(width: 1240, height: 484, child: _m7bQueue(true)));
   add('file-queue', 'folded', const Size(1272, 92), (_) => SizedBox(width: 1240, height: 52, child: _m7Queue(false, expanded: false, grip: false, spans: [const LgQueueSpan('1 个进行中')], progress: .45, percent: '45%', actions: const [])));
   add('file-queue', 'empty', const Size(1272, 92), (_) => SizedBox(width: 1240, height: 52, child: _m7Queue(false, expanded: false, grip: false, emptyText: '暂无传输任务', progress: null, percent: null, actions: const [])));
   add(
