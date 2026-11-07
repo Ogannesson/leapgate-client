@@ -4,8 +4,12 @@
 
 use hbb_common::{log, serde_json};
 use std::{
+    collections::BTreeMap,
     path::Path,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex,
+    },
     time::UNIX_EPOCH,
 };
 
@@ -56,6 +60,103 @@ pub fn paused_event(id: i32, paused: &Paused) -> String {
         "restart_file": paused.restart_file,
     })
     .to_string()
+}
+
+/// A job stopped with its temporary files kept (12 §2.2): `resume_from` is where a retry starts.
+pub fn kept_event(id: i32, resume_from: i32, err: &str, side: &str, restart_file: bool) -> String {
+    serde_json::json!({
+        "kind": "kept",
+        "id": id,
+        "resume_from": resume_from,
+        "err": err,
+        "side": side,
+        "restart_file": restart_file,
+    })
+    .to_string()
+}
+
+/// A job stopped after one of its files failed; the UI starts it again from `resume_from`.
+pub fn continue_from_event(id: i32, resume_from: i32, restart_file: bool) -> String {
+    serde_json::json!({
+        "kind": "continue_from",
+        "id": id,
+        "resume_from": resume_from,
+        "restart_file": restart_file,
+    })
+    .to_string()
+}
+
+/// `name` is the entry's path under the job's folder, with `/` between parts.
+pub fn file_failed_event(id: i32, file_num: i32, name: &str, err: &str, side: &str) -> String {
+    serde_json::json!({
+        "kind": "file_failed",
+        "id": id,
+        "file_num": file_num,
+        "name": entry_name(name),
+        "err": err,
+        "side": side,
+    })
+    .to_string()
+}
+
+/// A job's entry names carry this side's separator; a peer's Windows names are already turned to
+/// `/` on other systems (upstream's `transform_windows_path`).
+fn entry_name(name: &str) -> std::borrow::Cow<'_, str> {
+    if cfg!(windows) {
+        name.replace('\\', "/").into()
+    } else {
+        name.into()
+    }
+}
+
+/// What a file transfer error does to its job.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Fault {
+    /// Upstream's handling: a refusal of the whole job, or the user's own skip.
+    Upstream,
+    /// The job stops with its temporary files kept (`kept`).
+    Stop,
+    /// One file is not transferred; the rest go on. Only in a job of more than one file: a
+    /// single file's failure is its job's.
+    File,
+}
+
+pub fn fault(code: crate::ft_reason::Code) -> Fault {
+    use crate::ft_reason::Code;
+    match code {
+        Code::Skipped | Code::OneWay | Code::TooManyFiles | Code::AndroidScope => Fault::Upstream,
+        Code::DiskFull => Fault::Stop,
+        _ => Fault::File,
+    }
+}
+
+/// Jobs whose errors were already handled, by job ID (unique in the process): the last file
+/// reported, or `STOPPED` for a job that was stopped. A peer keeps erring on the blocks still on
+/// their way, and goes on erring for a job this side has dropped.
+static HANDLED: Mutex<BTreeMap<i32, i32>> = Mutex::new(BTreeMap::new());
+const STOPPED: i32 = i32::MAX;
+
+/// Whether this is the first error for `file_num` of `id` (errors come in file order).
+pub fn first_report(id: i32, file_num: i32) -> bool {
+    let mut handled = HANDLED.lock().unwrap();
+    if handled.get(&id).is_some_and(|last| *last >= file_num) {
+        return false;
+    }
+    handled.insert(id, file_num);
+    true
+}
+
+pub fn stop(id: i32) {
+    HANDLED.lock().unwrap().insert(id, STOPPED);
+}
+
+pub fn stopped(id: i32) -> bool {
+    HANDLED.lock().unwrap().get(&id) == Some(&STOPPED)
+}
+
+/// Whether `target` has a `.download`, as a file a download has started and not finished.
+pub fn staged(target: &Path) -> bool {
+    staging(target, "download").exists()
 }
 
 /// Whether a download already finished `target`: renamed from its `.download` and given the
@@ -150,6 +251,51 @@ mod tests {
         assert!(!download_finished(&target, 3, modified));
         assert!(!download_finished(&dir.join("missing"), 0, modified));
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A full disk stops the job with its files kept; a refusal of the whole job or the user's
+    /// skip stays upstream's; anything else costs one file.
+    #[test]
+    fn faults_by_reason() {
+        use crate::ft_reason::classify;
+        let fault_of = |text: &str, side: &str| fault(classify(text, "Windows", side).reason);
+        assert_eq!(fault_of("磁盘空间不足。 (os error 112)", "remote"), Fault::Stop);
+        assert_eq!(fault_of("skipped", "remote"), Fault::Upstream);
+        assert_eq!(fault_of("one-way-file-transfer-tip", "remote"), Fault::Upstream);
+        for text in [
+            "拒绝访问。 (os error 5)",
+            "另一个程序正在使用此文件，进程无法访问。 (os error 32)",
+            "invalid Windows download file name: a:b",
+            "symlink path component is not allowed",
+            "something new",
+        ] {
+            assert_eq!(fault_of(text, "remote"), Fault::File, "{text}");
+        }
+    }
+
+    /// Errors for a file already reported, or for a job already stopped, are claimed once.
+    #[test]
+    fn repeated_errors_are_reported_once() {
+        assert!(first_report(9001, 2));
+        assert!(!first_report(9001, 2));
+        assert!(!first_report(9001, 1));
+        assert!(first_report(9001, 3));
+        assert!(!stopped(9001));
+        stop(9001);
+        assert!(stopped(9001) && !first_report(9001, 4));
+    }
+
+    #[test]
+    fn file_failed_names_use_slashes() {
+        let v: serde_json::Value =
+            serde_json::from_str(&file_failed_event(5, 1, "dir\\sub\\a.txt", "e", "remote"))
+                .unwrap();
+        let name = if cfg!(windows) { "dir/sub/a.txt" } else { "dir\\sub\\a.txt" };
+        assert_eq!(
+            v,
+            serde_json::json!({"kind": "file_failed", "id": 5, "file_num": 1, "name": name,
+                "err": "e", "side": "remote"})
+        );
     }
 
     #[test]

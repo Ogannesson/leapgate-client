@@ -1,29 +1,39 @@
 //! The file transfer view's Rust items that need upstream's sessions and `fs`: reading a local
 //! folder with the error kept, and removing a link without following it (`LEAPGATE.md` §10.15);
-//! the event stream and pausing (§10.17). FT2 and M7b's rules are in `libs/leapgate` (`ft_reason`,
-//! `ft`).
+//! the event stream, pausing, and keeping or skipping on failure (§10.17). FT2 and M7b's rules
+//! are in `libs/leapgate` (`ft_reason`, `ft`, `ft_read`).
+//!
+//! Built without flutter too, so the hooks in `io_loop.rs` need no `cfg`: there the switch is
+//! never on and every hook leaves upstream's path alone.
 
+#[cfg(any(target_os = "android", target_os = "ios", feature = "flutter"))]
 use crate::{
     client::{Data, Interface as _},
     common::make_fd_to_json,
     flutter::sessions,
     flutter_ffi::SessionID,
-    ui_session_interface::{InvokeUiSession, Session},
 };
+use crate::ui_session_interface::{InvokeUiSession, Session};
+#[cfg(any(target_os = "android", target_os = "ios", feature = "flutter"))]
+use base::message_proto::{FileRemoveDir, FileRemoveFile};
 use base::{
     fs,
-    message_proto::{FileAction, FileRemoveDir, FileRemoveFile, FileTransferCancel, Message},
+    message_proto::{FileAction, FileTransferCancel, FileTransferDigest, FileTransferError, Message},
 };
+#[cfg(any(target_os = "android", target_os = "ios", feature = "flutter"))]
 use flutter_rust_bridge::StreamSink;
-use hbb_common::{allow_err, get_version_number, log, Stream};
-use leapgate::ft::{Command, Paused};
+use hbb_common::{allow_err, get_version_number, log, ResultType, Stream};
+use leapgate::ft::{Command, Fault, Paused};
+#[cfg(any(target_os = "android", target_os = "ios", feature = "flutter"))]
 use std::sync::Mutex;
 
 /// Held so the UI's stream stays open; nothing is sent on it.
+#[cfg(any(target_os = "android", target_os = "ios", feature = "flutter"))]
 static SUBSCRIPTION: Mutex<Option<StreamSink<String>>> = Mutex::new(None);
 
 /// `leapgate_ft_events`: a new subscription replaces the previous one; the first turns the
 /// switch on.
+#[cfg(any(target_os = "android", target_os = "ios", feature = "flutter"))]
 pub(crate) fn set_events(sink: StreamSink<String>) {
     *SUBSCRIPTION.lock().unwrap() = Some(sink);
     leapgate::ft::enable();
@@ -32,13 +42,30 @@ pub(crate) fn set_events(sink: StreamSink<String>) {
 /// On the session's own event stream as `{"name":"leapgate_ft","value":<event>}`; nothing for a
 /// session that is not the app's.
 fn push<T: InvokeUiSession>(handler: &Session<T>, event: &str) {
-    let ui = &handler.ui_handler as &dyn std::any::Any;
-    if let Some(ui) = ui.downcast_ref::<crate::flutter::FlutterHandler>() {
-        ui.push_event(leapgate::ft::EVENT, &[("value", event)], &[]);
+    #[cfg(any(target_os = "android", target_os = "ios", feature = "flutter"))]
+    {
+        let ui = &handler.ui_handler as &dyn std::any::Any;
+        if let Some(ui) = ui.downcast_ref::<crate::flutter::FlutterHandler>() {
+            ui.push_event(leapgate::ft::EVENT, &[("value", event)], &[]);
+        }
     }
+    #[cfg(not(any(target_os = "android", target_os = "ios", feature = "flutter")))]
+    let _ = (handler, event);
+}
+
+fn cancel(id: i32) -> Message {
+    let mut file_action = FileAction::new();
+    file_action.set_cancel(FileTransferCancel {
+        id,
+        ..Default::default()
+    });
+    let mut msg = Message::new();
+    msg.set_file_action(file_action);
+    msg
 }
 
 /// `leapgate_ft_pause`, `leapgate_ft_resume`: handled in the session's loop (`command`).
+#[cfg(any(target_os = "android", target_os = "ios", feature = "flutter"))]
 pub(crate) fn send(session_id: SessionID, command: Command) {
     if let Some(session) = sessions::get_session_by_session_id(&session_id) {
         session.send(Data::Leapgate(command));
@@ -64,14 +91,7 @@ pub(crate) async fn command<T: InvokeUiSession>(
         return;
     };
     if !paused.soft {
-        let mut file_action = FileAction::new();
-        file_action.set_cancel(FileTransferCancel {
-            id,
-            ..Default::default()
-        });
-        let mut msg = Message::new();
-        msg.set_file_action(file_action);
-        allow_err!(peer.send(&msg).await);
+        allow_err!(peer.send(&cancel(id)).await);
     }
     push(handler, &leapgate::ft::paused_event(id, &paused));
 }
@@ -177,8 +197,333 @@ fn pause_download(
     Some(paused)
 }
 
+// ---- Failures (FT4, FT5) ----
+// Each hook returns `true` when it handled the error, so `io_loop.rs` skips upstream's handling
+// (which cancels the job, removes the file being written and sends `job_error`). The decisions
+// are in the `on_*` functions, which only record what to send and to push (`Effects`).
+
+/// What a hook sends the peer, then pushes to the UI.
+#[derive(Default)]
+struct Effects {
+    msgs: Vec<Message>,
+    events: Vec<String>,
+    /// Upstream's `job_done`, for a download whose last file failed.
+    done: Option<(i32, i32)>,
+}
+
+impl Effects {
+    async fn apply<T: InvokeUiSession>(self, handler: &Session<T>, peer: &mut Stream) {
+        for msg in &self.msgs {
+            allow_err!(peer.send(msg).await);
+        }
+        for event in &self.events {
+            push(handler, event);
+        }
+        if let Some((id, file_num)) = self.done {
+            handler.job_done(id, file_num);
+        }
+    }
+}
+
+/// The upload read loop (`io_loop.rs`, the timer's `fs::handle_read_jobs`): see `ft_read`.
+pub(crate) async fn read_jobs<T: InvokeUiSession>(
+    handler: &Session<T>,
+    jobs: &mut Vec<fs::TransferJob>,
+    peer: &mut Stream,
+) -> ResultType<()> {
+    read_jobs_on(leapgate::ft::enabled(), handler, jobs, peer).await
+}
+
+async fn read_jobs_on<T: InvokeUiSession>(
+    on: bool,
+    handler: &Session<T>,
+    jobs: &mut Vec<fs::TransferJob>,
+    peer: &mut Stream,
+) -> ResultType<()> {
+    if !on {
+        return fs::handle_read_jobs(jobs, peer).await.map(|_| ());
+    }
+    let step = leapgate::ft_read::step(jobs).await;
+    for msg in &step.out {
+        peer.send(msg).await?;
+    }
+    for f in step.failed {
+        log::info!("leapgate ft: upload {} left out file {}: {}", f.id, f.file_num, f.err);
+        let event = leapgate::ft::file_failed_event(f.id, f.file_num, &f.name, &f.err, "local");
+        push(handler, &event);
+    }
+    Ok(())
+}
+
+/// A download's digest check failed (`io_loop.rs`, before upstream cancels the job). The check
+/// first renames the file before it, so either that rename failed, or this file's name or path
+/// cannot be written here (a name invalid on Windows, a link in the path).
+pub(crate) async fn digest_failed<T: InvokeUiSession>(
+    handler: &Session<T>,
+    write_jobs: &mut Vec<fs::TransferJob>,
+    digest: &FileTransferDigest,
+    err: &str,
+    peer: &mut Stream,
+) -> bool {
+    let mut fx = Effects::default();
+    let on = leapgate::ft::enabled();
+    let claimed = on_digest_failed(on, &handler.peer_platform(), write_jobs, digest, err, &mut fx);
+    fx.apply(handler, peer).await;
+    claimed
+}
+
+fn on_digest_failed(
+    on: bool,
+    peer_platform: &str,
+    write_jobs: &mut Vec<fs::TransferJob>,
+    digest: &FileTransferDigest,
+    err: &str,
+    fx: &mut Effects,
+) -> bool {
+    let Some(job) = claimable(on, write_jobs, digest.id) else {
+        return false;
+    };
+    let before = job.file_num();
+    let renaming = before != digest.file_num && staged(job, before);
+    let failed = if renaming { before } else { digest.file_num };
+    match local_fault(peer_platform, job, err) {
+        Fault::Upstream => return false,
+        Fault::Stop => stop_download(write_jobs, digest.id, failed, Some((err, "local")), fx),
+        Fault::File => {
+            file_failed(job, failed, err, "local", fx);
+            if renaming {
+                stop_download(write_jobs, digest.id, digest.file_num, None, fx);
+            } else {
+                fx.msgs
+                    .push(leapgate::ft_read::skip(digest.id, digest.file_num));
+            }
+        }
+    }
+    true
+}
+
+/// A downloaded block could not be written (`io_loop.rs`, before upstream cancels the job).
+/// Writing a block of a new file first renames the one before it; whichever failed is the one
+/// still staged. A full disk keeps the job (`kept`); another failure leaves the file out and the
+/// UI starts again from the next one: the peer may already be reading it.
+pub(crate) async fn write_failed<T: InvokeUiSession>(
+    handler: &Session<T>,
+    write_jobs: &mut Vec<fs::TransferJob>,
+    id: i32,
+    block_file_num: i32,
+    err: &str,
+    peer: &mut Stream,
+) -> bool {
+    let mut fx = Effects::default();
+    let (on, platform) = (leapgate::ft::enabled(), handler.peer_platform());
+    let claimed = on_write_failed(on, &platform, write_jobs, id, block_file_num, err, &mut fx);
+    fx.apply(handler, peer).await;
+    claimed
+}
+
+fn on_write_failed(
+    on: bool,
+    peer_platform: &str,
+    write_jobs: &mut Vec<fs::TransferJob>,
+    id: i32,
+    block_file_num: i32,
+    err: &str,
+    fx: &mut Effects,
+) -> bool {
+    let Some(job) = claimable(on, write_jobs, id) else {
+        return false;
+    };
+    let before = job.file_num();
+    let failed = if before != block_file_num && staged(job, before) {
+        before
+    } else {
+        block_file_num
+    };
+    match local_fault(peer_platform, job, err) {
+        Fault::Upstream => return false,
+        Fault::Stop => stop_download(write_jobs, id, failed, Some((err, "local")), fx),
+        Fault::File => {
+            file_failed(job, failed, err, "local", fx);
+            stop_download(write_jobs, id, failed + 1, None, fx);
+        }
+    }
+    true
+}
+
+/// The peer's `FileTransferError` (`io_loop.rs`, before upstream removes the job).
+///
+/// Download: the peer could not read a file. Its number in the error is one past the file (the
+/// peer moves on before reporting). Whether the peer reads on afterwards depends on it (a
+/// Windows CM ends the job), so this side stops: the file before it, complete, is renamed, the
+/// failed one keeps its staged part, and the UI starts again from the next file. An error before
+/// any file is listed is the peer refusing the job: upstream's.
+///
+/// Upload: the peer could not write a file, and keeps its job. The file is skipped on both sides
+/// (the peer drops its part); a full disk stops this side's job and leaves the peer's, so a retry
+/// resumes where the peer stopped. An error before the first file was confirmed is upstream's.
+pub(crate) async fn peer_error<T: InvokeUiSession>(
+    handler: &Session<T>,
+    read_jobs: &mut Vec<fs::TransferJob>,
+    write_jobs: &mut Vec<fs::TransferJob>,
+    e: &FileTransferError,
+    peer: &mut Stream,
+) -> bool {
+    let mut fx = Effects::default();
+    let (on, platform) = (leapgate::ft::enabled(), handler.peer_platform());
+    let claimed = on_peer_error(on, &platform, read_jobs, write_jobs, e, &mut fx);
+    fx.apply(handler, peer).await;
+    claimed
+}
+
+fn on_peer_error(
+    on: bool,
+    peer_platform: &str,
+    read_jobs: &mut Vec<fs::TransferJob>,
+    write_jobs: &mut Vec<fs::TransferJob>,
+    e: &FileTransferError,
+    fx: &mut Effects,
+) -> bool {
+    if !on {
+        return false;
+    }
+    let id = e.id;
+    let reason = leapgate::ft_reason::classify(&e.error, peer_platform, "remote");
+    let fault = single_file(leapgate::ft::fault(reason.reason), write_jobs, read_jobs, id);
+    if let Some(job) = claimable(on, write_jobs, id) {
+        let failed = e.file_num - 1;
+        if fault == Fault::Upstream || failed < 0 || failed as usize >= job.files().len() {
+            return false;
+        }
+        if fault == Fault::Stop {
+            stop_download(write_jobs, id, failed, Some((&e.error, "remote")), fx);
+            return true;
+        }
+        if job.file_num() < failed {
+            if let Err(err) = job.finish_download() {
+                file_failed(job, job.file_num(), &err.to_string(), "local", fx);
+            }
+        }
+        file_failed(job, failed, &e.error, "remote", fx);
+        stop_download(write_jobs, id, failed + 1, None, fx);
+        return true;
+    }
+    let Some(job) = fs::get_job(id, read_jobs).filter(|j| j.r#type == fs::JobType::Generic) else {
+        // A job stopped here, which the peer goes on erring for.
+        return leapgate::ft::stopped(id);
+    };
+    let failed = e.file_num;
+    let first_unconfirmed = job.file_num() == 0 && !job.file_confirmed();
+    if fault == Fault::Upstream
+        || failed < 0
+        || failed as usize >= job.files().len()
+        || first_unconfirmed
+    {
+        return false;
+    }
+    if !leapgate::ft::first_report(id, failed) {
+        return true;
+    }
+    if fault == Fault::Stop {
+        fs::remove_job(id, read_jobs);
+        leapgate::ft::stop(id);
+        log::info!("leapgate ft: upload {id} kept at file {failed}: {}", e.error);
+        let event = leapgate::ft::kept_event(id, failed, &e.error, "remote", false);
+        fx.events.push(event);
+        return true;
+    }
+    if job.file_num() == failed {
+        job.set_file_skipped();
+    }
+    fx.msgs.push(leapgate::ft_read::skip(id, failed));
+    file_failed(job, failed, &e.error, "remote", fx);
+    true
+}
+
+/// A running generic download, with the switch on.
+fn claimable(on: bool, write_jobs: &[fs::TransferJob], id: i32) -> Option<&fs::TransferJob> {
+    if !on {
+        return None;
+    }
+    fs::get_job_immutable(id, write_jobs).filter(|job| job.r#type == fs::JobType::Generic)
+}
+
+/// A single file's failure is its job's: upstream's.
+fn single_file(fault: Fault, write_jobs: &[fs::TransferJob], read_jobs: &[fs::TransferJob], id: i32) -> Fault {
+    let files = fs::get_job_immutable(id, write_jobs)
+        .or_else(|| fs::get_job_immutable(id, read_jobs))
+        .map_or(0, |job| job.files().len());
+    match fault {
+        Fault::File if files <= 1 => Fault::Upstream,
+        fault => fault,
+    }
+}
+
+fn local_fault(peer_platform: &str, job: &fs::TransferJob, err: &str) -> Fault {
+    let reason = leapgate::ft_reason::classify(err, peer_platform, "local");
+    match leapgate::ft::fault(reason.reason) {
+        Fault::File if job.files().len() <= 1 => Fault::Upstream,
+        fault => fault,
+    }
+}
+
+fn staged(job: &fs::TransferJob, file_num: i32) -> bool {
+    job.download_target(file_num)
+        .is_ok_and(|target| leapgate::ft::staged(&target))
+}
+
+fn entry(job: &fs::TransferJob, file_num: i32) -> String {
+    job.files()
+        .get(file_num as usize)
+        .map(|entry| entry.name.clone())
+        .unwrap_or_default()
+}
+
+fn file_failed(job: &fs::TransferJob, file_num: i32, err: &str, side: &str, fx: &mut Effects) {
+    let id = job.id();
+    log::info!("leapgate ft: job {id} left out file {file_num} ({side}): {err}");
+    let name = entry(job, file_num);
+    fx.events
+        .push(leapgate::ft::file_failed_event(id, file_num, &name, err, side));
+}
+
+/// Drops the download, keeping its staged files, and tells the peer to stop. `kept` carries the
+/// error and its side for a job that stops for good (`kept`); without it the UI starts again
+/// from `resume_from` (`continue_from`), or the job is over when no file is left.
+fn stop_download(
+    write_jobs: &mut Vec<fs::TransferJob>,
+    id: i32,
+    resume_from: i32,
+    kept: Option<(&str, &str)>,
+    fx: &mut Effects,
+) {
+    let Some(job) = fs::remove_job(id, write_jobs) else {
+        return;
+    };
+    let files = job.files().len() as i32;
+    let target = job.download_target(resume_from).ok();
+    // Closes the staged file before it may be removed.
+    drop(job);
+    let restart_file = target.is_some_and(|t| leapgate::ft::restart_past_resume_offset(&t));
+    fx.msgs.push(cancel(id));
+    leapgate::ft::stop(id);
+    match kept {
+        Some((err, side)) => {
+            log::info!("leapgate ft: download {id} kept at file {resume_from}: {err}");
+            let event = leapgate::ft::kept_event(id, resume_from, err, side, restart_file);
+            fx.events.push(event);
+        }
+        None if resume_from >= files => fx.done = Some((id, files)),
+        None => {
+            log::info!("leapgate ft: download {id} continues from file {resume_from}");
+            let event = leapgate::ft::continue_from_event(id, resume_from, restart_file);
+            fx.events.push(event);
+        }
+    }
+}
+
 /// M7a-4: what upstream's `session_read_local_dir_sync` returns, or `{"error","reason"}` where
 /// it returns an empty string.
+#[cfg(any(target_os = "android", target_os = "ios", feature = "flutter"))]
 pub(crate) fn read_local_dir(path: String, show_hidden: bool) -> String {
     match fs::read_dir(&fs::get_path(&path), show_hidden) {
         Ok(fd) => make_fd_to_json(fd.id, path, &fd.entries),
@@ -191,6 +536,7 @@ pub(crate) fn read_local_dir(path: String, show_hidden: bool) -> String {
 
 /// M7a-3: removes the link itself, never what it points to (upstream's folder removal recurses
 /// into a folder link's target). The result comes as `job_done` / `job_error` for `act_id`.
+#[cfg(any(target_os = "android", target_os = "ios", feature = "flutter"))]
 pub(crate) fn remove_link(
     session_id: SessionID,
     act_id: i32,
@@ -220,6 +566,7 @@ pub(crate) fn remove_link(
 
 /// A Windows peer removes a folder link or junction with `remove_dir` (non-recursive
 /// `FileRemoveDir`); a file link, or any link on another peer, is unlinked with `FileRemoveFile`.
+#[cfg(any(target_os = "android", target_os = "ios", feature = "flutter"))]
 fn link_action(act_id: i32, path: String, is_dir_link: bool, peer_platform: &str) -> FileAction {
     let mut file_action = FileAction::new();
     if is_dir_link && peer_platform == "Windows" {
@@ -242,6 +589,7 @@ fn link_action(act_id: i32, path: String, is_dir_link: bool, peer_platform: &str
 
 /// Windows tells a folder link or junction by the link's own attributes, not by the listing: a
 /// broken one lists as a file link (`entry_type` 5). Elsewhere any link is unlinked.
+#[cfg(any(target_os = "android", target_os = "ios", feature = "flutter"))]
 fn remove_local_link(path: &str) -> std::io::Result<()> {
     #[cfg(windows)]
     {
@@ -254,7 +602,7 @@ fn remove_local_link(path: &str) -> std::io::Result<()> {
     std::fs::remove_file(path)
 }
 
-#[cfg(test)]
+#[cfg(all(test, any(target_os = "android", target_os = "ios", feature = "flutter")))]
 mod tests {
     use super::*;
     use std::{fs as sfs, path::PathBuf};
@@ -503,6 +851,21 @@ mod tests {
         let older = get_version_number("1.4.1");
         assert!(handle(true, pause(2), older, &mut reads, &mut writes).is_none());
         assert_eq!(writes[0].id(), 2);
+        let mut fx = Effects::default();
+        let digest = FileTransferDigest {
+            id: 2,
+            file_num: 1,
+            ..Default::default()
+        };
+        let denied = "Access is denied. (os error 5)";
+        assert!(!on_digest_failed(false, "Windows", &mut writes, &digest, denied, &mut fx));
+        assert!(!on_write_failed(false, "Windows", &mut writes, 2, 1, denied, &mut fx));
+        for (id, file_num) in [(1, 0), (2, 2)] {
+            let e = peer_err(id, file_num, denied);
+            assert!(!on_peer_error(false, "Windows", &mut reads, &mut writes, &e, &mut fx));
+        }
+        assert!(fx.msgs.is_empty() && fx.events.is_empty() && fx.done.is_none());
+        assert_eq!((reads.len(), writes.len()), (1, 1));
         sfs::remove_dir_all(&dir).unwrap();
     }
 
@@ -571,5 +934,308 @@ mod tests {
         assert!(handle(true, Command::Resume { id: 20 }, v142(), &mut reads, &mut vec![]).is_none());
         assert!(!reads[0].is_last_job);
         sfs::remove_dir_all(&dir).unwrap();
+    }
+
+    // ---- Failures ----
+
+    const DENIED: &str = "Access is denied. (os error 5)";
+    #[cfg(windows)]
+    const LOCAL_DISK_FULL: &str = "There is not enough space on the disk. (os error 112)";
+    #[cfg(not(windows))]
+    const LOCAL_DISK_FULL: &str = "No space left on device (os error 28)";
+
+    fn peer_err(id: i32, file_num: i32, error: &str) -> FileTransferError {
+        FileTransferError {
+            id,
+            file_num,
+            error: error.to_owned(),
+            ..Default::default()
+        }
+    }
+
+    fn block(id: i32, file_num: i32, data: &[u8]) -> base::message_proto::FileTransferBlock {
+        base::message_proto::FileTransferBlock {
+            id,
+            file_num,
+            data: data.to_vec().into(),
+            ..Default::default()
+        }
+    }
+
+    /// A download of `a.txt`, `b.txt`, `c.txt` into `dir`.
+    fn download3(id: i32, dir: &PathBuf) -> fs::TransferJob {
+        let mut job = fs::TransferJob::new_write(
+            id,
+            fs::JobType::Generic,
+            "/remote/folder".to_owned(),
+            fs::DataSource::FilePath(dir.clone()),
+            0,
+            false,
+            true,
+            true,
+        )
+        .with_files(vec![entry("a.txt", 3), entry("b.txt", 5), entry("c.txt", 4)])
+        .unwrap();
+        job.is_last_job = false;
+        job
+    }
+
+    fn events(fx: &Effects) -> Vec<serde_json::Value> {
+        fx.events
+            .iter()
+            .map(|e| serde_json::from_str(e).unwrap())
+            .collect()
+    }
+
+    /// `cancel N` or `skip N:F` per message to the peer.
+    fn sent(fx: &Effects) -> Vec<String> {
+        use base::message_proto::{file_action, message};
+        fx.msgs
+            .iter()
+            .map(|msg| match &msg.union {
+                Some(message::Union::FileAction(a)) => match &a.union {
+                    Some(file_action::Union::Cancel(c)) => format!("cancel {}", c.id),
+                    Some(file_action::Union::SendConfirm(c)) if c.skip() => {
+                        format!("skip {}:{}", c.id, c.file_num)
+                    }
+                    other => panic!("{other:?}"),
+                },
+                other => panic!("{other:?}"),
+            })
+            .collect()
+    }
+
+    fn big(path: PathBuf) {
+        sfs::File::create(path)
+            .unwrap()
+            .set_len(u64::from(u32::MAX) + 1)
+            .unwrap();
+    }
+
+    /// The peer could not read `b.txt` (it reports file 2). Whether this side was still on
+    /// `a.txt`, complete (it is renamed), or already writing `b.txt` (its part stays staged),
+    /// the download stops and starts again at `c.txt`; a staged `c.txt` past 4 GiB restarts.
+    #[tokio::test]
+    async fn a_peer_read_failure_continues_past_the_file() {
+        let on_a = scratch("peer-read-a");
+        let mut writes = vec![download3(30, &on_a)];
+        writes[0].write(block(30, 0, b"abc")).await.unwrap();
+        big(on_a.join("c.txt.download"));
+        let on_b = scratch("peer-read-b");
+        let mut on_b_writes = vec![download3(31, &on_b)];
+        on_b_writes[0].write(block(31, 0, b"abc")).await.unwrap();
+        on_b_writes[0].write(block(31, 1, b"bb")).await.unwrap();
+        for (dir, writes, id, restart) in [(&on_a, &mut writes, 30, true), (&on_b, &mut on_b_writes, 31, false)] {
+            let mut fx = Effects::default();
+            let e = peer_err(id, 2, DENIED);
+            assert!(on_peer_error(true, "Windows", &mut vec![], writes, &e, &mut fx));
+            assert!(writes.is_empty());
+            assert_eq!(sfs::read(dir.join("a.txt")).unwrap(), b"abc");
+            assert!(!dir.join("a.txt.download").exists());
+            assert_eq!(dir.join("b.txt.download").exists(), id == 31);
+            assert!(!dir.join("c.txt.download").exists());
+            assert_eq!(sent(&fx), [format!("cancel {id}")]);
+            let ev = events(&fx);
+            assert_eq!(
+                (&ev[0]["kind"], &ev[0]["file_num"], &ev[0]["name"], &ev[0]["side"]),
+                (&"file_failed".into(), &1.into(), &"b.txt".into(), &"remote".into())
+            );
+            assert_eq!(
+                ev[1],
+                serde_json::json!({"kind": "continue_from", "id": id, "resume_from": 2,
+                    "restart_file": restart})
+            );
+            assert!(fx.done.is_none());
+            // The peer erring on for the stopped job is claimed without a word.
+            let mut fx = Effects::default();
+            assert!(on_peer_error(true, "Windows", &mut vec![], writes, &e, &mut fx));
+            assert!(fx.msgs.is_empty() && fx.events.is_empty());
+        }
+        sfs::remove_dir_all(&on_a).unwrap();
+        sfs::remove_dir_all(&on_b).unwrap();
+    }
+
+    /// A failed block of a new file is the rename of the file before it while that one is still
+    /// staged, else the new file's own; a full disk keeps the job, its staged part past 4 GiB
+    /// restarting.
+    #[tokio::test]
+    async fn a_failed_rename_is_told_from_a_failed_write() {
+        let dir = scratch("write");
+        // `a.txt` written and staged: the rename failed.
+        let mut writes = vec![download3(40, &dir)];
+        writes[0].write(block(40, 0, b"abc")).await.unwrap();
+        let mut fx = Effects::default();
+        assert!(on_write_failed(true, "Windows", &mut writes, 40, 1, DENIED, &mut fx));
+        let ev = events(&fx);
+        assert_eq!((&ev[0]["file_num"], &ev[0]["side"]), (&0.into(), &"local".into()));
+        assert_eq!((&ev[1]["kind"], &ev[1]["resume_from"]), (&"continue_from".into(), &1.into()));
+        assert!(dir.join("a.txt.download").exists());
+        // Nothing staged before `b.txt`: its own write failed.
+        let fresh = scratch("write-fresh");
+        let mut writes = vec![download3(41, &fresh)];
+        let mut fx = Effects::default();
+        assert!(on_write_failed(true, "Windows", &mut writes, 41, 1, DENIED, &mut fx));
+        let ev = events(&fx);
+        assert_eq!((&ev[0]["file_num"], &ev[1]["resume_from"]), (&1.into(), &2.into()));
+        // The last file: no file is left, the job is done.
+        let mut writes = vec![download3(42, &fresh)];
+        let mut fx = Effects::default();
+        assert!(on_write_failed(true, "Windows", &mut writes, 42, 2, DENIED, &mut fx));
+        assert_eq!((events(&fx).len(), fx.done), (1, Some((42, 3))));
+        // A full disk.
+        let mut writes = vec![download3(43, &fresh)];
+        big(fresh.join("b.txt.download"));
+        let mut fx = Effects::default();
+        assert!(on_write_failed(true, "Windows", &mut writes, 43, 1, LOCAL_DISK_FULL, &mut fx));
+        assert_eq!(sent(&fx), ["cancel 43"]);
+        let ev = events(&fx);
+        assert_eq!(ev.len(), 1);
+        assert_eq!(
+            (&ev[0]["kind"], &ev[0]["resume_from"], &ev[0]["side"], &ev[0]["restart_file"]),
+            (&"kept".into(), &1.into(), &"local".into(), &true.into())
+        );
+        assert!(!fresh.join("b.txt.download").exists());
+        sfs::remove_dir_all(&dir).unwrap();
+        sfs::remove_dir_all(&fresh).unwrap();
+    }
+
+    /// A name this side cannot write is skipped where the peer waits for its confirmation; the
+    /// job goes on. A failed rename of the file before it stops and starts again at this one.
+    #[tokio::test]
+    async fn a_digest_failure_skips_the_file_or_continues() {
+        let dir = scratch("digest");
+        let mut writes = vec![download3(50, &dir)];
+        let digest = FileTransferDigest {
+            id: 50,
+            file_num: 1,
+            ..Default::default()
+        };
+        let mut fx = Effects::default();
+        let invalid = "invalid Windows download file name: b.txt";
+        assert!(on_digest_failed(true, "Windows", &mut writes, &digest, invalid, &mut fx));
+        assert_eq!(sent(&fx), ["skip 50:1"]);
+        assert_eq!(events(&fx)[0]["file_num"], 1);
+        assert_eq!(writes.len(), 1);
+        writes[0].write(block(50, 0, b"abc")).await.unwrap();
+        let mut fx = Effects::default();
+        assert!(on_digest_failed(true, "Windows", &mut writes, &digest, DENIED, &mut fx));
+        assert_eq!(sent(&fx), ["cancel 50"]);
+        let ev = events(&fx);
+        assert_eq!((&ev[0]["file_num"], &ev[1]["resume_from"]), (&0.into(), &1.into()));
+        assert!(writes.is_empty());
+        sfs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The peer could not write a file of an upload: it is skipped on both sides, once however
+    /// often the peer reports it. A full disk stops this side's job; a single file's failure,
+    /// or one before the first file was confirmed, is upstream's.
+    #[tokio::test]
+    async fn a_peer_write_failure_skips_the_file() {
+        let dir = scratch("peer-write");
+        for name in ["a.txt", "b.txt"] {
+            sfs::write(dir.join(name), name).unwrap();
+        }
+        let upload = |id| {
+            let mut job = fs::TransferJob::new_read(
+                id,
+                fs::JobType::Generic,
+                "/remote".to_owned(),
+                fs::DataSource::FilePath(dir.clone()),
+                0,
+                false,
+                false,
+                false,
+            )
+            .unwrap();
+            job.is_last_job = false;
+            job
+        };
+        let mut reads = vec![upload(60)];
+        let mut fx = Effects::default();
+        assert!(!on_peer_error(true, "Windows", &mut reads, &mut vec![], &peer_err(60, 0, DENIED), &mut fx));
+        // Past the first file, reading the second.
+        reads[0].init_data_stream_for_cm().await.unwrap();
+        while reads[0].file_num() == 0 {
+            reads[0].read().await.unwrap();
+        }
+        reads[0].init_data_stream_for_cm().await.unwrap();
+        let e = peer_err(60, 1, DENIED);
+        let mut fx = Effects::default();
+        assert!(on_peer_error(true, "Windows", &mut reads, &mut vec![], &e, &mut fx));
+        assert_eq!(sent(&fx), ["skip 60:1"]);
+        assert_eq!(
+            (&events(&fx)[0]["file_num"], &events(&fx)[0]["side"]),
+            (&1.into(), &"remote".into())
+        );
+        assert_eq!((reads.len(), reads[0].file_num()), (1, 2));
+        let mut fx = Effects::default();
+        assert!(on_peer_error(true, "Windows", &mut reads, &mut vec![], &e, &mut fx));
+        assert!(fx.msgs.is_empty() && fx.events.is_empty());
+        // A full disk.
+        let mut reads = vec![upload(61)];
+        reads[0].init_data_stream_for_cm().await.unwrap();
+        while reads[0].file_num() == 0 {
+            reads[0].read().await.unwrap();
+        }
+        let mut fx = Effects::default();
+        let full = "There is not enough space on the disk. (os error 112)";
+        assert!(on_peer_error(true, "Windows", &mut reads, &mut vec![], &peer_err(61, 1, full), &mut fx));
+        assert!(reads.is_empty() && fx.msgs.is_empty());
+        assert_eq!((&events(&fx)[0]["kind"], &events(&fx)[0]["resume_from"]), (&"kept".into(), &1.into()));
+        // A single file.
+        let single = scratch("peer-write-single");
+        let mut reads = vec![running_upload(62, &single)];
+        reads[0].set_file_confirmed(true);
+        let mut fx = Effects::default();
+        assert!(!on_peer_error(true, "Windows", &mut reads, &mut vec![], &peer_err(62, 0, DENIED), &mut fx));
+        sfs::remove_dir_all(&dir).unwrap();
+        sfs::remove_dir_all(&single).unwrap();
+    }
+
+    /// With the switch off the read loop is upstream's, which reports a file it cannot open to
+    /// the peer; on, nothing goes to the peer.
+    #[tokio::test]
+    async fn the_read_loop_reports_to_the_peer_only_with_the_switch_off() {
+        use hbb_common::{protobuf::Message as _, tcp::FramedStream, tokio::net::TcpListener};
+        let handler = Session::<crate::flutter::FlutterHandler>::default();
+        for (on, id) in [(false, 70), (true, 71)] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            let a = hbb_common::tokio::net::TcpStream::connect(addr).await.unwrap();
+            let (b, _) = listener.accept().await.unwrap();
+            let mut ours = Stream::Tcp(FramedStream::from(a, addr));
+            let mut theirs = Stream::Tcp(FramedStream::from(b, addr));
+            let dir = scratch(&format!("loop-{on}"));
+            for name in ["a.txt", "b.txt"] {
+                sfs::write(dir.join(name), name).unwrap();
+            }
+            let mut job = fs::TransferJob::new_read(
+                id,
+                fs::JobType::Generic,
+                "/remote".to_owned(),
+                fs::DataSource::FilePath(dir.clone()),
+                0,
+                false,
+                false,
+                true,
+            )
+            .unwrap();
+            job.is_last_job = false;
+            let mut jobs = vec![job];
+            for name in ["a.txt", "b.txt"] {
+                sfs::remove_file(dir.join(name)).unwrap();
+            }
+            read_jobs_on(on, &handler, &mut jobs, &mut ours).await.unwrap();
+            let got = hbb_common::timeout(300, theirs.next()).await;
+            match (on, got) {
+                (false, Ok(Some(Ok(bytes)))) => {
+                    let msg = Message::parse_from_bytes(&bytes).unwrap();
+                    assert!(msg.has_file_response() && msg.file_response().has_error(), "{msg:?}");
+                }
+                (true, Err(_)) => {}
+                (on, got) => panic!("switch {on}: {got:?}"),
+            }
+            sfs::remove_dir_all(&dir).unwrap();
+        }
     }
 }

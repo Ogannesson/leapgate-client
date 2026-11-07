@@ -319,7 +319,8 @@ impl<T: InvokeUiSession> Remote<T> {
                                 break;
                             }
                             if !self.read_jobs.is_empty() {
-                                if let Err(err) = fs::handle_read_jobs(&mut self.read_jobs, &mut peer).await {
+                                // leapgate: M7b upload read loop, LEAPGATE.md §10.17.
+                                if let Err(err) = crate::leapgate_hooks::file_transfer::read_jobs(&self.handler, &mut self.read_jobs, &mut peer).await {
                                     self.handler.msgbox("error", "Connection Error", &err.to_string(), "");
                                     break;
                                 }
@@ -1233,7 +1234,6 @@ impl<T: InvokeUiSession> Remote<T> {
                 allow_err!(peer.send(&msg).await);
             }
             // leapgate: M7b pause and resume, LEAPGATE.md §10.17.
-            #[cfg(any(target_os = "android", target_os = "ios", feature = "flutter"))]
             Data::Leapgate(c) => crate::leapgate_hooks::file_transfer::command(c, &self.handler, &mut self.read_jobs, &mut self.write_jobs, peer).await,
             _ => {}
         }
@@ -1966,6 +1966,8 @@ impl<T: InvokeUiSession> Remote<T> {
                                                     }
                                                 },
                                                 Err(err) => {
+                                                    // leapgate: M7b skip or keep, LEAPGATE.md §10.17.
+                                                    if crate::leapgate_hooks::file_transfer::digest_failed(&self.handler, &mut self.write_jobs, &digest, &err.to_string(), peer).await { return true; }
                                                     self.cancel_transfer_job(digest.id, peer).await;
                                                     self.handle_job_status(
                                                         digest.id,
@@ -1982,6 +1984,7 @@ impl<T: InvokeUiSession> Remote<T> {
                         }
                         Some(file_response::Union::Block(block)) => {
                             let id = block.id;
+                            let file_num = block.file_num; // leapgate: M7b, LEAPGATE.md §10.17
                             let mut write_error = None;
                             if let Some(job) = fs::get_job(block.id, &mut self.write_jobs) {
                                 let result = job.write(block).await;
@@ -1991,6 +1994,7 @@ impl<T: InvokeUiSession> Remote<T> {
                                 }
                             }
                             if let Some(err) = write_error {
+                                if crate::leapgate_hooks::file_transfer::write_failed(&self.handler, &mut self.write_jobs, id, file_num, &err, peer).await { return true; } // leapgate: M7b
                                 self.cancel_transfer_job(id, peer).await;
                                 self.handle_job_status(id, -1, Some(err));
                             }
@@ -2052,6 +2056,8 @@ impl<T: InvokeUiSession> Remote<T> {
                             }
                         }
                         Some(file_response::Union::Error(e)) => {
+                            // leapgate: M7b skip or keep, LEAPGATE.md §10.17.
+                            if crate::leapgate_hooks::file_transfer::peer_error(&self.handler, &mut self.read_jobs, &mut self.write_jobs, &e, peer).await { return true; }
                             let job_type = fs::remove_job(e.id, &mut self.write_jobs)
                                 .or_else(|| fs::remove_job(e.id, &mut self.read_jobs))
                                 .map(|j| j.r#type)
