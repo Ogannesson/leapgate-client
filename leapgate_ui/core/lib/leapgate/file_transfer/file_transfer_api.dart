@@ -1,6 +1,7 @@
 // The one place the file transfer view reaches the M7a exports (`LEAPGATE.md` §10.15). The file
 // transfer models call [fileTransferApi] only; tests set a fake (`test/file_transfer_fakes.dart`).
 // The calls the copied models make to block 1 (`bind.session*`) stay where they are.
+import 'dart:async';
 import 'dart:convert';
 
 import '../../common.dart';
@@ -29,6 +30,19 @@ abstract interface class FileTransferApi {
       required String path,
       required bool isRemote,
       required bool isDirLink});
+
+  /// Subscribes to `leapgate_ft_events` (M7b, §10.17), which turns M7b's handling in Rust on;
+  /// what comes on it is not used. The app does it once when it starts. The events themselves
+  /// come on each session's stream as `leapgate_ft`.
+  void turnOnEvents();
+
+  /// `leapgate_ft_pause`: the result is a `paused` event; nothing happens for a job that is
+  /// gone or ended, or a remote device older than 1.4.2.
+  Future<void> pause(SessionID sessionId, int id);
+
+  /// `leapgate_ft_resume`: only for an upload soft-paused in this session. Everything else
+  /// resumes with upstream's `sessionResumeJob`.
+  Future<void> resume(SessionID sessionId, int id);
 }
 
 /// Set by tests; the app keeps the default.
@@ -71,4 +85,20 @@ class RustFileTransferApi implements FileTransferApi {
           path: path,
           isRemote: isRemote,
           isDirLink: isDirLink);
+
+  /// The subscription is the switch (`LEAPGATE.md` §10.17); the stream carries nothing.
+  @override
+  void turnOnEvents() =>
+      _ftSwitch ??= lgBind.leapgateFtEvents().listen((_) {});
+
+  @override
+  Future<void> pause(SessionID sessionId, int id) =>
+      lgBind.leapgateFtPause(sessionId: sessionId, id: id);
+
+  @override
+  Future<void> resume(SessionID sessionId, int id) =>
+      lgBind.leapgateFtResume(sessionId: sessionId, id: id);
 }
+
+/// Kept for the process's life.
+StreamSubscription<String>? _ftSwitch;

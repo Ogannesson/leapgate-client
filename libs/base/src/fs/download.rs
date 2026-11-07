@@ -329,3 +329,46 @@ impl TransferJob {
         Ok(())
     }
 }
+
+// leapgate: M7b, LEAPGATE.md §10.17. `files` is private, so the list has to be set here.
+impl TransferJob {
+    /// `set_files`, except that a download keeps an entry whose name can never be a target on
+    /// Windows, without checking its path: `validated_target` refuses it before touching the
+    /// file system, and the digest check then skips it, keeping the peer's file numbers.
+    pub fn leapgate_set_download_files(&mut self, files: Vec<FileEntry>) -> ResultType<()> {
+        if !self.is_download() {
+            return self.set_files(files);
+        }
+        let DataSource::FilePath(base) = &self.data_source else {
+            return self.set_files(files);
+        };
+        if !self.files.is_empty() {
+            bail!("cannot replace an accepted download file list");
+        }
+        if !(files.len() == 1 && files[0].name.is_empty()) {
+            for file in &files {
+                if file.name.is_empty() {
+                    bail!("empty file name in multi-file transfer");
+                }
+                if !leapgate_never_a_target(&file.name) {
+                    validate_file_name_no_traversal(&file.name)?;
+                    validate_no_symlink_components(base, &file.name)?;
+                }
+            }
+        }
+        self.total_size = files.iter().map(|x| x.size).sum();
+        self.files = files;
+        Ok(())
+    }
+}
+
+/// No null byte, `..` or leading separator, and a part `validate_component` refuses on
+/// Windows' grounds.
+fn leapgate_never_a_target(name: &str) -> bool {
+    let parts = || name.split(['/', '\\']).filter(|part| !part.is_empty());
+    cfg!(windows)
+        && !name.contains('\0')
+        && !name.starts_with(['/', '\\'])
+        && parts().all(|part| part != "..")
+        && parts().any(|part| part != "." && validate_component(part).is_err())
+}

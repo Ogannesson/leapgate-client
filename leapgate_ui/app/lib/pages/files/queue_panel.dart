@@ -20,6 +20,9 @@ const kQueueDefaultHeight = 200.0;
 const kQueueMinHeight = 96.0;
 const kQueueMaxHeight = 600.0;
 
+/// "查看详情" lists this many files; one more line says how many are left (12 §4.6).
+const kQueueDetailsMax = 50;
+
 /// The transfer queue at the bottom of the file transfer view (02 §2.2 block H): the summary
 /// line, the rows, collapsing and dragging its height. Coder B's; the file view (coder C)
 /// places it below the panes and gives it the full width (`LEAPGATE.md` §10.15).
@@ -44,6 +47,9 @@ class _FileQueuePanelState extends State<FileQueuePanel> {
   late Set<int> _seen;
   late bool _expanded;
   late double _height;
+
+  /// Rows whose "查看详情" is open.
+  final _details = <int>{};
 
   /// The grip moved since the pointer went down: the height is saved when it comes up.
   var _dragged = false;
@@ -150,7 +156,7 @@ class _FileQueuePanelState extends State<FileQueuePanel> {
     final progress = rows.isEmpty ? null : s.progress;
     final t = LgTokens.of(context);
     final summary = LgQueuePanel.summaryHeight(t, width);
-    final content = _contentHeight(t, width, rows);
+    final content = _contentHeight(t, width, rows, _details);
     return Listener(
       onPointerUp: (_) => _endDrag(),
       onPointerCancel: (_) => _endDrag(),
@@ -184,7 +190,15 @@ class _FileQueuePanelState extends State<FileQueuePanel> {
           ],
           rows: [
             for (final r in rows)
-              _Row(row: r, jobs: jobs, connected: connected),
+              _Row(
+                row: r,
+                jobs: jobs,
+                connected: connected,
+                detailsOpen: _details.contains(r.id),
+                onToggleDetails: () => setState(() {
+                  if (!_details.remove(r.id)) _details.add(r.id);
+                }),
+              ),
           ],
           onResize: (dy) => _drag(dy, limit, content),
         ),
@@ -194,12 +208,13 @@ class _FileQueuePanelState extends State<FileQueuePanel> {
 
   /// The height `LgQueuePanel`'s open list needs for [rows] at [width]: its padding, each row
   /// at its least height (`LgQueueRow`: a list row's when the path goes under the name, a
-  /// button's when beside it) and the notes open under a row. A status that wraps is not
-  /// counted; the list scrolls by that line.
+  /// button's when beside it) and the lines open under a row ([open]: the rows whose "查看详情"
+  /// is open). A status or a line that wraps is not counted; the list scrolls by that line.
   static double _contentHeight(
     LgTokens t,
     double width,
     List<FileJobRow> rows,
+    Set<int> open,
   ) {
     final s = t.sizes;
     final row = width < kLgQueueStackBelow
@@ -208,12 +223,23 @@ class _FileQueuePanelState extends State<FileQueuePanel> {
     var height = 2 * LgSpace.s1;
     for (final r in rows) {
       height += row;
-      if (r.notes.isNotEmpty) {
-        height +=
-            LgSpace.s1 + LgSpace.s2 + r.notes.length * (s.lhM + LgSpace.s1 + 2);
+      final lines = _detailLines(r, open.contains(r.id));
+      if (lines > 0) {
+        height += LgSpace.s1 + LgSpace.s2 + lines * (s.lhM + LgSpace.s1 + 2);
       }
     }
     return height;
+  }
+
+  /// The lines open under [row]: a row done with issues shows its files and notes while
+  /// "查看详情" is open, any other row its notes always.
+  static int _detailLines(FileJobRow row, bool open) {
+    if (row.status != FileJobStatus.doneWithIssues) return row.notes.length;
+    if (!open) return 0;
+    final n = row.unsent.length;
+    return math.min(n, kQueueDetailsMax) +
+        (n > kQueueDetailsMax ? 1 : 0) +
+        row.notes.length;
   }
 
   /// "‹n› 个进行中，‹m› 个排队"; paused and interrupted only once nothing else is left
@@ -240,13 +266,22 @@ class _FileQueuePanelState extends State<FileQueuePanel> {
 }
 
 /// One job (02 block H "每一行"): direction, name, source → destination, the state of the row
-/// with its progress, and the buttons of that state. Pausing and retrying are M7b.
+/// with its progress, and the buttons of that state. A row done with issues has "查看详情",
+/// which opens its files and notes under it; the other rows' notes are always open.
 class _Row extends StatelessWidget {
-  const _Row({required this.row, required this.jobs, required this.connected});
+  const _Row({
+    required this.row,
+    required this.jobs,
+    required this.connected,
+    required this.detailsOpen,
+    required this.onToggleDetails,
+  });
 
   final FileJobRow row;
   final FileJobs jobs;
   final bool connected;
+  final bool detailsOpen;
+  final VoidCallback onToggleDetails;
 
   String _remaining(AppLocalizations l10n, Duration d) {
     final s = d.inSeconds;
@@ -313,13 +348,24 @@ class _Row extends StatelessWidget {
               : l10n.queueStatusDone(r.fileCount, size(r.totalBytes)),
           null,
         );
+      // M7b-8: "已跳过" only when the user skipped them all.
+      case FileJobStatus.doneWithIssues:
+        final n = r.unsent.length;
+        return (
+          r.direction == FileJobDirection.delete
+              ? l10n.queueStatusDeleteUnsent(n)
+              : r.unsent.every((u) => u.skipped)
+              ? l10n.queueStatusDoneSkipped(n)
+              : l10n.queueStatusDoneUnsent(n),
+          _unclassified(),
+        );
       case FileJobStatus.skipped:
         return (l10n.queueStatusSkipped, null);
       case FileJobStatus.cancelled:
         return (l10n.queueStatusCancelled, null);
       case FileJobStatus.failed:
         final e = r.error ?? const FtError(FtReason.other);
-        // "传输失败。‹原文›": the text is behind the row until "查看详情" (M7b).
+        // "传输失败。‹原文›": the text is behind the row; a failed row has no details (M7b-9).
         if (e.reason == FtReason.other) {
           return (
             r.direction == FileJobDirection.delete
@@ -348,7 +394,55 @@ class _Row extends StatelessWidget {
           ? l10n.queueNoteEmptyFoldersOld
           : l10n.queueNoteEmptyFoldersUnreadable,
     ResumeUnsupported() => l10n.queueNoteResumeUnsupported,
+    RestartFile() => l10n.queueNoteRestartFile,
   };
+
+  /// The files of a row done with issues, each with its reason, then its notes. One the user
+  /// skipped is no error: it reads as a note.
+  List<LgQueueDetail> _details(AppLocalizations l10n) {
+    final r = row;
+    final n = r.unsent.length;
+    final delete = r.direction == FileJobDirection.delete;
+    return [
+      for (final u in r.unsent.take(kQueueDetailsMax))
+        if (u.skipped)
+          LgQueueDetail('${u.path} · ${l10n.queueStatusSkipped}')
+        else
+          LgQueueDetail(
+            u.path,
+            // Not classified: the short sentence, the text behind the row (as a failed row).
+            reason: u.error.reason == FtReason.other
+                ? (delete ? l10n.queueStatusDeleteFailed : l10n.ftReasonOther)
+                : ftReasonText(
+                    l10n,
+                    u.error,
+                    name: u.path.split(RegExp(r'[\\/]')).last,
+                    toLocal: switch (r.direction) {
+                      FileJobDirection.download => true,
+                      FileJobDirection.upload => false,
+                      FileJobDirection.delete => null,
+                    },
+                  ),
+          ),
+      if (n > kQueueDetailsMax)
+        LgQueueDetail(
+          delete
+              ? l10n.queueDetailsMoreItems(n - kQueueDetailsMax)
+              : l10n.queueDetailsMore(n - kQueueDetailsMax),
+        ),
+      for (final note in r.notes) LgQueueDetail(_note(l10n, note)),
+    ];
+  }
+
+  /// The original texts of the files listed whose reason is not classified, one per line.
+  String? _unclassified() {
+    final texts = {
+      for (final u in row.unsent.take(kQueueDetailsMax))
+        if (!u.skipped && u.error.reason == FtReason.other && u.error.text.isNotEmpty)
+          u.error.text,
+    };
+    return texts.isEmpty ? null : texts.join('\n');
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -382,6 +476,7 @@ class _Row extends StatelessWidget {
       ),
       FileJobStatus.interrupted => (LgQueueState.interrupted, null),
       FileJobStatus.done => (LgQueueState.done, null),
+      FileJobStatus.doneWithIssues => (LgQueueState.doneWithIssues, null),
       FileJobStatus.skipped => (LgQueueState.skipped, null),
       FileJobStatus.cancelled => (LgQueueState.cancelled, null),
       FileJobStatus.failed => (LgQueueState.failed, null),
@@ -399,11 +494,27 @@ class _Row extends StatelessWidget {
       label: l10n.queueCancel,
       onPressed: () => jobs.cancel(r.id),
     );
+    // Pausing and retrying need the connection, as resuming does.
+    final retry = LgQueueAction(
+      icon: LgIcons.refresh,
+      label: l10n.queueRetry,
+      onPressed: () => jobs.retry(r.id),
+    );
     final actions = switch (r.status) {
       FileJobStatus.done ||
       FileJobStatus.skipped ||
-      FileJobStatus.cancelled ||
-      FileJobStatus.failed => [remove],
+      FileJobStatus.cancelled => [remove],
+      FileJobStatus.failed => [if (r.canRetry && connected) retry, remove],
+      FileJobStatus.doneWithIssues => [
+        if (r.canRetry && connected) retry,
+        if (r.canRetryUnsent && connected)
+          LgQueueAction(
+            icon: LgIcons.refresh,
+            label: l10n.queueRetryUnsent,
+            onPressed: () => jobs.retryUnsent(r.id),
+          ),
+        remove,
+      ],
       FileJobStatus.waitingConfirm => const <LgQueueAction>[],
       FileJobStatus.paused => [
         if (connected)
@@ -414,12 +525,21 @@ class _Row extends StatelessWidget {
           ),
         cancel,
       ],
+      FileJobStatus.inProgress => [
+        if (r.canPause && connected)
+          LgQueueAction(
+            icon: LgIcons.pause,
+            label: l10n.queuePause,
+            onPressed: () => jobs.pause(r.id),
+          ),
+        cancel,
+      ],
       _ => [cancel],
     };
     final spoken = lead == null
         ? status
         : [lead, ..._progressParts(l10n)].join(l10n.queueSeparator);
-    // The notes stay open under the row; "查看详情" with the files left out is M7b.
+    final issues = r.status == FileJobStatus.doneWithIssues;
     final Widget item = LgQueueRow(
       direction: direction,
       semanticLabel: l10n.queueRowLabel(label, r.name, spoken),
@@ -430,8 +550,12 @@ class _Row extends StatelessWidget {
       statusLead: lead,
       progress: progress,
       actions: actions,
-      detailsOpen: r.notes.isNotEmpty,
-      details: [for (final note in r.notes) LgQueueDetail(_note(l10n, note))],
+      detailsLabel: issues ? l10n.queueDetails : null,
+      detailsOpen: issues ? detailsOpen : r.notes.isNotEmpty,
+      onToggleDetails: issues ? onToggleDetails : null,
+      details: issues
+          ? _details(l10n)
+          : [for (final note in r.notes) LgQueueDetail(_note(l10n, note))],
     );
     return detail == null ? item : LgTooltip(message: detail, child: item);
   }

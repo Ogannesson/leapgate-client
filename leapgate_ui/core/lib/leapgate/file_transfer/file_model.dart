@@ -111,9 +111,22 @@ class FileModel implements FileTransferModel {
     fileFetcher.tryCompleteEmptyDirsTask(evt['value'], evt['is_local']);
   }
 
+  /// For a job Rust stopped and keeps (`LEAPGATE.md` §10.17): dropped.
+  bool _kept(Map<String, dynamic> evt) =>
+      jobs.isKept(int.tryParse('${evt['id']}') ?? -1);
+
+  /// A paused row keeps its bytes: Rust reports the job waiting in a paused download's place at
+  /// 0, and a soft-paused upload at no speed (`LEAPGATE.md` §10.17).
+  void onJobProgress(Map<String, dynamic> evt) {
+    final i = jobController.getJob(int.tryParse('${evt['id']}') ?? -1);
+    if (i >= 0 && jobController.jobTable[i].state == JobState.paused) return;
+    jobController.tryUpdateJobProgress(evt);
+  }
+
   /// `job_done`: answers a request first; upstream refreshes both panes when a job ends
   /// (`models/model.dart:376-383`).
   Future<void> onJobDone(Map<String, dynamic> evt) async {
+    if (_kept(evt)) return;
     _completeRequest(evt);
     if (await jobController.jobDone(evt)) {
       await refreshAll();
@@ -124,6 +137,7 @@ class FileModel implements FileTransferModel {
   // is added after the read, so `jobError` can't find it and the read would wait for its
   // timeout). A remote folder read fails with id 0; only one is ever pending.
   void handleJobError(Map<String, dynamic> evt) {
+    if (_kept(evt)) return;
     final id = int.tryParse(evt['id']?.toString() ?? '');
     if (id != null) {
       final err = evt['err']?.toString() ?? 'Unknown error';
@@ -134,8 +148,43 @@ class FileModel implements FileTransferModel {
       }
       _completeRequest(evt);
     }
+    // `jobError` puts the error's file number in the job; a retry starts at the last progress's.
+    final i = jobController.getJob(id ?? -1);
+    final fileNum = i < 0 ? 0 : jobController.jobTable[i].fileNum;
     jobController.jobError(evt);
-    if (id != null) jobs.onJobError(id);
+    if (id != null) jobs.onJobError(id, fileNum: fileNum);
+  }
+
+  /// `load_last_job`. After reconnecting Rust gives back every saved job with `auto_start`; one
+  /// the user paused in this session goes back to Rust under its id without starting, and its
+  /// row stays (12 §4.1). The rest is upstream's; a row loaded paused that Rust starts so goes
+  /// under way with it.
+  Future<void> onLoadLastJob(Map<String, dynamic> evt) async {
+    final job = jsonDecode(evt['value']) as Map<String, dynamic>;
+    final id = job['id'];
+    if (job['auto_start'] != true || id is! int || !jobs.reloadPaused(id)) {
+      await jobController.loadLastJob(evt);
+      final i = id is int ? jobController.getJob(id) : -1;
+      if (job['auto_start'] == true &&
+          i >= 0 &&
+          jobController.jobTable[i].state == JobState.paused) {
+        jobController.updateJobStatus(id, state: JobState.inProgress);
+      }
+      return;
+    }
+    final String remote = job['remote'];
+    final String to = job['to'];
+    final bool isRemote = job['is_remote'];
+    jobController.registerTransferConflictBatch([id]);
+    await bind.sessionAddJob(
+      sessionId: sessionId,
+      isRemote: isRemote,
+      includeHidden: job['show_hidden'],
+      actId: id,
+      path: isRemote ? remote : to,
+      to: isRemote ? to : remote,
+      fileNum: job['file_num'],
+    );
   }
 
   void _completeRequest(Map<String, dynamic> evt) {
@@ -199,10 +248,10 @@ class FileModel implements FileTransferModel {
       return;
     }
     var resp = overrideConfirm;
-    // A remembered answer goes to Rust remembered too, as upstream's checkbox stays ticked.
     var remember = overrideConfirm != null || skip;
     if (!remember) {
-      final answer = await parent.target?.ask(_overwritePrompt(id, evt));
+      final answer = await parent.target?.ask(
+          _overwritePrompt(id, evt, withdrawn: jobs.confirmWithdrawn(id)));
       // Closed without an answer is upstream's cancel (Esc).
       remember = answer?.forAll ?? false;
       resp = switch (answer?.choice) {
@@ -220,18 +269,39 @@ class FileModel implements FileTransferModel {
       return;
     }
     if (remember) jobController.rememberTransferConflictBatch(id, resp);
+    if (resp == null) jobs.fileSkipped(id, _conflictPath(id, evt));
+    // Rust never remembers the answer (12 §4.5): each conflict of the batch comes here, so the
+    // files skipped can be counted.
     await bind.sessionSetConfirmOverrideFile(
         sessionId: sessionId,
         actId: id,
         fileNum: int.parse(evt['file_num']),
         needOverride: resp == true,
-        remember: remember,
+        remember: false,
         isUpload: evt['is_upload'] == "true");
+  }
+
+  /// The conflicting file under the job's top-level item, `/` between the parts; empty for the
+  /// item itself. [_overwritePrompt] says which file the event's path is.
+  String _conflictPath(int id, Map<String, dynamic> evt) {
+    final path = '${evt['read_path']}';
+    final i = jobController.getJob(id);
+    final root = evt['is_upload'] == "true"
+        ? (i < 0 ? null : jobController.jobTable[i].jobName)
+        : jobs.targetOf(id);
+    if (root == null) return p.basename(path);
+    final local =
+        _localWindows ? PathUtil.windowsContext : PathUtil.posixContext;
+    final relative = local.relative(path, from: root);
+    return relative == '.'
+        ? ''
+        : PathUtil.convert(relative, _localWindows, false);
   }
 
   /// M7a-5: the event has the job, one path and whether the two files are the same. The path
   /// of a download is this device's target file; of an upload, this device's source file.
-  FtOverwritePrompt _overwritePrompt(int id, Map<String, dynamic> evt) {
+  FtOverwritePrompt _overwritePrompt(int id, Map<String, dynamic> evt,
+      {ValueListenable<bool>? withdrawn}) {
     final path = '${evt['read_path']}';
     final identical = evt['is_identical'] == "true";
     if (evt['is_upload'] != "true") {
@@ -249,7 +319,8 @@ class FileModel implements FileTransferModel {
       return FtOverwritePrompt(
           name: p.basename(path),
           folder: PathUtil.dirname(path, _localWindows),
-          kind: kind);
+          kind: kind,
+          withdrawn: withdrawn);
     }
     final remote = remoteController;
     final target = _uploadTarget(id, path) ?? path;
@@ -269,7 +340,8 @@ class FileModel implements FileTransferModel {
         kind = FtOverwriteKind.tempOnly;
       }
     }
-    return FtOverwritePrompt(name: name, folder: folder, kind: kind);
+    return FtOverwritePrompt(
+        name: name, folder: folder, kind: kind, withdrawn: withdrawn);
   }
 
   /// An uploaded file's remote path: the job's destination plus the file's path under the
@@ -1016,11 +1088,58 @@ class FileController extends ChangeNotifier implements FilePane {
 
   Future<void> _deleteItem(Entry item, List<Entry> files) async {
     final isRemote = !isLocal;
+    final single = item.isLink || item.isFile;
+    final id = single
+        ? jobController.addDeleteFileJob(item, isRemote)
+        : jobController.addDeleteDirJob(item, isRemote, files.length);
+    // The counts of the confirmation (`_deleteReady`): a link is no file.
+    model.jobs.addDelete(id,
+        files: single ? (item.isLink ? 0 : 1) : files.length,
+        bytes: single
+            ? (item.isLink ? 0 : item.size)
+            : files.fold(0, (n, f) => n + f.size));
+    model.jobs.setDeleteRetry(id, () => _retryDelete(id, item));
+    await _runDelete(id, item, files);
+  }
+
+  /// "重试" (02 §2.4.7): only what is still there is deleted. A folder is counted again; an item
+  /// gone since is done.
+  Future<void> _retryDelete(int id, Entry item) async {
     if (item.isLink || item.isFile) {
-      final id = jobController.addDeleteFileJob(item, isRemote);
-      // The counts of the confirmation (`_deleteReady`): a link is no file.
-      model.jobs.addDelete(id,
-          files: item.isLink ? 0 : 1, bytes: item.isLink ? 0 : item.size);
+      await _runDelete(id, item, const []);
+      final i = jobController.getJob(id);
+      if (i >= 0 &&
+          jobController.jobTable[i].state == JobState.error &&
+          _error(jobController.jobTable[i].err).reason == FtReason.notFound) {
+        jobController.updateJobStatus(id, state: JobState.done);
+      }
+      return;
+    }
+    final List<Entry> files;
+    try {
+      files = (await _readRecursive(item.path)).entries;
+    } catch (e) {
+      final error = _error(e);
+      if (error.reason == FtReason.notFound) {
+        jobController.updateJobStatus(id, state: JobState.done);
+      } else {
+        jobController.updateJobStatus(id, error: '$e');
+        model.jobs.setError(id, error);
+      }
+      return;
+    }
+    final i = jobController.getJob(id);
+    if (i < 0) return;
+    jobController.jobTable[i].fileCount = files.length;
+    model.jobs.addDelete(id,
+        files: files.length, bytes: files.fold(0, (n, f) => n + f.size));
+    await _runDelete(id, item, files);
+    await _refresh();
+  }
+
+  Future<void> _runDelete(int id, Entry item, List<Entry> files) async {
+    final isRemote = !isLocal;
+    if (item.isLink || item.isFile) {
       final error = await model._request(
           id,
           () => item.isLink
@@ -1038,9 +1157,8 @@ class FileController extends ChangeNotifier implements FilePane {
       _requestFailed(id, error);
       return;
     }
-    final id = jobController.addDeleteDirJob(item, isRemote, files.length);
-    model.jobs.addDelete(id,
-        files: files.length, bytes: files.fold(0, (n, f) => n + f.size));
+    final context = isWindows ? PathUtil.windowsContext : PathUtil.posixContext;
+    final parent = PathUtil.dirname(item.path, isWindows);
     for (var i = 0; i < files.length; i++) {
       if (_stopped(id)) return;
       final error = await model._request(
@@ -1051,7 +1169,14 @@ class FileController extends ChangeNotifier implements FilePane {
               path: files[i].path,
               isRemote: isRemote,
               fileNum: i));
-      if (_requestFailed(id, error)) return;
+      // Cancelled while the answer was on its way: the row stays cancelled.
+      if (_requestFailed(id, error) || _stopped(id)) return;
+      // A file that could not be deleted is listed; the rest still go.
+      if (error is String) {
+        model.jobs.deleteFileFailed(
+            id, context.relative(files[i].path, from: parent), error,
+            remote: isRemote);
+      }
     }
     if (_stopped(id)) return;
     _history.removeWhere((element) => element.contains(item.path));
@@ -1062,6 +1187,7 @@ class FileController extends ChangeNotifier implements FilePane {
     if (isLocal && files.isEmpty) {
       jobController.updateJobStatus(id, state: JobState.done);
     }
+    model.jobs.deleteEnded(id);
   }
 
   /// Cancelled from its row, cut off by the connection (`FileTransferJobs.onConnectionChanged`),
