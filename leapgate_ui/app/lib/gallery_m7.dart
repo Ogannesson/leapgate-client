@@ -528,7 +528,7 @@ List<Widget> _m7QueueRows(bool en, {int count = 12, bool details = true}) {
       onToggleDetails: _noop,
       details: [
         LgQueueDetail(_x(en, r'项目资料\草稿.docx', r'Project files\draft.docx'), reason: _x(en, '没有访问权限', 'Access is denied')),
-        LgQueueDetail(_x(en, r'项目资料\图表.png', r'Project files\chart.png'), reason: _x(en, '文件正被其他应用使用', 'File is in use by another app')),
+        LgQueueDetail(_x(en, r'项目资料\图表.png', r'Project files\chart.png'), reason: _x(en, '文件正被其他应用使用', 'The file is in use by another app')),
       ],
       actions: [
         LgQueueAction(icon: LgIcons.refresh, label: _x(en, '重试未传输的文件', 'Retry files not transferred'), onPressed: _noop),
@@ -559,7 +559,7 @@ List<Widget> _m7QueueRows(bool en, {int count = 12, bool details = true}) {
       name: _x(en, '会议录音.m4a', 'meeting.m4a'),
       path: r'C:\Users\zhangsan\Documents → D:\备份',
       state: LgQueueState.failed,
-      status: _x(en, '失败：文件正被其他应用使用', 'Failed: file is in use by another app'),
+      status: _x(en, '失败：文件正被其他应用使用', 'Failed: The file is in use by another app'),
       actions: [
         LgQueueAction(icon: LgIcons.refresh, label: _x(en, '重试', 'Retry'), onPressed: _noop),
         _m7Remove(en),
