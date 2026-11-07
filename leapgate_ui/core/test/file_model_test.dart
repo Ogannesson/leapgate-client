@@ -664,6 +664,13 @@ void main() {
       ]);
       expect(rows[0].notes.single, isA<RestartFile>());
       expect(model.jobs.summary.failed, 2);
+      // `kept` keeps the id: what the peer sent before the cancel reached it is dropped.
+      await model.onJobDone({'id': '${d.id}', 'file_num': '5'});
+      model.handleJobError({'id': '${d.id}', 'err': 'x', 'file_num': '5'});
+      expect(
+          (model.jobs.rows[0].status, model.jobs.rows[0].error?.reason,
+              model.jobs.rows[0].canRetry),
+          (FileJobStatus.failed, FtReason.diskFull, true));
 
       model.jobs.retry(d.id);
       await settle();
@@ -727,9 +734,16 @@ void main() {
           {'file_num': 2, 'name': 'f2', 'err': 'locked', 'side': 'remote'});
       push(t, 'continue_from', id, {'resume_from': 3});
       expect(t.bind.callsTo(#sessionAddJob), isEmpty);
-      final row = model.jobs.rows.single;
+      var row = model.jobs.rows.single;
       expect((row.status, row.unsent.single.path),
           (FileJobStatus.doneWithIssues, 'd\\f2'));
+      // Rust's `job_done`, then the peer's for the same id.
+      await model.onJobDone({'id': '$id', 'file_num': '2'});
+      await model.onJobDone({'id': '$id', 'file_num': '2'});
+      await settle();
+      row = model.jobs.rows.single;
+      expect((row.status, row.unsent.length, row.fileIndex, row.fileCount),
+          (FileJobStatus.doneWithIssues, 1, 3, 3));
     });
 
     test('a file going wrong after one went through counts from one again', () async {
