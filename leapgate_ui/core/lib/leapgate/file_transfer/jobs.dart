@@ -320,14 +320,12 @@ class FileTransferJobs extends ChangeNotifier implements FileJobs {
   /// By Rust id.
   final _samples = <int, List<({DateTime at, int bytes})>>{};
 
-  /// The row key of each Rust id a row had after its first.
+  /// The row key of each Rust id a row had after its first. An id the row no longer has is in
+  /// no table entry, so upstream's events for it (a download's peer may still send them after
+  /// the pause) find nothing and are dropped.
   final _keys = <int, int>{};
 
-  /// Rust ids a row had before its current one. Their `job_progress`, `job_done` and
-  /// `job_error` are dropped: a download's peer may still send them after the pause.
-  final _retired = <int>{};
-
-  /// The replace confirmation open for a Rust id, closed when the id is retired.
+  /// The replace confirmation open for a Rust id, closed when the row takes another id.
   final _withdrawn = <int, ValueNotifier<bool>>{};
   final _rows = <int, _RowState>{};
 
@@ -350,9 +348,6 @@ class FileTransferJobs extends ChangeNotifier implements FileJobs {
     }
     return null;
   }
-
-  /// [id] is no longer the Rust id of its row: upstream's events for it are dropped.
-  bool isRetired(int id) => _retired.contains(id);
 
   /// Becomes true when the replace confirmation for [id] is to close unanswered: the row was
   /// paused and Rust would drop the answer.
@@ -508,11 +503,17 @@ class FileTransferJobs extends ChangeNotifier implements FileJobs {
     _fail(job, text);
   }
 
-  /// A file failed and Rust stopped the job: it goes on at once from the next one under a new
-  /// id, unless that came one file after the other more than [_kMaxContinues] times.
+  /// A file failed and Rust stopped the job: done when it was the last one, otherwise it goes
+  /// on at once from the next one under a new id, unless that came one file after the other
+  /// more than [_kMaxContinues] times.
   void _onContinueFrom(JobProgress job, Map<String, dynamic> evt) {
     final from = evt['resume_from'] as int?;
     if (from == null) return;
+    if (job.fileCount > 0 && from >= job.fileCount) {
+      _jobs.unregisterTransferConflictJob(job.id);
+      _jobs.updateJobStatus(job.id, state: JobState.done);
+      return;
+    }
     final st = _state(_key(job.id));
     final last = st.continued;
     final count = last != null && from == last.from + 1 ? last.count + 1 : 1;
@@ -522,11 +523,6 @@ class FileTransferJobs extends ChangeNotifier implements FileJobs {
           st.unsent.values.lastOrNull?.error ?? const FtError(FtReason.other);
       st.failure = _Failure(error.text, error, from);
       _fail(job, error.text);
-      return;
-    }
-    if (job.fileCount > 0 && from >= job.fileCount) {
-      _jobs.unregisterTransferConflictJob(job.id);
-      _jobs.updateJobStatus(job.id, state: JobState.done);
       return;
     }
     _restart(job, from);
@@ -543,7 +539,6 @@ class FileTransferJobs extends ChangeNotifier implements FileJobs {
     final old = job.id;
     if (old == id) return;
     _keys[id] = _key(old);
-    _retired.add(old);
     _jobs.registerTransferConflictBatch([id],
         batchId: _jobs.transferConflictBatchId(old));
     _jobs.unregisterTransferConflictJob(old);
@@ -1016,10 +1011,11 @@ class FileTransferJobs extends ChangeNotifier implements FileJobs {
     }
   }
 
-  /// At the end of its direction's line (12 §4.4).
+  /// A download goes to the end of its line: the peer queues it last (12 §4.4). An upload keeps
+  /// its place in Rust's read jobs, whose loop reads the first one not waiting.
   void _resume(JobProgress job) {
     final st = _state(_key(job.id));
-    st.order = _nextOrder++;
+    if (job.isRemoteToLocal) st.order = _nextOrder++;
     st.continued = null;
     _userPaused.remove(job.id);
     final s = _session;
@@ -1037,7 +1033,6 @@ class FileTransferJobs extends ChangeNotifier implements FileJobs {
     final job = _jobOf(id);
     final s = _session;
     if (job == null || s == null || !_isActive(job)) return;
-    _userPaused.add(job.id);
     unawaited(fileTransferApi.pause(s.sessionId, job.id));
   }
 
@@ -1142,7 +1137,6 @@ class FileTransferJobs extends ChangeNotifier implements FileJobs {
       _errors.remove(id);
       _rows.remove(id);
     }
-    _retired.removeWhere((id) => gone.contains(_key(id)));
     _keys.removeWhere((_, key) => gone.contains(key));
     _confirming.removeAll(ids);
     _userPaused.removeAll(ids);

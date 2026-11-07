@@ -397,13 +397,17 @@ class _Row extends StatelessWidget {
     RestartFile() => l10n.queueNoteRestartFile,
   };
 
-  /// The files of a row done with issues, each with its reason, then its notes.
+  /// The files of a row done with issues, each with its reason, then its notes. One the user
+  /// skipped is no error: it reads as a note.
   List<LgQueueDetail> _details(AppLocalizations l10n) {
     final r = row;
     final n = r.unsent.length;
     return [
       for (final u in r.unsent.take(kQueueDetailsMax))
-        LgQueueDetail(
+        if (u.skipped)
+          LgQueueDetail('${u.path} · ${l10n.queueStatusSkipped}')
+        else
+          LgQueueDetail(
           u.path,
           reason: ftReasonText(
             l10n,

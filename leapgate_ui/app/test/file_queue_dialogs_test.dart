@@ -525,14 +525,39 @@ void main() {
               ],
               canRetry: true,
             ),
+            // Skipped and failed together: "未传输".
+            _row(
+              3,
+              FileJobStatus.doneWithIssues,
+              unsent: const [
+                FileJobUnsent(
+                  '照片\\e.jpg',
+                  FtError(FtReason.skipped),
+                  skipped: true,
+                ),
+                FileJobUnsent('照片\\f.jpg', FtError(FtReason.inUse)),
+              ],
+            ),
           ]
           ..summary = _summary();
         await _pumpQueue(tester, jobs);
         expect(find.text('已完成，2 个文件已跳过'), findsOneWidget);
         expect(find.text('已完成，2 个项目未删除'), findsOneWidget);
+        expect(find.text('已完成，2 个文件未传输'), findsOneWidget);
         expect(_button('重试未传输的文件'), findsNothing);
         await tester.tap(_button('重试'));
         expect(jobs.calls, ['retry:2']);
+
+        // A file the user skipped reads as a note, not an error.
+        await tester.tap(find.text('查看详情').last);
+        await tester.pump();
+        final details = tester
+            .widget<LgQueueRow>(find.byType(LgQueueRow).last)
+            .details;
+        expect(details.map((d) => (d.text, d.reason)), [
+          ('照片\\e.jpg · 已跳过：目标位置已有同名文件', null),
+          ('照片\\f.jpg', '文件正被其他应用使用'),
+        ]);
       },
     );
 

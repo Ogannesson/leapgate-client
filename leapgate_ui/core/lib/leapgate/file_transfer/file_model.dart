@@ -111,16 +111,9 @@ class FileModel implements FileTransferModel {
     fileFetcher.tryCompleteEmptyDirsTask(evt['value'], evt['is_local']);
   }
 
-  /// From an id a row had before its current one (`LEAPGATE.md` §10.17): dropped.
-  bool _retired(Map<String, dynamic> evt) {
-    final id = int.tryParse(evt['id']?.toString() ?? '');
-    return id != null && jobs.isRetired(id);
-  }
-
   /// A paused row keeps its bytes: Rust reports the job waiting in a paused download's place at
   /// 0, and a soft-paused upload at no speed (`LEAPGATE.md` §10.17).
   void onJobProgress(Map<String, dynamic> evt) {
-    if (_retired(evt)) return;
     final i = jobController.getJob(int.tryParse('${evt['id']}') ?? -1);
     if (i >= 0 && jobController.jobTable[i].state == JobState.paused) return;
     jobController.tryUpdateJobProgress(evt);
@@ -129,7 +122,6 @@ class FileModel implements FileTransferModel {
   /// `job_done`: answers a request first; upstream refreshes both panes when a job ends
   /// (`models/model.dart:376-383`).
   Future<void> onJobDone(Map<String, dynamic> evt) async {
-    if (_retired(evt)) return;
     _completeRequest(evt);
     if (await jobController.jobDone(evt)) {
       await refreshAll();
@@ -140,7 +132,6 @@ class FileModel implements FileTransferModel {
   // is added after the read, so `jobError` can't find it and the read would wait for its
   // timeout). A remote folder read fails with id 0; only one is ever pending.
   void handleJobError(Map<String, dynamic> evt) {
-    if (_retired(evt)) return;
     final id = int.tryParse(evt['id']?.toString() ?? '');
     if (id != null) {
       final err = evt['err']?.toString() ?? 'Unknown error';
@@ -1094,10 +1085,19 @@ class FileController extends ChangeNotifier implements FilePane {
     await _runDelete(id, item, files);
   }
 
-  /// "重试" (02 §2.4.7): a folder is counted again and what is still in it deleted; nothing left
-  /// in it is done.
+  /// "重试" (02 §2.4.7): only what is still there is deleted. A folder is counted again; an item
+  /// gone since is done.
   Future<void> _retryDelete(int id, Entry item) async {
-    if (item.isLink || item.isFile) return _runDelete(id, item, const []);
+    if (item.isLink || item.isFile) {
+      await _runDelete(id, item, const []);
+      final i = jobController.getJob(id);
+      if (i >= 0 &&
+          jobController.jobTable[i].state == JobState.error &&
+          _error(jobController.jobTable[i].err).reason == FtReason.notFound) {
+        jobController.updateJobStatus(id, state: JobState.done);
+      }
+      return;
+    }
     final List<Entry> files;
     try {
       files = (await _readRecursive(item.path)).entries;
@@ -1152,7 +1152,8 @@ class FileController extends ChangeNotifier implements FilePane {
               path: files[i].path,
               isRemote: isRemote,
               fileNum: i));
-      if (_requestFailed(id, error)) return;
+      // Cancelled while the answer was on its way: the row stays cancelled.
+      if (_requestFailed(id, error) || _stopped(id)) return;
       // A file that could not be deleted is listed; the rest still go.
       if (error is String) {
         model.jobs.deleteFileFailed(

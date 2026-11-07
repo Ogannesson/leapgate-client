@@ -501,6 +501,7 @@ void main() {
         (a.id, FileJobStatus.paused),
         (b.id, FileJobStatus.inProgress),
       ]);
+      expect(model.jobs.unfinished, 1, reason: 'a paused row is kept (02 §3.1)');
       // The peer's answer to the old id, sent before it got the cancel; the job waiting in its
       // place at 0.
       await model.onJobDone({'id': '${a.id}', 'file_num': '0'});
@@ -538,6 +539,47 @@ void main() {
       model.jobs.resume(id);
       expect(t.api.resumed.single.id, id);
       expect(t.bind.callsTo(#sessionResumeJob), isEmpty);
+      expect(model.jobs.rows.single.status, FileJobStatus.inProgress);
+    });
+
+    test('an upload resumed keeps its place: Rust reads the first upload not waiting',
+        () async {
+      final t = ft();
+      final model = t.s.fileModel;
+      await model.localController.transfer(
+          [_entry('C:\\a.bin', size: 100), _entry('C:\\b.bin', size: 100)],
+          to: '/home/u');
+      final [a, _] = model.jobs.rows;
+      model.jobs.pause(a.id);
+      push(t, 'paused', a.id, {'new_id': a.id, 'soft': true, 'resume_from': 0});
+      expect(model.jobs.rows.map((r) => r.status),
+          [FileJobStatus.paused, FileJobStatus.inProgress]);
+      model.jobs.resume(a.id);
+      expect(model.jobs.rows.map((r) => r.status),
+          [FileJobStatus.inProgress, FileJobStatus.queued]);
+    });
+
+    test('paused, but cut off before Rust said so: after reconnecting it goes on by itself',
+        () async {
+      final t = ft();
+      final model = t.s.fileModel;
+      await model.remoteController.transfer([_entry('/r/a.bin')], to: 'C:\\dl');
+      final a = model.jobs.rows.single;
+      model.jobs.pause(a.id);
+      t.s.connection.reconnect(false);
+      t.s.connection.onPeerInfo();
+      await model.onLoadLastJob({
+        'value': jsonEncode({
+          'id': a.id,
+          'remote': '/r/a.bin',
+          'to': 'C:\\dl\\a.bin',
+          'show_hidden': true,
+          'file_num': 0,
+          'is_remote': true,
+          'auto_start': true,
+        })
+      });
+      expect(_args(t.bind, #sessionResumeJob, #actId), [a.id]);
       expect(model.jobs.rows.single.status, FileJobStatus.inProgress);
     });
 
@@ -672,6 +714,22 @@ void main() {
       final done = model.jobs.rows.single;
       expect((done.status, done.unsent.length),
           (FileJobStatus.doneWithIssues, 21));
+    });
+
+    test('the last file failing ends the row done with issues', () async {
+      final t = ft();
+      t.api.onReason = (text, platform, side) => FtError(FtReason.inUse, text: text);
+      final model = t.s.fileModel;
+      await download(t, [_entry('/r/d', type: 0)]);
+      final id = model.jobs.rows.single.id;
+      _dir(t.s, '/r/d', [_json('f0'), _json('f1'), _json('f2')], id: id);
+      push(t, 'file_failed', id,
+          {'file_num': 2, 'name': 'f2', 'err': 'locked', 'side': 'remote'});
+      push(t, 'continue_from', id, {'resume_from': 3});
+      expect(t.bind.callsTo(#sessionAddJob), isEmpty);
+      final row = model.jobs.rows.single;
+      expect((row.status, row.unsent.single.path),
+          (FileJobStatus.doneWithIssues, 'd\\f2'));
     });
 
     test('a file going wrong after one went through counts from one again', () async {
@@ -1137,6 +1195,54 @@ void main() {
       await settle();
       row = jobs.rows.single;
       expect((row.id, row.status, row.fileCount), (id, FileJobStatus.done, 1));
+    });
+
+    test('cancelled while a file that fails is on its way: it ends cancelled', () async {
+      final t = _session();
+      t.api.onReason = (text, platform, side) => FtError(FtReason.inUse, text: text);
+      appCore.prompter = TestPrompter((q) => whenReady(q, true));
+      final jobs = t.s.fileModel.jobs;
+      final done = t.s.fileModel.localController.delete([_entry('C:\\d', type: 0)]);
+      await settle();
+      final read =
+          t.bind.callsTo(#sessionReadDirToRemoveRecursive).single.namedArguments;
+      _dir(t.s, 'C:\\d', [_json('a'), _json('b')], id: read[#actId] as int);
+      await settle();
+      final remove = t.bind.callsTo(#sessionRemoveFile).single.namedArguments;
+      jobs.cancel(jobs.rows.single.id);
+      t.s.fileModel.handleJobError({
+        'id': '${remove[#actId]}',
+        'err': 'in use',
+        'file_num': '${remove[#fileNum]}'
+      });
+      await done;
+      expect(t.bind.callsTo(#sessionRemoveFile), hasLength(1));
+      expect(jobs.rows.single.status, FileJobStatus.cancelled);
+    });
+
+    test('重试 of a file gone since is done', () async {
+      final t = _session();
+      t.api.onReason = (text, platform, side) =>
+          FtError(text == 'gone' ? FtReason.notFound : FtReason.inUse, text: text);
+      appCore.prompter = TestPrompter((q) => whenReady(q, true));
+      final model = t.s.fileModel;
+      final done = model.localController.delete([_entry('C:\\f.txt')]);
+      await settle();
+      var remove = t.bind.callsTo(#sessionRemoveFile).last.namedArguments;
+      model.handleJobError(
+          {'id': '${remove[#actId]}', 'err': 'in use', 'file_num': '0'});
+      await done;
+      final row = model.jobs.rows.single;
+      expect((row.status, row.canRetry), (FileJobStatus.failed, true));
+
+      model.jobs.retry(row.id);
+      await settle();
+      remove = t.bind.callsTo(#sessionRemoveFile).last.namedArguments;
+      expect(t.bind.callsTo(#sessionRemoveFile), hasLength(2));
+      model.handleJobError(
+          {'id': '${remove[#actId]}', 'err': 'gone', 'file_num': '0'});
+      await settle();
+      expect(model.jobs.rows.single.status, FileJobStatus.done);
     });
 
     test('cancelled while counting: nothing is deleted', () async {
