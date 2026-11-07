@@ -1483,7 +1483,7 @@ Telegram 机器人设置改成两步（`leapgate_bot_lookup` 只查、什么都�
 | 1 | 下载时对端读失败（Mac 上 `dl8m` 20 个文件，第 8 个 `chmod 000`） | **通过** | 行"已完成，1 个文件未传输"，详情"dl8m\f08.bin · 没有访问权限"；本机 f01~f07、f09~f20 共 19 个，哈希对、无临时文件；Mac 上 `chmod 644` 后点"重试未传输的文件"，行"已完成 · 20 个文件，17.1 MB"，20 个哈希对。没有出现 1.4.9 那种第一个文件后弹"替换"的情况 |
 | 6 | 下载时文件名在 Windows 上无效（Mac 上 `a:b.txt`） | **不通过** | 两个文件夹各试一次：`dlcolon`（`a:b.txt`、f1、f3、f4，无效名排在第一）、`dlcolon2`（`b1.bin`、`c:d.txt`、`e1.bin`，无效名在中间）。两次都是整个任务"失败：名称无效"，本机连文件夹都没建出来，一个文件也没传，没有详情、没有"重试"。预期是其余照传、详情写原因。推测是接收一侧建任务时一次性检查全部名字，失败发生在任务创建阶段（Rust 的"跳过无效名"挂钩管不到），读码没做，交回 coder 核对 |
 
-**第 6 条复测（2026-11-07 20:10~20:45，新界面 `f591c755e`，哈希见 A 的 `evidence\m7b-accept1\00-builds.txt`；Mac 官方 1.5.0，维护者点"接受"）**：Mac 上 `dlcolon`（`a:b.txt`、f1、f3、f4，无效名排第一）、`dlcolon2`（`b1.bin`、`c:d.txt`、`e1.bin`，无效名在中间）、`dlq`（`g1.bin`、`g2.bin`、`x?y.txt`，无效名最后）。结论：**仍不通过，换了一种失败**（上面 `a:b.txt` 整个任务失败的记录保留，是修之前的）。
+**第 6 条复测（2026-11-07 20:10~20:45，新界面 `f591c755e`，哈希见 A 的 `evidence\m7b-accept1\00-builds.txt`；Mac 官方 1.5.0，维护者点"接受"）**：Mac 上 `dlcolon`（`a:b.txt`、f1、f3、f4，无效名排第一）、`dlcolon2`（`b1.bin`、`c:d.txt`、`e1.bin`，无效名在中间）、`dlq`（`g1.bin`、`g2.bin`、`x?y.txt`，无效名最后）。结论：**M7b 的跳过通过**（三种无效名都只跳过这一个文件、详情写原因、其余文件哈希对、本机没有坏名字和临时文件）；"写到错误的目录"另记，主会话核对后判断与跳过无关，见表后（上面 `a:b.txt` 整个任务失败的记录保留，是修之前的）。
 
 | 情形 | 结果 |
 |---|---|
@@ -1492,7 +1492,7 @@ Telegram 机器人设置改成两步（`leapgate_bot_lookup` 只查、什么都�
 | `dlcolon2`、`dlq`，本机目标文件夹不存在 | **不通过**：行都是"已完成，1 个文件未传输"，详情对（`dlcolon2\c:d.txt · 名称无效`、`dlq\x?y.txt · 文件名“x?y.txt”在 Windows 上无效`），但**其余文件写到了错误的目录**：本机目标是 `C:\leapgate-e2e\m7b-a1\dl_a` 时，文件落在 `C:\leapgate-e2e\dlcolon2\`、`C:\leapgate-e2e\dlq\`，`dl_a` 里什么都没有；目标换成 `...\m7b-a1\deep\x\y` 再下载 `dlq`，落在 `C:\leapgate-e2e\m7b-a1\dlq\`。界面上看不出来 |
 | `dlcolon2`、`dlq`，目标文件夹已存在 | 未单独验：目标在 `dl_b` 时下载 `dlcolon2` 弹出"替换“b1.bin”？"，路径是 `C:\leapgate-e2e\dlcolon2`（上一次落错位置留下的同名文件），同样是落错目录 |
 
-规律：无效名排第一（没有"跳过后接着传"这一步）时目录对；无效名在中间或最后时，跳过以后接着传的那一段文件写到错误的目录，疑似接着传时重新发起任务用的本机目标文件夹不对（`dl_a` 时落在 `leapgate-e2e`，`deep\x\y` 时落在 `m7b-a1`，没找到统一的层级规律，请 coder 读码核对重新发起时的目标路径）。已核对：本机没有带冒号或问号的文件，没有 `.download`、`.digest` 残留。落错目录的文件已复制到 `evidence\m7b-accept1\T6r-stray\` 后从 `C:\leapgate-e2e\` 删掉。
+tester 原先的推断是"跳过以后接着传时目标不对"。主会话查 A 的日志（`io_loop.rs:811` "New job N, write to …"）更正：落错的几次，任务**一建出来**本机目标就已经是错的（job 2 `C:\leapgate-e2e\dlcolon2`、job 3 `C:\leapgate-e2e\dlq`、job 5 `C:\leapgate-e2e\m7b-a1\dlq`；对的 job 1 是 `…\dl_a\dlcolon`、job 6 是 `…\dl_b\dlcolon`），Rust 照界面给的目标写，和跳过、接着传无关。界面发起下载时用的是本机栏当时的目录（`file_model.dart` `transfer` 的 `other.path`）。测试脚本点"下载"前没有确认本机栏位置（只用 `Nav` 打字跳转，不核对面包屑），jobs 2、3、5 没有位置记录，所以落错目录可能是本机栏不在 `dl_a`；但 job 4 时有一次转储，本机面包屑显示 `m7b-a1 > dl_b`，日志里任务目标却是 `C:\leapgate-e2e\dlcolon2`，这一处解释不了，不能排除"面包屑和本机栏实际路径不一致"（M7a 的问题）。交给验收第二段先在两台端点之间复现（每次点"下载"前记面包屑、"下载到…"按钮名和日志里的目标）。已核对：本机没有带冒号或问号的文件，没有 `.download`、`.digest` 残留。落错目录的文件已复制到 `evidence\m7b-accept1\T6r-stray\` 后从 `C:\leapgate-e2e\` 删掉。
 
 **没验**：下载方向的磁盘满；1.4.9 对端的第 1 条完整流程（被上游断线打断）。Mac 上的测试数据 `~/leapgate-ft-test/` 已整个删掉，没动 Mac 上 RustDesk 的配置。
 
