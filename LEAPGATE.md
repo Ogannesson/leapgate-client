@@ -2521,13 +2521,13 @@ Telegram 机器人设置改成两步（`leapgate_bot_lookup` 只查、什么都�
 
 | 分支 | 谁 | 只改这些 |
 |---|---|---|
-| `ui/rust-m7b` | Rust coder | 新文件 `libs/leapgate/src/ft*.rs`（总开关、失败去重、上传读循环、按原因码分"跳过 / 整任务停"、续传起点、4 GiB 规则，纯逻辑带单测）、`libs/leapgate/src/lib.rs`（加 mod）；`src/leapgate_hooks/file_transfer.rs`（和会话、`Remote`、`fs` 打交道的部分）；`src/leapgate_ffi.rs`（末尾追加 M7b 一段）；上游只下面"具名例外"列的六处；本节的 Rust 部分 |
+| `ui/rust-m7b` | Rust coder | 新文件 `libs/leapgate/src/ft*.rs`（总开关、失败去重、上传读循环、按原因码分"跳过 / 整任务停"、续传起点、4 GiB 规则，纯逻辑带单测）、`libs/leapgate/src/lib.rs`（加 mod）；`src/leapgate_hooks/file_transfer.rs`（和会话、`Remote`、`fs` 打交道的部分）；`src/leapgate_ffi.rs`（末尾追加 M7b 一段）；上游只下面"具名例外"列的八处；本节的 Rust 部分 |
 | `ui/m7b-dart` | Dart coder | core `leapgate/file_transfer/` 的 `jobs.dart`、`file_model.dart`、`file_transfer_api.dart`；`leapgate/session.dart`（事件分发）、`leapgate/session_registry.dart`（加按会话 ID 查找）、应用启动时订阅事件流的那一处；app `pages/files/queue_panel.dart`；`gallery_m7.dart`（只把"部分未传输"行的按钮改成"重试未传输的文件"）；ARB（新键以 `queue` 开头，加在末尾，中英同加，改完 `flutter gen-l10n`）；core、app 的 `test/file_transfer_fakes.dart`（两份同步改、内容相同）；测试。复制件 `core/lib/models/file_model.dart` 不改（只删界面调用那一档），只用它现成的 `updateJobStatus`、`resumeJob`、`cancelJob`、`JobID.next()` |
 
 - 块 2 的新导出在 Rust 合入、重新生成桥之前不存在：`RustFileTransferApi` 的新方法先抛 `UnimplementedError`（`TODO(M7b 整合)`），整合时由主会话换成真实调用；Dart 的测试一律用 `FakeFileTransferApi`。
 - 组件不动（12 §2.1）；画廊和组件测试里已有的状态够用。真要动组件先报主会话。
 
-**上游文件的具名例外**（03 §7.5 定 FT3~FT5 在 `io_loop.rs` 只占三处，M7b 实际要五处，按 12 §1.2 列在这里；每处带 `// leapgate:` 注释，只调 `crate::leapgate_hooks::file_transfer::…`）
+**上游文件的具名例外**（03 §7.5 定 FT3~FT5 在 `io_loop.rs` 只占三处，M7b 实际要五处，按 12 §1.2 列在这里；验收第 6 条又加了 `io_loop.rs` 第 6 处和 `download.rs` 的追加；每处带 `// leapgate:` 注释，`io_loop.rs` 里只调 `crate::leapgate_hooks::file_transfer::…`）
 
 | 文件 | 位置 | 做什么 | 行数上限 |
 |---|---|---|---|
@@ -2537,6 +2537,8 @@ Telegram 机器人设置改成两步（`leapgate_bot_lookup` 只查、什么都�
 | `src/client/io_loop.rs` | 下载 digest 出错、取消任务之前（约 `:1965`） | 挂钩认领了就 `return true`（回"跳过"给对端，或停下接着传）（实际 2 行） | 2 |
 | `src/client/io_loop.rs` | 写数据块之前（约 `:1981`、`:1990`） | 先存下 `block.file_num`，写失败时交给挂钩，认领了就 `return true`、不走取消（实际 2 行） | 3 |
 | `src/client/io_loop.rs` | 收到 `FileTransferError`、删任务之前（约 `:2052`） | 挂钩认领了就 `return true`（单文件错误、对端拒绝、整任务失败分开处理）（实际 2 行） | 2 |
+| `src/client/io_loop.rs` | 收到对端文件列表时的 `job.set_files(entries)`（约 `:1817`） | 改调 `file_transfer::set_files`：开关关着照旧调上游 `set_files`，开着调下面的 `leapgate_set_download_files`（验收第 6 条：Mac 对端的 `a:b.txt` 让整张列表被拒、整个任务失败）（实际改 1 行） | 1 |
+| `libs/base/src/fs/download.rs` | 文件末尾追加 | `TransferJob::leapgate_set_download_files` 和判据函数，上游的 `set_files` 和各校验函数不动。非改上游不可：`files` 是私有字段，只能在 `fs` 模块里设，而上游 `set_files` 对两类名字整张拒收（以盘符形式开头，如 `a:b.txt`；目标文件夹已存在时含 `?*<>|"` 等，`symlink_metadata` 报 os error 123，接着传、暂停后继续、重试都会撞上） | 追加约 40 行 |
 
 开关关着时每个挂钩都不认领，走上游原来的路（旧界面便携版因此不受影响）；取消路径（`cancel_transfer_job`）不动。
 
@@ -2589,6 +2591,7 @@ Telegram 机器人设置改成两步（`leapgate_bot_lookup` 只查、什么都�
   - "已处理过的错误"记录表（`ft.rs` 的 `HANDLED`）从不清理，每个处理过的任务留一项，量很小。
   - 下载时对端取修改时间失败、没跳到下一个文件：会白白接着传，直到 Dart 的 20 次上限。上游在这种情况下也是整任务停下。
   - 上传时对端 CM 写失败，还在路上的数据块仍可能写坏文件，或者把截短的文件改成正式名（上游原有的空档，宽度和上游一样）。
+  - 名字里带控制字符（如 `c\x01d`）不算"在 Windows 上无效"：目标文件夹不存在时能一路过 `validated_target`，到写数据时才失败，走 `write_failed`（`file_failed` 后从下一个文件 `continue_from`），不写坏东西；目标文件夹已存在时照上游整张拒收。
   - 最后一个文件出错后界面会收到两次 `job_done`（Rust 发一次，不经 CM 的对端随后再发一次），Dart 已经处理（`ui/m7b-dart` `e02bd198b` 有测试）。
 - 验收时留意：断线重连时带"自动开始"的恢复沿用旧 ID，`HANDLED` 是按 ID 记的、进程里一直在。读码判断不会吞掉重连后的真实错误：只有上传会按文件去重，记下的是对端报过的文件 f；那时读方已经跳过 f 或早已过了 f，断线时保存的 `file_num` 至少是 f+1，重连后只会传 f 之后的文件，它们的序号都大于记下的值。被停掉的任务（`kept`、`continue_from`）已经从任务表删掉，不会保存，也就不会带旧 ID 恢复。验收时如果看到重连后某个文件出错却没有 `file_failed`，先查这一条。
 

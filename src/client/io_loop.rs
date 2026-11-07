@@ -1814,7 +1814,7 @@ impl<T: InvokeUiSession> Remote<T> {
                             let mut set_files_err = None;
                             if let Some(job) = fs::get_job(fd.id, &mut self.write_jobs) {
                                 log::info!("job set_files: {:?}", entries);
-                                if let Err(err) = job.set_files(entries) {
+                                if let Err(err) = crate::leapgate_hooks::file_transfer::set_files(job, entries) { // leapgate: M7b, LEAPGATE.md §10.17
                                     set_files_err = Some(err.to_string());
                                 } else {
                                     job.set_finished_size_on_resume();

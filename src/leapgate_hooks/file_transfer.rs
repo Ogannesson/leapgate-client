@@ -18,7 +18,9 @@ use crate::ui_session_interface::{InvokeUiSession, Session};
 use base::message_proto::{FileRemoveDir, FileRemoveFile};
 use base::{
     fs,
-    message_proto::{FileAction, FileTransferCancel, FileTransferDigest, FileTransferError, Message},
+    message_proto::{
+        FileAction, FileEntry, FileTransferCancel, FileTransferDigest, FileTransferError, Message,
+    },
 };
 #[cfg(any(target_os = "android", target_os = "ios", feature = "flutter"))]
 use flutter_rust_bridge::StreamSink;
@@ -253,6 +255,20 @@ async fn read_jobs_on<T: InvokeUiSession>(
         push(handler, &event);
     }
     Ok(())
+}
+
+/// The peer's file list for a write job (`io_loop.rs`). With the switch on, a download keeps a
+/// name this side cannot write, for `digest_failed` to skip, where upstream refuses the list.
+pub(crate) fn set_files(job: &mut fs::TransferJob, files: Vec<FileEntry>) -> ResultType<()> {
+    set_files_on(leapgate::ft::enabled(), job, files)
+}
+
+fn set_files_on(on: bool, job: &mut fs::TransferJob, files: Vec<FileEntry>) -> ResultType<()> {
+    if on {
+        job.leapgate_set_download_files(files)
+    } else {
+        job.set_files(files)
+    }
 }
 
 /// A download's digest check failed (`io_loop.rs`, before upstream cancels the job). The check
@@ -1124,6 +1140,65 @@ mod tests {
         let ev = events(&fx);
         assert_eq!((&ev[0]["file_num"], &ev[1]["resume_from"]), (&0.into(), &1.into()));
         assert!(writes.is_empty());
+        sfs::remove_dir_all(&dir).unwrap();
+    }
+
+    fn new_download(id: i32, dir: &PathBuf) -> fs::TransferJob {
+        let mut job = fs::TransferJob::new_write(
+            id,
+            fs::JobType::Generic,
+            "/remote/folder".to_owned(),
+            fs::DataSource::FilePath(dir.clone()),
+            0,
+            false,
+            true,
+            true,
+        );
+        job.is_last_job = false;
+        job
+    }
+
+    /// A list from a peer whose names Windows cannot take (into a folder that exists, as when a
+    /// download starts again): upstream refuses the whole list; with the switch on, each such
+    /// file is skipped at its digest and the rest go on.
+    #[cfg(windows)]
+    #[test]
+    fn a_name_invalid_on_windows_skips_the_file_not_the_list() {
+        let dir = scratch("names");
+        let list = || {
+            ["a:b.txt", "f1.bin", "x?y.txt", "ab:c.txt"]
+                .map(|name| entry(name, 1))
+                .to_vec()
+        };
+        assert!(set_files_on(false, &mut new_download(60, &dir), list()).is_err());
+        let mut job = new_download(60, &dir);
+        set_files_on(true, &mut job, list()).unwrap();
+        assert_eq!(job.files().len(), 4);
+        let mut writes = vec![job];
+        for file_num in [0, 2, 3] {
+            let digest = FileTransferDigest {
+                id: 60,
+                file_num,
+                ..Default::default()
+            };
+            let err = writes[0].download_digest(true, &digest).err().unwrap().to_string();
+            let mut fx = Effects::default();
+            assert!(on_digest_failed(true, "Mac OS", &mut writes, &digest, &err, &mut fx));
+            assert_eq!(sent(&fx), [format!("skip 60:{file_num}")]);
+            assert_eq!(events(&fx)[0]["file_num"], file_num);
+        }
+        assert_eq!(writes.len(), 1);
+        sfs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Only a name invalid on Windows stays: a list with any other bad name is refused whole.
+    #[test]
+    fn other_bad_names_still_refuse_the_list() {
+        let dir = scratch("bad-names");
+        for bad in ["../a:b.txt", "sub/../x?y", "/a:b.txt", "\\x?y", "a\0:b", ""] {
+            let list = vec![entry("f1.bin", 1), entry(bad, 1)];
+            assert!(set_files_on(true, &mut new_download(61, &dir), list).is_err(), "{bad:?}");
+        }
         sfs::remove_dir_all(&dir).unwrap();
     }
 
