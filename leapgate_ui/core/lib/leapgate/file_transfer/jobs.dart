@@ -349,6 +349,16 @@ class FileTransferJobs extends ChangeNotifier implements FileJobs {
     return null;
   }
 
+  /// The job [id] stopped and Rust keeps where it was (`kept`, or [_kMaxContinues] reached): it
+  /// keeps its id until "重试", so a `job_done` or `job_error` the peer sent before the cancel
+  /// reached it is dropped.
+  bool isKept(int id) {
+    final i = _jobs.getJob(id);
+    return i >= 0 &&
+        _jobs.jobTable[i].state == JobState.error &&
+        _rows[_key(id)]?.failure?.resumeFrom != null;
+  }
+
   /// Becomes true when the replace confirmation for [id] is to close unanswered: the row was
   /// paused and Rust would drop the answer.
   ValueListenable<bool> confirmWithdrawn(int id) =>

@@ -111,6 +111,10 @@ class FileModel implements FileTransferModel {
     fileFetcher.tryCompleteEmptyDirsTask(evt['value'], evt['is_local']);
   }
 
+  /// For a job Rust stopped and keeps (`LEAPGATE.md` §10.17): dropped.
+  bool _kept(Map<String, dynamic> evt) =>
+      jobs.isKept(int.tryParse('${evt['id']}') ?? -1);
+
   /// A paused row keeps its bytes: Rust reports the job waiting in a paused download's place at
   /// 0, and a soft-paused upload at no speed (`LEAPGATE.md` §10.17).
   void onJobProgress(Map<String, dynamic> evt) {
@@ -122,6 +126,7 @@ class FileModel implements FileTransferModel {
   /// `job_done`: answers a request first; upstream refreshes both panes when a job ends
   /// (`models/model.dart:376-383`).
   Future<void> onJobDone(Map<String, dynamic> evt) async {
+    if (_kept(evt)) return;
     _completeRequest(evt);
     if (await jobController.jobDone(evt)) {
       await refreshAll();
@@ -132,6 +137,7 @@ class FileModel implements FileTransferModel {
   // is added after the read, so `jobError` can't find it and the read would wait for its
   // timeout). A remote folder read fails with id 0; only one is ever pending.
   void handleJobError(Map<String, dynamic> evt) {
+    if (_kept(evt)) return;
     final id = int.tryParse(evt['id']?.toString() ?? '');
     if (id != null) {
       final err = evt['err']?.toString() ?? 'Unknown error';
