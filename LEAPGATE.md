@@ -2494,11 +2494,11 @@ Telegram 机器人设置改成两步（`leapgate_bot_lookup` 只查、什么都�
 | 文件 | 位置 | 做什么 | 行数上限 |
 |---|---|---|---|
 | `src/client.rs` | `Data` 枚举末尾 | 加 `Leapgate(leapgate::ft::Command)`（`Data` 不带 flutter 也要编，命令类型放 `libs/leapgate`） | 1 |
-| `src/client/io_loop.rs` | `handle_msg_from_ui` 的 `match`，`_ => {}` 之前 | `Data::Leapgate(c)` 交给挂钩（暂停、上传软暂停的继续）；分支带 flutter 的 `cfg`，不带 flutter 时落进 `_ => {}` | 3 |
-| `src/client/io_loop.rs` | 调 `fs::handle_read_jobs` 的那一行（约 `:322`） | 开关关着照旧调上游，开着调 Leapgate 版上传读循环 | 3 |
-| `src/client/io_loop.rs` | 下载 digest 出错、取消任务之前（约 `:1965`） | 挂钩认领了就 `return true`（回"跳过"给对端） | 2 |
-| `src/client/io_loop.rs` | 写数据块之前（约 `:1981`、`:1990`） | 先存下 `block.file_num`，写失败时交给挂钩，认领了就不走取消 | 3 |
-| `src/client/io_loop.rs` | 收到 `FileTransferError`、删任务之前（约 `:2052`） | 挂钩认领了就 `return true`（单文件错误、对端拒绝、整任务失败分开处理） | 2 |
+| `src/client/io_loop.rs` | `handle_msg_from_ui` 的 `match`，`_ => {}` 之前 | `Data::Leapgate(c)` 交给挂钩（暂停、上传软暂停的继续）；第二段起挂钩模块不带 flutter 也编，分支不再带 `cfg`（实际 2 行） | 3 |
+| `src/client/io_loop.rs` | 调 `fs::handle_read_jobs` 的那一行（约 `:322`） | 改调 `file_transfer::read_jobs`：开关关着照旧调上游，开着调 Leapgate 版上传读循环（实际改 1 行加 1 行注释） | 3 |
+| `src/client/io_loop.rs` | 下载 digest 出错、取消任务之前（约 `:1965`） | 挂钩认领了就 `return true`（回"跳过"给对端，或停下接着传）（实际 2 行） | 2 |
+| `src/client/io_loop.rs` | 写数据块之前（约 `:1981`、`:1990`） | 先存下 `block.file_num`，写失败时交给挂钩，认领了就 `return true`、不走取消（实际 2 行） | 3 |
+| `src/client/io_loop.rs` | 收到 `FileTransferError`、删任务之前（约 `:2052`） | 挂钩认领了就 `return true`（单文件错误、对端拒绝、整任务失败分开处理）（实际 2 行） | 2 |
 
 开关关着时每个挂钩都不认领，走上游原来的路（旧界面便携版因此不受影响）；取消路径（`cancel_transfer_job`）不动。
 
@@ -2518,7 +2518,7 @@ Telegram 机器人设置改成两步（`leapgate_bot_lookup` 只查、什么都�
 |---|---|---|
 | `paused` | `new_id`、`soft`（bool）、`resume_from`（下一次从第几个文件开始，0 起）、`restart_file`（bool） | 暂停生效。下载：Rust 已删掉原任务、放好一个 `new_id` 的等待任务（关闭视图时照常保存）；上传：`soft` 为真、`new_id == id`，任务原地等待。界面把行改成已暂停、行对应的任务 ID 换成 `new_id` |
 | `kept` | `resume_from`、`err`（原文）、`side`（`local` / `remote`）、`restart_file` | 整任务出错停下（磁盘满、写失败等），Rust 里已经没有这个任务、也不保存；临时文件留着。界面显示失败，"重试"时用 `JobID.next()` 取新 ID，`sessionAddJob(…, fileNum: resume_from)` 加 `sessionResumeJob` |
-| `continue_from` | `resume_from` | 单个文件出错、任务停下（下载时对端读失败、本机写数据阶段失败），要从 `resume_from` 接着传；前面必有这个文件的 `file_failed`。界面立刻用新 ID 重新发起，同一行；同一行连续 20 次就不再接着传、整行显示失败（12 M7b-3，计数在 Dart） |
+| `continue_from` | `resume_from`、`restart_file` | 单个文件出错、任务停下（下载时对端读失败、本机写数据阶段失败），要从 `resume_from` 接着传；前面必有这个文件的 `file_failed`。界面立刻用新 ID 重新发起，同一行；同一行连续 20 次就不再接着传、整行显示失败（12 M7b-3，计数在 Dart） |
 | `file_failed` | `file_num`（出错文件在任务里的序号，0 起）、`name`（相对任务根的路径，分隔符 `/`）、`err`、`side` | 记一个没传的文件。任务没停的（下载 digest 阶段回了"跳过"、上传本机读失败、上传对端写失败）后面照常有进度和 `job_done` |
 
 - `restart_file`：下载接着传之前，本机临时文件已超过 4 GiB 的已被删掉，这个文件从头传（12 M7b-5），行上加一条附注。
@@ -2530,6 +2530,29 @@ Telegram 机器人设置改成两步（`leapgate_bot_lookup` 只查、什么都�
 - 下载暂停：找到运行中（不是等待中）的普通下载任务才动；续传起点是任务当前的 `file_num`，这个文件已经改名、没有 `.download`、大小和列表一致、修改时间和列表差 2 秒以内（FAT32 只有 2 秒精度）时加一；新任务照 `AddJob` 用 `new_write` 建、`is_last_job`、文件列表为空（继续时对端重发列表）；先丢掉旧任务（关掉临时文件）再看起点那个文件的 `.download` 是否超过 `u32::MAX`，超过就删 `.download`、`.digest`。然后给对端发取消、推 `paused`。
 - 上传暂停：运行中的读任务标 `is_last_job`，`resume_from` 是读方当前的 `file_num`。暂停期间进度事件照常每秒一条（速度 0）。`leapgate_ft_resume` 只是把 `is_last_job` 改回来，不核对这个任务是不是软暂停的（关闭视图后恢复、还没 `ResumeJob` 的等待任务不要调它）。
 - 下载暂停时对端可能已经发出旧 ID 的 `Done` 或错误（取消还没到），上游收到不认识 ID 的 `Done`、`FileTransferError` 也照发旧 ID 的 `job_done` / `job_error`。这时旧任务已删、最后一个文件可能没写完，新任务照常等继续。`paused` 和它们在同一条流上，界面一定先收到 `paused`，按下面第一条规则忽略这些旧 ID 的事件。
+
+**第二段的实现**（`ui/rust-m7b`）
+- 挂钩模块 `src/leapgate_hooks/file_transfer.rs` 改成不带 flutter 也编（只有 M7a 的几个函数、sink 和推事件那几行带 flutter 的 `cfg`），`io_loop.rs` 的挂钩因此都不带 `cfg`；不带 flutter 时开关永远关着。各挂钩的判断在 `on_*` 函数里，只记下要发给对端的消息和要推的事件，外层再发、再推（先发后推）。
+- 怎么归类（`leapgate::ft::fault`，按 FT2 原因码）：`skipped`、单向传输、文件数超限、Android 范围外走上游原路；磁盘满整任务停（`kept`）；其余算单个文件出错。**只有一个文件的任务**（单文件任务，或文件夹里只有一个文件）单个文件出错一律走上游原路（`job_error`，下载照上游删临时文件），磁盘满照样 `kept`。所以 `file_failed` 只出现在多文件任务里，`name` 不会是空串。
+- 下载 digest 出错：digest 检查先给上一个文件改名。上一个文件（任务当前的 `file_num`，不是这个 digest 的文件）还有 `.download` 就算改名失败：记它 `file_failed`、停下、从这个 digest 的文件 `continue_from`。否则是这个文件的名字或路径写不了：给对端回 `Skip`，记 `file_failed`，任务接着跑。
+- 写数据块出错：先存下 `block.file_num`。任务当前的 `file_num` 和它不同、且当前文件还有 `.download`，就是改名失败，出错的是当前文件；否则出错的是这一块的文件（建临时文件或写入失败）。磁盘满：停下、`kept`（续传起点是出错的文件，`.download` 留着）；其余：记 `file_failed`、停下、从下一个文件 `continue_from`。
+- 收到 `FileTransferError`：
+  - 下载：`files()` 为空（对端建任务时就拒绝了）、或原因走上游，**走上游原路**（不推 `kept`）。否则出错的文件是 `file_num - 1`（对端先跳到下一个再报）：本机的流还在它前一个文件上就先 `finish_download` 改名（失败另记一条本机的 `file_failed`），流在出错的文件上就留着 `.download`；记 `file_failed`（`side` 是 `remote`），停下，从下一个文件 `continue_from`。磁盘满推 `kept`（`side` 是 `remote`）。
+  - 上传：还什么都没发出去（读方未确认、`transferred()` 为 0，从中间续传的任务也一样，是对端在建任务时拒绝了）、或原因走上游，走上游原路。磁盘满：只删本机读任务、不通知对端（对端的写任务和临时文件留着，重试从远程断点接着传），推 `kept`。其余：读方还停在这个文件就 `set_file_skipped`，给对端回 `Skip(f)`（对端已经过了这个文件的会忽略），记 `file_failed`。同一个文件对端后面每个在路上的数据块还会再报一次，按任务记"已报到第几个文件"，重复的认领、不推事件。
+  - 本机已经停掉的任务（`kept`、`continue_from`），对端后面再报的错误一律认领、不推事件（不再有上游的 `job_error`）。
+- "停下"：删掉任务（先关临时文件），给对端发取消，起点那个文件的 `.download` 超过 `u32::MAX` 就删掉、事件带 `restart_file`，再推 `kept` 或 `continue_from`。起点已经过了最后一个文件（最后一个文件出错）时不推 `continue_from`，改发上游的 `job_done`。
+- 上传读循环（`libs/leapgate/src/ft_read.rs`）：和上游一样，每一轮所有没在等待的任务先打开当前文件（并发 digest），然后只读列表里第一个没在等待的任务。不同的两处：打开或读失败的文件不把错误发给对端（对端 CM 会结束整个任务），读到一半出错的补发 `Skip(f)`，记 `file_failed`（`side` 是 `local`）；这一轮打开失败的任务不再读（上游会在这一轮把它当成"已完成"结束掉），下一轮从下一个文件接着。出错后任务没跳到下一个文件的（打开成功、取修改时间失败，例如修改时间早于 1970 年），照上游处理：错误发给对端，同一轮接着读，任务被判成已完成、发 `Done`、删掉（不这样做会每轮都发一条错误，对端第一条就删了写任务，任务永远等确认，同会话后面的上传也被挡住）。用的都是 `fs` 的公开接口（`init_data_stream_for_cm` 加自己发 digest、`read`、`job_completed`、`job_error`），上游的读循环和被控端都不动。
+- 已知的空档：
+  - 对端在任务结束时也会发完成：下载时对端读失败、本机已经停掉任务，对端（不经 CM 的那种）随后发来的旧 ID `Done` 照上游发 `job_done`；`continue_from` 之后界面已经换了 ID、会忽略，最后一个文件出错时界面会收到两次 `job_done`。`kept` 之后同样可能收到旧 ID 的 `job_done`（取消还没到对端时它已经发完），界面收到 `kept` 后这一行就不该再认这个 ID。
+  - 判断"改名失败"靠上一个文件还有没有 `.download`：上一个文件在别的会话留下过 `.download`、这次又被用户跳过时会认错成改名失败，结果只是多从这个文件重新发起一次。
+  - 上传时对端写失败、读方已经过了这个文件，对端已经写进去的部分留成 `.download`（`Skip` 让对端丢掉它的流，不删文件）。
+- 已知限制（审查后定为不修）：
+  - 改名成功、但改名之后的步骤失败（删 `.digest`、设修改时间）：错误会被算到下一个文件头上，原因原文也挂在错的文件上。不写坏数据，可以重试。
+  - "已处理过的错误"记录表（`ft.rs` 的 `HANDLED`）从不清理，每个处理过的任务留一项，量很小。
+  - 下载时对端取修改时间失败、没跳到下一个文件：会白白接着传，直到 Dart 的 20 次上限。上游在这种情况下也是整任务停下。
+  - 上传时对端 CM 写失败，还在路上的数据块仍可能写坏文件，或者把截短的文件改成正式名（上游原有的空档，宽度和上游一样）。
+  - 最后一个文件出错后界面会收到两次 `job_done`（Rust 发一次，不经 CM 的对端随后再发一次），Dart 已经处理（`ui/m7b-dart` `e02bd198b` 有测试）。
+- 验收时留意：断线重连时带"自动开始"的恢复沿用旧 ID，`HANDLED` 是按 ID 记的、进程里一直在。读码判断不会吞掉重连后的真实错误：只有上传会按文件去重，记下的是对端报过的文件 f；那时读方已经跳过 f 或早已过了 f，断线时保存的 `file_num` 至少是 f+1，重连后只会传 f 之后的文件，它们的序号都大于记下的值。被停掉的任务（`kept`、`continue_from`）已经从任务表删掉，不会保存，也就不会带旧 ID 恢复。验收时如果看到重连后某个文件出错却没有 `file_failed`，先查这一条。
 
 **Dart 侧的规则**（12 §4）
 - 行不变、Rust 任务 ID 会变：`FileTransferJobs` 维护"行 → 当前任务 ID"。进度只认当前 ID；`job_done`、`job_error`、`override_file_confirm` 只认当前 ID，旧 ID 一律忽略；已暂停的行不认进度事件（软暂停的上传暂停期间每秒仍有一条速度为 0 的进度）。
