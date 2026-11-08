@@ -286,6 +286,16 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
         : null;
   }
 
+  /// The platform of the current row's device, for the "Connect" menu ([connectMenu]); empty
+  /// for typed text and without a row.
+  String _currentPlatform() {
+    final search = _search?.search;
+    final row = _currentRow(search);
+    if (row == null) return '';
+    if (search == null) return _capped(_listed(_tabs.current))[row].platform;
+    return row == 0 ? '' : search.matches[row - 1].platform;
+  }
+
   void _move(int by) {
     final search = _search?.search;
     final ids = _rowIds(search);
@@ -398,29 +408,36 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
         onConnect: _input.isEmpty ? null : _runCurrent,
         menuLabel: l10n.connectBoxConnectionType,
         menuItems: [
-          LgMenuItem(
-            label: l10n.connectBoxRemoteDesktop,
-            checked: true,
-            hint: l10n.connectBoxDefault,
-            onPressed: _runCurrent,
-          ),
-          LgMenuItem(
-            label: l10n.ftFileTransfer,
-            checked: false,
-            onPressed: () => _runCurrent(fileTransfer: true),
-          ),
-          if (_exitTarget() case final exit?)
-            LgMenuItem(
-              label: l10n.exitUseAsExit,
-              checked: false,
-              onPressed: () => useAsExit(exit.id, category: exit.category),
-            ),
-          LgMenuItem(
-            label: l10n.connectBoxViaRelay,
-            checked: false,
-            description: l10n.connectBoxViaRelayNote,
-            onPressed: () => _runCurrent(relay: true),
-          ),
+          for (final action in connectMenu(_currentPlatform()))
+            ?switch (action) {
+              PeerAction.remoteDesktop => LgMenuItem(
+                label: l10n.connectBoxRemoteDesktop,
+                checked: true,
+                hint: l10n.connectBoxDefault,
+                onPressed: _runCurrent,
+              ),
+              PeerAction.fileTransfer => LgMenuItem(
+                label: l10n.ftFileTransfer,
+                checked: false,
+                onPressed: () => _runCurrent(fileTransfer: true),
+              ),
+              PeerAction.useAsExit => switch (_exitTarget()) {
+                final exit? => LgMenuItem(
+                  label: l10n.exitUseAsExit,
+                  checked: false,
+                  onPressed: () => useAsExit(exit.id, category: exit.category),
+                ),
+                null => null,
+              },
+              PeerAction.viaRelay => LgMenuItem(
+                label: l10n.connectBoxViaRelay,
+                checked: false,
+                description: l10n.connectBoxViaRelayNote,
+                onPressed: () => _runCurrent(relay: true),
+              ),
+              // TODO(M9b): terminal, camera. TODO(M9c): TCP tunnel, RDP (`LEAPGATE.md` §10.18).
+              _ => null,
+            },
         ],
         clearLabel: l10n.connectBoxClear,
         helpLabel: l10n.connectBoxHelp,
@@ -705,28 +722,33 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
               ),
             ),
             // The "⋯" at the end of "Connect to" (`p1-cb-conn`; `LgConnectToRow` has no slot for
-            // it, so it stands beside the row). What was typed has no known platform, so the
-            // connection types are those of M2b (05 §1.3).
+            // it, so it stands beside the row). What was typed has no known platform
+            // ([connectMenu] with an empty one).
             LgMenuAnchor(
               items: [
-                LgMenuItem(
-                  label: l10n.connectBoxRemoteDesktop,
-                  onPressed: () => _connect(_input),
-                ),
-                LgMenuItem(
-                  label: l10n.ftFileTransfer,
-                  onPressed: () => _connect(_input, fileTransfer: true),
-                ),
-                if (isExitId(_input))
-                  LgMenuItem(
-                    label: l10n.exitUseAsExit,
-                    onPressed: () => useAsExit(_input),
-                  ),
-                LgMenuItem(
-                  label: l10n.connectBoxViaRelay,
-                  description: l10n.connectBoxViaRelayNote,
-                  onPressed: () => _connect(_input, relay: true),
-                ),
+                for (final action in connectMenu(''))
+                  ?switch (action) {
+                    PeerAction.remoteDesktop => LgMenuItem(
+                      label: l10n.connectBoxRemoteDesktop,
+                      onPressed: () => _connect(_input),
+                    ),
+                    PeerAction.fileTransfer => LgMenuItem(
+                      label: l10n.ftFileTransfer,
+                      onPressed: () => _connect(_input, fileTransfer: true),
+                    ),
+                    PeerAction.useAsExit when isExitId(_input) => LgMenuItem(
+                      label: l10n.exitUseAsExit,
+                      onPressed: () => useAsExit(_input),
+                    ),
+                    PeerAction.viaRelay => LgMenuItem(
+                      label: l10n.connectBoxViaRelay,
+                      description: l10n.connectBoxViaRelayNote,
+                      onPressed: () => _connect(_input, relay: true),
+                    ),
+                    // TODO(M9b): terminal, camera. TODO(M9c): TCP tunnel, RDP
+                    // (`LEAPGATE.md` §10.18).
+                    _ => null,
+                  },
               ],
               builder: (context, controller) => LgIconButton(
                 icon: LgIcons.more,

@@ -89,11 +89,7 @@ enum CmSessionKind {
   exit
 }
 
-/// The login target of an exit tunnel; same values as `leapgate::exit` in Rust and
-/// `flutter/lib/leapgate/exit_tunnel.dart`. The CM gets the normalized `host:port`.
-const String kLeapgateExitHost = 'leapgate-exit.invalid';
-const int kLeapgateExitPort = 65536;
-
+/// [kLeapgateExitHost] and [kLeapgateExitPort] as the CM gets them.
 bool isLeapgateExitAddress(String addr) =>
     addr == '$kLeapgateExitHost:$kLeapgateExitPort';
 

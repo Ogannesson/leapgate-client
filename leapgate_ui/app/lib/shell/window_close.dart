@@ -67,7 +67,7 @@ Future<void> closeMainWindow(TabOverlays overlays) async {
     remembered: rememberedCloseAction(local),
   );
   var action = plan.action;
-  final exits = appCore.exitNodes.runningCount;
+  final exits = appCore.backgroundCount;
   // Unfinished transfers are asked about even after "Don't show again" (R2-Q28, 02 §3.1).
   final transfers = unfinishedTransfers(views);
   if (plan.askSessions || plan.askAction || transfers > 0) {

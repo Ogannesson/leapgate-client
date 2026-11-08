@@ -266,22 +266,19 @@ void main() {
     expect(card.state, ExitCardState.connecting);
   });
 
-  test('the device menu offers "Use as exit node" for a Windows device only',
-      () {
-    List<PeerAction> connect(bool peerWindows) => peerMenu(PeerCategory.recent,
+  test(
+      'the device menu offers "Use as exit node" for a device not known to run '
+      'another system than Windows', () {
+    List<PeerAction> connect(String peerPlatform) => peerMenu(
+            PeerCategory.recent,
             favorite: false,
             hasPassword: false,
             windows: true,
-            peerWindows: peerWindows)
+            peerPlatform: peerPlatform)
         .first;
-    expect(connect(true), [
-      PeerAction.remoteDesktop,
-      PeerAction.fileTransfer,
-      PeerAction.useAsExit,
-      PeerAction.viaRelay
-    ]);
-    expect(connect(false),
-        [PeerAction.remoteDesktop, PeerAction.fileTransfer, PeerAction.viaRelay]);
+    expect(connect('Windows'), contains(PeerAction.useAsExit));
+    expect(connect(''), contains(PeerAction.useAsExit));
+    expect(connect('Linux'), isNot(contains(PeerAction.useAsExit)));
   });
 
   test('an exit takes a device ID or ID@server', () {

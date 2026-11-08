@@ -6,6 +6,7 @@ import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/app_window.dart';
 import 'package:flutter_hbb/leapgate/bridge.dart';
 import 'package:flutter_hbb/leapgate/local_status.dart';
+import 'package:flutter_hbb/leapgate/session.dart' show ConnType;
 import 'package:flutter_hbb/leapgate/settings/settings_api.dart';
 import 'package:flutter_hbb/leapgate/settings/unlock.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
@@ -197,6 +198,16 @@ class FakeNavigation implements MainNavigation {
           bool isSharedPassword = false,
           bool forceRelay = false}) =>
       fileTransfers.add(id);
+
+  final views = <({String id, ConnType kind, bool terminalAdmin})>[];
+
+  @override
+  void openView(String id, ConnType kind,
+          {bool terminalAdmin = false,
+          String password = '',
+          bool isSharedPassword = false,
+          bool forceRelay = false}) =>
+      views.add((id: id, kind: kind, terminalAdmin: terminalAdmin));
 }
 
 /// Fresh fakes behind `bind`, `appCore` and `mainNavigation` for one test.

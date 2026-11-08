@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
-import 'package:flutter_hbb/leapgate/exit_nodes.dart' show offersExit;
+import 'package:flutter_hbb/leapgate/exit_nodes.dart' show isExitId;
 import 'package:flutter_hbb/leapgate/peer_list.dart';
 import 'package:flutter_hbb/leapgate/peer_tabs.dart';
 import 'package:flutter_hbb/leapgate/recent_peers.dart';
@@ -249,8 +249,20 @@ List<Widget> peerMenuItems(
         (item.category == PeerCategory.addressBook && item.peer.hash.isNotEmpty),
     windows: Platform.isWindows,
     ab: appCore.addressBook.menuFlags(category),
-    peerWindows: offersExit(item.peer.id, item.peer.platform),
+    peerPlatform: item.peer.platform,
   );
+  // TODO(M9b): the terminal, administrator terminal and camera items. TODO(M9c): the TCP tunnel
+  // and RDP items. Until then they are left out (`LEAPGATE.md` §10.18). "用作出口" also needs an
+  // ID it can use ([isExitId]; [peerMenu] only looks at the platform).
+  bool built(PeerAction action) => switch (action) {
+    PeerAction.terminal ||
+    PeerAction.terminalAdmin ||
+    PeerAction.camera ||
+    PeerAction.tcpTunnel ||
+    PeerAction.rdp => false,
+    PeerAction.useAsExit => isExitId(id),
+    _ => true,
+  };
   final titles = [
     l10n.connectBoxConnectionType,
     l10n.peerMenuDevice,
@@ -366,6 +378,12 @@ List<Widget> peerMenuItems(
     PeerAction.setSharedPassword ||
     PeerAction.showBooks ||
     PeerAction.deleteFromAb => const SizedBox.shrink(),
+    // Left out by [built].
+    PeerAction.terminal ||
+    PeerAction.terminalAdmin ||
+    PeerAction.camera ||
+    PeerAction.tcpTunnel ||
+    PeerAction.rdp => const SizedBox.shrink(),
   };
   return [
     for (final group in groups) ...[
@@ -373,7 +391,8 @@ List<Widget> peerMenuItems(
         titleOf(group),
         note: abMenuGroupNote(l10n, item, group, groups),
       ),
-      for (final action in group) itemOf(action),
+      for (final action in group)
+        if (built(action)) itemOf(action),
     ],
   ];
 }

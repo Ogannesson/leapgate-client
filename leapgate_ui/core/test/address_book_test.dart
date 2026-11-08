@@ -238,11 +238,8 @@ void main() {
             windows: true,
             ab: ab.menuFlags(PeerCategory.group)),
         [
-          [
-            PeerAction.remoteDesktop,
-            PeerAction.fileTransfer,
-            PeerAction.viaRelay
-          ],
+          // Every connection type, the platform not being known.
+          connectMenu('', windows: true),
           [PeerAction.addToAb],
         ]);
   });

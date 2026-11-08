@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 
+import '../common.dart' show isWindows;
+import '../consts.dart';
 import '../models/peer_model.dart';
 import 'recent_peers.dart';
 
@@ -53,8 +55,15 @@ enum PeerAction {
   remoteDesktop,
   // M7a: every device, as upstream's cards (`_transferFileAction`).
   fileTransfer,
+  // M9 (`LEAPGATE.md` §10.18): the platform rules are [peerMenu]'s; the app builds the terminal
+  // and camera items with M9b, the TCP tunnel and RDP items with M9c.
+  terminal,
+  terminalAdmin,
+  camera,
+  tcpTunnel,
   // M5: only when the remote device is on Windows (`libs/leapgate/src/exit/mod.rs`).
   useAsExit,
+  rdp,
   viaRelay,
   alwaysRelay,
   wakeOnLan,
@@ -85,22 +94,19 @@ typedef AbMenuFlags = ({bool addToAb, bool sharedBook, bool tags});
 /// (`common/widgets/peer_card.dart:958-1100`, `RecentPeerCard`, `FavoritePeerCard`,
 /// `DiscoveredPeerCard`) in 01's groups: the connection group has what M2b connects with,
 /// "Favorites" has no danger group (01: "移出收藏" in the manage group does it), and every
-/// category offers "加入地址簿" when there is a book to add to (M4).
+/// category offers "加入地址簿" when there is a book to add to (M4). [peerPlatform] is the remote
+/// device's (`kPeerPlatform*`, empty when not known), for the connection group (see
+/// [connectMenu]); this one also has "终端（管理员）".
 List<List<PeerAction>> peerMenu(
   PeerCategory category, {
   required bool favorite,
   required bool hasPassword,
   required bool windows,
   AbMenuFlags ab = (addToAb: false, sharedBook: false, tags: false),
-  bool peerWindows = false,
+  String peerPlatform = '',
 }) {
-  // [windows] is this device's platform (the shortcut); the exit is the remote device's.
-  final connect = [
-    PeerAction.remoteDesktop,
-    PeerAction.fileTransfer,
-    if (peerWindows) PeerAction.useAsExit,
-    PeerAction.viaRelay,
-  ];
+  // [windows] is this device's platform (the shortcut, RDP); the rest is the remote device's.
+  final connect = _connectGroup(peerPlatform, windows: windows, admin: true);
   // The address book and the team devices (01 P1 block F; upstream `AddressBookPeerCard`,
   // `MyGroupPeerCard`). A read-only book keeps its writing items, greyed by the app.
   if (category == PeerCategory.group) {
@@ -147,6 +153,36 @@ List<List<PeerAction>> peerMenu(
   return [
     for (final g in groups)
       if (g.isNotEmpty) g,
+  ];
+}
+
+/// The "连接" button's menu and the "⋯" after "连接到 ‹输入›" (`A-P1.html#p1-cb-menu`): the
+/// connection types for a remote device on [peerPlatform] (`kPeerPlatform*`, empty when not
+/// known, as for typed text), in the mockup's order, without "终端（管理员）" (14 §1.2).
+/// [windows] is this device's platform, for RDP; tests pass it.
+List<PeerAction> connectMenu(String peerPlatform, {bool? windows}) =>
+    _connectGroup(peerPlatform, windows: windows ?? isWindows, admin: false);
+
+/// The connection types in `p1-menu-more-top`'s order. What the remote platform is known not
+/// to support is left out, an unknown platform offers all (R3-Q12, 01 §3.1 block F): the
+/// terminal and the TCP tunnel not on Android, the administrator terminal only on Windows
+/// (13 §2.1.1), the camera not on macOS or Android, the exit node not on a known non-Windows
+/// (M5), RDP from Windows to a device not known to be another platform (13 §1.1.2).
+List<PeerAction> _connectGroup(String peerPlatform,
+    {required bool windows, required bool admin}) {
+  final android = peerPlatform == kPeerPlatformAndroid;
+  final peerWindows = peerPlatform == kPeerPlatformWindows;
+  final notWindows = peerPlatform.isNotEmpty && !peerWindows;
+  return [
+    PeerAction.remoteDesktop,
+    PeerAction.fileTransfer,
+    if (!android) PeerAction.terminal,
+    if (admin && peerWindows) PeerAction.terminalAdmin,
+    if (!android && peerPlatform != kPeerPlatformMacOS) PeerAction.camera,
+    if (!android) PeerAction.tcpTunnel,
+    if (!notWindows) PeerAction.useAsExit,
+    if (windows && !notWindows) PeerAction.rdp,
+    PeerAction.viaRelay,
   ];
 }
 
