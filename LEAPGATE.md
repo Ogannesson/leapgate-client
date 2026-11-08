@@ -2759,7 +2759,7 @@ M9 分三段，各自审查、验收、外观检查、合 main（M9-1）。和�
 
 **第 0 步放好的**（分支 `ui/m9-0`，合 main 后各路照用）
 
-- **设备菜单**：`PeerAction` 加 `terminal`、`terminalAdmin`、`camera`、`tcpTunnel`、`rdp`。`peerMenu` 的 `bool peerWindows` 换成 `String peerPlatform`（`kPeerPlatform*` 之一，空串是未知）。连接组照样稿 `A-P1.html` 的顺序列全，平台已知不支持的不列、未知照列（R3-Q12，01 §3.1 区块 F）：终端、TCP 隧道在对端不是 Android 时列；终端（管理员）只在对端已知是 Windows 时列（13 §2.1.1）；摄像头在对端不是 macOS、Android 时列；RDP 在本机是 Windows、对端不是已知的非 Windows 时列（13 §1.1.2）；用作出口照旧（对端已知是 Windows）。连接按钮下拉和"连接到 ‹输入›"的"⋯"改成按 core 新函数 `connectMenu(String peerPlatform)` 列：样稿 `p1-cb-menu` 的八项（远程桌面、文件传输、终端、摄像头、TCP 隧道、用作出口、RDP、经中继），不列终端（管理员）（14 §1.2）。
+- **设备菜单**：`PeerAction` 加 `terminal`、`terminalAdmin`、`camera`、`tcpTunnel`、`rdp`。`peerMenu` 的 `bool peerWindows` 换成 `String peerPlatform = ''`（`kPeerPlatform*` 之一，空串是未知）。连接组照样稿 `A-P1.html` 的顺序列全，平台已知不支持的不列、未知照列（R3-Q12，01 §3.1 区块 F）：终端、TCP 隧道在对端不是 Android 时列；终端（管理员）只在对端已知是 Windows 时列（13 §2.1.1）；摄像头在对端不是 macOS、Android 时列；RDP 在本机是 Windows、对端不是已知的非 Windows 时列（13 §1.1.2）；用作出口照旧（对端不是已知的非 Windows；app 另要求 ID 能当出口，`isExitId`）。连接组的规则在私有的 `_connectGroup` 里，`peerMenu` 和 `connectMenu` 共用。连接按钮下拉和"连接到 ‹输入›"的"⋯"改成按 core 新函数 `connectMenu(String peerPlatform, {bool? windows})` 列（`windows` 是本机平台，不传按本机，给测试用）：样稿 `p1-cb-menu` 的八项（远程桌面、文件传输、终端、摄像头、TCP 隧道、用作出口、RDP、经中继），不列终端（管理员）（14 §1.2）。
 - app 里按 `PeerAction` 建菜单项的地方（`peer_views.dart`、`devices_page.dart` 两处下拉），五个新值第 0 步不建（跳过，`TODO(M9b)` / `TODO(M9c)`），A、T 各填各的。
 - **链接**：`ConnectLink` 的 `bool fileTransfer` 换成 `LinkKind kind`（`remoteDesktop`、`fileTransfer`、`terminal`、`terminalAdmin`、`camera`、`tcpTunnel`、`rdp`），第三轮的五种也取 ID 和 `--password`、`--relay`；`_open` 按种类分派，五种新的照旧出轻提示，A、T 各换各的。
 - **打开视图**：`MainNavigation.openView(String id, ConnType kind, {bool terminalAdmin = false, String password = '', bool isSharedPassword = false, bool forceRelay = false})`；`openFileTransfer` 留着、转调它（M7a 的调用和测试不动）。主窗口的实现和 `openFileTransfer` 同一条路（`SessionRegistry.open(id, kind, terminalAdmin:)`、切标签、显示那个视图）；视图容器里终端一支挂 `TerminalViewPage`，摄像头一支挂 `SessionPage`。菜单不列、链接不开，所以第 0 步里走不到。
@@ -2795,7 +2795,7 @@ M9 分三段，各自审查、验收、外观检查、合 main（M9-1）。和�
   }
   ```
 
-  出口占位的常量（目标 `leapgate-exit.invalid:65536`）从 `cm_core.dart` 挪到公共处，`savedForwards` 和 CM 共用。
+  出口占位的两个常量（目标 `leapgate-exit.invalid:65536`）从 `cm_core.dart` 挪到 `consts.dart`，CM 和 `savedForwards` 共用；解析存下的转发是公开的纯函数 `parseSavedForwards`（`tunnel_api.dart`）。
 - **依赖**：core `xterm: 4.0.0`（钉死，和上游同版本）、app `xterm: any`，用同一个 `PUB_CACHE` 重新生成两份 lock（14 §2.4）。
 - **画廊和常量**：`gallery_m9a.dart`、`gallery_m9b.dart`、`gallery_m9c.dart` 登记进 `gallery_main.dart`；`consts.dart` 加"M9a""M9b views""M9b terminal""M9c"四个锚点。
 
