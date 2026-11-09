@@ -6,6 +6,7 @@
 // here compares pixels.
 
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:leapgate_ui/icons/lg_icon.dart';
@@ -15,6 +16,7 @@ import 'package:leapgate_ui/widgets/lg_feedback.dart';
 import 'package:leapgate_ui/widgets/lg_form_dialog.dart';
 import 'package:leapgate_ui/widgets/lg_install_dialog.dart';
 import 'package:leapgate_ui/widgets/lg_list_chrome.dart';
+import 'package:leapgate_ui/widgets/lg_selection.dart';
 
 import 'helpers.dart';
 
@@ -452,7 +454,11 @@ void main() {
       await tester.tap(find.text('安装 Leapgate 打印机'), warnIfMissed: false);
       expect(
         tester.getSemantics(find.bySemanticsLabel(spoken)),
-        isSemantics(isButton: true, hasEnabledState: true, isEnabled: false),
+        isSemantics(
+          hasCheckedState: true,
+          hasEnabledState: true,
+          isEnabled: false,
+        ),
       );
       handle.dispose();
     });
@@ -462,13 +468,14 @@ void main() {
     ) async {
       final handle = tester.ensureSemantics();
       await pumpLg(tester, option((_) {}, value: true));
+      // A check box that is ticked: the Windows engine gives it the check box role and the
+      // checked state; a button would be Invoke only, and say nothing of the state.
       expect(
         tester.getSemantics(find.bySemanticsLabel(spoken)),
         isSemantics(
           label: spoken,
-          isButton: true,
-          hasToggledState: true,
-          isToggled: true,
+          hasCheckedState: true,
+          isChecked: true,
           hasEnabledState: true,
           isEnabled: true,
           hasTapAction: true,
@@ -476,6 +483,103 @@ void main() {
           isFocusable: true,
         ),
       );
+      handle.dispose();
+    });
+
+    testWidgets('unticked it says so, and is not a button', (tester) async {
+      final handle = tester.ensureSemantics();
+      await pumpLg(tester, option((_) {}));
+      final node = tester.getSemantics(find.bySemanticsLabel(spoken));
+      expect(
+        node,
+        isSemantics(
+          label: spoken,
+          hasCheckedState: true,
+          isChecked: false,
+          hasEnabledState: true,
+          isEnabled: true,
+          hasTapAction: true,
+          hasFocusAction: true,
+          isFocusable: true,
+        ),
+      );
+      // `isSemantics` says nothing of a flag it is not given; the role is the point.
+      expect(node.flagsCollection.isButton, isFalse);
+      handle.dispose();
+    });
+
+    testWidgets('pressing it by its semantic action toggles it', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      final seen = <bool>[];
+      await pumpLg(tester, option(seen.add));
+      tester.semantics.tap(find.semantics.byLabel(spoken));
+      await tester.pump();
+      expect(seen, [true]);
+      handle.dispose();
+    });
+
+    testWidgets('LgCheckbox is a check box too, ticked or not', (tester) async {
+      final handle = tester.ensureSemantics();
+      for (final on in [true, false]) {
+        await pumpLg(
+          tester,
+          LgCheckbox(value: on, label: '记住密码', onChanged: (_) {}),
+        );
+        final node = tester.getSemantics(find.bySemanticsLabel('记住密码'));
+        expect(
+          node,
+          isSemantics(
+            label: '记住密码',
+            hasCheckedState: true,
+            isChecked: on,
+            hasEnabledState: true,
+            isEnabled: true,
+            hasTapAction: true,
+            hasFocusAction: true,
+            isFocusable: true,
+          ),
+          reason: 'value $on',
+        );
+        expect(node.flagsCollection.isButton, isFalse);
+      }
+      handle.dispose();
+    });
+
+    testWidgets('a greyed LgCheckbox says it is disabled, still a check box', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      await pumpLg(
+        tester,
+        const LgCheckbox(value: true, label: '记住密码', onChanged: null),
+      );
+      expect(
+        tester.getSemantics(find.bySemanticsLabel('记住密码')),
+        isSemantics(
+          label: '记住密码',
+          hasCheckedState: true,
+          isChecked: true,
+          hasEnabledState: true,
+          isEnabled: false,
+        ),
+      );
+      handle.dispose();
+    });
+
+    testWidgets('pressing an LgCheckbox by its semantic action toggles it', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      final seen = <bool>[];
+      await pumpLg(
+        tester,
+        LgCheckbox(value: false, label: '记住密码', onChanged: seen.add),
+      );
+      tester.semantics.tap(find.semantics.byLabel('记住密码'));
+      await tester.pump();
+      expect(seen, [true]);
       handle.dispose();
     });
 
@@ -610,6 +714,140 @@ void main() {
         find.byWidgetPredicate((w) => w is LgIcon && w.icon == LgIcons.uac),
         findsNothing,
       );
+    });
+  });
+
+  group('a greyed button of a dialog is disabled in the semantics too', () {
+    // What `getSemantics` shows is what the engine is given; whether the Windows bridge passes
+    // "disabled" on to UI Automation is the engine's (see DS-components.md).
+    SemanticsNode node(WidgetTester tester, String label) =>
+        tester.getSemantics(find.bySemanticsLabel(label));
+
+    testWidgets('the install dialog: no location, then running', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      await pumpLg(tester, _stage(_dialog(installEnabled: false)));
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(
+        node(tester, '安装'),
+        isSemantics(
+          label: '安装',
+          isButton: true,
+          hasEnabledState: true,
+          isEnabled: false,
+        ),
+      );
+      // The way out is still there.
+      expect(
+        node(tester, '取消'),
+        isSemantics(
+          label: '取消',
+          isButton: true,
+          hasEnabledState: true,
+          isEnabled: true,
+          hasTapAction: true,
+          hasFocusAction: true,
+          isFocusable: true,
+        ),
+      );
+
+      await pumpLg(tester, _stage(_dialog(busy: true)));
+      await tester.pump(const Duration(milliseconds: 200));
+      for (final label in ['正在安装…', '取消']) {
+        expect(
+          node(tester, label),
+          isSemantics(
+            label: label,
+            isButton: true,
+            hasEnabledState: true,
+            isEnabled: false,
+          ),
+          reason: label,
+        );
+      }
+      handle.dispose();
+    });
+
+    testWidgets('LgConfirmDialog and LgFormDialog buttons, as before', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      await pumpLg(
+        tester,
+        _stage(
+          LgConfirmDialog(
+            title: '替换？',
+            actions: [
+              LgDialogAction(label: '跳过', onPressed: () {}),
+              const LgDialogAction(
+                label: '替换',
+                kind: LgButtonKind.primary,
+                onPressed: null,
+              ),
+            ],
+          ),
+        ),
+      );
+      expect(
+        node(tester, '替换'),
+        isSemantics(
+          label: '替换',
+          isButton: true,
+          hasEnabledState: true,
+          isEnabled: false,
+        ),
+      );
+      expect(
+        node(tester, '跳过'),
+        isSemantics(
+          label: '跳过',
+          isButton: true,
+          hasEnabledState: true,
+          isEnabled: true,
+          hasTapAction: true,
+          hasFocusAction: true,
+          isFocusable: true,
+        ),
+      );
+
+      await pumpLg(
+        tester,
+        _stage(
+          const LgFormDialog(
+            title: '登录到服务器',
+            actions: [
+              LgDialogAction(
+                label: '登录',
+                kind: LgButtonKind.primary,
+                onPressed: null,
+              ),
+            ],
+          ),
+        ),
+      );
+      expect(
+        node(tester, '登录'),
+        isSemantics(
+          label: '登录',
+          isButton: true,
+          hasEnabledState: true,
+          isEnabled: false,
+        ),
+      );
+      handle.dispose();
+    });
+
+    testWidgets('a button that is greyed gives no way to press it', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      await pumpLg(tester, _stage(_dialog(installEnabled: false)));
+      await tester.pump(const Duration(milliseconds: 200));
+      final n = node(tester, '安装');
+      expect(n.getSemanticsData().hasAction(SemanticsAction.tap), isFalse);
+      expect(n.getSemanticsData().hasAction(SemanticsAction.focus), isFalse);
+      handle.dispose();
     });
   });
 
