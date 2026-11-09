@@ -427,6 +427,7 @@ class _PathBoxState extends State<_PathBox> {
         final painter = TextPainter(
           text: TextSpan(text: widget.path, style: style),
           textDirection: Directionality.of(context),
+          textScaler: MediaQuery.textScalerOf(context),
           maxLines: 1,
         )..layout();
         final cutOff = painter.width > room;

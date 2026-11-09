@@ -210,6 +210,32 @@ void main() {
   });
 
   testWidgets(
+    'after a failure the keyboard is back on "安装": Enter tries again',
+    (tester) async {
+      lg.installAnswer = Completer();
+      // With a session the keyboard starts on "取消"; "安装" is clicked.
+      await openFromCard(
+        tester,
+        setUp: (m) => m.incoming = const IncomingSessions(1, controlled: true),
+      );
+      expect(_focusedButton(), '取消');
+      await tester.tap(_button('安装'));
+      await tester.pump();
+      expect(lg.installs, ['install']);
+      lg.installAnswer.complete('{"result":"uac_denied","text":""}');
+      await _pumps(tester);
+      expect(find.text('未获得管理员权限，未安装。'), findsOneWidget);
+      expect(_focusedButton(), '安装');
+
+      lg.installAnswer = Completer();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      expect(lg.installs, ['install', 'install']);
+      await unmount(tester);
+    },
+  );
+
+  testWidgets(
     'a long location keeps its last folder whole and is read out whole',
     (tester) async {
       const long = r'D:\工作资料\常用软件\远程工具\公司内部\某个很长的文件夹名称\Leapgate';

@@ -61,8 +61,10 @@ class _InstallDialogState extends State<InstallDialog> {
     widget.model.sessionsChanges,
   ]);
 
-  /// A failure is added under the options: it is scrolled into view when it appears.
+  /// A failure is added under the options: it is scrolled into view when it appears, and the
+  /// keyboard goes back to "安装" (greyed while it ran, so it lost it) for Enter to try again.
   final _scroll = ScrollController();
+  final _dialogKey = GlobalKey();
   InstallFailure? _failure;
 
   @override
@@ -84,6 +86,7 @@ class _InstallDialogState extends State<InstallDialog> {
     if (failure == null || identical(failure, _failure)) return;
     _failure = failure;
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       if (_scroll.hasClients) {
         _scroll.animateTo(
           _scroll.position.maxScrollExtent,
@@ -91,12 +94,30 @@ class _InstallDialogState extends State<InstallDialog> {
           curve: Curves.easeOut,
         );
       }
+      // `LgDialogAction` takes no focus node: the button is found by its label, among the
+      // dialog's own (the scrim's scope; the hint card under it has an "安装" too).
+      final dialog = _dialogKey.currentContext;
+      if (dialog == null) return;
+      final install = AppLocalizations.of(context)!.homeInstallButton;
+      FocusScope.of(dialog).traversalDescendants
+          .where(
+            (node) =>
+                node.context
+                    ?.findAncestorWidgetOfExactType<LgButton>()
+                    ?.label ==
+                install,
+          )
+          .firstOrNull
+          ?.requestFocus();
     });
   }
 
   Future<void> _change() async {
     final folder = await FilePicker.platform.getDirectoryPath(
+      // file_picker 5.5.0 ignores it on Windows (a known limit); passed for when it doesn't.
       initialDirectory: widget.model.pickerStart,
+      // On the main window, so that it can't end up behind it.
+      lockParentWindow: true,
     );
     if (folder != null && mounted) widget.model.choose(folder);
   }
@@ -116,6 +137,7 @@ class _InstallDialogState extends State<InstallDialog> {
           onEscape: busy ? null : widget.close,
           scrollable: false,
           child: LgInstallDialog(
+            key: _dialogKey,
             title: l10n.installTitle,
             scrollController: _scroll,
             actions: [

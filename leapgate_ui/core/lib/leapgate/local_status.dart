@@ -122,7 +122,8 @@ class LocalStatusModel extends ChangeNotifier {
   InstallCard? _installing;
   bool get installing => _installing != null;
 
-  /// The last failure, shown on its card until the next click.
+  /// The last failure until the next click: the "升级" card shows it under its button; one of
+  /// "安装" shows on the install page, not on the card (M9a).
   InstallFailure? installFailure;
 
   /// Authorized sessions into this device of every type (C1, 06 M3-1): "正在被远程控制（N 个
