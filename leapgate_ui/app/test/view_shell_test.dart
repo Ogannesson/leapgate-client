@@ -9,6 +9,7 @@ import 'package:flutter_hbb/models/peer_model.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/models/state_model.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:leapgate_ui/icons/lg_icon.dart';
 import 'package:leapgate_ui/l10n/app_localizations.dart';
 import 'package:leapgate_ui/pages/home/peer_views.dart';
 import 'package:leapgate_ui/pages/session/connection_panel.dart';
@@ -388,11 +389,15 @@ void main() {
           toolbarButton('摄像头 1'),
         );
         expect(button.semanticLabel, '切换摄像头，当前为摄像头 1');
+        expect(button.icon, LgIcons.camera);
 
         await tester.tap(toolbarButton('摄像头 1'));
         await settle(tester);
         expect(find.text('Integrated Camera'), findsOneWidget);
         expect(find.text('摄像头 2'), findsOneWidget);
+        // A reader gets each row whole: the number, then the name (13 §3.5).
+        expect(find.bySemanticsLabel('摄像头 1，Integrated Camera'), findsOneWidget);
+        expect(find.bySemanticsLabel('摄像头 2'), findsOneWidget);
         // Read once for the peer info, however often the toolbar builds, as long as no other
         // camera was switched to (that may make a new first display and read again).
         expect(reads, 1);

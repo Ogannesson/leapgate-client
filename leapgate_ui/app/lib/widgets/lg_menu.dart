@@ -398,10 +398,15 @@ class LgMenuItem extends StatelessWidget {
     this.indent = false,
     this.keepOpen = false,
     this.requestFocusOnHover = true,
+    this.semanticLabel,
   });
 
   final String label;
   final VoidCallback? onPressed;
+
+  /// The row's whole name for a screen reader, in place of the texts it shows ("摄像头 1，
+  /// Integrated Camera" for "摄像头 1" with the name at the end). Null reads what is shown.
+  final String? semanticLabel;
   final LgIcons? icon;
   final bool? checked;
   final String? hint;
@@ -425,6 +430,25 @@ class LgMenuItem extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = LgTokens.of(context);
     final c = t.colors;
+    final row = _ItemRow(
+      label: label,
+      description: description,
+      disabled: onPressed == null,
+      ownTip: !(onPressed == null && disabledNote != null),
+      lead: _lead(
+        c,
+        icon: icon,
+        checked: checked,
+        accentIcon: LgMenuAccentIcons.of(context),
+      ),
+      trailing: _tail(
+        t,
+        hint: hint,
+        shortcut: shortcut,
+        badge: badge,
+        trailing: trailing,
+      ),
+    );
     final item = MenuItemButton(
       onPressed: onPressed,
       closeOnActivate: !keepOpen,
@@ -449,25 +473,8 @@ class LgMenuItem extends StatelessWidget {
       child: Semantics(
         button: true,
         checked: checked == true ? true : null,
-        child: _ItemRow(
-          label: label,
-          description: description,
-          disabled: onPressed == null,
-          ownTip: !(onPressed == null && disabledNote != null),
-          lead: _lead(
-            c,
-            icon: icon,
-            checked: checked,
-            accentIcon: LgMenuAccentIcons.of(context),
-          ),
-          trailing: _tail(
-            t,
-            hint: hint,
-            shortcut: shortcut,
-            badge: badge,
-            trailing: trailing,
-          ),
-        ),
+        label: semanticLabel,
+        child: semanticLabel == null ? row : ExcludeSemantics(child: row),
       ),
     );
     return _explained(disabledNote, onPressed == null, item);

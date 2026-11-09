@@ -89,7 +89,7 @@ Widget _cameraMenu(FFI ffi, AppLocalizations l10n, {required bool all}) {
   final merged = current == kAllDisplayValue;
   return LgToolbarMenuButton(
     label: merged ? l10n.camAll : l10n.camN(current + 1),
-    icon: LgIcons.displays,
+    icon: LgIcons.camera,
     semanticLabel:
         merged ? l10n.camSwitchAllLabel : l10n.camSwitchLabel(current + 1),
     items: [
@@ -97,6 +97,7 @@ Widget _cameraMenu(FFI ffi, AppLocalizations l10n, {required bool all}) {
         LgMenuItem(
           label: l10n.camN(i + 1),
           trailing: names[i].isEmpty ? null : LgMenuRowNote(names[i]),
+          semanticLabel: _cameraLabel(l10n, names, i),
           checked: current == i,
           onPressed: () => openMonitor(ffi, i),
         ),
