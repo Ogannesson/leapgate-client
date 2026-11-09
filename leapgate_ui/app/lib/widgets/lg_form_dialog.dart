@@ -171,6 +171,8 @@ class LgFormDialog extends StatelessWidget {
           semanticLabel: a.semanticLabel,
           kind: a.kind,
           busy: a.busy,
+          icon: a.icon,
+          iconSize: a.iconSize,
           onPressed: a.onPressed,
         ),
     ],
