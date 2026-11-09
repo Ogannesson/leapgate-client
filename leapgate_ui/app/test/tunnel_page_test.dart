@@ -12,8 +12,11 @@ import 'package:leapgate_ui/pages/home/exit/open_tunnel.dart';
 import 'package:leapgate_ui/pages/home/exit/tunnel_section.dart';
 import 'package:leapgate_ui/shell/links.dart';
 import 'package:leapgate_ui/shell/window_close.dart';
+import 'package:leapgate_ui/widgets/lg_panel_inputs.dart';
 import 'package:leapgate_ui/widgets/lg_rdp_dialog.dart';
 import 'package:leapgate_ui/widgets/lg_title_bar.dart';
+import 'package:leapgate_ui/widgets/lg_tooltip.dart';
+import 'package:leapgate_ui/widgets/lg_tunnel_card.dart';
 
 import '../../core/test/exit_fakes.dart' show FakeExitApi;
 import 'session_fakes.dart';
@@ -34,12 +37,22 @@ Future<void> _settle(WidgetTester tester) async {
 
 Finder _text(String text) => find.textContaining(text, findRichText: true);
 
+/// Gives the RDP settings dialog its password limit.
+class _TunnelBind extends AppFakeBind {
+  @override
+  dynamic noSuchMethod(Invocation invocation) =>
+      invocation.memberName == #mainMaxEncryptLen
+      ? 128
+      : super.noSuchMethod(invocation);
+}
+
 void main() {
   late FakeTunnelApi api;
   late FakeExitApi exits;
 
   setUp(() {
     installAppFakes();
+    platformFFI.setBindingForTesting(_TunnelBind());
     api = FakeTunnelApi();
     tunnelApi = api;
     exits = FakeExitApi();
@@ -174,6 +187,46 @@ void main() {
       await row(tester, 'in_use', 15432, {'transport': 'relay'});
       expect(_text('正在验证…'), findsNothing);
       expect(_text('可用 · 经中继'), findsNWidgets(2));
+      // Each row says why on hover.
+      expect(
+        find.byWidgetPredicate(
+          (w) => w is LgTooltip && w.message == '流量由中继服务器转发，速度可能较慢',
+        ),
+        findsNWidgets(2),
+      );
+    },
+  );
+
+  testMainWindow(
+    'a forward added and in use at once: a later question keeps away from the keyboard',
+    (tester) async {
+      await open(tester);
+      await row(tester, 'in_use', 2222, {'transport': 'direct'});
+      await row(tester, 'in_use', 15432, {'transport': 'direct'});
+      await tester.ensureVisible(find.text('添加端口转发'));
+      await tester.tap(find.text('添加端口转发'));
+      await _settle(tester);
+      final fields = find.descendant(
+        of: find.byType(TunnelCardView),
+        matching: find.byType(EditableText),
+      );
+      await tester.enterText(fields.at(0), '8080');
+      await tester.enterText(fields.at(2), '80');
+      await tester.pump();
+      await tester.tap(find.text('添加'));
+      await _settle(tester);
+      // Logged in with what the session had: no question.
+      await row(tester, 'in_use', 8080, {'transport': 'direct'});
+
+      // Later the tunnel ends and the next local connection logs in again, asking by itself.
+      await row(tester, 'connecting', 2222);
+      await session(tester, msgbox('input-password', 'Password Required', ''));
+      expect(_text('输入密码'), findsOneWidget);
+      final password = find.descendant(
+        of: find.byType(LgTunnelQuestion),
+        matching: find.byType(EditableText),
+      );
+      expect(tester.widget<EditableText>(password).focusNode.hasFocus, isFalse);
     },
   );
 
@@ -182,7 +235,7 @@ void main() {
   ) async {
     await open(tester);
     await session(tester, msgbox('insecure-connection', '', ''));
-    expect(_text('连接未加密'), findsOneWidget);
+    expect(_text('未加密'), findsOneWidget);
     expect(_text('此连接未使用端到端加密，传输的内容可能被第三方读取。'), findsOneWidget);
     expect(
       tester.widget<LgTitleBar>(find.byType(LgTitleBar)).homeAlert,
@@ -195,7 +248,7 @@ void main() {
         .single
         .namedArguments;
     expect(set[#value], 'Y');
-    expect(_text('连接未加密'), findsNothing);
+    expect(_text('未加密'), findsNothing);
   });
 
   testMainWindow(
@@ -215,6 +268,12 @@ void main() {
         matching: find.byType(EditableText),
       );
       expect(fields, findsNWidgets(3));
+      // Nothing to fold back to: no "取消".
+      final cancel = find.descendant(
+        of: find.byType(TunnelCardView),
+        matching: find.text('取消'),
+      );
+      expect(cancel, findsNothing);
 
       Future<void> add(String local, String host, String remote) async {
         await tester.enterText(fields.at(0), local);
@@ -238,6 +297,7 @@ void main() {
         22,
       ]);
       expect(_text('正在连接…'), findsOneWidget);
+      expect(cancel, findsOneWidget);
       await add('2222', '192.0.2.30', '80');
       expect(find.text('此端口已有一条端口转发'), findsOneWidget);
       // The add line stays open for the next one; the card runs now.
@@ -328,10 +388,49 @@ void main() {
     });
     const text = '无法访问 192.0.2.20:5432。请确认远程设备可以访问该地址，且端口已开放。';
     expect(_text(text), findsOneWidget);
+    // The newest shows; closing it brings back the one before.
+    await row(tester, 'notice', 15432, {
+      'reason': {'code': 'tunnel_too_many_channels'},
+    });
+    expect(_text('经此隧道的连接数已达上限。'), findsOneWidget);
+    expect(_text(text), findsNothing);
+    await tester.tap(find.bySemanticsLabel('关闭通知'));
+    await _settle(tester);
+    expect(_text('经此隧道的连接数已达上限。'), findsNothing);
+    expect(_text(text), findsOneWidget);
     await tester.tap(find.bySemanticsLabel('关闭通知'));
     await _settle(tester);
     expect(_text(text), findsNothing);
   });
+
+  testMainWindow(
+    'the RDP settings of a device without a name show its ID once',
+    (tester) async {
+      await pumpMainWindow(tester);
+      expect(handleLink(Uri.parse('leapgate://rdp/$_id')), true);
+      await _settle(tester);
+      await row(tester, 'in_use', 0, {'transport': 'direct'}, TunnelKind.rdp);
+      await tester.ensureVisible(find.text('RDP 设置'));
+      await tester.tap(find.text('RDP 设置'));
+      await _settle(tester);
+      final dialog = find.byType(LgRdpSettingsDialog);
+      expect(
+        find.descendant(of: dialog, matching: find.text('100 200 300')),
+        findsOneWidget,
+      );
+      expect(
+        tester
+            .widget<LgPasswordField>(
+              find.descendant(
+                of: dialog,
+                matching: find.byType(LgPasswordField),
+              ),
+            )
+            .maxLength,
+        128,
+      );
+    },
+  );
 
   testMainWindow('a link opens the card; opened again it is only shown', (
     tester,

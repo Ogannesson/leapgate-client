@@ -388,12 +388,14 @@ List<Widget> peerMenuItems(
       label: l10n.tunnelKindTcp,
       onPressed: () => openTunnel(id, TunnelKind.tcp,
           name: name == formatPeerId(id) ? null : name,
+          platform: item.peer.platform,
           category: item.category),
     ),
     PeerAction.rdp => LgMenuItem(
       label: 'RDP',
       onPressed: () => openTunnel(id, TunnelKind.rdp,
           name: name == formatPeerId(id) ? null : name,
+          platform: item.peer.platform,
           category: item.category),
       trailing: LgMenuRowButton(
         label: l10n.tunnelRdpSettings,

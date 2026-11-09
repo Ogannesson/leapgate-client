@@ -168,12 +168,20 @@ class LgForwardAction {
 ///
 /// Use the kinds `busy`, `direct`, `relay`, `warning` and `error`.
 class LgForwardStatusText extends StatelessWidget {
-  const LgForwardStatusText(this.status, {super.key});
+  const LgForwardStatusText(this.status, {super.key, this.tooltip});
 
   final LgExitStatus status;
 
+  /// Shown on hover ("流量由中继服务器转发，速度可能较慢" beside "可用 · 经中继"); none by default.
+  final String? tooltip;
+
   @override
   Widget build(BuildContext context) {
+    final text = _text(context);
+    return tooltip == null ? text : LgTooltip(message: tooltip, child: text);
+  }
+
+  Widget _text(BuildContext context) {
     final t = LgTokens.of(context);
     final c = t.colors;
     final (Widget mark, double markSize, Color color) = switch (status.kind) {
@@ -332,6 +340,7 @@ class LgForwardRow extends StatelessWidget {
     this.actions = const [],
     this.notice,
     this.semanticLabel,
+    this.statusTooltip,
   }) : assert(onCopy == null || copyLabel != null);
 
   final String localHost;
@@ -348,6 +357,9 @@ class LgForwardRow extends StatelessWidget {
   /// A note that hangs under the line and can be closed (`.fl-n`).
   final LgExitNotice? notice;
   final String? semanticLabel;
+
+  /// The status's hover text ([LgForwardStatusText.tooltip]); none by default.
+  final String? statusTooltip;
 
   @override
   Widget build(BuildContext context) {
@@ -419,7 +431,7 @@ class LgForwardRow extends StatelessWidget {
                 const SizedBox(height: 2),
                 Padding(
                   padding: const EdgeInsets.only(bottom: 2),
-                  child: LgForwardStatusText(status),
+                  child: LgForwardStatusText(status, tooltip: statusTooltip),
                 ),
               ],
             ),
@@ -440,7 +452,7 @@ class LgForwardRow extends StatelessWidget {
           const SizedBox(width: kLgForwardGap),
           SizedBox(
             width: kLgForwardStatusWidth,
-            child: LgForwardStatusText(status),
+            child: LgForwardStatusText(status, tooltip: statusTooltip),
           ),
           const SizedBox(width: kLgForwardGap),
           // At least 188 wide: longer words (a language that needs more room) make it wider and
@@ -619,7 +631,7 @@ class LgForwardAddRow extends StatelessWidget {
     required this.addLabel,
     required this.cancelLabel,
     required this.onAdd,
-    required this.onCancel,
+    this.onCancel,
     this.localPlaceholder,
     this.hostPlaceholder,
     this.remotePlaceholder,
@@ -643,7 +655,8 @@ class LgForwardAddRow extends StatelessWidget {
   final String addLabel;
   final String cancelLabel;
   final VoidCallback? onAdd;
-  final VoidCallback onCancel;
+  /// Null: no "取消" and Esc does nothing (a card without forwards, 13 §1.3 block B).
+  final VoidCallback? onCancel;
   final String? localPlaceholder;
   final String? hostPlaceholder;
   final String? remotePlaceholder;
@@ -751,8 +764,10 @@ class LgForwardAddRow extends StatelessWidget {
           kind: LgForwardButtonKind.primary,
           onPressed: onAdd,
         ),
-        const SizedBox(width: 2),
-        LgForwardButton(label: cancelLabel, onPressed: onCancel),
+        if (onCancel != null) ...[
+          const SizedBox(width: 2),
+          LgForwardButton(label: cancelLabel, onPressed: onCancel),
+        ],
       ],
     );
     final arrow = SizedBox(
@@ -762,7 +777,10 @@ class LgForwardAddRow extends StatelessWidget {
       ),
     );
     return CallbackShortcuts(
-      bindings: {const SingleActivator(LogicalKeyboardKey.escape): onCancel},
+      bindings: {
+        if (onCancel case final cancel?)
+          const SingleActivator(LogicalKeyboardKey.escape): cancel,
+      },
       child: Semantics(
         container: true,
         explicitChildNodes: true,

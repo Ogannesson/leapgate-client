@@ -196,11 +196,15 @@ class _TunnelCardViewState extends State<TunnelCardView> {
             question == TunnelQuestion.password ? _passwordFocus : _codeFocus,
           );
         }
-      } else if (question == TunnelQuestion.none) {
-        _promptFocus.remove(_focusKey);
       }
       _question = question;
       _syncTicker();
+    }
+    // The login the user asked for is over without a question (a saved password, the tab's
+    // token): a later one that asks by itself keeps away from the keyboard.
+    if (question == TunnelQuestion.none &&
+        !_card.rows.any((r) => r.state == TunnelRowState.connecting)) {
+      _promptFocus.remove(_focusKey);
     }
     setState(() {});
   }
@@ -230,8 +234,6 @@ class _TunnelCardViewState extends State<TunnelCardView> {
   }
 
   void _closeAdd() {
-    // With no forward there is nothing to fold back to (13 §1.3 block B).
-    if (_noForwards) return;
     setState(() {
       _adding = false;
       _addError = null;
@@ -628,7 +630,12 @@ class _TunnelCardViewState extends State<TunnelCardView> {
           onPressed: () => _card.removeForward(row),
         ),
       ],
-      notice: notices.isEmpty ? null : notices.first,
+      // One at a time, the newest; closing it shows the one before.
+      notice: notices.isEmpty ? null : notices.last,
+      // "可用 · 经中继" says why on hover (13 §1.3 block B).
+      statusTooltip: row.state == TunnelRowState.inUse && !row.direct
+          ? l10n.exitRelayNote
+          : null,
     );
   }
 
@@ -650,7 +657,8 @@ class _TunnelCardViewState extends State<TunnelCardView> {
     onAdd: _local.text.trim().isEmpty || _remote.text.trim().isEmpty
         ? null
         : _add,
-    onCancel: _closeAdd,
+    // With no forward there is nothing to fold back to (13 §1.3 block B).
+    onCancel: _noForwards ? null : _closeAdd,
     errorText: switch (_addError) {
       TunnelAddForwardError.invalid => l10n.exitPortInvalid,
       TunnelAddForwardError.duplicate => l10n.tunnelPortDuplicate,

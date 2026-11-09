@@ -88,10 +88,12 @@ class TunnelRow {
 class TunnelCard extends ChangeNotifier {
   TunnelCard(this._model, this._api, this.id, this.kind,
       {String? name,
+      String platform = '',
       String? sharedPassword,
       this.password = '',
       this.forceRelay = false})
       : _name = name,
+        _platform = platform,
         _sharedPassword = sharedPassword,
         sessionId = const Uuid().v4obj() {
     _login = CardLogin(sessionId,
@@ -134,7 +136,7 @@ class TunnelCard extends ChangeNotifier {
   late final int rdpPort;
 
   String? _name;
-  var _platform = '';
+  String _platform;
   var _added = false;
   var _ended = false;
   TunnelAddError? _addError;
@@ -145,7 +147,8 @@ class TunnelCard extends ChangeNotifier {
   /// logged in; null until then.
   String? get name => _name;
 
-  /// The remote platform (`kPeerPlatform*`) once logged in, for the icon; empty until then.
+  /// The remote platform (`kPeerPlatform*`), for the icon: the device list's when it was opened
+  /// from there, the remote's own once logged in; empty while not known.
   String get platform => _platform;
 
   /// The rows, in the order the device keeps its forwards; an RDP card has one, port 0.
@@ -272,7 +275,11 @@ class TunnelCard extends ChangeNotifier {
     if (!_validPort(localPort) || !_validPort(remotePort)) {
       return TunnelAddForwardError.invalid;
     }
-    if (rows.any((r) => r.localPort == localPort)) {
+    // A row's port, or one the device keeps without a row (the old UI's exit mapping): upstream
+    // would ignore it and the row would wait for ever.
+    final rowPorts = {for (final r in _rows) r.localPort};
+    if (rows.any((r) => r.localPort == localPort) ||
+        _api.savedLocalPorts(id).difference(rowPorts).contains(localPort)) {
       return TunnelAddForwardError.duplicate;
     }
     if (_model.portTaken(localPort, this)) return TunnelAddForwardError.taken;

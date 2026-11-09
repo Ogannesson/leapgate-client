@@ -50,6 +50,10 @@ abstract interface class TunnelApi {
   /// Block 1 mainGetPeerSync's port_forwards, without the exit sentinel and ports ≤ 0.
   List<TunnelForward> savedForwards(String id);
 
+  /// The local ports of all of the device's port_forwards, the exit sentinel's too: upstream
+  /// `add_port_forward` ignores a port it keeps already (M9c review, 13 §1.3 block B).
+  Set<int> savedLocalPorts(String id);
+
   /// rdp_port, rdp_username, rdp_password with mainGetPeerOption / mainSetPeerOption.
   RdpSettings rdpSettings(String id);
   Future<void> setRdpSettings(String id, RdpSettings settings);
@@ -109,6 +113,10 @@ class RustTunnelApi implements TunnelApi {
       parseSavedForwards(bind.mainGetPeerSync(id: id));
 
   @override
+  Set<int> savedLocalPorts(String id) =>
+      parseSavedLocalPorts(bind.mainGetPeerSync(id: id));
+
+  @override
   RdpSettings rdpSettings(String id) => (
         port: bind.mainGetPeerOptionSync(id: id, key: _kRdpPort),
         username: bind.mainGetPeerOptionSync(id: id, key: _kRdpUsername),
@@ -158,5 +166,22 @@ List<TunnelForward> parseSavedForwards(String json) {
     return const [];
   } on TypeError {
     return const [];
+  }
+}
+
+/// The local port of every entry of `mainGetPeerSync`'s `port_forwards`, as upstream
+/// `add_port_forward` compares them: the exit mapping and ports ≤ 0 included. Empty when the JSON
+/// is not of that shape.
+Set<int> parseSavedLocalPorts(String json) {
+  try {
+    final config = jsonDecode(json) as Map<String, dynamic>;
+    return {
+      for (final e in config['port_forwards'] as List? ?? const [])
+        if (e is List && e.isNotEmpty && e[0] is int) e[0] as int,
+    };
+  } on FormatException {
+    return const {};
+  } on TypeError {
+    return const {};
   }
 }

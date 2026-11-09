@@ -3,6 +3,7 @@ import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/recent_peers.dart' show formatPeerId;
 import 'package:flutter_hbb/leapgate/tunnel_api.dart';
 import 'package:flutter_hbb/leapgate/tunnel_card.dart' show kRdpDefaultPort;
+import 'package:flutter_hbb/models/platform_model.dart';
 
 import '../../../l10n/app_localizations.dart';
 import '../../../shell/tab_overlays.dart';
@@ -84,7 +85,8 @@ class _RdpSettingsDialogState extends State<_RdpSettingsDialog> {
         appCore.tunnels.cardOf(widget.id, TunnelKind.rdp)?.running ?? false;
     return LgRdpSettingsDialog(
       title: l10n.tunnelRdpSettings,
-      deviceName: widget.name ?? formatPeerId(widget.id),
+      // A device without a name shows its ID once.
+      deviceName: widget.name == formatPeerId(widget.id) ? null : widget.name,
       deviceId: formatPeerId(widget.id),
       portLabel: l10n.tunnelRdpPort,
       portController: _port,
@@ -96,6 +98,8 @@ class _RdpSettingsDialogState extends State<_RdpSettingsDialog> {
       passwordController: _password,
       showPasswordLabel: l10n.connShowPassword,
       hidePasswordLabel: l10n.connHidePassword,
+      // As upstream's dialog (`common/widgets/peer_card.dart` `_rdpDialog`).
+      passwordMaxLength: bind.mainMaxEncryptLen(),
       runningNote: running ? l10n.tunnelRdpRunningNote : null,
       cancelLabel: l10n.homeCancel,
       confirmLabel: l10n.homeOk,

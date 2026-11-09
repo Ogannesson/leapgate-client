@@ -26,6 +26,10 @@ class FakeTunnelApi implements TunnelApi {
   final forwards = <String, List<TunnelForward>>{};
   final rdp = <String, RdpSettings>{};
 
+  /// Saved local ports [savedForwards] leaves out (the old UI's exit mapping), which
+  /// [savedLocalPorts] still gives.
+  final hiddenPorts = <String, Set<int>>{};
+
   final _events = StreamController<Map<String, dynamic>>.broadcast();
 
   /// A tunnel event `{"id","session_id","kind","state",…}` with the session last added for
@@ -90,6 +94,12 @@ class FakeTunnelApi implements TunnelApi {
 
   @override
   List<TunnelForward> savedForwards(String id) => forwards[id] ?? const [];
+
+  @override
+  Set<int> savedLocalPorts(String id) => {
+        for (final f in forwards[id] ?? const <TunnelForward>[]) f.localPort,
+        ...?hiddenPorts[id],
+      };
 
   @override
   RdpSettings rdpSettings(String id) =>

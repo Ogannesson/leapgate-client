@@ -36,39 +36,38 @@ void main() {
     await _settle(tester);
   }
 
-  testWidgets(
-    '"TCP 隧道" opens the card; the pencil of "RDP" only its settings',
-    (tester) async {
-      await pumpHome(tester, id: '135792468', status: ServiceStatus.ready);
-      await loadRecent([
-        {'id': '123456789', 'alias': '书房台式机', 'platform': 'Windows'},
-      ]);
-      await tester.pump();
+  testWidgets('"TCP 隧道" opens the card; the pencil of "RDP" only its settings', (
+    tester,
+  ) async {
+    await pumpHome(tester, id: '135792468', status: ServiceStatus.ready);
+    await loadRecent([
+      {'id': '123456789', 'alias': '书房台式机', 'platform': 'Windows'},
+    ]);
+    await tester.pump();
 
-      await openMenu(tester);
-      expect(find.text('TCP 隧道'), findsOneWidget);
-      expect(find.text('RDP'), findsOneWidget);
-      await tester.tap(find.bySemanticsLabel('RDP 设置'));
-      await _settle(tester);
-      expect(find.text('RDP 设置'), findsOneWidget);
-      expect(api.callsTo('sessionAdd'), isEmpty);
-      await tester.tap(find.text('取消'));
-      await _settle(tester);
+    await openMenu(tester);
+    expect(find.text('TCP 隧道'), findsOneWidget);
+    expect(find.text('RDP'), findsOneWidget);
+    await tester.tap(find.bySemanticsLabel('RDP 设置'));
+    await _settle(tester);
+    expect(find.text('RDP 设置'), findsOneWidget);
+    expect(api.callsTo('sessionAdd'), isEmpty);
+    await tester.tap(find.text('取消'));
+    await _settle(tester);
 
-      await openMenu(tester);
-      await tester.tap(find.text('TCP 隧道'), kind: PointerDeviceKind.mouse);
-      await _settle(tester);
-      expect(api.callsTo('sessionAdd').single.sublist(1, 3), [
-        '123456789',
-        TunnelKind.tcp,
-      ]);
-      expect(
-        appCore.tunnels.cardOf('123456789', TunnelKind.tcp)!.name,
-        '书房台式机',
-      );
-      await tester.pumpWidget(const SizedBox());
-    },
-  );
+    await openMenu(tester);
+    await tester.tap(find.text('TCP 隧道'), kind: PointerDeviceKind.mouse);
+    await _settle(tester);
+    expect(api.callsTo('sessionAdd').single.sublist(1, 3), [
+      '123456789',
+      TunnelKind.tcp,
+    ]);
+    final card = appCore.tunnels.cardOf('123456789', TunnelKind.tcp)!;
+    expect(card.name, '书房台式机');
+    // The list's platform until the remote says its own (this one never logs in).
+    expect(card.platform, 'Windows');
+    await tester.pumpWidget(const SizedBox());
+  });
 
   testWidgets('an Android device: no TCP tunnel, no RDP', (tester) async {
     await pumpHome(tester, id: '135792468', status: ServiceStatus.ready);

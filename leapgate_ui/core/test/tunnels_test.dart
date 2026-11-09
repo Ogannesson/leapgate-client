@@ -142,7 +142,11 @@ void main() {
   test('adding: the three checks, then the row logs in; a port deleted waits',
       () async {
     final exit = appCore.exitNodes.use(_b);
+    // The old UI's exit mapping on 31180: not a row, but upstream would not add its port.
+    api.hiddenPorts[_a] = {31180};
     final card = appCore.tunnels.open(_a, _tcp);
+    expect(card.rows.length, 2);
+    expect(card.addForward(31180, '', 22), TunnelAddForwardError.duplicate);
     expect(card.addForward(0, '', 22), TunnelAddForwardError.invalid);
     expect(card.addForward(70000, '', 22), TunnelAddForwardError.invalid);
     expect(card.addForward(8080, '', 0), TunnelAddForwardError.invalid);
@@ -251,5 +255,24 @@ void main() {
 
     api.rdp[_b] = (port: 'x', username: '', password: '');
     expect(appCore.tunnels.open(_b, TunnelKind.rdp).rdpPort, kRdpDefaultPort);
+  });
+
+  test('the platform: the device list\'s first, the remote\'s once logged in',
+      () async {
+    api.addError = const TunnelAddError('already');
+    // A card that never logs in keeps the list's.
+    expect(appCore.tunnels.open(_b, _tcp, platform: 'Linux').platform, 'Linux');
+    api.addError = null;
+    final card = appCore.tunnels.open(_a, _tcp, platform: 'Linux');
+    await session(card, {'name': 'peer_info', 'platform': 'Windows'});
+    expect(card.platform, 'Windows');
+  });
+
+  test('the saved local ports include the old UI\'s exit mapping', () {
+    expect(
+        parseSavedLocalPorts(
+            '{"port_forwards": [[21180, "leapgate-exit.invalid", 65536], [8080, "localhost", 80]]}'),
+        {21180, 8080});
+    expect(parseSavedLocalPorts('{}'), isEmpty);
   });
 }

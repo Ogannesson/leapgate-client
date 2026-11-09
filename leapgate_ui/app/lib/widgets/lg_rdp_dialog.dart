@@ -50,15 +50,16 @@ class LgRdpSettingsDialog extends StatelessWidget {
     this.portError,
     this.runningNote,
     this.portFocusNode,
+    this.passwordMaxLength,
     this.width = 440,
   });
 
   /// "RDP 设置".
   final String title;
 
-  /// The device name, or the ID when the device has none, and the ID formatted ("234 567 891",
-  /// which also gives the tile its colour).
-  final String deviceName;
+  /// The device name, null when the device has none (only the ID shows then), and the ID
+  /// formatted ("234 567 891", which also gives the tile its colour).
+  final String? deviceName;
   final String deviceId;
   final String portLabel;
   final TextEditingController portController;
@@ -74,6 +75,9 @@ class LgRdpSettingsDialog extends StatelessWidget {
   /// Names of the eye button in its two states.
   final String showPasswordLabel;
   final String hidePasswordLabel;
+
+  /// The longest password Rust can store (upstream `mainMaxEncryptLen`); no limit by default.
+  final int? passwordMaxLength;
 
   /// "停止后重新打开 RDP，新的设置才会生效。", in a banner under the fields.
   final String? runningNote;
@@ -99,15 +103,17 @@ class LgRdpSettingsDialog extends StatelessWidget {
       subtitle: ExcludeSemantics(
         child: Row(
           children: [
-            Flexible(
-              child: Text(
-                deviceName,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: t.textS.copyWith(color: c.text2),
+            if (deviceName case final name?) ...[
+              Flexible(
+                child: Text(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: t.textS.copyWith(color: c.text2),
+                ),
               ),
-            ),
-            const SizedBox(width: LgSpace.s2),
+              const SizedBox(width: LgSpace.s2),
+            ],
             // The groups of the ID stand 6 px apart (`.id3.sm`).
             Text(
               deviceId,
@@ -157,6 +163,7 @@ class LgRdpSettingsDialog extends StatelessWidget {
             controller: passwordController,
             showLabel: showPasswordLabel,
             hideLabel: hidePasswordLabel,
+            maxLength: passwordMaxLength,
             onSubmitted: (_) => onConfirm?.call(),
           ),
         ),

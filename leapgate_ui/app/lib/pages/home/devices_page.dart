@@ -463,6 +463,7 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
                   onPressed: () => openTunnel(
                     target.id,
                     action == PeerAction.rdp ? TunnelKind.rdp : TunnelKind.tcp,
+                    platform: _currentPlatform(),
                     category: target.category,
                   ),
                 ),

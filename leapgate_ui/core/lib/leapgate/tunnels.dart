@@ -28,10 +28,11 @@ class TunnelsModel extends ChangeNotifier {
   bool get needsAttention => _cards.any((c) => c.needsAttention);
 
   /// "TCP 隧道" and "RDP" (13 §1.1.2): the card listens and logs in at once; the device's card of
-  /// [kind] when it has one. [sharedPassword] is the address book's for the device, [password]
-  /// and [forceRelay] a link's.
+  /// [kind] when it has one. [platform] is the device list's, empty when not known;
+  /// [sharedPassword] is the address book's for the device, [password] and [forceRelay] a link's.
   TunnelCard open(String id, TunnelKind kind,
       {String? name,
+      String platform = '',
       String? sharedPassword,
       String password = '',
       bool forceRelay = false}) {
@@ -40,6 +41,7 @@ class TunnelsModel extends ChangeNotifier {
     _events ??= _api.events().listen(_onEvent);
     final card = TunnelCard(this, _api, id, kind,
         name: name,
+        platform: platform,
         sharedPassword: sharedPassword,
         password: password,
         forceRelay: forceRelay);
