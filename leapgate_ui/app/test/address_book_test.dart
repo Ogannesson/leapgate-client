@@ -521,6 +521,8 @@ void _categoryTests() {
       _item(_peer('123456789'), PeerCategory.recent),
       hasPassword: true,
     );
+    // M9b's terminal and camera rows push it below the 600 px surface.
+    await tester.ensureVisible(find.text('清除保存的密码'));
     await tester.tap(find.text('清除保存的密码'));
     await _settle(tester);
     expect(api.callsTo('updatePeer'), [

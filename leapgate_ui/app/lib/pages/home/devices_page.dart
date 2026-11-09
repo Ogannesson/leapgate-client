@@ -12,6 +12,7 @@ import 'package:flutter_hbb/leapgate/local_status.dart';
 import 'package:flutter_hbb/leapgate/peer_list.dart';
 import 'package:flutter_hbb/leapgate/peer_tabs.dart';
 import 'package:flutter_hbb/leapgate/recent_peers.dart';
+import 'package:flutter_hbb/leapgate/session.dart' show ConnType;
 import 'package:flutter_hbb/leapgate/ui_mode.dart';
 import 'package:flutter_hbb/models/peer_model.dart';
 import 'package:window_manager/window_manager.dart';
@@ -233,32 +234,40 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
   }
 
   /// [category] is where the device is listed (the address book connects with its shared
-  /// password); null for what was typed.
+  /// password); null for what was typed. [view] is the terminal or the camera.
   void _connect(String id,
           {bool relay = false,
           PeerCategory? category,
-          bool fileTransfer = false}) =>
-      fileTransfer
+          bool fileTransfer = false,
+          ConnType? view}) =>
+      view != null
+          ? openViewPeer(id, view, category: category)
+          : fileTransfer
           ? openFileTransferPeer(id, category: category)
           : connectPeer(id, category: category, relay: relay);
 
   /// Enter, "Connect" and its menu: the current row.
-  void _runCurrent({bool relay = false, bool fileTransfer = false}) {
+  void _runCurrent(
+      {bool relay = false, bool fileTransfer = false, ConnType? view}) {
     final found = _search;
     final search = found?.search;
     final row = _currentRow(search);
     if (row == null) return;
     if (search == null) {
       _connect(_rowIds(null)[row],
-          relay: relay, category: _tabs.current, fileTransfer: fileTransfer);
+          relay: relay,
+          category: _tabs.current,
+          fileTransfer: fileTransfer,
+          view: view);
     } else if (row == 0) {
-      _connect(_input, relay: relay, fileTransfer: fileTransfer);
+      _connect(_input, relay: relay, fileTransfer: fileTransfer, view: view);
     } else {
       final id = search.matches[row - 1].id;
       _connect(id,
           relay: relay,
           category: found!.sources[id],
-          fileTransfer: fileTransfer);
+          fileTransfer: fileTransfer,
+          view: view);
     }
   }
 
@@ -435,10 +444,18 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
                 description: l10n.connectBoxViaRelayNote,
                 onPressed: () => _runCurrent(relay: true),
               ),
-              // TODO(M9b): terminal, camera (`LEAPGATE.md` §10.18).
-              PeerAction.terminal => null,
+              PeerAction.terminal => LgMenuItem(
+                label: l10n.viewTerminal,
+                checked: false,
+                onPressed: () => _runCurrent(view: ConnType.terminal),
+              ),
+              // [connectMenu] has no administrator terminal (`p1-cb-menu`).
               PeerAction.terminalAdmin => null,
-              PeerAction.camera => null,
+              PeerAction.camera => LgMenuItem(
+                label: l10n.viewCamera,
+                checked: false,
+                onPressed: () => _runCurrent(view: ConnType.viewCamera),
+              ),
               // TODO(M9c): TCP tunnel, RDP (`LEAPGATE.md` §10.18).
               PeerAction.tcpTunnel => null,
               PeerAction.rdp => null,
@@ -751,10 +768,17 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
                       description: l10n.connectBoxViaRelayNote,
                       onPressed: () => _connect(_input, relay: true),
                     ),
-                    // TODO(M9b): terminal, camera (`LEAPGATE.md` §10.18).
-                    PeerAction.terminal => null,
+                    PeerAction.terminal => LgMenuItem(
+                      label: l10n.viewTerminal,
+                      onPressed: () =>
+                          _connect(_input, view: ConnType.terminal),
+                    ),
                     PeerAction.terminalAdmin => null,
-                    PeerAction.camera => null,
+                    PeerAction.camera => LgMenuItem(
+                      label: l10n.viewCamera,
+                      onPressed: () =>
+                          _connect(_input, view: ConnType.viewCamera),
+                    ),
                     // TODO(M9c): TCP tunnel, RDP (`LEAPGATE.md` §10.18).
                     PeerAction.tcpTunnel => null,
                     PeerAction.rdp => null,

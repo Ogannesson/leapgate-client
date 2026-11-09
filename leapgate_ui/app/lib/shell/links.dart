@@ -1,5 +1,6 @@
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/bridge.dart';
+import 'package:flutter_hbb/leapgate/session.dart' show ConnType;
 
 import 'navigation.dart';
 
@@ -7,8 +8,9 @@ import 'navigation.dart';
 // `leapgate://` links. The Rust core hands a later launch's arguments to the running main window
 // as a `leapgate://` link (`src/core_main.rs` `core_main_invoke_new_connection`, W1); a launch
 // that finds no main window keeps them on its own command line. The parsing follows upstream
-// `flutter/lib/common.dart:2256-2523` (`handleUriLink`, `urlLinkToCmdArgs`). A remote desktop and
-// a file transfer open (M8-7); the third round's kinds are logged and say so in a toast.
+// `flutter/lib/common.dart:2256-2523` (`handleUriLink`, `urlLinkToCmdArgs`). A remote desktop, a
+// file transfer (M8-7), a terminal and a camera view (M9b) open; the TCP tunnel and RDP are
+// logged and say so in a toast.
 
 /// What a link or `--<kind>` asks to open (`LEAPGATE.md` §10.18).
 enum LinkKind {
@@ -132,8 +134,8 @@ ConnectLink? connectLinkOf(List<String> args) {
   );
 }
 
-/// The arguments of a launch, or of a link handed over by a later launch: opens the remote
-/// desktop or file transfer they ask for and brings the window up. [uriPrefix] is `bind.mainUriPrefixSync()`
+/// The arguments of a launch, or of a link handed over by a later launch: opens the view they
+/// ask for and brings the window up. [uriPrefix] is `bind.mainUriPrefixSync()`
 /// (`leapgate://`). Returns whether there was something to handle.
 bool handleLaunchArgs(List<String> args, String uriPrefix) {
   if (args.isEmpty) return false;
@@ -145,8 +147,8 @@ bool handleLaunchArgs(List<String> args, String uriPrefix) {
   return _open(linkArgs);
 }
 
-/// A link that a later launch handed to this window: a remote desktop or a file transfer opens,
-/// the third round's kinds get a toast. A link that is not a connection is only logged, by
+/// A link that a later launch handed to this window: a view opens, the TCP tunnel and RDP get a
+/// toast. A link that is not a connection is only logged, by
 /// scheme and host: the path or the query may hold a password.
 bool handleLink(Uri uri) {
   final args = linkToArgs(uri);
@@ -176,11 +178,18 @@ bool _open(List<String>? args) {
     case LinkKind.fileTransfer:
       mainNavigation.openFileTransfer(link.id,
           password: link.password, forceRelay: link.forceRelay);
-    // Until their segments build them (`LEAPGATE.md` §10.18), these are logged and say so in a
+    // `--terminal-admin` opens the administrator terminal, as upstream's desktop app (13 §2.1.1);
+    // with a terminal already open it goes to that one (R3-Q9).
+    case LinkKind.terminal || LinkKind.terminalAdmin:
+      mainNavigation.openView(link.id, ConnType.terminal,
+          terminalAdmin: link.kind == LinkKind.terminalAdmin,
+          password: link.password,
+          forceRelay: link.forceRelay);
+    case LinkKind.camera:
+      mainNavigation.openView(link.id, ConnType.viewCamera,
+          password: link.password, forceRelay: link.forceRelay);
+    // Until their segment builds them (`LEAPGATE.md` §10.18), these are logged and say so in a
     // toast.
-    // TODO(M9b): the terminals and the camera.
-    case LinkKind.terminal || LinkKind.terminalAdmin || LinkKind.camera:
-      return _unsupported(link.kind);
     // TODO(M9c): the TCP tunnel and RDP.
     case LinkKind.tcpTunnel || LinkKind.rdp:
       return _unsupported(link.kind);
@@ -193,10 +202,8 @@ bool _unsupported(LinkKind kind) {
   lgBind.leapgateLog(
       level: 3, msg: 'leapgate ui: link not handled: ${kind.name}');
   appCore.toasts.show(switch (kind) {
-    LinkKind.tcpTunnel => 'linkUnsupportedPortForward',
     LinkKind.rdp => 'linkUnsupportedRdp',
-    LinkKind.camera => 'linkUnsupportedCamera',
-    _ => 'linkUnsupportedTerminal',
+    _ => 'linkUnsupportedPortForward',
   });
   appCore.window.bringToFront();
   return false;

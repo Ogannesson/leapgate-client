@@ -11,6 +11,7 @@ import '../../shell/navigation.dart';
 import '../../widgets/lg_connection_panel.dart';
 import '../../widgets/lg_panel_inputs.dart';
 import '../../widgets/lg_selection.dart';
+import '../../widgets/lg_text_field.dart';
 import 'reasons.dart';
 import 'session_names.dart';
 
@@ -54,6 +55,8 @@ class ConnectionPanel extends StatefulWidget {
 class _ConnectionPanelState extends State<ConnectionPanel> {
   final _password = TextEditingController();
   final _code = TextEditingController();
+  final _osUsername = TextEditingController();
+  final _osPassword = TextEditingController();
 
   /// The password or code field, whichever shows.
   final _inputFocus = FocusNode();
@@ -92,6 +95,8 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
     _ticker?.cancel();
     _password.dispose();
     _code.dispose();
+    _osUsername.dispose();
+    _osPassword.dispose();
     _inputFocus.dispose();
     super.dispose();
   }
@@ -109,6 +114,8 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
             _conn.reason?.code == 'wrong_password');
     if (!retyping) {
       _password.clear();
+      _osUsername.clear();
+      _osPassword.clear();
       _remember = _conn.rememberPassword;
     }
     _code.clear();
@@ -131,6 +138,13 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
     _conn.login(password: _password.text, remember: _remember);
   }
 
+  /// The account alone has no password field: nothing typed before goes with it.
+  void _loginAdmin() => _conn.login(
+      osUsername: _osUsername.text,
+      osPassword: _osPassword.text,
+      password: _conn.input == ConnInput.osAccount ? '' : _password.text,
+      remember: _remember);
+
   void _submit2fa() => _conn.submit2fa(_code.text, trustThisDevice: _trust);
 
   String _duration(AppLocalizations l10n, int seconds) => seconds < 60
@@ -140,7 +154,7 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-        listenable: Listenable.merge([_conn, _password, _code]),
+        listenable: Listenable.merge([_conn, _password, _code, _osUsername]),
         builder: (context, _) => _build(context));
   }
 
@@ -163,14 +177,71 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
     // Closing closes this view either way; the tab goes with its last one.
     final closeLabel = widget.lastView
         ? l10n.connCloseTab
-        : ffi.connType == ConnType.fileTransfer
-            ? l10n.connCloseFileTransfer
-            : l10n.connCloseRemoteDesktop;
+        : switch (ffi.connType) {
+            ConnType.fileTransfer => l10n.connCloseFileTransfer,
+            ConnType.terminal => l10n.connCloseTerminal,
+            ConnType.viewCamera => l10n.connCloseCamera,
+            _ => l10n.connCloseRemoteDesktop,
+          };
 
     List<LgPanelStep> twoSteps(LgStepState connect, LgStepState verify) => [
           LgPanelStep(l10n.connStepConnect, connect),
           LgPanelStep(l10n.connStepVerify, verify),
         ];
+
+    // The administrator terminal (13 §2.2.2 block H, `A-P2.html#c-terminal`): an administrator
+    // account of the remote device; without a saved password or a token, the connection
+    // password first, as the password panel asks it. The system password may stay empty, as
+    // upstream.
+    void adminAccount() {
+      final withPassword = conn.input != ConnInput.osAccount;
+      message = l10n.viewAdminAccount;
+      secondary = l10n.viewAdminAccountNote;
+      if (withPassword) {
+        inputs
+          ..add(LgPasswordField(
+            controller: _password,
+            focusNode: _inputFocus,
+            showLabel: l10n.connShowPassword,
+            hideLabel: l10n.connHidePassword,
+            placeholder: l10n.connPassword,
+            semanticLabel: l10n.connPassword,
+            autofocus: true,
+            errorText: conn.reason?.code == 'wrong_password'
+                ? l10n.connWrongPassword
+                : null,
+          ))
+          ..add(LgCheckbox(
+            value: _remember,
+            label: l10n.connRememberPassword,
+            onChanged: (v) => setState(() => _remember = v),
+          ));
+      }
+      inputs
+        ..add(LgTextField(
+          controller: _osUsername,
+          focusNode: withPassword ? null : _inputFocus,
+          placeholder: l10n.viewAdminUsername,
+          semanticLabel: l10n.viewAdminUsername,
+          autofocus: !withPassword,
+        ))
+        ..add(LgPasswordField(
+          controller: _osPassword,
+          showLabel: l10n.connShowPassword,
+          hideLabel: l10n.connHidePassword,
+          placeholder: l10n.viewAdminPassword,
+          semanticLabel: l10n.viewAdminPassword,
+        ));
+      final ready = _osUsername.text.trim().isNotEmpty &&
+          (!withPassword || _password.text.trim().isNotEmpty);
+      actions
+        ..add(cancel)
+        ..add(LgPanelAction(
+            label: l10n.viewAdminSignIn,
+            onPressed: ready ? _loginAdmin : null,
+            primary: true,
+            isDefault: true));
+    }
 
     switch (conn.stage) {
       case ConnStage.connecting:
@@ -193,6 +264,11 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
       case ConnStage.verifying:
         steps = twoSteps(LgStepState.done, LgStepState.current);
         switch (conn.input) {
+          // A wrong connection password of the administrator terminal is asked again as a
+          // plain password (`re-input-password`): without the account the remote device would
+          // open a normal shell.
+          case ConnInput.password when ffi.terminalAdmin:
+            adminAccount();
           case ConnInput.password:
             // The panel's sentence names the field, as its password specimens (`c-pwd-wrong`).
             message = l10n.connEnterPassword;
@@ -276,9 +352,9 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
               primary: true,
               isDefault: true,
             ));
-          // The terminal's OS account is round 3; M2a opens remote desktops only.
           case ConnInput.osAccount:
           case ConnInput.osAccountAndPassword:
+            adminAccount();
           case ConnInput.none:
             message = l10n.connVerifying;
             busy = true;
@@ -289,7 +365,10 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
         message = l10n.connWaitingImage;
         busy = true;
         if (_elapsed >= kWaitingImageHintAfter) {
-          notice = l10n.connWaitingImageHint;
+          // A camera that does not open says nothing (13 §3.2 "连接过程和中断").
+          notice = ffi.connType == ConnType.viewCamera
+              ? l10n.camWaitingImageHint
+              : l10n.connWaitingImageHint;
         }
         actions.add(cancel);
       case ConnStage.restarting:
