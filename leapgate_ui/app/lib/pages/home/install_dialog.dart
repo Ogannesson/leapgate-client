@@ -62,9 +62,10 @@ class _InstallDialogState extends State<InstallDialog> {
   ]);
 
   /// A failure is added under the options: it is scrolled into view when it appears, and the
-  /// keyboard goes back to "安装" (greyed while it ran, so it lost it) for Enter to try again.
+  /// keyboard goes back to "安装" ([_install]; greyed while it ran, so it may have been
+  /// elsewhere) for Enter to try again.
   final _scroll = ScrollController();
-  final _dialogKey = GlobalKey();
+  final _install = FocusNode();
   InstallFailure? _failure;
 
   @override
@@ -78,6 +79,7 @@ class _InstallDialogState extends State<InstallDialog> {
   void dispose() {
     widget.model.status.removeListener(_onStatus);
     _scroll.dispose();
+    _install.dispose();
     super.dispose();
   }
 
@@ -94,21 +96,7 @@ class _InstallDialogState extends State<InstallDialog> {
           curve: Curves.easeOut,
         );
       }
-      // `LgDialogAction` takes no focus node: the button is found by its label, among the
-      // dialog's own (the scrim's scope; the hint card under it has an "安装" too).
-      final dialog = _dialogKey.currentContext;
-      if (dialog == null) return;
-      final install = AppLocalizations.of(context)!.homeInstallButton;
-      FocusScope.of(dialog).traversalDescendants
-          .where(
-            (node) =>
-                node.context
-                    ?.findAncestorWidgetOfExactType<LgButton>()
-                    ?.label ==
-                install,
-          )
-          .firstOrNull
-          ?.requestFocus();
+      _install.requestFocus();
     });
   }
 
@@ -137,7 +125,6 @@ class _InstallDialogState extends State<InstallDialog> {
           onEscape: busy ? null : widget.close,
           scrollable: false,
           child: LgInstallDialog(
-            key: _dialogKey,
             title: l10n.installTitle,
             scrollController: _scroll,
             actions: [
@@ -155,6 +142,7 @@ class _InstallDialogState extends State<InstallDialog> {
                 busy: busy,
                 onPressed: model.blocked || busy ? null : model.install,
                 isDefault: _focus == _Focus.install,
+                focusNode: _install,
               ),
             ],
             pathRow: LgInstallPathRow(
@@ -176,6 +164,11 @@ class _InstallDialogState extends State<InstallDialog> {
                 InstallLocationIssue.insideProgram => l10n.installInsideProgram,
                 InstallLocationIssue.notEmpty => l10n.installNotEmpty,
               },
+              // The folder Leapgate runs from: for the portable single file it is where it was
+              // unpacked, not where it was downloaded, so the line says which (13 §4.2 block A).
+              messageTooltip: issue == InstallLocationIssue.insideProgram
+                  ? model.programFolder
+                  : null,
             ),
             options: [
               LgOptionCheck(

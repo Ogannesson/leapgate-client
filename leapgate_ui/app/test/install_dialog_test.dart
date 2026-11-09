@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/leapgate/install_page.dart';
@@ -255,6 +256,31 @@ void main() {
     expect(find.text('无法安装到 Leapgate 当前所在的文件夹。请选择其他位置。'), findsOneWidget);
     expect(tester.widget<LgButton>(_button('安装')).onPressed, isNull);
     expect(_focusedButton(), '修改');
+    // Which folder that is, on hover and for a screen reader (13 §4.2 block A).
+    expect(
+      find.bySemanticsLabel(RegExp(RegExp.escape(system.programFolder))),
+      findsOneWidget,
+    );
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    addTearDown(mouse.removePointer);
+    await mouse.moveTo(
+      tester.getCenter(find.text('无法安装到 Leapgate 当前所在的文件夹。请选择其他位置。')),
+    );
+    await tester.pump(const Duration(seconds: 2));
+    expect(find.text(system.programFolder), findsOneWidget);
+    await unmount(tester);
+  });
+
+  testWidgets('another unusable location has no folder to show', (
+    tester,
+  ) async {
+    system.defaultPath = r'Z:\Leapgate';
+    await openFromCard(tester);
+    expect(find.text('无法安装到网络位置或可移动磁盘。请选择本机磁盘上的文件夹。'), findsOneWidget);
+    expect(
+      find.bySemanticsLabel(RegExp(RegExp.escape(system.programFolder))),
+      findsNothing,
+    );
     await unmount(tester);
   });
 
