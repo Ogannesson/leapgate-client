@@ -38,6 +38,8 @@ class LgFormDialog extends StatelessWidget {
     this.children = const [],
     this.width = 440,
     this.leading,
+    this.tile,
+    this.subtitle,
   });
 
   /// "登录", "添加设备", "修改标签颜色".
@@ -47,6 +49,15 @@ class LgFormDialog extends StatelessWidget {
   /// starts at the left edge ("新建文件夹", "重命名": a question about a name
   /// needs no picture).
   final LgIcons? icon;
+
+  /// A 44 px tile of the caller's own in place of the one [icon] makes (the device's identity
+  /// colour: [LgDeviceAvatar] with its `icon`, as the RDP settings dialog has it). It is for the
+  /// eyes only: the dialog is named by [title].
+  final Widget? tile;
+
+  /// Right under the title, inside the head, next to the tile (`.sheet .hd .sub`): the device the
+  /// dialog is about, its name and ID. [note] is another thing, a line under the whole head.
+  final Widget? subtitle;
 
   /// A small line under the head ("添加到：家里的电脑").
   final String? note;
@@ -72,6 +83,13 @@ class LgFormDialog extends StatelessWidget {
     final defaultAction = actions
         .where((a) => a.isDefault && a.onPressed != null && !a.busy)
         .firstOrNull;
+    final head = Semantics(
+      header: true,
+      child: Text(
+        title,
+        style: LgTokens.style(20, 28, FontWeight.w700).copyWith(color: c.text),
+      ),
+    );
     return Semantics(
       scopesRoute: true,
       namesRoute: true,
@@ -96,7 +114,10 @@ class LgFormDialog extends StatelessWidget {
                   children: [
                     Row(
                       children: [
-                        if (icon != null) ...[
+                        if (tile != null) ...[
+                          ExcludeSemantics(child: tile),
+                          const SizedBox(width: 14),
+                        ] else if (icon != null) ...[
                           Container(
                             width: 44,
                             height: 44,
@@ -110,17 +131,17 @@ class LgFormDialog extends StatelessWidget {
                           const SizedBox(width: 14),
                         ],
                         Expanded(
-                          child: Semantics(
-                            header: true,
-                            child: Text(
-                              title,
-                              style: LgTokens.style(
-                                20,
-                                28,
-                                FontWeight.w700,
-                              ).copyWith(color: c.text),
-                            ),
-                          ),
+                          child: subtitle == null
+                              ? head
+                              : Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    head,
+                                    const SizedBox(height: 2),
+                                    subtitle!,
+                                  ],
+                                ),
                         ),
                       ],
                     ),

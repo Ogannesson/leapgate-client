@@ -176,6 +176,7 @@ ButtonStyle _itemStyle(
   required bool bold,
   bool tall = false,
   bool indent = false,
+  double endInset = LgSpace.s4,
 }) {
   final c = t.colors;
   return ButtonStyle(
@@ -203,7 +204,7 @@ ButtonStyle _itemStyle(
         // `.mr.ind`: a row that belongs to the one above it.
         indent ? LgSpace.s4 + LgSpace.s6 : LgSpace.s4,
         tall ? LgSpace.s2 : 0,
-        LgSpace.s4,
+        endInset,
         tall ? LgSpace.s2 : 0,
       ),
     ),
@@ -425,6 +426,12 @@ class LgMenuItem extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = LgTokens.of(context);
     final c = t.colors;
+    // An [LgMenuRowButton] is not a child of the row: `MenuItemButton` merges the semantics of
+    // everything in it into one node, which would make the pencil a part of the row's name. It
+    // stands over the row's end instead (a sibling in a [Stack]); the row keeps the room for it.
+    final edit = trailing is LgMenuRowButton
+        ? trailing as LgMenuRowButton
+        : null;
     final item = MenuItemButton(
       onPressed: onPressed,
       closeOnActivate: !keepOpen,
@@ -440,6 +447,8 @@ class LgMenuItem extends StatelessWidget {
         bold: (danger && onPressed != null) || checked == true,
         tall: description != null,
         indent: indent,
+        // The pencil stands 8 px into the padding (`.ib2` margin -8).
+        endInset: edit == null ? LgSpace.s4 : LgSpace.s2,
       ),
       // Material's menu rows are buttons only on the web; the Windows engine
       // reads a row without the flag as plain text, with no Invoke for UI
@@ -465,12 +474,28 @@ class LgMenuItem extends StatelessWidget {
             hint: hint,
             shortcut: shortcut,
             badge: badge,
-            trailing: trailing,
+            trailing: edit == null ? trailing : SizedBox(width: t.sizes.button),
           ),
         ),
       ),
     );
-    return _explained(disabledNote, onPressed == null, item);
+    return _explained(
+      disabledNote,
+      onPressed == null,
+      edit == null
+          ? item
+          : Stack(
+              children: [
+                item,
+                Positioned(
+                  right: LgSpace.s2,
+                  top: 0,
+                  bottom: 0,
+                  child: Center(child: edit),
+                ),
+              ],
+            ),
+    );
   }
 }
 
@@ -550,6 +575,74 @@ class LgMenuRowNote extends StatelessWidget {
         style: t.textS.copyWith(
           color: t.colors.text2,
           fontWeight: FontWeight.w400,
+        ),
+      ),
+    );
+  }
+}
+
+/// An icon button for [LgMenuItem.trailing]: the pencil at the end of the "RDP" row of a device
+/// menu, which opens the RDP settings and does not use the row itself (`.mr .ib2` of
+/// `A-P2.html`): button high and wide, the icon in the second colour, standing 8 px into the
+/// row's padding.
+///
+/// [LgMenuItem] does not put it inside the row but over the row's end, with the room for it kept
+/// free: the row (a `MenuItemButton`) merges everything in it into one node for a screen reader,
+/// and a pencil inside it would be read as a part of the row's name ("RDP 编辑 RDP 设置") with no
+/// action of its own. Outside, it is a button node of its own named [label], the row keeps "RDP",
+/// and a script can press either. It takes the keyboard on its own: Tab reaches it, Enter and Space
+/// press it, and it shows the focus ring inside its edge (the menu's panel would cut one outside).
+/// A click on it does not use the row. [closeMenu] closes the menu it stands in first (the dialog
+/// it opens must not open under the menu); turn it off for a button that changes something in the
+/// menu.
+///
+/// There is no tooltip: the label is the pencil's name and the icon says what it is. A greyed row
+/// passes null for [onPressed].
+class LgMenuRowButton extends StatelessWidget {
+  const LgMenuRowButton({
+    super.key,
+    required this.label,
+    required this.onPressed,
+    this.icon = LgIcons.edit,
+    this.closeMenu = true,
+  });
+
+  final String label;
+  final VoidCallback? onPressed;
+  final LgIcons icon;
+  final bool closeMenu;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = LgTokens.of(context);
+    final c = t.colors;
+    const radius = BorderRadius.all(Radius.circular(LgRadius.r10));
+    return LgPressable(
+      onPressed: onPressed == null
+          ? null
+          : () {
+              if (closeMenu) MenuController.maybeOf(context)?.close();
+              onPressed!();
+            },
+      semanticLabel: label,
+      builder: (context, states) => LgFocusRing(
+        show: states.contains(WidgetState.focused),
+        radius: radius,
+        inset: true,
+        child: Container(
+          width: t.sizes.button,
+          height: t.sizes.button,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: lgStateOverlay(c, states),
+            borderRadius: radius,
+          ),
+          child: ExcludeSemantics(
+            child: Opacity(
+              opacity: states.contains(WidgetState.disabled) ? .45 : 1,
+              child: LgIcon(icon, size: t.sizes.icon, color: c.text2),
+            ),
+          ),
         ),
       ),
     );
