@@ -193,8 +193,16 @@ class FakeLeapgate implements lg.Leapgate {
   @override
   Stream<String> leapgateCmEvents({dynamic hint}) => cmEvents.stream;
 
-  /// `leapgate_install` calls by kind, and what they answer (Rust exits on success instead).
+  /// `leapgate_install` calls by kind, the same calls with all they pass, and what they answer
+  /// (Rust exits on success instead).
   final installs = <String>[];
+  final installCalls = <({
+    String kind,
+    String path,
+    bool startMenu,
+    bool desktopShortcut,
+    bool printer,
+  })>[];
   Completer<String> installAnswer = Completer();
 
   @override
@@ -206,6 +214,13 @@ class FakeLeapgate implements lg.Leapgate {
       required bool printer,
       dynamic hint}) {
     installs.add(kind);
+    installCalls.add((
+      kind: kind,
+      path: path,
+      startMenu: startMenu,
+      desktopShortcut: desktopShortcut,
+      printer: printer,
+    ));
     return installAnswer.future;
   }
 

@@ -7,6 +7,7 @@ import '../consts.dart';
 import '../models/platform_model.dart';
 import 'app_core.dart';
 import 'bridge.dart';
+import 'install_page.dart' show InstallOptions;
 import 'settings/server_config.dart' show readSocks;
 
 enum ServiceStatus { ready, connecting, notReady, stopped }
@@ -121,7 +122,8 @@ class LocalStatusModel extends ChangeNotifier {
   InstallCard? _installing;
   bool get installing => _installing != null;
 
-  /// The last failure, shown on its card until the next click.
+  /// The last failure until the next click: the "升级" card shows it under its button; one of
+  /// "安装" shows on the install page, not on the card (M9a).
   InstallFailure? installFailure;
 
   /// Authorized sessions into this device of every type (C1, 06 M3-1): "正在被远程控制（N 个
@@ -164,20 +166,25 @@ class LocalStatusModel extends ChangeNotifier {
   /// on success this process is ended (by the install script, or by Rust) and the installed copy
   /// starts. A second click while it runs does nothing; the export
   /// throwing or answering something unreadable counts as `failed` with the error's text.
-  Future<void> install(InstallCard card) async {
+  /// [path] and [options] are the install page's (13 §4, M9a); "升级" passes neither and keeps
+  /// the installed location and options (Rust ignores them for it). Without them it is the
+  /// default location with both shortcuts, as M8's card installed.
+  Future<void> install(InstallCard card,
+      {String? path, InstallOptions? options}) async {
     if (installing) return;
     _installing = card;
     installFailure = null;
     notifyListeners();
     InstallFailure failure;
+    final o =
+        options ?? (startMenu: true, desktopShortcut: true, printer: false);
     try {
-      // M8's options (M9a's install page passes its own; this branch has the M9a export).
       final answer = jsonDecode(await lgBind.leapgateInstall(
         kind: card.name,
-        path: '',
-        startMenu: true,
-        desktopShortcut: true,
-        printer: false,
+        path: path ?? '',
+        startMenu: o.startMenu,
+        desktopShortcut: o.desktopShortcut,
+        printer: o.printer,
       )) as Map<String, dynamic>;
       failure = InstallFailure(
         card: card,

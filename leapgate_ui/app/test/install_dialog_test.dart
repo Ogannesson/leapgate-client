@@ -1,1047 +1,340 @@
-// Behaviour of the M9a components (docs LEAPGATE.md §10.18, 14 §2.6): the install dialog with its
-// location row, options, licence line and banners, the local notice card's button with the
-// shield, and the three small additions to older components (an icon on `LgDialogAction`, a
-// scrim that does not scroll, the medium banner). Callbacks are called, a greyed part does not
-// respond, the keyboard reaches the parts, the names a screen reader gets are there. Nothing
-// here compares pixels.
+import 'dart:async';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_hbb/leapgate/install_page.dart';
+import 'package:flutter_hbb/leapgate/local_status.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:leapgate_ui/icons/lg_icon.dart';
-import 'package:leapgate_ui/widgets/lg_banner.dart';
+import 'package:leapgate_ui/l10n/app_localizations.dart';
+import 'package:leapgate_ui/pages/settings/sections/remote_printing.dart';
+import 'package:leapgate_ui/pages/settings/settings_section_state.dart';
+import 'package:leapgate_ui/pages/settings/settings_status.dart';
+import 'package:leapgate_ui/shell/tab_overlays.dart';
+import 'package:leapgate_ui/theme/lg_theme.dart';
+import 'package:leapgate_ui/theme/lg_tokens.dart';
 import 'package:leapgate_ui/widgets/lg_button.dart';
-import 'package:leapgate_ui/widgets/lg_feedback.dart';
-import 'package:leapgate_ui/widgets/lg_form_dialog.dart';
 import 'package:leapgate_ui/widgets/lg_install_dialog.dart';
-import 'package:leapgate_ui/widgets/lg_list_chrome.dart';
-import 'package:leapgate_ui/widgets/lg_selection.dart';
+import 'package:win32/win32.dart' as win32;
 
-import 'helpers.dart';
+import 'home_fakes.dart';
 
-const _path = r'C:\Program Files\Leapgate';
-const _longPath = r'D:\工作资料\常用软件\远程工具\公司内部\更长的文件夹名称\Leapgate';
+/// Drives and folders as the location checks see them. The paths here are made up.
+class _System implements InstallSystem {
+  @override
+  String defaultPath = r'C:\Program Files\Leapgate';
 
-LgInstallPathRow _row({
-  String path = _path,
-  VoidCallback? onChange,
-  LgPathTone tone = LgPathTone.normal,
-  String? message,
-  String? messageTooltip,
-}) => LgInstallPathRow(
-  label: '安装位置',
-  path: path,
-  changeLabel: '修改',
-  changeSemanticLabel: '修改安装位置',
-  onChange: onChange,
-  tone: tone,
-  message: message,
-  messageTooltip: messageTooltip,
+  @override
+  String get appName => 'Leapgate';
+
+  @override
+  String programFolder = r'C:\Apps\Leap gate\leapgate-0.4.0';
+
+  @override
+  int driveType(String root) =>
+      root == r'Z:\' ? win32.DRIVE_REMOTE : win32.DRIVE_FIXED;
+
+  @override
+  bool isSubst(String root) => false;
+
+  @override
+  String resolveFolder(String folder) => folder;
+
+  @override
+  bool hasFiles(String folder) => false;
+}
+
+/// The line about what ends, whatever M9c makes of its wording.
+final _sessionsLine = find.textContaining('Leapgate 将关闭并重新打开');
+
+LgOptionCheck _checkbox(String label) =>
+    find
+            .byWidgetPredicate((w) => w is LgOptionCheck && w.label == label)
+            .evaluate()
+            .single
+            .widget
+        as LgOptionCheck;
+
+const _options = ['创建开始菜单快捷方式', '创建桌面快捷方式', '安装 Leapgate 打印机'];
+
+/// A button of the install page (the hint card has an "安装" too).
+Finder _button(String label) => find.descendant(
+  of: find.byType(LgInstallDialog),
+  matching: find.widgetWithText(LgButton, label),
 );
 
-LgInstallDialog _dialog({
-  List<String>? log,
-  bool busy = false,
-  bool installEnabled = true,
-  List<Widget> banners = const [],
-  Widget? pathRow,
-  List<bool>? printer,
-  ScrollController? controller,
-}) => LgInstallDialog(
-  title: '安装 Leapgate',
-  scrollController: controller,
-  pathRow: pathRow ?? _row(onChange: busy ? null : () => log?.add('change')),
-  options: [
-    LgOptionCheck(
-      value: true,
-      label: '创建开始菜单快捷方式',
-      onChanged: busy ? null : (_) => log?.add('menu'),
-    ),
-    LgOptionCheck(
-      value: printer?.single ?? false,
-      label: '安装 Leapgate 打印机',
-      description: '远程控制本机时，对方在本机打印到“Leapgate Printer”的文件将发送到对方的设备上打印',
-      onChanged: busy ? null : (v) => log?.add('printer $v'),
-    ),
-  ],
-  license: LgLicenseLine(
-    before: '开始安装即表示接受',
-    link: '许可协议',
-    after: '。',
-    onOpen: () => log?.add('license'),
-  ),
-  banners: banners,
-  actions: [
-    LgDialogAction(
-      label: '取消',
-      onPressed: busy ? null : () => log?.add('cancel'),
-    ),
-    LgDialogAction(
-      label: busy ? '正在安装…' : '安装',
-      kind: LgButtonKind.primary,
-      icon: LgIcons.uac,
-      iconSize: 18,
-      busy: busy,
-      isDefault: true,
-      onPressed: installEnabled ? () => log?.add('install') : null,
-    ),
-  ],
-);
+/// The location as a screen reader gets it: the row is named "安装位置", its value is the path.
+String? _location(WidgetTester tester) =>
+    tester.getSemantics(find.bySemanticsLabel('安装位置')).value;
 
-/// The dialog in a scrim of [height], the way the home tab's dialog layer holds it.
-Widget _stage(Widget dialog, {double height = 700}) => SizedBox(
-  width: 600,
-  height: height,
-  child: LgDialogScrim(scrollable: false, child: dialog),
-);
+bool _ticked(String label) => _checkbox(label).value;
+
+/// The dialog's fade; the home page and a busy button keep animating, so no pumpAndSettle.
+Future<void> _pumps(WidgetTester tester) async {
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 400));
+}
+
+/// The label of the button the keyboard is on.
+String? _focusedButton() => FocusManager.instance.primaryFocus?.context
+    ?.findAncestorWidgetOfExactType<LgButton>()
+    ?.label;
 
 void main() {
-  group('LgInstallDialog', () {
-    testWidgets('the buttons call back; Enter runs the answer', (tester) async {
-      final log = <String>[];
-      await pumpLg(tester, _stage(_dialog(log: log)));
-      await tester.pump(const Duration(milliseconds: 200));
-
-      await tester.tap(find.text('取消'));
-      await tester.tap(find.text('修改'));
-      await tester.tap(find.text('许可协议'));
-      expect(log, ['cancel', 'change', 'license']);
-
-      // The answer is the default: it holds the keyboard when the dialog opens.
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-      expect(log.last, 'install');
-    });
-
-    testWidgets('while it runs nothing answers and the answer says so', (
-      tester,
-    ) async {
-      final handle = tester.ensureSemantics();
-      final log = <String>[];
-      await pumpLg(tester, _stage(_dialog(log: log, busy: true)));
-      await tester.pump(const Duration(milliseconds: 200));
-
-      for (final label in ['取消', '修改', '创建开始菜单快捷方式']) {
-        await tester.tap(find.text(label), warnIfMissed: false);
-      }
-      await tester.tap(find.text('正在安装…'));
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-      expect(log, isEmpty);
-      expect(find.bySemanticsLabel('正在安装…'), findsOneWidget);
-      handle.dispose();
-    });
-
-    testWidgets('a greyed answer does not run on Enter', (tester) async {
-      final log = <String>[];
-      await pumpLg(tester, _stage(_dialog(log: log, installEnabled: false)));
-      await tester.pump(const Duration(milliseconds: 200));
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-      await tester.tap(find.text('安装'));
-      expect(log, isEmpty);
-    });
-
-    testWidgets('the middle scrolls, the head and the buttons stay in view', (
-      tester,
-    ) async {
-      final controller = ScrollController();
-      addTearDown(controller.dispose);
-      const stageHeight = 380.0;
-      await pumpLg(
-        tester,
-        _stage(
-          _dialog(
-            controller: controller,
-            banners: const [
-              LgInstallBanner(
-                tone: LgTone.warning,
-                text: 'Leapgate 将关闭并重新打开，所有会话和正在使用的出口、隧道都将断开。',
-              ),
-              LgInstallBanner(
-                tone: LgTone.error,
-                text:
-                    '安装失败：Cannot install the EXE package over an existing MSI installation',
-              ),
-            ],
-          ),
-          height: stageHeight,
-        ),
-      );
-      await tester.pump(const Duration(milliseconds: 200));
-
-      expect(controller.position.maxScrollExtent, greaterThan(0));
-      final card = tester.getRect(find.byType(LgInstallDialog));
-      // Within the area less 24 px on every side.
-      expect(card.height, lessThanOrEqualTo(stageHeight - 48));
-      expect(
-        tester.getRect(find.text('安装 Leapgate')).top,
-        greaterThanOrEqualTo(card.top),
-      );
-      expect(
-        tester.getRect(find.text('安装')).bottom,
-        lessThanOrEqualTo(card.bottom),
-      );
-
-      // Scrolled to the end, the last banner is in view.
-      controller.jumpTo(controller.position.maxScrollExtent);
-      await tester.pump();
-      expect(
-        tester.getRect(find.textContaining('安装失败')).bottom,
-        lessThanOrEqualTo(tester.getRect(find.text('取消')).top),
-      );
-    });
-
-    testWidgets('names the dialog and its parts for a screen reader', (
-      tester,
-    ) async {
-      final handle = tester.ensureSemantics();
-      await pumpLg(tester, _stage(_dialog(banners: const [])));
-      await tester.pump(const Duration(milliseconds: 200));
-      expect(find.bySemanticsLabel('安装 Leapgate'), findsWidgets);
-      expect(find.bySemanticsLabel('修改安装位置'), findsOneWidget);
-      expect(find.bySemanticsLabel('安装'), findsOneWidget);
-      // The location is one node named by its label and valued with the path; the folder's
-      // parts are not read one by one.
-      expect(
-        tester.getSemantics(find.bySemanticsLabel('安装位置')),
-        isSemantics(label: '安装位置', value: _path),
-      );
-      handle.dispose();
-    });
+  late _System system;
+  late FakeLeapgate lg;
+  setUp(() {
+    lg = installHomeFakes().lg;
+    system = _System();
+    installSystem = system;
+    addTearDown(() => installSystem = const WindowsInstallSystem());
   });
 
-  group('LgInstallPathRow', () {
-    testWidgets('"修改" calls back, and is greyed without a callback', (
+  /// The portable home page with the install page opened from its card.
+  Future<LocalStatusModel> openFromCard(
+    WidgetTester tester, {
+    void Function(LocalStatusModel model)? setUp,
+  }) async {
+    final model = await pumpHome(
       tester,
-    ) async {
-      var n = 0;
-      await pumpLg(
-        tester,
-        SizedBox(width: 480, child: _row(onChange: () => n++)),
-      );
-      await tester.tap(find.text('修改'));
-      expect(n, 1);
-
-      await pumpLg(tester, SizedBox(width: 480, child: _row()));
-      await tester.tap(find.text('修改'), warnIfMissed: false);
-      expect(n, 1);
-    });
-
-    testWidgets('the message shows only with a warning or an error', (
-      tester,
-    ) async {
-      const text = '无法安装到网络位置或可移动磁盘。请选择本机磁盘上的文件夹。';
-      await pumpLg(tester, SizedBox(width: 480, child: _row(message: text)));
-      expect(find.text(text), findsNothing);
-
-      for (final tone in [LgPathTone.error, LgPathTone.warning]) {
-        await pumpLg(
-          tester,
-          SizedBox(
-            width: 480,
-            child: _row(tone: tone, message: text),
-          ),
-        );
-        expect(find.text(text), findsOneWidget);
-        expect(
-          find.byWidgetPredicate(
-            (w) =>
-                w is LgIcon &&
-                w.icon ==
-                    (tone == LgPathTone.error ? LgIcons.err : LgIcons.warn),
-          ),
-          findsOneWidget,
-        );
-      }
-    });
-
-    group('messageTooltip', () {
-      const text = '无法安装到 Leapgate 当前所在的文件夹。请选择其他位置。';
-      const folder = r'C:\Users\zhangsan\Downloads\leapgate-0.4.0';
-
-      Widget row({String? tooltip, String path = _path}) => SizedBox(
-        width: 640,
-        child: _row(
-          path: path,
-          tone: LgPathTone.error,
-          message: text,
-          messageTooltip: tooltip,
-        ),
-      );
-
-      testWidgets('shows the folder while the pointer is on the red line', (
-        tester,
-      ) async {
-        await pumpLg(tester, row(tooltip: folder));
-        await hover(tester, find.text(text));
-        await tester.pump(const Duration(seconds: 1));
-        expect(find.text(folder), findsOneWidget);
-        // The text is still there once, and the line looks as it did: icon, then the text.
-        expect(find.text(text), findsOneWidget);
-      });
-
-      testWidgets('without it the line has no tooltip', (tester) async {
-        await pumpLg(tester, row());
-        await hover(tester, find.text(text));
-        await tester.pump(const Duration(seconds: 1));
-        expect(find.text(folder), findsNothing);
-      });
-
-      testWidgets('does not stack on the tooltip of a cut path', (
-        tester,
-      ) async {
-        await pumpLg(
-          tester,
-          SizedBox(
-            width: 480,
-            child: _row(
-              path: _longPath,
-              tone: LgPathTone.error,
-              message: text,
-              messageTooltip: folder,
-            ),
-          ),
-        );
-        await hover(tester, find.text(text));
-        await tester.pump(const Duration(seconds: 1));
-        // The pointer is on the line: the folder shows, the cut path does not.
-        expect(find.text(folder), findsOneWidget);
-        expect(find.text(_longPath), findsNothing);
-      });
-
-      testWidgets('the folder is read after the message', (tester) async {
-        final handle = tester.ensureSemantics();
-        await pumpLg(tester, row(tooltip: folder));
-        expect(find.bySemanticsLabel('$text $folder'), findsOneWidget);
-        handle.dispose();
-      });
-
-      testWidgets('the message is read as before without it', (tester) async {
-        final handle = tester.ensureSemantics();
-        await pumpLg(tester, row());
-        expect(find.bySemanticsLabel(text), findsOneWidget);
-        handle.dispose();
-      });
-    });
-
-    testWidgets(
-      'a long path is cut in the middle: the last folder stays whole',
-      (tester) async {
-        await pumpLg(
-          tester,
-          SizedBox(width: 480, child: _row(path: _longPath)),
-        );
-        expect(find.text(r'\Leapgate'), findsOneWidget);
-        final head = tester.widget<Text>(
-          find.byWidgetPredicate(
-            (w) => w is Text && (w.data ?? '').startsWith(r'D:\工作资料'),
-          ),
-        );
-        expect(head.overflow, TextOverflow.ellipsis);
-        // The tail is not cut: it has its whole width.
-        expect(tester.getSize(find.text(r'\Leapgate')).width, greaterThan(60));
+      id: '135792468',
+      setUp: (m) {
+        m.installed = false;
+        setUp?.call(m);
       },
     );
+    await tester.tap(find.widgetWithText(LgButton, '安装'));
+    await _pumps(tester);
+    expect(find.text('安装 Leapgate'), findsOneWidget);
+    return model;
+  }
 
-    testWidgets('a cut path shows in full while the pointer is on it', (
-      tester,
-    ) async {
-      await pumpLg(tester, SizedBox(width: 480, child: _row(path: _longPath)));
-      await hover(tester, find.byType(LgInstallPathRow));
-      await tester.pump(const Duration(seconds: 1));
-      expect(find.text(_longPath), findsOneWidget);
-    });
+  testWidgets(
+    'the card opens the page: default location, both shortcuts, no printer; '
+    'busy, then the failure on the page and not on the card (R3-Q20)',
+    (tester) async {
+      lg.installAnswer = Completer();
+      await openFromCard(tester);
+      expect(_location(tester), r'C:\Program Files\Leapgate');
+      // It asks for administrator permission: the shield (02 §1.2.6).
+      expect(tester.widget<LgButton>(_button('安装')).icon, LgIcons.uac);
+      expect(_ticked('创建开始菜单快捷方式'), isTrue);
+      expect(_ticked('创建桌面快捷方式'), isTrue);
+      expect(_ticked('安装 Leapgate 打印机'), isFalse);
+      expect(_sessionsLine, findsNothing);
 
-    testWidgets('a path that fits has no tooltip', (tester) async {
-      // The test font's letters are as wide as they are tall: room for 25 of them at 15 px.
-      await pumpLg(tester, SizedBox(width: 640, child: _row()));
-      await hover(tester, find.byType(LgInstallPathRow));
-      await tester.pump(const Duration(seconds: 1));
-      expect(find.text(_path), findsNothing);
-    });
-
-    group('under enlarged system text', () {
-      // At 100 % the path of the test above fits in 640 px; at 200 % its 25 letters are 750 px.
-      Widget scaled(double factor) => MediaQuery(
-        data: MediaQueryData(textScaler: TextScaler.linear(factor)),
-        child: SizedBox(width: 640, child: _row()),
-      );
-
-      testWidgets('a path that fits at 100 % is cut at 200 %', (tester) async {
-        await pumpLg(tester, scaled(2));
-        final head = tester.widget<Text>(
-          find.byWidgetPredicate(
-            (w) => w is Text && (w.data ?? '').startsWith(r'C:\Program'),
-          ),
-        );
-        expect(head.overflow, TextOverflow.ellipsis);
-        // The text really is drawn wider than the box: it is cut, not merely measured so.
-        final box = tester.getRect(find.byType(LgInstallPathRow));
-        expect(
-          tester.getRect(find.text(r'\Leapgate')).right,
-          lessThanOrEqualTo(box.right),
-        );
-      });
-
-      testWidgets('then the pointer shows the whole path', (tester) async {
-        await pumpLg(tester, scaled(2));
-        await hover(tester, find.byType(LgInstallPathRow));
-        await tester.pump(const Duration(seconds: 1));
-        expect(find.text(_path), findsOneWidget);
-      });
-
-      testWidgets('at 100 % the same path has no tooltip', (tester) async {
-        await pumpLg(tester, scaled(1));
-        await hover(tester, find.byType(LgInstallPathRow));
-        await tester.pump(const Duration(seconds: 1));
-        expect(find.text(_path), findsNothing);
-      });
-    });
-
-    testWidgets('the change button can take the keyboard at the start', (
-      tester,
-    ) async {
-      final node = FocusNode();
-      addTearDown(node.dispose);
-      await pumpLg(
-        tester,
-        SizedBox(
-          width: 480,
-          child: LgInstallPathRow(
-            label: '安装位置',
-            path: _path,
-            changeLabel: '修改',
-            onChange: () {},
-            changeFocusNode: node,
-            changeAutofocus: true,
-          ),
-        ),
-      );
+      // The keyboard is on "安装": Enter starts it.
+      expect(_focusedButton(), '安装');
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
       await tester.pump();
-      expect(node.hasFocus, isTrue);
-    });
+      expect(lg.installs, ['install']);
+      expect(_button('正在安装…'), findsOneWidget);
+      expect(tester.widget<LgButton>(_button('取消')).onPressed, isNull);
+      // Nothing on the page changes while it runs.
+      expect(tester.widget<LgButton>(_button('修改')).onPressed, isNull);
+      for (final option in _options) {
+        expect(_checkbox(option).onChanged, isNull, reason: option);
+      }
+      // Esc does nothing while it runs.
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
+      expect(find.text('安装 Leapgate'), findsOneWidget);
+
+      lg.installAnswer.complete('{"result":"uac_denied","text":""}');
+      await tester.pump();
+      expect(find.text('未获得管理员权限，未安装。'), findsOneWidget);
+      await tester.tap(_button('取消'));
+      await _pumps(tester);
+      expect(find.text('安装 Leapgate'), findsNothing);
+      expect(find.text('未获得管理员权限，未安装。'), findsNothing);
+      await unmount(tester);
+    },
+  );
+
+  testWidgets(
+    'with a session into this device: the line, and the keyboard on "取消"',
+    (tester) async {
+      await openFromCard(
+        tester,
+        setUp: (m) => m.incoming = const IncomingSessions(1, controlled: true),
+      );
+      expect(_sessionsLine, findsOneWidget);
+      expect(_focusedButton(), '取消');
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await _pumps(tester);
+      expect(find.text('安装 Leapgate'), findsNothing);
+      expect(lg.installs, isEmpty);
+      await unmount(tester);
+    },
+  );
+
+  testWidgets('the line follows the sessions while the page is open', (
+    tester,
+  ) async {
+    final status = await openFromCard(tester);
+    status
+      ..incoming = const IncomingSessions(2, controlled: false)
+      ..notifyListeners();
+    await tester.pump();
+    expect(_sessionsLine, findsOneWidget);
+    await unmount(tester);
   });
 
-  group('LgOptionCheck', () {
-    Widget option(ValueChanged<bool>? on, {bool value = false}) => SizedBox(
-      width: 448,
-      child: LgOptionCheck(
-        value: value,
-        label: '安装 Leapgate 打印机',
-        description: '文件将发送到对方的设备上打印',
-        onChanged: on,
+  testWidgets('a failure without the installer\'s text, then with it', (
+    tester,
+  ) async {
+    lg.installAnswer = Completer();
+    await openFromCard(tester);
+    await tester.tap(_button('安装'));
+    await tester.pump();
+    lg.installAnswer.complete('{"result":"failed","text":""}');
+    await tester.pump();
+    expect(find.text('安装失败。'), findsOneWidget);
+
+    lg.installAnswer = Completer();
+    await tester.tap(_button('安装'));
+    await tester.pump();
+    // Clicking again clears the line until the answer.
+    expect(find.text('安装失败。'), findsNothing);
+    lg.installAnswer.complete(
+      '{"result":"failed","text":"Cannot install the EXE package over an existing MSI installation"}',
+    );
+    await tester.pump();
+    expect(
+      find.text(
+        '安装失败：Cannot install the EXE package over an existing MSI installation',
       ),
+      findsOneWidget,
     );
-
-    testWidgets('the whole row toggles, by mouse and by Space', (tester) async {
-      final seen = <bool>[];
-      await pumpLg(tester, option(seen.add));
-      await tester.tap(find.text('文件将发送到对方的设备上打印'));
-      await tester.tap(find.text('安装 Leapgate 打印机'));
-      expect(seen, [true, true]);
-
-      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
-      await tester.sendKeyEvent(LogicalKeyboardKey.space);
-      expect(seen, [true, true, true]);
-    });
-
-    const spoken = '安装 Leapgate 打印机. 文件将发送到对方的设备上打印';
-
-    testWidgets('without a callback it is greyed and does not respond', (
-      tester,
-    ) async {
-      final handle = tester.ensureSemantics();
-      await pumpLg(tester, option(null));
-      await tester.tap(find.text('安装 Leapgate 打印机'), warnIfMissed: false);
-      expect(
-        tester.getSemantics(find.bySemanticsLabel(spoken)),
-        isSemantics(
-          hasCheckedState: true,
-          hasEnabledState: true,
-          isEnabled: false,
-        ),
-      );
-      handle.dispose();
-    });
-
-    testWidgets('read as label and description, with the state', (
-      tester,
-    ) async {
-      final handle = tester.ensureSemantics();
-      await pumpLg(tester, option((_) {}, value: true));
-      // A check box that is ticked: the Windows engine gives it the check box role and the
-      // checked state; a button would be Invoke only, and say nothing of the state.
-      expect(
-        tester.getSemantics(find.bySemanticsLabel(spoken)),
-        isSemantics(
-          label: spoken,
-          hasCheckedState: true,
-          isChecked: true,
-          hasEnabledState: true,
-          isEnabled: true,
-          hasTapAction: true,
-          hasFocusAction: true,
-          isFocusable: true,
-        ),
-      );
-      handle.dispose();
-    });
-
-    testWidgets('unticked it says so, and is not a button', (tester) async {
-      final handle = tester.ensureSemantics();
-      await pumpLg(tester, option((_) {}));
-      final node = tester.getSemantics(find.bySemanticsLabel(spoken));
-      expect(
-        node,
-        isSemantics(
-          label: spoken,
-          hasCheckedState: true,
-          isChecked: false,
-          hasEnabledState: true,
-          isEnabled: true,
-          hasTapAction: true,
-          hasFocusAction: true,
-          isFocusable: true,
-        ),
-      );
-      // `isSemantics` says nothing of a flag it is not given; the role is the point.
-      expect(node.flagsCollection.isButton, isFalse);
-      handle.dispose();
-    });
-
-    testWidgets('pressing it by its semantic action toggles it', (
-      tester,
-    ) async {
-      final handle = tester.ensureSemantics();
-      final seen = <bool>[];
-      await pumpLg(tester, option(seen.add));
-      tester.semantics.tap(find.semantics.byLabel(spoken));
-      await tester.pump();
-      expect(seen, [true]);
-      handle.dispose();
-    });
-
-    testWidgets('LgCheckbox is a check box too, ticked or not', (tester) async {
-      final handle = tester.ensureSemantics();
-      for (final on in [true, false]) {
-        await pumpLg(
-          tester,
-          LgCheckbox(value: on, label: '记住密码', onChanged: (_) {}),
-        );
-        final node = tester.getSemantics(find.bySemanticsLabel('记住密码'));
-        expect(
-          node,
-          isSemantics(
-            label: '记住密码',
-            hasCheckedState: true,
-            isChecked: on,
-            hasEnabledState: true,
-            isEnabled: true,
-            hasTapAction: true,
-            hasFocusAction: true,
-            isFocusable: true,
-          ),
-          reason: 'value $on',
-        );
-        expect(node.flagsCollection.isButton, isFalse);
-      }
-      handle.dispose();
-    });
-
-    testWidgets('a greyed LgCheckbox says it is disabled, still a check box', (
-      tester,
-    ) async {
-      final handle = tester.ensureSemantics();
-      await pumpLg(
-        tester,
-        const LgCheckbox(value: true, label: '记住密码', onChanged: null),
-      );
-      expect(
-        tester.getSemantics(find.bySemanticsLabel('记住密码')),
-        isSemantics(
-          label: '记住密码',
-          hasCheckedState: true,
-          isChecked: true,
-          hasEnabledState: true,
-          isEnabled: false,
-        ),
-      );
-      handle.dispose();
-    });
-
-    testWidgets('pressing an LgCheckbox by its semantic action toggles it', (
-      tester,
-    ) async {
-      final handle = tester.ensureSemantics();
-      final seen = <bool>[];
-      await pumpLg(
-        tester,
-        LgCheckbox(value: false, label: '记住密码', onChanged: seen.add),
-      );
-      tester.semantics.tap(find.semantics.byLabel('记住密码'));
-      await tester.pump();
-      expect(seen, [true]);
-      handle.dispose();
-    });
-
-    testWidgets('draws the 24 px box of the mockup', (tester) async {
-      await pumpLg(tester, option((_) {}, value: true));
-      final check = find.byWidgetPredicate(
-        (w) => w is LgIcon && w.icon == LgIcons.check,
-      );
-      expect(tester.getSize(check), const Size(16, 16));
-      expect(
-        tester.getSize(
-          find.ancestor(of: check, matching: find.byType(Container)).first,
-        ),
-        const Size(24, 24),
-      );
-    });
+    await unmount(tester);
   });
 
-  group('LgLicenseLine', () {
-    testWidgets('only the link responds; the text around it is plain', (
-      tester,
-    ) async {
-      final handle = tester.ensureSemantics();
-      var n = 0;
-      await pumpLg(
+  testWidgets(
+    'after a failure the keyboard is back on "安装": Enter tries again',
+    (tester) async {
+      lg.installAnswer = Completer();
+      // With a session the keyboard starts on "取消"; "安装" is clicked.
+      await openFromCard(
         tester,
-        SizedBox(
-          width: 448,
-          child: LgLicenseLine(
-            before: '开始安装即表示接受',
-            link: '许可协议',
-            after: '。',
-            onOpen: () => n++,
-            linkSemanticLabel: '许可协议（在浏览器中打开）',
-          ),
-        ),
+        setUp: (m) => m.incoming = const IncomingSessions(1, controlled: true),
       );
-      await tester.tap(find.text('许可协议'));
-      expect(n, 1);
-      // A button of its own, not the whole sentence.
-      expect(
-        tester.getSemantics(find.bySemanticsLabel('许可协议（在浏览器中打开）')),
-        isSemantics(isButton: true, hasEnabledState: true, isEnabled: true),
-      );
-      expect(find.bySemanticsLabel(RegExp('开始安装即表示接受')), findsOneWidget);
-      // The arrow that leaves the window is there.
-      expect(
-        find.byWidgetPredicate(
-          (w) => w is LgIcon && w.icon == LgIcons.externalLink,
-        ),
-        findsOneWidget,
-      );
-      handle.dispose();
-    });
-  });
-
-  group('LgLocalNotice action icon', () {
-    Widget card({LgIcons? icon, LgButtonKind? kind}) => SizedBox(
-      width: 192,
-      child: kind == null
-          ? LgLocalNotice(
-              tone: LgTone.info,
-              text: '已安装的 Leapgate 版本低于当前版本。',
-              actionLabel: '升级',
-              onAction: () {},
-              actionIcon: icon,
-            )
-          : LgLocalNotice(
-              tone: LgTone.info,
-              text: '已安装的 Leapgate 版本低于当前版本。',
-              actionLabel: '升级',
-              onAction: () {},
-              actionIcon: icon,
-              actionKind: kind,
-            ),
-    );
-
-    testWidgets('the shield goes before the label, 18 px', (tester) async {
-      await pumpLg(tester, card(icon: LgIcons.uac, kind: LgButtonKind.primary));
-      final shield = find.byWidgetPredicate(
-        (w) => w is LgIcon && w.icon == LgIcons.uac,
-      );
-      expect(shield, findsOneWidget);
-      expect(tester.getSize(shield), const Size(18, 18));
-      expect(
-        tester.getCenter(shield).dx,
-        lessThan(tester.getCenter(find.text('升级')).dx),
-      );
-    });
-
-    testWidgets('the arrow of "安装" is 20 px', (tester) async {
-      await pumpLg(
-        tester,
-        card(icon: LgIcons.download, kind: LgButtonKind.primary),
-      );
-      final arrow = find.byWidgetPredicate(
-        (w) => w is LgIcon && w.icon == LgIcons.download,
-      );
-      expect(tester.getSize(arrow), const Size(20, 20));
-    });
-
-    testWidgets('without the new parameters the button is what it was', (
-      tester,
-    ) async {
-      await pumpLg(tester, card());
-      final button = tester.widget<LgButton>(find.byType(LgButton));
-      expect(button.kind, LgButtonKind.secondary);
-      expect(button.icon, isNull);
-      expect(button.iconSize, 20);
-    });
-
-    testWidgets('busy shows the spinner and does not respond', (tester) async {
-      var n = 0;
-      await pumpLg(
-        tester,
-        SizedBox(
-          width: 192,
-          child: LgLocalNotice(
-            tone: LgTone.info,
-            text: '已安装的 Leapgate 版本低于当前版本。',
-            actionLabel: '正在升级…',
-            onAction: () => n++,
-            actionIcon: LgIcons.uac,
-            actionKind: LgButtonKind.primary,
-            actionBusy: true,
-          ),
-        ),
-      );
-      await tester.tap(find.text('正在升级…'));
-      expect(n, 0);
-      expect(
-        find.byWidgetPredicate((w) => w is LgIcon && w.icon == LgIcons.uac),
-        findsNothing,
-      );
-    });
-  });
-
-  group('a greyed button of a dialog is disabled in the semantics too', () {
-    // What `getSemantics` shows is what the engine is given; whether the Windows bridge passes
-    // "disabled" on to UI Automation is the engine's (see DS-components.md).
-    SemanticsNode node(WidgetTester tester, String label) =>
-        tester.getSemantics(find.bySemanticsLabel(label));
-
-    testWidgets('the install dialog: no location, then running', (
-      tester,
-    ) async {
-      final handle = tester.ensureSemantics();
-      await pumpLg(tester, _stage(_dialog(installEnabled: false)));
-      await tester.pump(const Duration(milliseconds: 200));
-      expect(
-        node(tester, '安装'),
-        isSemantics(
-          label: '安装',
-          isButton: true,
-          hasEnabledState: true,
-          isEnabled: false,
-        ),
-      );
-      // The way out is still there.
-      expect(
-        node(tester, '取消'),
-        isSemantics(
-          label: '取消',
-          isButton: true,
-          hasEnabledState: true,
-          isEnabled: true,
-          hasTapAction: true,
-          hasFocusAction: true,
-          isFocusable: true,
-        ),
-      );
-
-      await pumpLg(tester, _stage(_dialog(busy: true)));
-      await tester.pump(const Duration(milliseconds: 200));
-      for (final label in ['正在安装…', '取消']) {
-        expect(
-          node(tester, label),
-          isSemantics(
-            label: label,
-            isButton: true,
-            hasEnabledState: true,
-            isEnabled: false,
-          ),
-          reason: label,
-        );
-      }
-      handle.dispose();
-    });
-
-    testWidgets('LgConfirmDialog and LgFormDialog buttons, as before', (
-      tester,
-    ) async {
-      final handle = tester.ensureSemantics();
-      await pumpLg(
-        tester,
-        _stage(
-          LgConfirmDialog(
-            title: '替换？',
-            actions: [
-              LgDialogAction(label: '跳过', onPressed: () {}),
-              const LgDialogAction(
-                label: '替换',
-                kind: LgButtonKind.primary,
-                onPressed: null,
-              ),
-            ],
-          ),
-        ),
-      );
-      expect(
-        node(tester, '替换'),
-        isSemantics(
-          label: '替换',
-          isButton: true,
-          hasEnabledState: true,
-          isEnabled: false,
-        ),
-      );
-      expect(
-        node(tester, '跳过'),
-        isSemantics(
-          label: '跳过',
-          isButton: true,
-          hasEnabledState: true,
-          isEnabled: true,
-          hasTapAction: true,
-          hasFocusAction: true,
-          isFocusable: true,
-        ),
-      );
-
-      await pumpLg(
-        tester,
-        _stage(
-          const LgFormDialog(
-            title: '登录到服务器',
-            actions: [
-              LgDialogAction(
-                label: '登录',
-                kind: LgButtonKind.primary,
-                onPressed: null,
-              ),
-            ],
-          ),
-        ),
-      );
-      expect(
-        node(tester, '登录'),
-        isSemantics(
-          label: '登录',
-          isButton: true,
-          hasEnabledState: true,
-          isEnabled: false,
-        ),
-      );
-      handle.dispose();
-    });
-
-    testWidgets('a button that is greyed gives no way to press it', (
-      tester,
-    ) async {
-      final handle = tester.ensureSemantics();
-      await pumpLg(tester, _stage(_dialog(installEnabled: false)));
-      await tester.pump(const Duration(milliseconds: 200));
-      final n = node(tester, '安装');
-      expect(n.getSemanticsData().hasAction(SemanticsAction.tap), isFalse);
-      expect(n.getSemanticsData().hasAction(SemanticsAction.focus), isFalse);
-      handle.dispose();
-    });
-  });
-
-  group('older components, new optional parameters', () {
-    testWidgets(
-      'LgDialogAction.icon reaches the buttons of the other dialogs',
-      (tester) async {
-        await pumpLg(
-          tester,
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              LgConfirmDialog(
-                title: '安装？',
-                actions: [
-                  LgDialogAction(
-                    label: '安装',
-                    kind: LgButtonKind.primary,
-                    icon: LgIcons.uac,
-                    iconSize: 18,
-                    onPressed: () {},
-                  ),
-                ],
-              ),
-              LgFormDialog(
-                title: '登录',
-                actions: [
-                  LgDialogAction(
-                    label: '登录',
-                    kind: LgButtonKind.primary,
-                    icon: LgIcons.uac,
-                    onPressed: () {},
-                  ),
-                ],
-              ),
-            ],
-          ),
-        );
-        final shields = find.byWidgetPredicate(
-          (w) => w is LgIcon && w.icon == LgIcons.uac,
-        );
-        expect(shields, findsNWidgets(2));
-        expect(tester.getSize(shields.first), const Size(18, 18));
-        expect(tester.getSize(shields.last), const Size(20, 20));
-      },
-    );
-
-    testWidgets(
-      'the banner in the medium size is the slim one with 14 px text',
-      (tester) async {
-        await pumpLg(
-          tester,
-          const SizedBox(
-            width: 400,
-            child: Column(
-              children: [
-                LgBanner(tone: LgTone.warning, text: '一', slim: true),
-                LgBanner(
-                  tone: LgTone.warning,
-                  text: '二',
-                  slim: true,
-                  medium: true,
-                ),
-              ],
-            ),
-          ),
-        );
-        final plain = tester.widget<Text>(
-          find.byWidgetPredicate(
-            (w) =>
-                w is Text &&
-                w.textSpan != null &&
-                w.textSpan!.toPlainText() == '一',
-          ),
-        );
-        final medium = tester.widget<Text>(
-          find.byWidgetPredicate(
-            (w) =>
-                w is Text &&
-                w.textSpan != null &&
-                w.textSpan!.toPlainText() == '二',
-          ),
-        );
-        expect(plain.style!.fontSize, 15);
-        expect(medium.style!.fontSize, 14);
-      },
-    );
-
-    testWidgets('a scrim that does not scroll keeps its child within the area', (
-      tester,
-    ) async {
-      await pumpLg(
-        tester,
-        SizedBox(
-          width: 400,
-          height: 300,
-          child: LgDialogScrim(
-            scrollable: false,
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 300),
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  // Whatever the child is given, it is the area less 24 px all round.
-                  expect(constraints.maxHeight, 300 - 48);
-                  expect(constraints.maxWidth, 300);
-                  return const SizedBox(height: 10, key: ValueKey('inner'));
-                },
-              ),
-            ),
-          ),
-        ),
-      );
-      expect(find.byKey(const ValueKey('inner')), findsOneWidget);
-    });
-
-    testWidgets('LgDialogAction.focusNode is the focus node of the button', (
-      tester,
-    ) async {
-      final nodes = [FocusNode(), FocusNode(), FocusNode()];
-      for (final n in nodes) {
-        addTearDown(n.dispose);
-      }
-      final dialogs = <Widget>[
-        LgInstallDialog(
-          title: '安装 Leapgate',
-          actions: [
-            LgDialogAction(label: '安装', focusNode: nodes[0], onPressed: () {}),
-          ],
-        ),
-        LgFormDialog(
-          title: '登录',
-          actions: [
-            LgDialogAction(label: '登录', focusNode: nodes[1], onPressed: () {}),
-          ],
-        ),
-        LgConfirmDialog(
-          title: '确认？',
-          actions: [
-            LgDialogAction(label: '好', focusNode: nodes[2], onPressed: () {}),
-          ],
-        ),
-      ];
-      for (final (i, dialog) in dialogs.indexed) {
-        await pumpLg(tester, _stage(dialog));
-        await tester.pump();
-        // Moved to by the caller, as the install page does after a failed install: the node is
-        // the button's, so the button takes the keyboard.
-        nodes[i].requestFocus();
-        await tester.pump();
-        expect(nodes[i].hasPrimaryFocus, isTrue, reason: 'dialog $i');
-      }
-    });
-
-    testWidgets('Enter presses the button that was given the keyboard back', (
-      tester,
-    ) async {
-      var presses = 0;
-      final node = FocusNode();
-      addTearDown(node.dispose);
-      await pumpLg(
-        tester,
-        _stage(
-          LgInstallDialog(
-            title: '安装 Leapgate',
-            actions: [
-              LgDialogAction(label: '取消', onPressed: () {}),
-              LgDialogAction(
-                label: '安装',
-                kind: LgButtonKind.primary,
-                focusNode: node,
-                onPressed: () => presses++,
-              ),
-            ],
-          ),
-        ),
-      );
+      expect(_focusedButton(), '取消');
+      await tester.tap(_button('安装'));
       await tester.pump();
-      expect(presses, 0);
-      node.requestFocus();
-      await tester.pump();
+      expect(lg.installs, ['install']);
+      lg.installAnswer.complete('{"result":"uac_denied","text":""}');
+      await _pumps(tester);
+      expect(find.text('未获得管理员权限，未安装。'), findsOneWidget);
+      expect(_focusedButton(), '安装');
+
+      lg.installAnswer = Completer();
       await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-      expect(presses, 1);
-    });
+      await tester.pump();
+      expect(lg.installs, ['install', 'install']);
+      await unmount(tester);
+    },
+  );
 
-    testWidgets('the default scrim still scrolls a tall child', (tester) async {
-      await pumpLg(
-        tester,
-        const SizedBox(
-          width: 400,
-          height: 200,
-          child: LgDialogScrim(child: SizedBox(width: 100, height: 500)),
+  testWidgets(
+    'a long location keeps its last folder whole and is read out whole',
+    (tester) async {
+      const long = r'D:\工作资料\常用软件\远程工具\公司内部\某个很长的文件夹名称\Leapgate';
+      system.defaultPath = long;
+      await openFromCard(tester);
+      expect(find.text(r'\Leapgate'), findsOneWidget);
+      expect(_location(tester), long);
+      await unmount(tester);
+    },
+  );
+
+  testWidgets('a location in the program folder greys "安装" and says why', (
+    tester,
+  ) async {
+    system.defaultPath = r'C:\apps\leap gate\leapgate-0.4.0\Leapgate';
+    await openFromCard(tester);
+    expect(find.text('无法安装到 Leapgate 当前所在的文件夹。请选择其他位置。'), findsOneWidget);
+    expect(tester.widget<LgButton>(_button('安装')).onPressed, isNull);
+    expect(_focusedButton(), '修改');
+    // Which folder that is, on hover and for a screen reader (13 §4.2 block A).
+    expect(
+      find.bySemanticsLabel(RegExp(RegExp.escape(system.programFolder))),
+      findsOneWidget,
+    );
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    addTearDown(mouse.removePointer);
+    await mouse.moveTo(
+      tester.getCenter(find.text('无法安装到 Leapgate 当前所在的文件夹。请选择其他位置。')),
+    );
+    await tester.pump(const Duration(seconds: 2));
+    expect(find.text(system.programFolder), findsOneWidget);
+    await unmount(tester);
+  });
+
+  testWidgets('another unusable location has no folder to show', (
+    tester,
+  ) async {
+    system.defaultPath = r'Z:\Leapgate';
+    await openFromCard(tester);
+    expect(find.text('无法安装到网络位置或可移动磁盘。请选择本机磁盘上的文件夹。'), findsOneWidget);
+    expect(
+      find.bySemanticsLabel(RegExp(RegExp.escape(system.programFolder))),
+      findsNothing,
+    );
+    await unmount(tester);
+  });
+
+  testWidgets(
+    '远程打印 on the portable version opens the page with the printer ticked',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final overlays = TabOverlays();
+      final state = SettingsSectionState(
+        overlays: overlays,
+        saveFailedText: '无法保存设置',
+        locked: false,
+      );
+      addTearDown(state.dispose);
+      final status = LocalStatusModel()..installed = false;
+      addTearDown(status.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          locale: const Locale('zh'),
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          theme: buildLgTheme(
+            brightness: Brightness.light,
+            mode: LgMode.compact,
+          ),
+          home: Scaffold(
+            body: SettingsStatus(
+              status: status,
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child: Builder(
+                      builder: (context) => SingleChildScrollView(
+                        child: remotePrintingSection(
+                          AppLocalizations.of(context)!,
+                        ).build(context, state),
+                      ),
+                    ),
+                  ),
+                  Positioned.fill(child: Overlay(key: overlays.keyOf(null))),
+                ],
+              ),
+            ),
+          ),
         ),
       );
-      expect(find.byType(SingleChildScrollView), findsOneWidget);
-    });
-  });
+      expect(find.text('仅安装版支持远程打印'), findsOneWidget);
+      await tester.tap(find.widgetWithText(LgButton, '安装'));
+      await _pumps(tester);
+      expect(find.text('安装 Leapgate'), findsOneWidget);
+      expect(_ticked('安装 Leapgate 打印机'), isTrue);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
 }

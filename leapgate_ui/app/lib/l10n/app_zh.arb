@@ -1445,5 +1445,16 @@
   "termNoteOpenFailed": "无法打开终端：{text}",
   "termNoteOpenTimeout": "无法打开终端：响应超时",
   "termNoteError": "终端错误：{text}",
-  "termNoteReconnected": "已重新连接。原终端会话已结束，当前为新的终端会话。"
+  "termNoteReconnected": "已重新连接。原终端会话已结束，当前为新的终端会话。",
+  "installTitle": "安装 Leapgate",
+  "installLocation": "安装位置",
+  "installChange": "修改",
+  "installChangeLabel": "修改安装位置",
+  "installStartMenu": "创建开始菜单快捷方式",
+  "installDesktopShortcut": "创建桌面快捷方式",
+  "installPrinter": "安装 Leapgate 打印机",
+  "installNotLocalDisk": "无法安装到网络位置或可移动磁盘。请选择本机磁盘上的文件夹。",
+  "installPercent": "路径中不能包含“%”。请选择其他位置。",
+  "installInsideProgram": "无法安装到 Leapgate 当前所在的文件夹。请选择其他位置。",
+  "installNotEmpty": "此文件夹中的现有文件将在安装或卸载 Leapgate 时被删除"
 }

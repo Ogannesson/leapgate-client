@@ -36,9 +36,12 @@ Future<void> main(List<String> args) async {
   if (args.isNotEmpty && args.first == '--cm') {
     await runConnectionManager();
   } else if (args.contains('--install')) {
-    // The install page is round 3.
+    // Not an entry: the install page is a dialog on the home tab (R3-Q21, R3-Q22), so a
+    // process started with --install (or as ...install.exe) only says so and exits.
     lgBind.leapgateLog(
-        level: 2, msg: 'leapgate ui: --install is not supported yet');
+        level: 2,
+        msg: 'leapgate ui: --install is not supported, '
+            'install from the home page of the portable version');
     exit(0);
   } else {
     desktopType = DesktopType.main;
