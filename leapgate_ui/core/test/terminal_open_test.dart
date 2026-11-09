@@ -3,12 +3,12 @@ import 'package:flutter_hbb/leapgate/session.dart';
 import 'package:flutter_hbb/leapgate/terminal/terminals.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'fakes.dart';
+import 'terminal_fakes.dart';
 
 // Which terminal a device's tab has (R3-Q9, `LEAPGATE.md` §10.18). Device IDs here are made up.
 void main() {
   test('no terminal view, a normal one or the administrator\'s', () {
-    installFakes();
+    installTerminalFakes();
     final registry = appCore.sessions;
     expect(terminalOpenState('100200300'), TerminalOpen.none);
 
@@ -28,7 +28,7 @@ void main() {
   });
 
   test('closing the terminal view leaves none', () async {
-    installFakes();
+    installTerminalFakes();
     final registry = appCore.sessions;
     registry.open('100200300', ConnType.defaultConn);
     final terminal = registry.open('100200300', ConnType.terminal);

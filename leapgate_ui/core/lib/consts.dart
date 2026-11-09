@@ -630,4 +630,9 @@ const int kLeapgateExitPort = 65536;
 
 // M9b terminal (coder B): the terminal.
 
+/// Values of [kOptionAllowTerminalClipboardWrite] (upstream's): empty asks each time.
+const String kTerminalClipboardWriteUnconfigured = "";
+const String kTerminalClipboardWriteAllowed = "Y";
+const String kTerminalClipboardWriteDenied = "N";
+
 // M9c (coder T): the tunnels.

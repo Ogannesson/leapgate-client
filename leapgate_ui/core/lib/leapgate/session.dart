@@ -92,6 +92,11 @@ class FFI {
     if (connType == ConnType.fileTransfer) {
       connection.addListener(fileModel.jobs.onConnectionChanged);
     }
+    // Upstream `models/model.dart:368-369`, `:4426-4446`.
+    if (connType == ConnType.terminal) {
+      final tabs = terminals = TerminalTabs(this);
+      events.on('terminal_response', tabs.route);
+    }
   }
 
   /// The events of the copied models (upstream `FfiModel.startEventListener`,
@@ -201,6 +206,12 @@ class FFI {
         recordingModel
             .updateStatus(bind.sessionGetIsRecording(sessionId: sessionId));
       });
+    }
+    // Upstream sets it where a terminal is asked for (`common.dart:2251-2253`), so an open
+    // terminal window left it set for the next session; Rust clears it at the end of
+    // `session_add_sync` (`src/flutter_ffi.rs:175-179`), only for a terminal session.
+    if (terminalAdmin && connType == ConnType.terminal) {
+      bind.mainSetEnv(key: 'IS_TERMINAL_ADMIN', value: 'Y');
     }
     bind.sessionAddSync(
       sessionId: sessionId,
@@ -341,6 +352,7 @@ class FFI {
       if (connType == ConnType.fileTransfer) {
         await fileModel.close();
       }
+      await terminals?.close();
       if (connType == ConnType.defaultConn) {
         textureModel.onRemotePageDispose(true);
       } else if (connType == ConnType.viewCamera) {
