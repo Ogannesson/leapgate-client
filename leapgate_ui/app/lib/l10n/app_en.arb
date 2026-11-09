@@ -1620,5 +1620,16 @@
   "@queueStatusDeleteUnsent": {"placeholders": {"count": {"type": "int"}}},
   "queueNoteRestartFile": "The current file is larger than 4 GB and can't be resumed. It will start over.",
   "queueDetailsMoreItems": "{count, plural, =1{1 more item} other{{count} more items}}",
-  "@queueDetailsMoreItems": {"placeholders": {"count": {"type": "int"}}}
+  "@queueDetailsMoreItems": {"placeholders": {"count": {"type": "int"}}},
+  "installTitle": "Install Leapgate",
+  "installLocation": "Install location",
+  "installChange": "Change",
+  "installChangeLabel": "Change install location",
+  "installStartMenu": "Create Start menu shortcuts",
+  "installDesktopShortcut": "Create a desktop shortcut",
+  "installPrinter": "Install the Leapgate printer",
+  "installNotLocalDisk": "Can't install to a network location or removable drive. Choose a folder on a local drive.",
+  "installPercent": "The path can't contain \"%\". Choose another location.",
+  "installInsideProgram": "Can't install into the folder Leapgate is running from. Choose another location.",
+  "installNotEmpty": "Files already in this folder will be deleted when Leapgate is installed or uninstalled"
 }

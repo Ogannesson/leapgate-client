@@ -1397,5 +1397,16 @@
   "queueStatusDoneSkipped": "已完成，{count} 个文件已跳过",
   "queueStatusDeleteUnsent": "已完成，{count} 个项目未删除",
   "queueNoteRestartFile": "当前文件超过 4 GB，无法断点续传，将从头传输。",
-  "queueDetailsMoreItems": "另有 {count} 个项目"
+  "queueDetailsMoreItems": "另有 {count} 个项目",
+  "installTitle": "安装 Leapgate",
+  "installLocation": "安装位置",
+  "installChange": "修改",
+  "installChangeLabel": "修改安装位置",
+  "installStartMenu": "创建开始菜单快捷方式",
+  "installDesktopShortcut": "创建桌面快捷方式",
+  "installPrinter": "安装 Leapgate 打印机",
+  "installNotLocalDisk": "无法安装到网络位置或可移动磁盘。请选择本机磁盘上的文件夹。",
+  "installPercent": "路径中不能包含“%”。请选择其他位置。",
+  "installInsideProgram": "无法安装到 Leapgate 当前所在的文件夹。请选择其他位置。",
+  "installNotEmpty": "此文件夹中的现有文件将在安装或卸载 Leapgate 时被删除"
 }

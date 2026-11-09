@@ -426,10 +426,22 @@ class LgDialogAction {
     this.isDefault = false,
     this.semanticLabel,
     this.busy = false,
+    this.icon,
+    this.iconSize = 20,
+    this.focusNode,
   });
 
   final String label;
   final VoidCallback? onPressed;
+
+  /// The button's focus node, for a caller that must give the keyboard back to this button (the
+  /// install dialog after a failed install). Without it the button has one of its own.
+  final FocusNode? focusNode;
+
+  /// Before the label (the shield on "安装", which asks for administrator
+  /// permission, at [iconSize] 18). A busy button shows its spinner there.
+  final LgIcons? icon;
+  final double iconSize;
 
   /// The request this button started is on its way (see [LgButton.busy]); give
   /// [label] the words for it ("正在添加…").
@@ -454,11 +466,22 @@ class LgDialogAction {
 /// ground and puts [child] in the middle. Clicks outside the card do nothing;
 /// Esc calls [onEscape]. What it covers (the whole window, one tab) is decided
 /// by where the caller puts it.
+///
+/// With [scrollable] false the layer does not scroll: [child] gets the height of
+/// the area less 24 px on every side as its largest and must keep within it
+/// itself (the install dialog scrolls its middle and keeps its head and
+/// buttons in view, `.sheet.inst`).
 class LgDialogScrim extends StatelessWidget {
-  const LgDialogScrim({super.key, required this.child, this.onEscape});
+  const LgDialogScrim({
+    super.key,
+    required this.child,
+    this.onEscape,
+    this.scrollable = true,
+  });
 
   final Widget child;
   final VoidCallback? onEscape;
+  final bool scrollable;
 
   @override
   Widget build(BuildContext context) {
@@ -488,12 +511,18 @@ class LgDialogScrim extends StatelessWidget {
                   onTap: () {},
                   child: ColoredBox(color: c.scrim),
                 ),
-                Center(
-                  child: SingleChildScrollView(
+                if (scrollable)
+                  Center(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.all(LgSpace.s6),
+                      child: child,
+                    ),
+                  )
+                else
+                  Padding(
                     padding: const EdgeInsets.all(LgSpace.s6),
-                    child: child,
+                    child: Center(child: child),
                   ),
-                ),
               ],
             ),
           ),
@@ -552,6 +581,9 @@ class LgConfirmDialog extends StatelessWidget {
             semanticLabel: a.semanticLabel,
             kind: a.kind,
             busy: a.busy,
+            icon: a.icon,
+            iconSize: a.iconSize,
+            focusNode: a.focusNode,
             autofocus: a == defaultAction,
             onPressed: a.onPressed,
           ),

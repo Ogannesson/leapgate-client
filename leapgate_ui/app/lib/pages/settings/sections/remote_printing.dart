@@ -8,9 +8,11 @@ import '../../../icons/lg_icon.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../shell/navigation.dart';
 import '../../../widgets/lg_settings_rows.dart';
+import '../../home/install_dialog.dart';
 import '../dialogs/server_dialog.dart' show ServerErrorDetail;
 import '../settings_flow.dart';
 import '../settings_registry.dart';
+import '../settings_status.dart';
 
 /// Item ids of this section.
 const _printer = 'printer';
@@ -110,8 +112,16 @@ class _RemotePrintingBodyState extends State<_RemotePrintingBody> {
                       onPressed: _model.install,
                     ),
                   ]),
-                // No install page in the new UI yet (03 §5.2, the third round).
-                PrinterState.portable ||
+                // The install page with the printer ticked (R3-Q20). No shield: the page asks
+                // for administrator permission, not this button.
+                PrinterState.portable => LgSettingsValueActions(actions: [
+                    LgSettingsAction(
+                      label: l10n.homeInstallButton,
+                      onPressed: () => showInstallDialog(
+                          ctx.overlays, SettingsStatus.of(context),
+                          printer: true),
+                    ),
+                  ]),
                 PrinterState.installing ||
                 PrinterState.ready =>
                   null,

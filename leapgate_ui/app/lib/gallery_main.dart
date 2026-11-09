@@ -48,6 +48,7 @@ import 'widgets/lg_file_marks.dart';
 import 'widgets/lg_file_pane.dart';
 import 'widgets/lg_file_queue.dart';
 import 'widgets/lg_form_dialog.dart';
+import 'widgets/lg_install_dialog.dart';
 import 'widgets/lg_list_chrome.dart';
 import 'widgets/lg_login_dialog.dart';
 import 'widgets/lg_menu.dart';
