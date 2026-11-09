@@ -15,6 +15,7 @@ import '../icons/lg_icon.dart';
 import '../theme/lg_tokens.dart';
 import 'lg_menu.dart';
 import 'lg_pressable.dart';
+import 'lg_tooltip.dart';
 import 'lg_view_bar.dart';
 
 /// One tab: the name ("终端 2") and the name of its close button ("关闭终端 2"; the mockup says
@@ -48,6 +49,8 @@ class LgTermTabs extends StatefulWidget {
     required this.newLabel,
     required this.allLabel,
     this.newTooltip,
+    this.closeTooltip,
+    this.closeEnabled = true,
   });
 
   final List<LgTermTabItem> tabs;
@@ -55,6 +58,14 @@ class LgTermTabs extends StatefulWidget {
   final ValueChanged<int> onSelect;
   final ValueChanged<int> onClose;
   final VoidCallback? onNew;
+
+  /// "关闭终端（Ctrl+Shift+W）": what the pointer shows on each close button; none when null.
+  /// The name a reader gets stays the tab's [LgTermTabItem.closeLabel].
+  final String? closeTooltip;
+
+  /// False greys every close button (the connection is down: a remote terminal cannot be
+  /// closed); the tabs can still be selected.
+  final bool closeEnabled;
 
   /// "终端": the name of the strip.
   final String semanticLabel;
@@ -179,7 +190,8 @@ class _LgTermTabsState extends State<LgTermTabs> {
               item: tab,
               selected: i == widget.selected,
               onSelect: () => widget.onSelect(i),
-              onClose: () => widget.onClose(i),
+              onClose: widget.closeEnabled ? () => widget.onClose(i) : null,
+              closeTooltip: widget.closeTooltip,
             ),
           ],
         ],
@@ -265,12 +277,19 @@ class _Tab extends StatelessWidget {
     required this.selected,
     required this.onSelect,
     required this.onClose,
+    this.closeTooltip,
   });
 
   final LgTermTabItem item;
   final bool selected;
   final VoidCallback onSelect;
-  final VoidCallback onClose;
+  final VoidCallback? onClose;
+  final String? closeTooltip;
+
+  Widget _withTooltip(Widget child) {
+    final tip = closeTooltip;
+    return tip == null ? child : LgTooltip(message: tip, child: child);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -339,21 +358,27 @@ class _Tab extends StatelessWidget {
         Positioned(
           right: LgSpace.s1,
           top: (t.sizes.button - closeSide) / 2,
-          child: LgPressable(
-            onPressed: onClose,
-            semanticLabel: item.closeLabel,
-            builder: (context, states) => LgFocusRing(
-              show: states.contains(WidgetState.focused),
-              radius: BorderRadius.circular(LgRadius.r6),
-              child: Container(
-                width: closeSide,
-                height: closeSide,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: lgStateOverlay(c, states),
-                  borderRadius: BorderRadius.circular(LgRadius.r6),
+          child: _withTooltip(
+            LgPressable(
+              onPressed: onClose,
+              semanticLabel: item.closeLabel,
+              builder: (context, states) => Opacity(
+                // Greyed as the bar's other icon buttons are.
+                opacity: states.contains(WidgetState.disabled) ? .45 : 1,
+                child: LgFocusRing(
+                  show: states.contains(WidgetState.focused),
+                  radius: BorderRadius.circular(LgRadius.r6),
+                  child: Container(
+                    width: closeSide,
+                    height: closeSide,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: lgStateOverlay(c, states),
+                      borderRadius: BorderRadius.circular(LgRadius.r6),
+                    ),
+                    child: LgIcon(LgIcons.x, size: 14, color: c.text2),
+                  ),
                 ),
-                child: LgIcon(LgIcons.x, size: 14, color: c.text2),
               ),
             ),
           ),

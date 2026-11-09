@@ -218,18 +218,21 @@ class _TerminalViewPageState extends State<TerminalViewPage> {
                       middle: LgContextMenuRegion(
                         items: _menuItems(l10n),
                         child: LgTermTabs(
-                          // Empty while the connection panel is up (13 §2.2.2 block A).
+                          // Empty until the first connection makes the first terminal; while
+                          // reconnecting they stay listed and can be selected, the × greyed
+                          // (13 §2.2.2 block A).
                           tabs: [
-                            if (connected)
-                              for (final m in tabs.terminals)
-                                LgTermTabItem(
-                                  label: l10n.termTab(m.terminalId),
-                                  closeLabel: l10n.termCloseN(m.terminalId),
-                                ),
+                            for (final m in tabs.terminals)
+                              LgTermTabItem(
+                                label: l10n.termTab(m.terminalId),
+                                closeLabel: l10n.termCloseN(m.terminalId),
+                              ),
                           ],
                           selected: tabs.selected,
                           onSelect: tabs.select,
                           onClose: (i) => _close(tabs.terminals[i]),
+                          closeEnabled: connected,
+                          closeTooltip: l10n.termCloseTip,
                           onNew: tabs.canAdd ? tabs.add : null,
                           semanticLabel: l10n.termTabs,
                           newLabel: l10n.termNew,

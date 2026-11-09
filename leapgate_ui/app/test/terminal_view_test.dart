@@ -13,6 +13,7 @@ import 'package:leapgate_ui/pages/terminal/terminal_view.dart';
 import 'package:leapgate_ui/shell/tab_shortcuts.dart';
 import 'package:leapgate_ui/theme/lg_theme.dart';
 import 'package:leapgate_ui/theme/lg_tokens.dart';
+import 'package:leapgate_ui/widgets/lg_tooltip.dart';
 import 'package:leapgate_ui/widgets/lg_view_bar.dart';
 import 'package:leapgate_ui/widgets/lg_feedback.dart';
 import 'package:leapgate_ui/widgets/lg_menu.dart';
@@ -181,6 +182,49 @@ void main() {
       await tester.pump();
       expect([for (final m in tabs.terminals) m.terminalId], [3]);
       expect(v.disconnects, 1);
+    },
+  );
+
+  testWidgets(
+    'the × hovers with its key; the connection lost: the tabs stay and switch, their × '
+    'and "+" greyed',
+    (tester) async {
+      final v = await _pump(tester);
+      final tabs = v.ffi.terminals!;
+      tabs.add();
+      await tester.pump();
+      // Each × is named for its terminal and hovers with the key.
+      expect(_button('关闭终端 1'), findsOneWidget);
+      expect(
+        find.byWidgetPredicate(
+          (w) => w is LgTooltip && w.message == '关闭终端（Ctrl+Shift+W）',
+        ),
+        findsNWidgets(2),
+      );
+      await v.ffi.events.dispatch(
+        msgbox(
+          'error',
+          'Connection Error',
+          'Connection reset by peer',
+          hasRetry: true,
+        ),
+      );
+      await tester.pump();
+      expect(find.text('终端 1'), findsOneWidget);
+      expect(find.text('终端 2'), findsOneWidget);
+      expect(_plus(tester).onPressed, isNull);
+
+      await tester.tap(find.text('终端 1'));
+      await tester.pump();
+      expect(tabs.selected, 0);
+      await tester.tap(_button('关闭终端 2'), warnIfMissed: false);
+      await tester.pump();
+      expect(tabs.terminals, hasLength(2));
+      expect(v.bind.terminalIds(#sessionCloseTerminal), isEmpty);
+      expect(v.disconnects, 0);
+      // The retry countdown.
+      await appCore.sessions.close(v.ffi);
+      await tester.pump(const Duration(seconds: 10));
     },
   );
 
