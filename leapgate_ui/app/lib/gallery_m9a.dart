@@ -32,6 +32,7 @@ Widget _m9aDialog({
   String path = _m9aPath,
   LgPathTone tone = LgPathTone.normal,
   String? message,
+  String? messageTooltip,
   bool printer = false,
   bool sessions = false,
   String? fail,
@@ -52,6 +53,7 @@ Widget _m9aDialog({
       changeAutofocus: changeFocus,
       tone: tone,
       message: message,
+      messageTooltip: messageTooltip,
     ),
     options: [
       LgOptionCheck(
@@ -179,6 +181,8 @@ List<Specimen> _m9aSpecimens() {
       path: r'C:\Users\zhangsan\Downloads\leapgate-0.4.0\Leapgate',
       tone: LgPathTone.error,
       message: '无法安装到 Leapgate 当前所在的文件夹。请选择其他位置。',
+      // p11-bad-self-light: the pointer is on the red line, which shows the folder.
+      messageTooltip: r'C:\Users\zhangsan\Downloads\leapgate-0.4.0',
       installEnabled: false,
       changeFocus: true,
     ),

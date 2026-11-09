@@ -26,6 +26,7 @@ LgInstallPathRow _row({
   VoidCallback? onChange,
   LgPathTone tone = LgPathTone.normal,
   String? message,
+  String? messageTooltip,
 }) => LgInstallPathRow(
   label: '安装位置',
   path: path,
@@ -34,6 +35,7 @@ LgInstallPathRow _row({
   onChange: onChange,
   tone: tone,
   message: message,
+  messageTooltip: messageTooltip,
 );
 
 LgInstallDialog _dialog({
@@ -248,6 +250,75 @@ void main() {
           findsOneWidget,
         );
       }
+    });
+
+    group('messageTooltip', () {
+      const text = '无法安装到 Leapgate 当前所在的文件夹。请选择其他位置。';
+      const folder = r'C:\Users\zhangsan\Downloads\leapgate-0.4.0';
+
+      Widget row({String? tooltip, String path = _path}) => SizedBox(
+        width: 640,
+        child: _row(
+          path: path,
+          tone: LgPathTone.error,
+          message: text,
+          messageTooltip: tooltip,
+        ),
+      );
+
+      testWidgets('shows the folder while the pointer is on the red line', (
+        tester,
+      ) async {
+        await pumpLg(tester, row(tooltip: folder));
+        await hover(tester, find.text(text));
+        await tester.pump(const Duration(seconds: 1));
+        expect(find.text(folder), findsOneWidget);
+        // The text is still there once, and the line looks as it did: icon, then the text.
+        expect(find.text(text), findsOneWidget);
+      });
+
+      testWidgets('without it the line has no tooltip', (tester) async {
+        await pumpLg(tester, row());
+        await hover(tester, find.text(text));
+        await tester.pump(const Duration(seconds: 1));
+        expect(find.text(folder), findsNothing);
+      });
+
+      testWidgets('does not stack on the tooltip of a cut path', (
+        tester,
+      ) async {
+        await pumpLg(
+          tester,
+          SizedBox(
+            width: 480,
+            child: _row(
+              path: _longPath,
+              tone: LgPathTone.error,
+              message: text,
+              messageTooltip: folder,
+            ),
+          ),
+        );
+        await hover(tester, find.text(text));
+        await tester.pump(const Duration(seconds: 1));
+        // The pointer is on the line: the folder shows, the cut path does not.
+        expect(find.text(folder), findsOneWidget);
+        expect(find.text(_longPath), findsNothing);
+      });
+
+      testWidgets('the folder is read after the message', (tester) async {
+        final handle = tester.ensureSemantics();
+        await pumpLg(tester, row(tooltip: folder));
+        expect(find.bySemanticsLabel('$text $folder'), findsOneWidget);
+        handle.dispose();
+      });
+
+      testWidgets('the message is read as before without it', (tester) async {
+        final handle = tester.ensureSemantics();
+        await pumpLg(tester, row());
+        expect(find.bySemanticsLabel(text), findsOneWidget);
+        handle.dispose();
+      });
     });
 
     testWidgets(
