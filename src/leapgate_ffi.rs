@@ -461,3 +461,60 @@ pub fn leapgate_session_display_names(session_id: SessionID) -> SyncReturn<Strin
     });
     SyncReturn(names.unwrap_or_else(|| "[]".to_owned()))
 }
+
+// M9c tunnel cards, desktop only. Adding and removing forwards, stopping, a new RDP connection,
+// the saved forwards and the RDP settings are the first block's exports.
+
+/// A TCP tunnel (`rdp` false) or RDP card's session, registered as a card; then `session_start`
+/// as usual (the prompts are on that stream). `{}`, or `{"error":"already"}` (the device has a
+/// port forward session, an exit card's or a closing tunnel card's; for RDP, an RDP session),
+/// `{"error":"invalid_id"}`, `{"error":"other","text":…}`.
+pub fn leapgate_tunnel_session_add(
+    session_id: SessionID,
+    id: String,
+    rdp: bool,
+    password: String,
+    is_shared_password: bool,
+    conn_token: Option<String>,
+    force_relay: bool,
+) -> SyncReturn<String> {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    return SyncReturn(crate::leapgate_hooks::tunnel::session_add(
+        &session_id,
+        &id,
+        rdp,
+        password,
+        is_shared_password,
+        conn_token,
+        force_relay,
+    ));
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        let _ = (session_id, id, rdp, password, is_shared_password, conn_token, force_relay);
+        SyncReturn(r#"{"error":"other","text":"not supported"}"#.to_owned())
+    }
+}
+
+/// `{"id","session_id","kind","port","state",…}` per row change, `{"id","session_id","kind",
+/// "state":"closed"}` when a card ends (`LEAPGATE.md` §10.18); each row's last state first. A new
+/// subscription replaces the previous one.
+pub fn leapgate_tunnel_events(sink: StreamSink<String>) -> ResultType<()> {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    crate::leapgate_hooks::tunnel::set_events(sink);
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    let _ = sink;
+    Ok(())
+}
+
+/// "重试" and "重新连接" of a row (`port` is the local port, 0 for RDP): reopens a closed
+/// listener and logs in, or logs in at once while interrupted; nothing while in use or
+/// connecting. `false` without such a card or row.
+pub fn leapgate_tunnel_retry(session_id: SessionID, port: i32) -> SyncReturn<bool> {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    return SyncReturn(crate::leapgate_hooks::tunnel::retry(&session_id, port));
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        let _ = (session_id, port);
+        SyncReturn(false)
+    }
+}

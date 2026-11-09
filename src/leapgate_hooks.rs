@@ -8,6 +8,8 @@ pub(crate) mod install;
 pub(crate) mod ipc;
 #[cfg(any(target_os = "android", target_os = "ios", feature = "flutter"))]
 pub(crate) mod settings;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub(crate) mod tunnel;
 
 use crate::{
     client::{Client, Interface},

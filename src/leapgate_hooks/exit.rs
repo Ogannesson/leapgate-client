@@ -291,13 +291,47 @@ pub(crate) mod cards {
         conn_token: Option<String>,
         force_relay: bool,
     ) -> String {
-        use crate::flutter::{get_adapter_luid, sessions, FlutterHandler};
         use hbb_common::{rendezvous_proto::ConnType, serde_json::json};
-        use std::sync::{atomic::AtomicUsize, Arc, RwLock};
         if !(1..=65535).contains(&port) {
             return json!({ "error": "invalid_port" }).to_string();
         }
-        if sessions::get_session_by_peer_id(id.to_owned(), ConnType::PORT_FORWARD).is_some() {
+        add_session(
+            session_id,
+            id,
+            ConnType::PORT_FORWARD,
+            vec![
+                port.to_string(),
+                exit::SENTINEL_HOST.to_owned(),
+                exit::SENTINEL_PORT.to_string(),
+            ],
+            password,
+            is_shared_password,
+            conn_token,
+            force_relay,
+            || register(id, session_id.to_string()),
+        )
+    }
+
+    /// A card's session, the exit's or a tunnel's (M9c): upstream's `session_add` with `args`
+    /// as given and without `LocalConfig::set_remote_id`. `register` registers the card once the
+    /// session is known to be good, before it goes into the session table. `{}`, or the export's
+    /// error: `already` (the device has a session of `conn_type`), `invalid_id`, `other`.
+    #[cfg(feature = "flutter")]
+    pub(in crate::leapgate_hooks) fn add_session(
+        session_id: &crate::flutter_ffi::SessionID,
+        id: &str,
+        conn_type: hbb_common::rendezvous_proto::ConnType,
+        args: Vec<String>,
+        password: String,
+        is_shared_password: bool,
+        conn_token: Option<String>,
+        force_relay: bool,
+        register: impl FnOnce(),
+    ) -> String {
+        use crate::flutter::{get_adapter_luid, sessions, FlutterHandler};
+        use hbb_common::serde_json::json;
+        use std::sync::{atomic::AtomicUsize, Arc, RwLock};
+        if sessions::get_session_by_peer_id(id.to_owned(), conn_type).is_some() {
             return json!({ "error": "already" }).to_string();
         }
         if sessions::get_session_by_session_id(session_id).is_some() {
@@ -310,11 +344,7 @@ pub(crate) mod cards {
         };
         let session: Session<FlutterHandler> = Session {
             password: preset_password,
-            args: vec![
-                port.to_string(),
-                exit::SENTINEL_HOST.to_owned(),
-                exit::SENTINEL_PORT.to_string(),
-            ],
+            args,
             server_keyboard_enabled: Arc::new(RwLock::new(true)),
             server_file_transfer_enabled: Arc::new(RwLock::new(true)),
             server_clipboard_enabled: Arc::new(RwLock::new(true)),
@@ -323,7 +353,7 @@ pub(crate) mod cards {
         };
         session.lc.write().unwrap().initialize(
             id.to_owned(),
-            ConnType::PORT_FORWARD,
+            conn_type,
             None,
             force_relay,
             get_adapter_luid(),
@@ -335,8 +365,8 @@ pub(crate) mod cards {
         if session.get_id() != id {
             return json!({ "error": "invalid_id" }).to_string();
         }
-        register(id, session_id.to_string());
-        sessions::insert_session(*session_id, ConnType::PORT_FORWARD, Arc::new(session));
+        register();
+        sessions::insert_session(*session_id, conn_type, Arc::new(session));
         "{}".to_owned()
     }
 
