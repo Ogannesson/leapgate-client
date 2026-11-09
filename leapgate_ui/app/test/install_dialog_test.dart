@@ -5,8 +5,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_hbb/leapgate/install_page.dart';
 import 'package:flutter_hbb/leapgate/local_status.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:leapgate_ui/icons/lg_icon.dart';
 import 'package:leapgate_ui/l10n/app_localizations.dart';
-import 'package:leapgate_ui/pages/home/install_dialog.dart';
 import 'package:leapgate_ui/pages/settings/sections/remote_printing.dart';
 import 'package:leapgate_ui/pages/settings/settings_section_state.dart';
 import 'package:leapgate_ui/pages/settings/settings_status.dart';
@@ -14,8 +14,7 @@ import 'package:leapgate_ui/shell/tab_overlays.dart';
 import 'package:leapgate_ui/theme/lg_theme.dart';
 import 'package:leapgate_ui/theme/lg_tokens.dart';
 import 'package:leapgate_ui/widgets/lg_button.dart';
-import 'package:leapgate_ui/widgets/lg_feedback.dart';
-import 'package:leapgate_ui/widgets/lg_selection.dart';
+import 'package:leapgate_ui/widgets/lg_install_dialog.dart';
 import 'package:win32/win32.dart' as win32;
 
 import 'home_fakes.dart';
@@ -48,21 +47,25 @@ class _System implements InstallSystem {
 /// The line about what ends, whatever M9c makes of its wording.
 final _sessionsLine = find.textContaining('Leapgate 将关闭并重新打开');
 
-LgCheckbox _checkbox(String label) =>
+LgOptionCheck _checkbox(String label) =>
     find
-            .byWidgetPredicate((w) => w is LgCheckbox && w.label == label)
+            .byWidgetPredicate((w) => w is LgOptionCheck && w.label == label)
             .evaluate()
             .single
             .widget
-        as LgCheckbox;
+        as LgOptionCheck;
 
 const _options = ['创建开始菜单快捷方式', '创建桌面快捷方式', '安装 Leapgate 打印机'];
 
 /// A button of the install page (the hint card has an "安装" too).
 Finder _button(String label) => find.descendant(
-  of: find.byType(LgConfirmDialog),
+  of: find.byType(LgInstallDialog),
   matching: find.widgetWithText(LgButton, label),
 );
+
+/// The location as a screen reader gets it: the row is named "安装位置", its value is the path.
+String? _location(WidgetTester tester) =>
+    tester.getSemantics(find.bySemanticsLabel('安装位置')).value;
 
 bool _ticked(String label) => _checkbox(label).value;
 
@@ -112,11 +115,9 @@ void main() {
     (tester) async {
       lg.installAnswer = Completer();
       await openFromCard(tester);
-      // Read out whole, however much of it fits.
-      expect(
-        find.bySemanticsLabel(r'C:\Program Files\Leapgate'),
-        findsOneWidget,
-      );
+      expect(_location(tester), r'C:\Program Files\Leapgate');
+      // It asks for administrator permission: the shield (02 §1.2.6).
+      expect(tester.widget<LgButton>(_button('安装')).icon, LgIcons.uac);
       expect(_ticked('创建开始菜单快捷方式'), isTrue);
       expect(_ticked('创建桌面快捷方式'), isTrue);
       expect(_ticked('安装 Leapgate 打印机'), isFalse);
@@ -208,33 +209,17 @@ void main() {
     await unmount(tester);
   });
 
-  testWidgets('a long location is cut in the middle and read out whole', (
-    tester,
-  ) async {
-    const long = r'D:\工作资料\常用软件\远程工具\公司内部\某个很长的文件夹名称\Leapgate';
-    system.defaultPath = long;
-    await openFromCard(tester);
-    final shown = tester
-        .widget<Text>(
-          find.byWidgetPredicate(
-            (w) => w is Text && (w.data?.startsWith(r'D:\') ?? false),
-          ),
-        )
-        .data!;
-    expect(shown, contains('…'));
-    expect(shown, endsWith('Leapgate'));
-    expect(shown.length, lessThan(long.length));
-    expect(find.bySemanticsLabel(long), findsOneWidget);
-    await unmount(tester);
-  });
-
-  test('the cut never splits a surrogate pair', () {
-    // a b 😀 c d: a head of three units would end inside the pair.
-    expect(cutMiddle('ab😀cd', 5), 'ab…cd');
-    // a b c 😀 d: a tail of two units would start inside the pair.
-    expect(cutMiddle('abc😀d', 4), 'ab…d');
-    expect(cutMiddle('abcdef', 4), 'ab…ef');
-  });
+  testWidgets(
+    'a long location keeps its last folder whole and is read out whole',
+    (tester) async {
+      const long = r'D:\工作资料\常用软件\远程工具\公司内部\某个很长的文件夹名称\Leapgate';
+      system.defaultPath = long;
+      await openFromCard(tester);
+      expect(find.text(r'\Leapgate'), findsOneWidget);
+      expect(_location(tester), long);
+      await unmount(tester);
+    },
+  );
 
   testWidgets('a location in the program folder greys "安装" and says why', (
     tester,

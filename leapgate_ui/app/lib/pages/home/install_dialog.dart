@@ -1,19 +1,18 @@
 // The install page (P11, 13 §4, M9a): a dialog over the home tab (R3-Q21), opened from the
-// hint card's "安装" and from 远程打印 on the portable version (R3-Q20). Coder I's; it is built
-// from the components there are, the designer's take their place when M9a is put together.
+// hint card's "安装" and from 远程打印 on the portable version (R3-Q20). Coder I's, on the
+// designer's install dialog parts (`widgets/lg_install_dialog.dart`).
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/leapgate/install_page.dart';
 import 'package:flutter_hbb/leapgate/local_status.dart';
 
+import '../../icons/lg_icon.dart';
 import '../../l10n/app_localizations.dart';
 import '../../shell/tab_overlays.dart';
-import '../../theme/lg_tokens.dart';
 import '../../widgets/lg_banner.dart';
 import '../../widgets/lg_button.dart';
 import '../../widgets/lg_feedback.dart';
-import '../../widgets/lg_selection.dart';
-import '../../widgets/lg_tooltip.dart';
+import '../../widgets/lg_install_dialog.dart';
 
 /// Opens the install page over the home tab; [printer] ticks the printer (from 远程打印).
 /// Completes when it closes: "取消" or Esc. On success this process is ended instead.
@@ -62,6 +61,39 @@ class _InstallDialogState extends State<InstallDialog> {
     widget.model.sessionsChanges,
   ]);
 
+  /// A failure is added under the options: it is scrolled into view when it appears.
+  final _scroll = ScrollController();
+  InstallFailure? _failure;
+
+  @override
+  void initState() {
+    super.initState();
+    _failure = widget.model.failure;
+    widget.model.status.addListener(_onStatus);
+  }
+
+  @override
+  void dispose() {
+    widget.model.status.removeListener(_onStatus);
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  void _onStatus() {
+    final failure = widget.model.failure;
+    if (failure == null || identical(failure, _failure)) return;
+    _failure = failure;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scroll.hasClients) {
+        _scroll.animateTo(
+          _scroll.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
   Future<void> _change() async {
     final folder = await FilePicker.platform.getDirectoryPath(
       initialDirectory: widget.model.pickerStart,
@@ -77,74 +109,82 @@ class _InstallDialogState extends State<InstallDialog> {
       listenable: _changes,
       builder: (context, _) {
         final l10n = AppLocalizations.of(context)!;
-        final t = LgTokens.of(context);
-        final c = t.colors;
         final busy = status.installing;
         final failure = model.failure;
+        final issue = model.issue;
         return LgDialogScrim(
           onEscape: busy ? null : widget.close,
-          child: LgConfirmDialog(
+          scrollable: false,
+          child: LgInstallDialog(
             title: l10n.installTitle,
+            scrollController: _scroll,
             actions: [
               LgDialogAction(
                 label: l10n.homeCancel,
                 onPressed: busy ? null : widget.close,
                 isDefault: _focus == _Focus.cancel,
               ),
-              // TODO(M9 整合): the shield (02 §1.2.6) with the designer's dialog button.
+              // Asks for administrator permission (02 §1.2.6).
               LgDialogAction(
                 label: busy ? l10n.homeInstalling : l10n.homeInstallButton,
                 kind: LgButtonKind.primary,
+                icon: LgIcons.uac,
+                iconSize: 18,
                 busy: busy,
                 onPressed: model.blocked || busy ? null : model.install,
                 isDefault: _focus == _Focus.install,
               ),
             ],
-            children: [
-              _Location(
-                model: model,
-                onChange: busy ? null : _change,
-                autofocus: _focus == _Focus.change,
+            pathRow: LgInstallPathRow(
+              label: l10n.installLocation,
+              path: model.path,
+              changeLabel: l10n.installChange,
+              changeSemanticLabel: l10n.installChangeLabel,
+              onChange: busy ? null : _change,
+              changeAutofocus: _focus == _Focus.change,
+              tone: switch (issue) {
+                null => LgPathTone.normal,
+                InstallLocationIssue.notEmpty => LgPathTone.warning,
+                _ => LgPathTone.error,
+              },
+              message: switch (issue) {
+                null => null,
+                InstallLocationIssue.notLocalDisk => l10n.installNotLocalDisk,
+                InstallLocationIssue.percent => l10n.installPercent,
+                InstallLocationIssue.insideProgram => l10n.installInsideProgram,
+                InstallLocationIssue.notEmpty => l10n.installNotEmpty,
+              },
+            ),
+            options: [
+              LgOptionCheck(
+                value: model.startMenu,
+                label: l10n.installStartMenu,
+                onChanged: busy ? null : model.setStartMenu,
               ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  LgCheckbox(
-                    value: model.startMenu,
-                    onChanged: busy ? null : model.setStartMenu,
-                    label: l10n.installStartMenu,
-                  ),
-                  LgCheckbox(
-                    value: model.desktopShortcut,
-                    onChanged: busy ? null : model.setDesktopShortcut,
-                    label: l10n.installDesktopShortcut,
-                  ),
-                  LgCheckbox(
-                    value: model.printer,
-                    onChanged: busy ? null : model.setPrinter,
-                    label: l10n.installPrinter,
-                  ),
-                  // Under the label, as 远程打印 has it word for word (01 §7.6 item 7).
-                  Padding(
-                    padding: const EdgeInsets.only(left: 20 + LgSpace.s3),
-                    child: Text(
-                      l10n.settingsRemotePrintPrinterNote,
-                      style: t.textS.copyWith(color: c.text2),
-                    ),
-                  ),
-                ],
+              LgOptionCheck(
+                value: model.desktopShortcut,
+                label: l10n.installDesktopShortcut,
+                onChanged: busy ? null : model.setDesktopShortcut,
               ),
-              // The license line waits for the brand decisions (13 §4.2 block C): not shown,
-              // as on the About section.
+              // The note is 远程打印's word for word (01 §7.6 item 7).
+              LgOptionCheck(
+                value: model.printer,
+                label: l10n.installPrinter,
+                description: l10n.settingsRemotePrintPrinterNote,
+                onChanged: busy ? null : model.setPrinter,
+              ),
+            ],
+            // The license line waits for the brand decisions (13 §4.2 block C): not shown, as
+            // on the About section.
+            banners: [
               if (model.sessionsEnd)
-                Text(
-                  l10n.settingsServiceStartBody,
-                  style: t.textM.copyWith(color: c.text),
+                LgInstallBanner(
+                  tone: LgTone.warning,
+                  text: l10n.settingsServiceStartBody,
                 ),
               if (failure != null)
-                LgBanner(
+                LgInstallBanner(
                   tone: LgTone.error,
-                  slim: true,
                   text: switch (failure) {
                     InstallFailure(uacDenied: true) =>
                       l10n.homeInstallUacDenied,
@@ -160,142 +200,4 @@ class _InstallDialogState extends State<InstallDialog> {
       },
     );
   }
-}
-
-/// Block A: "安装位置", the path with "修改", and what is wrong with it.
-class _Location extends StatelessWidget {
-  const _Location({
-    required this.model,
-    required this.onChange,
-    required this.autofocus,
-  });
-
-  final InstallPageModel model;
-  final VoidCallback? onChange;
-  final bool autofocus;
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context)!;
-    final t = LgTokens.of(context);
-    final c = t.colors;
-    final issue = model.issue;
-    final issueText = switch (issue) {
-      null => null,
-      InstallLocationIssue.notLocalDisk => l10n.installNotLocalDisk,
-      InstallLocationIssue.percent => l10n.installPercent,
-      InstallLocationIssue.insideProgram => l10n.installInsideProgram,
-      InstallLocationIssue.notEmpty => l10n.installNotEmpty,
-    };
-    final issueLine = issueText == null
-        ? null
-        : Text(
-            issueText,
-            style: t.textS.copyWith(
-              color: issue == InstallLocationIssue.notEmpty
-                  ? c.warning
-                  : c.error,
-            ),
-          );
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          l10n.installLocation,
-          style: t.textS.copyWith(color: c.text2, fontWeight: FontWeight.w700),
-        ),
-        const SizedBox(height: LgSpace.s1),
-        Row(
-          children: [
-            Expanded(child: _MiddleEllipsisPath(model.path)),
-            const SizedBox(width: LgSpace.s3),
-            LgButton(
-              label: l10n.installChange,
-              semanticLabel: l10n.installChangeLabel,
-              autofocus: autofocus,
-              onPressed: onChange,
-            ),
-          ],
-        ),
-        if (issueLine != null) ...[
-          const SizedBox(height: LgSpace.s1),
-          // The folder Leapgate runs from is not the one the user downloaded it to when it is
-          // the portable single file: hovering says which.
-          issue == InstallLocationIssue.insideProgram
-              ? LgTooltip(message: model.programFolder, child: issueLine)
-              : issueLine,
-        ],
-      ],
-    );
-  }
-}
-
-/// A path on one line, cut in the middle when it does not fit (13 §4.2 block A); hovering shows
-/// it whole.
-class _MiddleEllipsisPath extends StatelessWidget {
-  const _MiddleEllipsisPath(this.path);
-
-  final String path;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = LgTokens.of(context);
-    final style = t.textM.copyWith(color: t.colors.text);
-    final direction = Directionality.of(context);
-    final scaler = MediaQuery.textScalerOf(context);
-    return Semantics(
-      label: path,
-      excludeSemantics: true,
-      child: LgTooltip(
-        message: path,
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            bool fits(String s) {
-              final painter = TextPainter(
-                text: TextSpan(text: s, style: style),
-                textDirection: direction,
-                textScaler: scaler,
-                maxLines: 1,
-              )..layout();
-              final width = painter.width;
-              painter.dispose();
-              return width <= constraints.maxWidth;
-            }
-
-            var shown = path;
-            if (!fits(path)) {
-              // The most characters kept, half from each end, that fit with the "…".
-              var low = 0;
-              var high = path.length;
-              while (low < high) {
-                final keep = (low + high + 1) ~/ 2;
-                if (fits(_cut(keep))) {
-                  low = keep;
-                } else {
-                  high = keep - 1;
-                }
-              }
-              shown = _cut(low);
-            }
-            return Text(shown, style: style, maxLines: 1, softWrap: false);
-          },
-        ),
-      ),
-    );
-  }
-
-  String _cut(int keep) => cutMiddle(path, keep);
-}
-
-/// [keep] UTF-16 units of [text], half from each end, around a "…"; a cut that falls inside a
-/// surrogate pair moves one unit off it.
-@visibleForTesting
-String cutMiddle(String text, int keep) {
-  bool high(int unit) => unit >= 0xD800 && unit <= 0xDBFF;
-  bool low(int unit) => unit >= 0xDC00 && unit <= 0xDFFF;
-  var head = (keep + 1) ~/ 2;
-  var tail = text.length - (keep - head);
-  if (head > 0 && high(text.codeUnitAt(head - 1))) head--;
-  if (tail < text.length && low(text.codeUnitAt(tail))) tail++;
-  return '${text.substring(0, head)}…${text.substring(tail)}';
 }

@@ -470,17 +470,21 @@ class _InstallNotice extends StatelessWidget {
         tone: LgTone.info,
         text: l10n.homeInstallText,
         actionLabel: l10n.homeInstallButton,
+        actionIcon: LgIcons.download,
+        actionKind: LgButtonKind.primary,
         onAction: () => showInstallDialog(overlays, status),
       );
     }
     final failure =
         status.installFailure?.card == card ? status.installFailure : null;
-    // TODO(M9 整合): the shield on "升级" (02 §1.2.6) once LgLocalNotice's button takes an icon.
+    // The shield: "升级" asks for administrator permission at once (02 §1.2.6).
     return LgLocalNotice(
       tone: LgTone.info,
       text: l10n.homeUpgradeText,
       actionLabel:
           status.installing ? l10n.homeUpgrading : l10n.homeUpgradeButton,
+      actionIcon: LgIcons.uac,
+      actionKind: LgButtonKind.primary,
       onAction: () => status.install(card),
       actionBusy: status.installing,
       actionError: switch (failure) {

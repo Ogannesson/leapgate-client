@@ -193,7 +193,41 @@ void main() {
 
       page.choose(r'D:\Tools');
       expect(page.failure, isNull);
-      // Nor does a page opened after it show it.
+    });
+
+    test('the location and the three options reach Rust as they are', () async {
+      lg.installAnswer = Completer();
+      final page = InstallPageModel(LocalStatusModel(), printer: true)
+        ..choose(r'D:\Apps\Leap gate')
+        ..setDesktopShortcut(false);
+      final done = page.install();
+      lg.installAnswer.complete('{"result":"failed","text":""}');
+      await done;
+      expect(lg.installCalls.single, (
+        kind: 'install',
+        path: r'D:\Apps\Leap gate\Leapgate',
+        startMenu: true,
+        desktopShortcut: false,
+        printer: true,
+      ));
+    });
+
+    test('"升级" passes no location: Rust keeps the installed one', () async {
+      lg.installAnswer = Completer();
+      final done = LocalStatusModel().install(InstallCard.upgrade);
+      lg.installAnswer.complete('{"result":"failed","text":""}');
+      await done;
+      expect(lg.installCalls.single.kind, 'upgrade');
+      expect(lg.installCalls.single.path, '');
+    });
+
+    test('a failure from before the page opened is not shown', () async {
+      lg.installAnswer = Completer();
+      final status = LocalStatusModel();
+      final done = status.install(InstallCard.install);
+      lg.installAnswer.complete('{"result":"uac_denied","text":""}');
+      await done;
+      expect(status.installFailure, isNotNull);
       expect(InstallPageModel(status).failure, isNull);
     });
 

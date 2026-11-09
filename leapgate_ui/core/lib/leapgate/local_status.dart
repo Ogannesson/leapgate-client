@@ -166,7 +166,8 @@ class LocalStatusModel extends ChangeNotifier {
   /// starts. A second click while it runs does nothing; the export
   /// throwing or answering something unreadable counts as `failed` with the error's text.
   /// [path] and [options] are the install page's (13 §4, M9a); "升级" passes neither and keeps
-  /// the installed location and options.
+  /// the installed location and options (Rust ignores them for it). Without them it is the
+  /// default location with both shortcuts, as M8's card installed.
   Future<void> install(InstallCard card,
       {String? path, InstallOptions? options}) async {
     if (installing) return;
@@ -174,12 +175,16 @@ class LocalStatusModel extends ChangeNotifier {
     installFailure = null;
     notifyListeners();
     InstallFailure failure;
+    final o =
+        options ?? (startMenu: true, desktopShortcut: true, printer: false);
     try {
-      // TODO(M9 整合): pass [path] and [options] once the bridge has the new
-      // `leapgate_install(kind, path, start_menu, desktop_shortcut, printer)` (LEAPGATE.md
-      // §10.18); until then Rust installs to the default location with both shortcuts.
-      final answer = jsonDecode(await lgBind.leapgateInstall(kind: card.name))
-          as Map<String, dynamic>;
+      final answer = jsonDecode(await lgBind.leapgateInstall(
+        kind: card.name,
+        path: path ?? '',
+        startMenu: o.startMenu,
+        desktopShortcut: o.desktopShortcut,
+        printer: o.printer,
+      )) as Map<String, dynamic>;
       failure = InstallFailure(
         card: card,
         uacDenied: answer['result'] == 'uac_denied',

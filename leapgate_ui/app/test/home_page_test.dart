@@ -7,7 +7,9 @@ import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/bridge.dart';
 import 'package:flutter_hbb/leapgate/local_status.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:leapgate_ui/icons/lg_icon.dart';
 import 'package:leapgate_ui/pages/home/password_row.dart';
+import 'package:leapgate_ui/widgets/lg_button.dart';
 
 import 'home_fakes.dart';
 
@@ -253,6 +255,11 @@ void main() {
         setUp: (m) => m.installedLowerVersion = true,
       );
       expect(find.textContaining('已安装的 Leapgate 版本低于当前版本。'), findsOneWidget);
+      // It asks for administrator permission at once: the shield (02 §1.2.6).
+      expect(
+        tester.widget<LgButton>(find.widgetWithText(LgButton, '升级')).icon,
+        LgIcons.uac,
+      );
       await tester.tap(find.text('升级'));
       await tester.pump();
       expect(lg.installs, ['upgrade']);
