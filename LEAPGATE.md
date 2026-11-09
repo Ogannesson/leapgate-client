@@ -1354,6 +1354,39 @@ Telegram 机器人设置改成两步（`leapgate_bot_lookup` 只查、什么都�
 
 **环境说明**：测试虚拟机测完回滚到 `m6-admin` 并 `qm shutdown 110 --forceStop 1`（`stopped`）；回滚后时钟会落后，telechir 连不上，下次用要维护者同步时间。A 的配置：测前备份 8 个文件，测中为了出口项改过（`leapgate-allow-exit`、固定密码）、A 的便携版是从 `app-ui-m9a-0c6b156d8` 起的，测完删掉整个配置目录用备份盖回，8 个文件逐个哈希一致；A 上没有 Leapgate 进程，没有残留计划任务，没有 MSIX 包内副本；原版 RustDesk、msi、mihomo 没碰（msi 没用）。测试虚拟机上测试共享用的本地账户 `lgshare` 随回滚消失。构建 worktree `.wt\ui-m0-build` 停在 `1c3d3f44a`。证据在 A 的 `C:\leapgate-e2e\evidence\m9a-accept\`（`results.txt` 逐项流水账、`premise-test.txt`、`00-build-hashes-*.txt`、`build*.log`、`99-A-config-after.txt`、`tools\` 脚本）。
 
+#### M9a 最新 stable 检查和最终外观检查（台式机 A，2026-11-09 18:05~19:15，待合入的 `51e8eef16`）
+
+**最新 stable 检查（03 §8.8）：这一轮没做，挪到 M9b。** 原因：台式机可用提交内存（`FreeVirtualMemory`）从 18:05 起一直只有 3.0~3.5 GB（物理内存空闲约 17 GB，提交上限 77.7 GB、已提交 73.9 GB，其中进程合计只占 56.5 GB），等了约 60 分钟没有回到手册 §0 的 8 GB 线，所以没编。协调者定：不占维护者机器的内存，整个 M9 只做一次最新 stable，放在 M9b 验收时编。3.47.9 是否仍是最新 stable 也到那时再查。
+
+**画廊对比（3.44.9，`flutter test test/gallery_export_test.dart`）**：`origin/main`（`05a9fa194`，与 `ui/m9a` 的合并基点相比只多 LEAPGATE.md 改动）2988 张，`ui/m9a`（`51e8eef16`）3156 张。逐像素比较（任何差异都算，不设阈值）：2988 张共有的图里 2984 张完全一致，只有 `icons_all_{light,dark}-{compact,detail}` 四张变了（新增 rdp、cameras 两个图标）；新增 168 张全是安装页相关（`install-dialog_*`、`install-option_*`、`install-path-row_*`、`install-banner_*`、`install-license_*`、`local-notice-install_*`）。也就是说这次改的共享组件：`LgPressable` 的 checked 语义、`LgCheckbox`、`LgOptionCheck`、`LgDialogAction.focusNode`，在设置页的勾选、文件传输替换确认等所有旧页面图上外观完全没变（语义改动不画到像素里）。
+
+**安装页画廊对样稿 A-P11**：用 Playwright 渲染样稿画框后，并排看了默认、有会话时、很长的路径三张，其余（网络位置、含"%"、在程序所在文件夹、非空文件夹、正在安装、未获得管理员权限、安装失败两条、从远程打印进入、勾选框六种状态、路径行五种、本机提示卡五种）对着样稿说明的文案和样式看了画廊图，没有逐张并排。结果：版式、间距、颜色、文案和样稿一致；样稿里画了的"许可协议"一行，画廊里有、真机里没有（真机按 13 §4.2 区块 C 的定法不显示，一致）。
+
+**真机（台式机 A，便携版，只开安装页、选位置、看状态、取消，从没点过"安装"）**：只在 `1c3d3f44a` 的构建上做（`app-ui-m9a-1c3d3f44a`），`51e8eef16` 没编；两者之间只有 Dart 改动，Rust 没变。窗口在主屏上（副屏只有 1024×768，放不下新界面窗口，会被裁掉），只截 Leapgate 自己的窗口（`PrintWindow`），不用整屏截图；主页截图含一次性密码和本机 ID，已删，只留对话框区域的截图。
+| 项 | 浅色 | 深色 |
+|---|---|---|
+| "安装"按钮盾牌图标 | 在，主按钮和灰显时都在 | 在 |
+| 默认位置、两个快捷方式勾上、打印机不勾 | 与样稿一致，打开时焦点环在"安装"上 | 一致 |
+| 含"%"（`C:\LGT\100%`） | 红框、红字"路径中不能包含“%”。请选择其他位置。"，"安装"灰显 | 一致 |
+| 映射的网络盘（A 上本来就有的 `Y:`，没动它） | 红字"无法安装到网络位置或可移动磁盘……"，灰显 | — |
+| `subst` 盘（`W:`，测完撤掉） | 同一句红字，灰显 | — |
+| 选 Leapgate 所在的文件夹（`C:\leapgate-e2e\app-ui-m9a-1c3d3f44a`，目标在它里面） | 路径中间省略（`C:\leapgate-e2e\app-ui-m... \Leapgate`），红字"无法安装到 Leapgate 当前所在的文件夹……"，灰显 | 一致 |
+| 非空文件夹 | 琥珀色框和警告三角、"此文件夹中的现有文件将在安装或卸载 Leapgate 时被删除"，"安装"可点、有焦点环 | 一致 |
+| 很长的路径 | 中间省略，最后一级固定；悬停有提示浮层，内容是完整的安装位置 | — |
+| 空文件夹 | 无提示，普通样式 | — |
+对应截图：`C:\leapgate-e2e\evidence\m9a-final\shots\`（`m-old1.png`、`m-old2.png` 浅色拼图，`m-olddark.png` 深色拼图，`old-*.png`、`olddark-*.png` 单张）。
+
+**判定**
+- **必须改**：没有。
+- **小项**（不挡合入）：
+  1. 悬停提示的内容：在 `1c3d3f44a` 上悬停"在程序所在的文件夹里"那一行，浮层显示的是**选中的安装位置**（`…\app-ui-m9a-1c3d3f44a\Leapgate`），不是 13 §4.2 区块 A 写的"这个文件夹（程序所在的文件夹）的完整路径"。`51e8eef16` 加了 `messageTooltip` 就是为了给红字配这条提示，真机上悬停红字那一行是否显示程序所在文件夹，要在 M9b 验收构建上看；`install_dialog_test` 里有对应的单测。
+  2. 长路径省略号和 `\Leapgate` 之间有一个空格的间隔：样稿里同样画成这样，不用改。
+  3. 悬停浮层会盖住路径行下面那一行红字（鼠标在路径行时），和样稿里把浮层画在路径行下方、盖住下面一行的画法一致，不用改。
+  4. 画廊 `local-notice-install_default-unchanged` 画的是描边的"安装"按钮、无箭头；真机主页本机提示卡是蓝色提示底、实心带下载箭头的"安装"按钮。没有搞清这张图想表达的状态和真机默认卡的关系（卡片在真机上和 M8 起一样），M9b 看一眼代码里它指哪个状态。
+- **不用改**：画廊里图标表四张变化是新增图标；真机窗口被我手动移动后高度变成 2186（在 1024×768 副屏和主屏之间挪动、改尺寸造成，测试操作的副作用，没有当成产品问题，也没有复现于直接启动的窗口）。
+
+**挪到 M9b 的两件事**：①最新 stable 检查（4K 上屏仍要 B 有 4K 屏，B 现在是 1366×768）；②`51e8eef16` 的真机悬停（红字的 `messageTooltip`）和读屏（勾选框的 checked 状态、灰显按钮的 enabled=false：`install_dialog_test` 里有 getSemantics 单测，真机用讲述人或 UI Automation 的 Toggle/IsEnabled 看一次）。
+
 #### M8 切换，安装版（测试虚拟机，2026-11-06 20:00~21:25，被测 `57c0087fd`）
 
 按 11 §5.3。构建：新界面（`-Ui leapgate`）`leapgate.exe` `A1FA2192…`、`libleapgate.dll` `570E2E52…`、便携单文件 `leapgate-0.4.0-x86_64.exe` `CF5EFA8F…`、发布目录 zip `204B25C1…`；旧界面（`-Ui upstream`，同一提交）`leapgate.exe` `7F7BFDD1…`、`libleapgate.dll` `26FF0C84…`；"构建时间早"的对照是 `8769ee3ce` 的新界面构建（`libleapgate.dll` `609FDC3A…`）。端点 A 当控制端（新界面便携版），测试虚拟机当被控端（先回滚快照；快照里管理员提权不弹框）。
