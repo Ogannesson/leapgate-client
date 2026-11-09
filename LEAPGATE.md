@@ -2756,7 +2756,7 @@ M9 分三段，各自审查、验收、外观检查、合 main（M9-1）。和�
 - ARB 加在两个 ARB 文件末尾，中英同时加，文案照 13 逐字照抄，英文照 13 的英文表，没有的新写并列进提交说明；改完跑 `flutter gen-l10n`。合并时只会有追加冲突。
 - coder 先用现成组件和占位把逻辑写通，整合时换成 designer 的组件；行为测试按文字和语义标签找控件。
 - 块 2 的新导出在 R 合入、桥重新生成之前不存在：调用它们的 Rust 实现一律抛 `UnimplementedError`（`TODO(M9 整合)`），由主会话整合时换成真实调用；测试一律用假实现。改了签名的 `leapgate_install` 例外：I 保留现在的 `lgBind.leapgateInstall(kind:)` 调用，位置和三个选项先只存在 `InstallPageModel` 和 `LocalStatusModel.install` 的参数里（`TODO(M9 整合)`）；桥重新生成后，`core/lib/leapgate/local_status.dart` 的调用和 `core/test/fakes.dart` 里 `FakeLeapgate` 的重写由主会话一起改。
-- B 可以 import `app/lib/shell/tab_shortcuts.dart` 用 `matchShortcut`（终端区先拦会话快捷键，拦到的返回 `ignored` 交给 `TabShortcuts`）；只剩终端一个视图时"关闭标签"的 `onCloseTab` 归 A 放开。
+- B 可以 import `app/lib/shell/tab_shortcuts.dart` 用 `matchShortcut`（终端区先拦会话快捷键，拦到的自己执行、返回 `skipRemainingHandlers`：返回 `ignored` 时 xterm 会接着把它认得的组合键（例如 Ctrl+→）发给远程终端，B 的测试证实过）；只剩终端一个视图时"关闭标签"的 `onCloseTab` 归 A 放开。
 - core analyze 的基线是 91 条 info（第 0 步合入时），app 0 条。
 
 **第 0 步放好的**（分支 `ui/m9-0`，合 main 后各路照用）
@@ -2865,7 +2865,7 @@ M9 分三段，各自审查、验收、外观检查、合 main（M9-1）。和�
 
 **各段的要点**（细节在 14 §2.3~§2.5，这里只列接口性的）
 - M9a：`LocalStatusModel.install(card, {String? path, InstallOptions? options})`，本机提示卡"安装"改成打开对话框，卡片自己不再显示进行中和失败；对话框用 `overlays.show(null, …)`（只遮主页标签），读 `LocalStatusModel` 已有的 `installing`、`installFailure`。四项位置检查在 core，纯函数加一层取系统信息的薄壳，可注入。"修改"从当前位置的上一级开始（14 §1.2）。有会话时那一行看 `appCore.sessions`、`appCore.backgroundCount`、`LocalStatusModel.incoming`，不复用 `serviceAsksFirst`。runner 的 `--install` 分支留着。
-- M9b 视图框架（A）：`session_views.dart` 里按 `ConnType` 的 `switch`，另加 `hasImage`、`usesViewBar`，不建类层次；13 §5.4 的各处加 14 §1.2 补的 5 处。终端（B）：`FFI.start` 在 `sessionAddSync` 之前按 `terminalAdmin` 设 `IS_TERMINAL_ADMIN`，`terminal` 类型登记 `terminal_response`，`close()` 清终端，`ffi_model.dart` 补 `onReady` 的终端一支；终端区给 `TerminalMouseInteraction` 传 Leapgate 的快捷键表（去掉 Ctrl+A、加 Ctrl+Shift+A），会话快捷键在终端区 `onKeyEvent` 里用 `matchShortcut` 先拦；写进终端的提示行经 core 可注入的 `terminalNoteText`。管理员账户的连接面板输入归 A，B 只调 `conn.login`。摄像头（A）：名称在对端信息到了以后取一次，没有时只写编号；"全部摄像头"先做，验收不能用就去掉。
+- M9b 视图框架（A）：`session_views.dart` 里按 `ConnType` 的 `switch`，另加 `hasImage`、`usesViewBar`，不建类层次；13 §5.4 的各处加 14 §1.2 补的 5 处。终端（B）：`FFI.start` 在 `sessionAddSync` 之前按 `terminalAdmin` 设 `IS_TERMINAL_ADMIN`，`terminal` 类型登记 `terminal_response`，`close()` 清终端，`ffi_model.dart` 补 `onReady` 的终端一支；终端区给 `TerminalMouseInteraction` 传 Leapgate 的快捷键表（去掉 Ctrl+A、加 Ctrl+Shift+A），会话快捷键在终端区 `onKeyEvent` 里用 `matchShortcut` 先拦；写进终端的提示行经 core 可注入的 `terminalNoteText`。复制件 `terminal_mouse_handler.dart` 的 `TerminalMouseInteraction` 加一个 `theme` 参数传给 `TerminalView`（上游没有这个参数，终端配色接不进去），这个文件因此从原样档改成改写档，来源行注明这一处（2026-11-09 主会话定）。R3-Q15 的"断开终端？"由终端视图自己画在视图上（`TerminalTabs.askDisconnect`），不经 prompter；从没选中的标签点 × 时，A 的 `closeSessionTab` 只在 `terminals.needsDisconnectConfirm` 为真时先切到那个标签再调 `disconnectTerminalView`，不问时直接关、不切标签（2026-11-09 主会话定）。只剩一个终端时 Ctrl+Shift+W 照 13 不起作用（吞掉，不发给远程）。管理员账户的连接面板输入归 A，B 只调 `conn.login`；面板的键用 `viewAdmin` 前缀（属 A 的 `view`）。摄像头（A）：名称在对端信息到了以后取一次，没有时只写编号；"全部摄像头"先做，验收不能用就去掉。
 - M9c（T）：`TunnelsModel` 另起，和出口只共享后台计数、本机端口占用表、抽出的 `CardLogin`（不安全连接按参数分"自动拒绝"（出口）和"问用户"（隧道），抽完先跑出口现有测试）；提问区在没有任何一行还在 `connecting` 时才收起；冲突要等出口卡片移除才解除（14 §1.2、§4.4）。
 
 **打印机驱动**（M9-4）：`build-client.ps1` 照上游 CI（`.github/workflows/flutter-build.yml` 打印机驱动那一步）下载驱动和适配器两个 zip、按 sha256 核对、解到程序旁的 `drivers/`。I 写好这一步，但不跑下载：第一次带这一步构建之前，主会话把文件名、来源和大小告诉维护者，等点头。
