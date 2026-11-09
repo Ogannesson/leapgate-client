@@ -718,7 +718,9 @@ pub(crate) mod cards {
         }
     }
 
-    async fn accept(listener: &Option<TcpListener>) -> std::io::Result<TcpStream> {
+    pub(in crate::leapgate_hooks) async fn accept(
+        listener: &Option<TcpListener>,
+    ) -> std::io::Result<TcpStream> {
         match listener {
             Some(listener) => listener.accept().await.map(|(socket, _)| socket),
             None => std::future::pending().await,
@@ -742,7 +744,8 @@ pub(crate) mod cards {
         });
     }
 
-    async fn loopback_pair() -> std::io::Result<(TcpStream, TcpStream)> {
+    pub(in crate::leapgate_hooks) async fn loopback_pair() -> std::io::Result<(TcpStream, TcpStream)>
+    {
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let ours = TcpStream::connect(listener.local_addr()?).await?;
         let (theirs, _) = listener.accept().await?;

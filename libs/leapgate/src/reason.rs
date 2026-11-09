@@ -71,6 +71,13 @@ pub enum Reason {
     },
     NoCameras,
     CameraUnsupported,
+    /// The peer cannot reach a tunnel's target (M9c), as the peer wrote it.
+    TunnelUnreachable {
+        target: String,
+    },
+    TunnelTooManyChannels,
+    /// A tunnel row's insecure-connection prompt was answered "断开". Rust's own, not matched.
+    InsecureDeclined,
     /// Not recognized: the UI shows the original text.
     Other,
 }
@@ -165,6 +172,11 @@ fn match_reason(msgtype: &str, title: &str, text: &str) -> Reason {
     {
         return OsLoginBackoff { seconds };
     }
+    if let Some(target) = unreachable_target(text) {
+        return TunnelUnreachable {
+            target: target.to_owned(),
+        };
+    }
     match text {
         "ID does not exist" => IdNotExist,
         "Remote desktop is offline" => PeerOffline,
@@ -209,8 +221,17 @@ fn match_reason(msgtype: &str, title: &str, text: &str) -> Reason {
         "No active console user logged on, please connect and logon first." => NoConsoleUser,
         "No cameras" => NoCameras,
         "view_camera_unsupported_tip" => CameraUnsupported,
+        "Too many port forward channels" => TunnelTooManyChannels,
         _ => Other,
     }
+}
+
+/// The target in the peer's "cannot reach it" text, a refused channel's or a raw pipe's login
+/// error.
+pub(crate) fn unreachable_target(text: &str) -> Option<&str> {
+    text.strip_prefix("Failed to access remote ")?
+        .split_once(". Please make sure")
+        .map(|(target, _)| target)
 }
 
 #[cfg(test)]
@@ -468,6 +489,34 @@ mod tests {
                 ("error", "Error", "view_camera_unsupported_tip"),
                 CameraUnsupported,
             ),
+            // M9c. server/port_forward_mux.rs:282 `unreachable_message`, a refused channel shown
+            // by port_forward_mux.rs:731 `tunnel_loop`; connection.rs:1839/1851, a raw pipe's
+            // login. Both write "RDP" for an RDP target.
+            (
+                (
+                    "error",
+                    "Error",
+                    "Failed to access remote 192.0.2.10:8080. Please make sure it is reachable/open.",
+                ),
+                TunnelUnreachable {
+                    target: "192.0.2.10:8080".to_owned(),
+                },
+            ),
+            (
+                (
+                    "error",
+                    "Login Error",
+                    "Failed to access remote RDP. Please make sure it is reachable/open.",
+                ),
+                TunnelUnreachable {
+                    target: "RDP".to_owned(),
+                },
+            ),
+            // server/port_forward_mux.rs:123 `on_open`
+            (
+                ("error", "Error", "Too many port forward channels"),
+                TunnelTooManyChannels,
+            ),
         ];
         for ((msgtype, title, text), expected) in cases {
             assert_eq!(classify(msgtype, title, text), expected, "{text}");
@@ -485,6 +534,8 @@ mod tests {
             ),
             // a backoff whose seconds do not parse
             ("error", "Login Error", "Please try again in a while."),
+            // server/port_forward_mux.rs:147 `on_open` (13 §1.3: should not happen)
+            ("error", "Error", "Port forward target not authorized"),
             // a port that does not parse
             ("error", "Error", "Failed to listen on 70000: invalid port"),
             // MSG_NEED_MUX never reaches a Leapgate controller (01 §4.3)
@@ -527,5 +578,12 @@ mod tests {
             json(&OsLoginBackoff { seconds: 45 }),
             r#"{"code":"os_login_backoff","seconds":45}"#
         );
+        assert_eq!(
+            json(&TunnelUnreachable {
+                target: "192.0.2.10:8080".to_owned()
+            }),
+            r#"{"code":"tunnel_unreachable","target":"192.0.2.10:8080"}"#
+        );
+        assert_eq!(json(&InsecureDeclined), r#"{"code":"insecure_declined"}"#);
     }
 }

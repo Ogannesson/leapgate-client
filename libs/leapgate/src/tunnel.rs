@@ -4,10 +4,68 @@
 
 use crate::{
     exit::card::{Cause, Transport},
-    reason::Reason,
+    reason::{self, Feature, Reason},
 };
 use hbb_common::serde_json;
 use serde::Serialize;
+
+/// How a row's `connect_and_login_mux` ended.
+pub enum LoginEnd {
+    Peer {
+        mux: bool,
+    },
+    /// The login ended without a stream; `insecure_declined` when the row's insecure-connection
+    /// prompt was answered "断开".
+    Refused {
+        insecure_declined: bool,
+    },
+    Failed,
+}
+
+pub enum Next {
+    Use,
+    /// Close the listener and wait for a retry.
+    Stop(Option<Reason>),
+    /// Keep listening; the next local connection logs in again.
+    Interrupt(Reason),
+}
+
+/// `error` is the row's last error: for `Failed` the login's error, otherwise the error message
+/// box the login reported last (`(title, text)`), if any. Unlike an exit card's, a row does not
+/// look at the peer's exit feature nor at an unsecured stream (the user chose to go on), and a
+/// failure has no cooldown.
+pub fn after_login(end: LoginEnd, error: Option<(&str, &str)>) -> Next {
+    let classify = |(title, text): (&str, &str)| reason::classify("error", title, text);
+    match end {
+        LoginEnd::Peer { mux: true } => Next::Use,
+        LoginEnd::Peer { mux: false } => Next::Stop(Some(Reason::PeerTooOld {
+            feature: Feature::PortForward,
+        })),
+        LoginEnd::Refused {
+            insecure_declined: true,
+        } => Next::Stop(Some(Reason::InsecureDeclined)),
+        LoginEnd::Refused { .. } => Next::Stop(error.map(classify)),
+        LoginEnd::Failed => Next::Interrupt(error.map_or(Reason::Other, classify)),
+    }
+}
+
+/// A channel the peer refused while the tunnel is up, from the peer's text.
+pub fn notice(text: &str) -> State {
+    let reason = match text {
+        "No permission of IP tunneling" => Reason::NoPermission {
+            feature: Feature::PortForward,
+        },
+        "Too many port forward channels" => Reason::TunnelTooManyChannels,
+        _ => match reason::unreachable_target(text) {
+            Some(target) => Reason::TunnelUnreachable {
+                target: target.to_owned(),
+            },
+            None => Reason::Other,
+        },
+    };
+    let text = (reason == Reason::Other).then(|| reason::clip(text).to_owned());
+    State::Notice { reason, text }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -76,7 +134,107 @@ pub fn event(id: &str, session_id: &str, kind: Kind, port: Option<i32>, state: &
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::reason::Feature;
+
+    #[test]
+    fn a_login_ends_as_the_row_shows_it() {
+        let reason = |next: Next| match next {
+            Next::Use => panic!("in use"),
+            Next::Stop(reason) => (true, reason),
+            Next::Interrupt(reason) => (false, Some(reason)),
+        };
+        assert!(matches!(
+            after_login(LoginEnd::Peer { mux: true }, None),
+            Next::Use
+        ));
+        assert_eq!(
+            reason(after_login(LoginEnd::Peer { mux: false }, None)),
+            (
+                true,
+                Some(Reason::PeerTooOld {
+                    feature: Feature::PortForward
+                })
+            )
+        );
+        assert_eq!(
+            reason(after_login(
+                LoginEnd::Refused {
+                    insecure_declined: true
+                },
+                None
+            )),
+            (true, Some(Reason::InsecureDeclined))
+        );
+        // The peer refused the login: its error box, classified as C3 does.
+        assert_eq!(
+            reason(after_login(
+                LoginEnd::Refused {
+                    insecure_declined: false
+                },
+                Some(("Login Error", "No permission of IP tunneling"))
+            )),
+            (
+                true,
+                Some(Reason::NoPermission {
+                    feature: Feature::PortForward
+                })
+            )
+        );
+        assert_eq!(
+            reason(after_login(
+                LoginEnd::Refused {
+                    insecure_declined: false
+                },
+                None
+            )),
+            (true, None)
+        );
+        assert_eq!(
+            reason(after_login(
+                LoginEnd::Failed,
+                Some(("Connection Error", "Remote desktop is offline"))
+            )),
+            (false, Some(Reason::PeerOffline))
+        );
+    }
+
+    #[test]
+    fn refused_channels_are_notices() {
+        let notice_of = |text: &str| match notice(text) {
+            State::Notice { reason, text } => (reason, text),
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(
+            notice_of(
+                "Failed to access remote 192.0.2.10:8080. Please make sure it is reachable/open."
+            ),
+            (
+                Reason::TunnelUnreachable {
+                    target: "192.0.2.10:8080".to_owned()
+                },
+                None
+            )
+        );
+        assert_eq!(
+            notice_of("Too many port forward channels"),
+            (Reason::TunnelTooManyChannels, None)
+        );
+        assert_eq!(
+            notice_of("No permission of IP tunneling"),
+            (
+                Reason::NoPermission {
+                    feature: Feature::PortForward
+                },
+                None
+            )
+        );
+        assert_eq!(
+            notice_of("Port forward target not authorized"),
+            (
+                Reason::Other,
+                Some("Port forward target not authorized".to_owned())
+            )
+        );
+    }
 
     #[test]
     fn events_read_as_documented() {
@@ -88,40 +246,67 @@ mod tests {
             )
         };
         let cases = [
-            (Kind::Tcp, Some(8080), State::Connecting, r#""state":"connecting"}"#),
+            (
+                Kind::Tcp,
+                Some(8080),
+                State::Connecting,
+                r#""state":"connecting"}"#,
+            ),
             (
                 Kind::Rdp,
                 Some(0),
-                State::InUse { transport: Transport::Relay },
+                State::InUse {
+                    transport: Transport::Relay,
+                },
                 r#""state":"in_use","transport":"relay"}"#,
             ),
             (
                 Kind::Tcp,
                 Some(8080),
-                State::Interrupted { cause: Cause::TunnelEnded, reason: None },
+                State::Interrupted {
+                    cause: Cause::TunnelEnded,
+                    reason: None,
+                },
                 r#""state":"interrupted","cause":"tunnel_ended"}"#,
             ),
             (
                 Kind::Tcp,
                 Some(8080),
-                State::Interrupted { cause: Cause::LoginFailed, reason: Some(Reason::PeerOffline) },
+                State::Interrupted {
+                    cause: Cause::LoginFailed,
+                    reason: Some(Reason::PeerOffline),
+                },
                 r#""state":"interrupted","cause":"login_failed","reason":{"code":"peer_offline"}}"#,
             ),
-            (Kind::Tcp, Some(8080), State::Stopped { reason: None }, r#""state":"stopped"}"#),
+            (
+                Kind::Tcp,
+                Some(8080),
+                State::Stopped { reason: None },
+                r#""state":"stopped"}"#,
+            ),
             (
                 Kind::Tcp,
                 Some(8080),
                 State::Stopped {
-                    reason: Some(Reason::PeerTooOld { feature: Feature::PortForward }),
+                    reason: Some(Reason::PeerTooOld {
+                        feature: Feature::PortForward,
+                    }),
                 },
                 r#""state":"stopped","reason":{"code":"peer_too_old","feature":"port_forward"}}"#,
             ),
-            (Kind::Tcp, Some(8080), State::PortInUse, r#""state":"port_in_use"}"#),
+            (
+                Kind::Tcp,
+                Some(8080),
+                State::PortInUse,
+                r#""state":"port_in_use"}"#,
+            ),
             (
                 Kind::Tcp,
                 Some(8080),
                 State::Notice {
-                    reason: Reason::NoPermission { feature: Feature::PortForward },
+                    reason: Reason::NoPermission {
+                        feature: Feature::PortForward,
+                    },
                     text: None,
                 },
                 r#""state":"notice","reason":{"code":"no_permission","feature":"port_forward"}}"#,
@@ -129,10 +314,18 @@ mod tests {
             (
                 Kind::Tcp,
                 Some(8080),
-                State::Notice { reason: Reason::Other, text: Some("refused".to_owned()) },
+                State::Notice {
+                    reason: Reason::Other,
+                    text: Some("refused".to_owned()),
+                },
                 r#""state":"notice","reason":{"code":"other"},"text":"refused"}"#,
             ),
-            (Kind::Tcp, Some(8080), State::Removed, r#""state":"removed"}"#),
+            (
+                Kind::Tcp,
+                Some(8080),
+                State::Removed,
+                r#""state":"removed"}"#,
+            ),
         ];
         for (kind, port, state, tail) in cases {
             let kind_name = if kind == Kind::Tcp { "tcp" } else { "rdp" };
