@@ -4,8 +4,7 @@ import 'package:flutter_hbb/leapgate/session.dart';
 
 /// The terminal view in its session tab (13 §2.2): the view title bar, the terminal tabs and the
 /// terminal, the connection panel over them while not connected. Coder B's; the shell mounts it
-/// in the tab's view container as it mounts `FileView` (`LEAPGATE.md` §10.18). It imports nothing
-/// from `shell/`.
+/// in the tab's view container as it mounts `FileView` (`LEAPGATE.md` §10.18).
 // TODO(M9b terminal): coder B builds the view.
 class TerminalViewPage extends StatefulWidget {
   const TerminalViewPage({

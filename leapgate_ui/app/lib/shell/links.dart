@@ -176,13 +176,13 @@ bool _open(List<String>? args) {
     case LinkKind.fileTransfer:
       mainNavigation.openFileTransfer(link.id,
           password: link.password, forceRelay: link.forceRelay);
-    // TODO(M9b): the terminals and the camera. TODO(M9c): the TCP tunnel and RDP
-    // (`LEAPGATE.md` §10.18). Until then they are logged and say so in a toast.
-    case LinkKind.terminal ||
-          LinkKind.terminalAdmin ||
-          LinkKind.camera ||
-          LinkKind.tcpTunnel ||
-          LinkKind.rdp:
+    // Until their segments build them (`LEAPGATE.md` §10.18), these are logged and say so in a
+    // toast.
+    // TODO(M9b): the terminals and the camera.
+    case LinkKind.terminal || LinkKind.terminalAdmin || LinkKind.camera:
+      return _unsupported(link.kind);
+    // TODO(M9c): the TCP tunnel and RDP.
+    case LinkKind.tcpTunnel || LinkKind.rdp:
       return _unsupported(link.kind);
   }
   appCore.window.bringToFront();

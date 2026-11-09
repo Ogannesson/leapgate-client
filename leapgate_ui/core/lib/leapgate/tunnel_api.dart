@@ -133,8 +133,8 @@ const _kRdpPassword = 'rdp_password';
 
 /// The `port_forwards` of `mainGetPeerSync`'s JSON (`[[local port, host, remote port], …]`, as
 /// upstream `port_forward_page.dart` reads it), without the old UI's exit mapping
-/// ([kLeapgateExitHost]:[kLeapgateExitPort]) and local ports ≤ 0, as the Rust card loop skips
-/// them. Empty when the JSON is not of that shape.
+/// ([kLeapgateExitHost]:[kLeapgateExitPort]) and local or remote ports ≤ 0, as upstream
+/// `io_loop` and the Rust card loop skip them. Empty when the JSON is not of that shape.
 List<TunnelForward> parseSavedForwards(String json) {
   try {
     final config = jsonDecode(json) as Map<String, dynamic>;
@@ -146,6 +146,7 @@ List<TunnelForward> parseSavedForwards(String json) {
             e[1] is String &&
             e[2] is int &&
             (e[0] as int) > 0 &&
+            (e[2] as int) > 0 &&
             !(e[1] == kLeapgateExitHost && e[2] == kLeapgateExitPort))
           (
             localPort: e[0] as int,

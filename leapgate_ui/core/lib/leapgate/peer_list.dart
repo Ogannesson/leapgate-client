@@ -1,6 +1,7 @@
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 
-import '../common.dart' show isWindows;
 import '../consts.dart';
 import '../models/peer_model.dart';
 import 'recent_peers.dart';
@@ -161,7 +162,7 @@ List<List<PeerAction>> peerMenu(
 /// known, as for typed text), in the mockup's order, without "终端（管理员）" (14 §1.2).
 /// [windows] is this device's platform, for RDP; tests pass it.
 List<PeerAction> connectMenu(String peerPlatform, {bool? windows}) =>
-    _connectGroup(peerPlatform, windows: windows ?? isWindows, admin: false);
+    _connectGroup(peerPlatform, windows: windows ?? Platform.isWindows, admin: false);
 
 /// The connection types in `p1-menu-more-top`'s order. What the remote platform is known not
 /// to support is left out, an unknown platform offers all (R3-Q12, 01 §3.1 block F): the

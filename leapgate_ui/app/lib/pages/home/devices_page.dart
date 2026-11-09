@@ -435,7 +435,13 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
                 description: l10n.connectBoxViaRelayNote,
                 onPressed: () => _runCurrent(relay: true),
               ),
-              // TODO(M9b): terminal, camera. TODO(M9c): TCP tunnel, RDP (`LEAPGATE.md` §10.18).
+              // TODO(M9b): terminal, camera (`LEAPGATE.md` §10.18).
+              PeerAction.terminal => null,
+              PeerAction.terminalAdmin => null,
+              PeerAction.camera => null,
+              // TODO(M9c): TCP tunnel, RDP (`LEAPGATE.md` §10.18).
+              PeerAction.tcpTunnel => null,
+              PeerAction.rdp => null,
               _ => null,
             },
         ],
@@ -745,8 +751,13 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
                       description: l10n.connectBoxViaRelayNote,
                       onPressed: () => _connect(_input, relay: true),
                     ),
-                    // TODO(M9b): terminal, camera. TODO(M9c): TCP tunnel, RDP
-                    // (`LEAPGATE.md` §10.18).
+                    // TODO(M9b): terminal, camera (`LEAPGATE.md` §10.18).
+                    PeerAction.terminal => null,
+                    PeerAction.terminalAdmin => null,
+                    PeerAction.camera => null,
+                    // TODO(M9c): TCP tunnel, RDP (`LEAPGATE.md` §10.18).
+                    PeerAction.tcpTunnel => null,
+                    PeerAction.rdp => null,
                     _ => null,
                   },
               ],

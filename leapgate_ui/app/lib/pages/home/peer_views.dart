@@ -251,15 +251,14 @@ List<Widget> peerMenuItems(
     ab: appCore.addressBook.menuFlags(category),
     peerPlatform: item.peer.platform,
   );
-  // TODO(M9b): the terminal, administrator terminal and camera items. TODO(M9c): the TCP tunnel
-  // and RDP items. Until then they are left out (`LEAPGATE.md` §10.18). "用作出口" also needs an
-  // ID it can use ([isExitId]; [peerMenu] only looks at the platform).
+  // The terminal, camera, TCP tunnel and RDP items are left out until their segments build them
+  // (`LEAPGATE.md` §10.18). "用作出口" also needs an ID it can use ([isExitId]; [peerMenu] only
+  // looks at the platform).
   bool built(PeerAction action) => switch (action) {
-    PeerAction.terminal ||
-    PeerAction.terminalAdmin ||
-    PeerAction.camera ||
-    PeerAction.tcpTunnel ||
-    PeerAction.rdp => false,
+    // TODO(M9b): the terminal, administrator terminal and camera items.
+    PeerAction.terminal || PeerAction.terminalAdmin || PeerAction.camera => false,
+    // TODO(M9c): the TCP tunnel and RDP items.
+    PeerAction.tcpTunnel || PeerAction.rdp => false,
     PeerAction.useAsExit => isExitId(id),
     _ => true,
   };
@@ -379,11 +378,12 @@ List<Widget> peerMenuItems(
     PeerAction.showBooks ||
     PeerAction.deleteFromAb => const SizedBox.shrink(),
     // Left out by [built].
+    // TODO(M9b): the terminal, administrator terminal and camera items.
     PeerAction.terminal ||
     PeerAction.terminalAdmin ||
-    PeerAction.camera ||
-    PeerAction.tcpTunnel ||
-    PeerAction.rdp => const SizedBox.shrink(),
+    PeerAction.camera => const SizedBox.shrink(),
+    // TODO(M9c): the TCP tunnel and RDP items.
+    PeerAction.tcpTunnel || PeerAction.rdp => const SizedBox.shrink(),
   };
   return [
     for (final group in groups) ...[

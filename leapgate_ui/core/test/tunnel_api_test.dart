@@ -6,14 +6,14 @@ import 'package:flutter_test/flutter_test.dart';
 // The saved port forwards a TCP tunnel card starts with (`LEAPGATE.md` §10.18). Addresses are
 // from the documentation ranges.
 void main() {
-  test(
-      'the saved forwards, without the old UI\'s exit mapping and local ports ≤ 0',
+  test('the saved forwards, without the old UI\'s exit mapping and ports ≤ 0',
       () {
     final json = jsonEncode({
       'port_forwards': [
         [8080, '192.0.2.10', 80],
         [21180, 'leapgate-exit.invalid', 65536],
         [0, '192.0.2.11', 22],
+        [2222, '192.0.2.12', 0],
         [3390, 'localhost', 3389],
       ],
     });

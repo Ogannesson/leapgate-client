@@ -257,6 +257,10 @@ class _MainWindowState extends State<MainWindow>
       String password = '',
       bool isSharedPassword = false,
       bool forceRelay = false}) async {
+    assert(kind == ConnType.defaultConn ||
+        kind == ConnType.fileTransfer ||
+        kind == ConnType.terminal ||
+        kind == ConnType.viewCamera);
     id = id.replaceAll(' ', '');
     if (id.isEmpty) return;
     final oldId = id;
