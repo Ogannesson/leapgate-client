@@ -58,6 +58,7 @@ class LgMenuAnchor extends StatelessWidget {
     this.controller,
     this.onClose,
     this.triggerFocus = false,
+    this.alignmentOffset = const Offset(0, LgSpace.s1),
   });
 
   final List<Widget> items;
@@ -65,6 +66,11 @@ class LgMenuAnchor extends StatelessWidget {
   builder;
   final double width;
   final MenuController? controller;
+
+  /// Where the menu's top left corner stands from the trigger's bottom left: 4 px down by
+  /// default. A menu that hangs from the right end of the bar ("⋯") passes `dx` as the trigger's
+  /// width less the menu's.
+  final Offset alignmentOffset;
 
   /// Called when the menu has closed, however it was closed.
   final VoidCallback? onClose;
@@ -83,7 +89,7 @@ class LgMenuAnchor extends StatelessWidget {
       onClose: onClose,
       style: _panelStyle(c),
       clipBehavior: Clip.none,
-      alignmentOffset: const Offset(0, LgSpace.s1),
+      alignmentOffset: alignmentOffset,
       menuChildren: [_panelBody(width, items)],
       builder: (context, controller, _) => triggerFocus
           ? Focus(
@@ -521,6 +527,32 @@ class LgSubmenu extends StatelessWidget {
       ),
     );
     return _explained(disabledNote, items.isEmpty, item);
+  }
+}
+
+/// A text for [LgMenuItem.trailing] that may be long and comes from elsewhere: the name of a
+/// camera on the remote device (`.mr .cn` of `A-P10-摄像头.html`). Small, in the second colour,
+/// one line of at most [maxWidth] (170) that ends in "…" and shows the whole name on hover. It
+/// is read with the row ("摄像头 1，Integrated Camera").
+class LgMenuRowNote extends StatelessWidget {
+  const LgMenuRowNote(this.text, {super.key, this.maxWidth = 170});
+
+  final String text;
+  final double maxWidth;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = LgTokens.of(context);
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxWidth: maxWidth),
+      child: LgEllipsisText(
+        text,
+        style: t.textS.copyWith(
+          color: t.colors.text2,
+          fontWeight: FontWeight.w400,
+        ),
+      ),
+    );
   }
 }
 

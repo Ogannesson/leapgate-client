@@ -10,8 +10,9 @@
 import 'dart:io';
 
 /// Symbols in A-基础.html that are illustrations, not icons: the fictional
-/// remote desktop picture and the sample QR code.
-const _skip = {'rd-desk', 'x-qr'};
+/// remote desktop picture, the sample QR code and the three camera pictures of
+/// the P10 mockup.
+const _skip = {'rd-desk', 'x-qr', 'cam-study', 'cam-shelf', 'cam-living'};
 
 const _prefixes = {
   'i': '',

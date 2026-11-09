@@ -39,6 +39,7 @@ class LgPressable extends StatefulWidget {
     this.selected,
     this.toggled,
     this.expanded,
+    this.checked,
   });
 
   final VoidCallback? onPressed;
@@ -57,6 +58,14 @@ class LgPressable extends StatefulWidget {
   final String? semanticLabel;
   final bool? selected;
   final bool? toggled;
+
+  /// A check box: whether it is ticked. The control is announced as a check box, not as a button:
+  /// the Windows engine gives a node that is a button the role Button and drops every checked
+  /// state (`accessibility_bridge.cc` `SetRoleFromFlutterUpdate`: `is_button` is tested before
+  /// `is_checked`), so a script and a screen reader could press it and never tell whether it is
+  /// on. With [checked] the node has no button flag; it keeps its press action, which is the
+  /// toggle of the check box.
+  final bool? checked;
 
   /// For a control that opens something (a drop-down, a menu, a folded part of
   /// a dialog): whether it is open now. A reader says "expanded" or
@@ -134,11 +143,13 @@ class _LgPressableState extends State<LgPressable> {
         onTap: enabled ? widget.onPressed : null,
         onSecondaryTapUp: widget.onSecondaryTapUp,
         child: Semantics(
-          button: true,
+          // See [checked].
+          button: widget.checked == null ? true : null,
           enabled: enabled,
           label: widget.semanticLabel,
           selected: widget.selected,
           toggled: widget.toggled,
+          checked: widget.checked,
           expanded: widget.expanded,
           child: widget.builder(context, states),
         ),

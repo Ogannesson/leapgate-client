@@ -41,6 +41,7 @@ class LgBanner extends StatelessWidget {
     this.icon,
     this.slim = false,
     this.dense = false,
+    this.medium = false,
     this.actionLabel,
     this.onAction,
     this.actionIcon,
@@ -70,6 +71,10 @@ class LgBanner extends StatelessWidget {
   /// The banner of the settings page (`.bnr` in A-P6-设置.html): 8 px above and
   /// under and the medium text, with [slim].
   final bool dense;
+
+  /// The medium text (14/20) without [dense]'s tighter padding: the banners inside the install
+  /// dialog (`.ibody .bnr`, `A-P11-安装.html`) and under a tunnel's forward (`.fl-n .bnr`).
+  final bool medium;
 
   /// The button at the end ("重试"); [actionIcon] goes before its label.
   final String? actionLabel;
@@ -133,7 +138,9 @@ class LgBanner extends StatelessWidget {
                     if (text != null) TextSpan(text: text),
                   ],
                 ),
-                style: (dense ? t.textM : t.text).copyWith(color: c.text),
+                style: (dense || medium ? t.textM : t.text).copyWith(
+                  color: c.text,
+                ),
               ),
             ),
             if (actionLabel != null) ...[

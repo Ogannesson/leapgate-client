@@ -130,6 +130,8 @@ enum LgIcons {
   pause,
   play,
   link,
+  rdp,
+  cameras,
 }
 
 LgIconData _buildIcon(LgIcons icon) => switch (icon) {
@@ -623,5 +625,15 @@ LgIconData _buildIcon(LgIcons icon) => switch (icon) {
       ]),
     LgIcons.link => LgIconData(24, 24, [
         LgIconPart(Path()..moveTo(7, 17)..lineTo(17, 7)..moveTo(9.5, 7)..lineTo(17, 7)..lineTo(17, 14.5), stroke: 2, scaleStroke: false, cap: StrokeCap.round, join: StrokeJoin.round),
+      ]),
+    LgIcons.rdp => LgIconData(24, 24, [
+        LgIconPart(Path()..addRRect(RRect.fromRectAndRadius(const Rect.fromLTWH(3, 4.5, 18, 12), const Radius.circular(2.5))), stroke: 2, scaleStroke: false, cap: StrokeCap.round, join: StrokeJoin.round),
+        LgIconPart(Path()..moveTo(8.5, 20)..lineTo(15.5, 20)..moveTo(12, 16.5)..lineTo(12, 20), stroke: 2, scaleStroke: false, cap: StrokeCap.round, join: StrokeJoin.round),
+        LgIconPart(Path()..moveTo(8.5, 10.5)..lineTo(15.5, 10.5)..moveTo(10.5, 8.5)..lineTo(8.5, 10.5)..lineTo(10.5, 12.5)..moveTo(13.5, 8.5)..lineTo(15.5, 10.5)..lineTo(13.5, 12.5), stroke: 2, scaleStroke: false, cap: StrokeCap.round, join: StrokeJoin.round),
+      ]),
+    LgIcons.cameras => LgIconData(24, 24, [
+        LgIconPart(Path()..addRRect(RRect.fromRectAndRadius(const Rect.fromLTWH(2.5, 10, 13.5, 9.5), const Radius.circular(2.2))), stroke: 2, scaleStroke: false, cap: StrokeCap.round, join: StrokeJoin.round),
+        LgIconPart(Path()..addOval(Rect.fromCircle(center: const Offset(9.25, 14.75), radius: 2.5)), stroke: 2, scaleStroke: false, cap: StrokeCap.round, join: StrokeJoin.round),
+        LgIconPart(Path()..moveTo(7, 10)..lineTo(7, 7.5)..arcToPoint(const Offset(9, 5.5), radius: const Radius.circular(2), clockwise: true)..lineTo(18.5, 5.5)..arcToPoint(const Offset(20.5, 7.5), radius: const Radius.circular(2), clockwise: true)..lineTo(20.5, 14)..arcToPoint(const Offset(18.5, 16), radius: const Radius.circular(2), clockwise: true)..lineTo(16.5, 16), stroke: 2, scaleStroke: false, cap: StrokeCap.round, join: StrokeJoin.round),
       ]),
     };
