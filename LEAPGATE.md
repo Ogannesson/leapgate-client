@@ -1307,6 +1307,39 @@ Telegram 机器人设置改成两步（`leapgate_bot_lookup` 只查、什么都�
 
 **环境说明**：测试虚拟机测完回滚到 `m6-admin` 并强制关机（`stopped`）；A 的配置文件和测前备份逐个哈希一致，A 上的一次性数据已删；Mac 上的测试目录已删，Mac 的 RustDesk 和配置没动。测试虚拟机上装好、改了服务器以后本机 ID 从 9 位变成 10 位：测试服务上这个 9 位 ID 被以前几轮装的（不同密钥的）安装版锁过公钥，新装的换了密钥，注册回 `UUID_MISMATCH`，客户端随机换了 ID（第三期 01 的锁定规则，整机回滚的环境才会碰到）。证据在 A 的 `C:\leapgate-e2e\evidence\m7a-p2-1106\`（`results.txt`、`shots\`、`tools\`）。
 
+#### M9a 安装页（测试虚拟机，2026-11-09 11:28~13:30，被测 `0c6b156d8`，几项在 `1c3d3f44a` 上复测）
+
+按 14 §5.3。构建（`-Ui leapgate -ForceBridge -PrinterDriver`）：`0c6b156d8` 的 `leapgate.exe` `304FB91C…`、`libleapgate.dll` `5F14E611…`、`data/app.so` `4BAC2CEF…`、便携单文件 `9B078767…`、zip `7EC0B2BF…`；`1c3d3f44a` 的 `libleapgate.dll` `19458F7A…`、`data/app.so` `4CED07A1…`、便携单文件 `A19B4D56…`、zip `EE0662A4…`（`leapgate.exe`、`flutter_windows.dll` `8667024A…` 两版相同）。打印机驱动经维护者同意下载，脚本打印的 sha256：`rustdesk_printer_driver_v4-1.4.zip` `c4cf4d3b48c4d9079b243edc43bb1db03b076282bc259c9f49883e9db20fa8b5`、`printer_driver_adapter.zip` `e90e5d52c8807b4c6293c78a52479338715e0bf396b1b34802777b8c452e6781`（两个都是"还没钉住，按 sha256sums 核对通过"）；发布目录里有 `drivers\RustDeskPrinterDriver\`（6 个文件）和 `printer_driver_adapter.dll`。端点：测试虚拟机用便携单文件（解到 `%LOCALAPPDATA%\leapgate`）当被测，A 的便携版当控制端（有会话那条）。开测前测试虚拟机上装着 `d3073a33d` 的安装版（服务在跑），先 `--uninstall` 卸掉再测；没有回滚，用它当时的状态。
+
+**这台测试虚拟机的显示不刷新**：窗口内容截图一直是旧画面（整屏截图只有任务栏会变，`PrintWindow` 是白的），所以**这一节没有任何截图判断，全靠 UI Automation 的语义树（名称、值、焦点）加注册表、文件系统、进程、服务、`Get-Printer`**。凡要靠眼睛看的（盾牌图标、中间省略、悬停提示、灰显外观）都标"未验证"。台式机副屏关着，A 上的窗口留在主屏。
+
+| 项 | 构建 | 结果 |
+|---|---|---|
+| 默认安装 | 两版 | 通过。便携版点本机提示卡"安装"（卡片文字"安装后，对方远程控制本机时也能操作用户账户控制（UAC）窗口。 / 安装"）：对话框标题"安装 Leapgate"，位置 `C:\Program Files\Leapgate`，三个选项（"创建开始菜单快捷方式""创建桌面快捷方式""安装 Leapgate 打印机"带说明），"取消""安装"，打开时焦点在"安装"。焦点在"安装"时按回车直接装（`0c6b156d8`、`1c3d3f44a` 各一次，约 6 秒服务 Running、安装版界面、托盘起来）：`InstallLocation` = `C:\Program Files\Leapgate`，开始菜单有 `Leapgate.lnk`、`Uninstall Leapgate.lnk`，公共桌面有 `Leapgate.lnk`，没有打印机；装完安装版里本机 ID 和固定密码"已设置"与便携版一致，主页没有"安装"卡。三个选项的勾选状态没法读（见读屏一行），靠装出来的结果证明默认值是"两个快捷方式勾、打印机不勾" |
+| 自定义位置 | 两版；选择框归属只看 `1c3d3f44a` | 通过。选 `C:\Apps\Leap gate` 后路径显示 `C:\Apps\Leap gate\Leapgate`（选中的文件夹加 `\Leapgate`）；真装：`InstallLocation`、服务路径、托盘、界面进程都在 `C:\Apps\Leap gate\Leapgate\`（`0c6b156d8` 取消开始菜单、桌面两个快捷方式、勾上打印机装过一次：没有开始菜单的 `Leapgate` 文件夹，公共桌面没有快捷方式，`Get-Printer` 有"Leapgate Printer"（驱动名 `RustDesk v4 Printer Driver`、端口 `Leapgate Printer`），卸载后打印机和驱动都没了；`1c3d3f44a` 默认选项装过一次，结果同默认安装）。`1c3d3f44a` 上选择框打开时枚举窗口：`#32770` "选择文件夹"的所有者窗口句柄就是主窗口（`LEAPGATE_UI_MAIN`），在 z 序里排在主窗口上面、是前台窗口。"修改"的选择框起始位置按主会话说明不判。很长的路径"省略中间"：**未验证**（语义值给的是全文，看不见画面；`D:\工作资料\…` 形的长路径本身能选、值正确） |
+| 位置检查 | `0c6b156d8` | 通过（文字逐字对）。映射的网络盘（本机回环共享映射成 `Z:`）→"无法安装到网络位置或可移动磁盘。请选择本机磁盘上的文件夹。"；`subst` 盘 `Y:` → 同一句；`C:\100%` →"路径中不能包含“%”。请选择其他位置。"；选 `%LOCALAPPDATA%` →"无法安装到 Leapgate 当前所在的文件夹。请选择其他位置。"。"安装"在这几种情况下点了（UI Automation 的 Invoke）没有任何反应：没有服务、进程不变、对话框还在（只试了 `Z:`）。预先放了文件的文件夹（`C:\Apps\Warn\Leapgate\keep.txt`，选 `C:\Apps\Warn`）→ 警告"此文件夹中的现有文件将在安装或卸载 Leapgate 时被删除"，能装：安装后 `keep.txt` 还在，卸载后整个文件夹连 `keep.txt` 一起没了，和警告相符。悬停显示 Leapgate 当前所在文件夹的完整路径：**未验证**（真实鼠标悬停后语义树里没有提示节点，看不见画面） |
+| 有会话时 | `0c6b156d8` | 通过。A 的便携版连进测试虚拟机的便携版（主页出现"正在被远程控制（1 个会话）"和"查看"）：打开安装对话框，"安装"上方有一行"Leapgate 将关闭并重新打开，所有会话和正在使用的出口都将断开。"（M9c 之前的文案，没有"隧道"，按预期），焦点在"取消"；按回车关闭对话框，会话还在。另测只有出口卡片没有会话（A 开 `leapgate-allow-exit`，测试虚拟机的出口页按 ID 使用 A，卡片"可用 · 直连"）：同一行出现，焦点在"取消"，按 Esc 关闭、卡片还在。两者同时存在没单测 |
+| 远程打印 | `0c6b156d8` | 通过。便携版设置 → 传入连接 → 远程打印：状态"仅安装版支持远程打印"，右边"安装"按钮；点它打开同一个对话框，不改任何选项直接装：装完 `Get-Printer` 有"Leapgate Printer"（驱动 `RustDesk v4 Printer Driver`，上游驱动名，驱动不改名是已定的），说明打印机在这个入口是预先勾上的。按钮有没有盾牌：未验证 |
+| "升级"卡 | `0c6b156d8` | 直接升级通过，盾牌**未验证**。先 `--silent-install` 装 M8 的发布构建（`BuildDate` 2026-11-07 04:49），停掉服务和进程，起新便携版：主页卡"已安装的 Leapgate 版本低于当前版本。 / 升级"；点后没有对话框，约 6 秒服务 Running、安装版界面和托盘起来，`BuildDate` 变成 2026-11-09 12:00，`libleapgate.dll` 哈希等于被测构建的，位置不变 |
+| `--install` | `0c6b156d8` | 通过。便携版 exe 加 `--install` 0.4 秒退出、退出码 0，`log\install\` 里一行 `leapgate ui: --install is not supported, install from the home page of the portable version`，没有窗口、没有安装 |
+| 取消 UAC | — | 未验证（这台虚拟机提权不弹框） |
+| 失败后回车重试 | `1c3d3f44a` | 通过（用提权前的失败代替 UAC 取消）。把发布 zip 解到 `C:\100%\app` 起便携版，点"安装"：对话框里"安装"上方出现"安装失败：Installer path or name contains characters unsafe for cmd.exe"，对话框留着，焦点（语义树）在"安装"；按回车，`log\leapgate-install\` 里那条失败日志的时间戳变成新的（每次尝试重写一次），再次出现同一句错误，没有装上。UAC 被取消那条路径本身没走 |
+| 长路径悬停，系统文字放大到 125% 以上 | `1c3d3f44a` | 未验证（没有可看的画面；真实鼠标悬停后语义树里也没有提示节点，没有去改系统文字大小） |
+| 读屏 | `0c6b156d8`、`1c3d3f44a` | 部分通过。用 `scripts/e2e/leapgate-uia.ps1`（本次加了读取值和遗留 MSAA 状态的副本）读对话框：所有可操作控件都有名字（"修改安装位置""创建开始菜单快捷方式""创建桌面快捷方式""安装 Leapgate 打印机. ‹说明›""取消""安装"），标题"安装 Leapgate"，路径是名为"安装位置"的文本、值是完整路径，错误和提示行是文本节点；对话框开着时底下主页的控件不在树里（被遮）。**两处不满意**：①三个勾选行是 `Button`（只有 Invoke），没有 Toggle 模式，遗留状态里没有"已选中"，屏幕阅读器读不出有没有勾上；②位置不可用时"安装"灰显，但语义树里它的"启用"仍是真（只有 Invoke 无效这一条行为证据），读屏不会报"不可用"。需要时交 designer 看（同一个勾选行组件在别的页面里是不是一样没查） |
+| 旧界面编一次加五项冒烟 | — | 未做（14 §5.3 末行；这次任务没要求，Rust 改了 `libs/leapgate` 和 `src/leapgate_hooks/install.rs`） |
+
+**前提实测（13 R3-Q24 第 1、3 项，14 §5.1 第 2 条）**：用旧界面（`app-ui-m7a-upstream-b16f17cd1`）的安装页（没有任何检查）在测试虚拟机上装，每次装完清理（删服务、卸载项、快捷方式、`HKCR\leapgate`、防火墙规则）。
+
+| 情形 | 结果 |
+|---|---|
+| 选映射的网络盘 `Z:\`（安装位置 `Z:\Leapgate`） | **装出空壳，13 的说法成立**。服务注册了（Stopped，路径 `"Z:\Leapgate\Leapgate.exe" --service`）、卸载项 `InstallLocation` = `Z:\Leapgate`、开始菜单和公共桌面快捷方式都建了；提权的脚本看不到当前用户的 `Z:`（映射只在未提权的会话里），共享的根目录里也是空的，哪里都没有程序文件 |
+| 选 Leapgate 所在的文件夹本身（目标就是正在运行的文件夹） | **没有装出空壳，13 的说法不成立**。文件齐全（94 个文件对来源 92 个，多的是 `RuntimeBroker_leapgate.exe` 和卸载快捷方式），服务 Running、托盘和界面起来；安装脚本没有删正在运行的文件夹，也没有报循环复制。但随后 `--uninstall` 把整个文件夹（便携版自己解出来的那份）连同程序删了，所以"卸载会删掉整个安装文件夹"仍然成立 |
+| 选 Leapgate 所在文件夹**里面**（目标是 `‹运行文件夹›\Leapgate`） | **装出空壳，成立**。目标里只有 `RuntimeBroker_leapgate.exe` 和 `Uninstall Leapgate.lnk`，没有 `leapgate.exe`，服务 Stopped。在管理员 shell 里手动 `xcopy ‹运行文件夹› ‹运行文件夹›\Leapgate /Y /E /H /C /I` 报"Cannot perform a cyclic copy"，退出码 4；安装脚本自己的 xcopy 输出没看到 |
+
+13 要据此改的两处：①单文件便携版运行在 `%LOCALAPPDATA%\leapgate`，在选择框里选 `%LOCALAPPDATA%`（Windows 路径不分大小写）得到的目标就是它本身，这一类**装得上**，不是空壳，但卸载会把便携版自己的解压目录删掉（便携版下次启动会重新解压）；真正装出空壳的是装进它里面的子文件夹。②现在检查把这两种情形用同一句"无法安装到 Leapgate 当前所在的文件夹"挡掉，对"本身"这一类是偏严（装得上、只是卸载后果特殊），要不要放宽由主会话和维护者定。
+
+**环境说明**：测试虚拟机测完回滚到 `m6-admin` 并 `qm shutdown 110 --forceStop 1`（`stopped`）；回滚后时钟会落后，telechir 连不上，下次用要维护者同步时间。A 的配置：测前备份 8 个文件，测中为了出口项改过（`leapgate-allow-exit`、固定密码）、A 的便携版是从 `app-ui-m9a-0c6b156d8` 起的，测完删掉整个配置目录用备份盖回，8 个文件逐个哈希一致；A 上没有 Leapgate 进程，没有残留计划任务，没有 MSIX 包内副本；原版 RustDesk、msi、mihomo 没碰（msi 没用）。测试虚拟机上测试共享用的本地账户 `lgshare` 随回滚消失。构建 worktree `.wt\ui-m0-build` 停在 `1c3d3f44a`。证据在 A 的 `C:\leapgate-e2e\evidence\m9a-accept\`（`results.txt` 逐项流水账、`premise-test.txt`、`00-build-hashes-*.txt`、`build*.log`、`99-A-config-after.txt`、`tools\` 脚本）。
+
 #### M8 切换，安装版（测试虚拟机，2026-11-06 20:00~21:25，被测 `57c0087fd`）
 
 按 11 §5.3。构建：新界面（`-Ui leapgate`）`leapgate.exe` `A1FA2192…`、`libleapgate.dll` `570E2E52…`、便携单文件 `leapgate-0.4.0-x86_64.exe` `CF5EFA8F…`、发布目录 zip `204B25C1…`；旧界面（`-Ui upstream`，同一提交）`leapgate.exe` `7F7BFDD1…`、`libleapgate.dll` `26FF0C84…`；"构建时间早"的对照是 `8769ee3ce` 的新界面构建（`libleapgate.dll` `609FDC3A…`）。端点 A 当控制端（新界面便携版），测试虚拟机当被控端（先回滚快照；快照里管理员提权不弹框）。
