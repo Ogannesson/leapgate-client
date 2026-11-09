@@ -1667,7 +1667,7 @@
   "termDisconnectTitle": "Disconnect terminal?",
   "termDisconnectBody": "{count, plural, =1{1 terminal will be closed.} other{{count} terminals will be closed.}}",
   "@termDisconnectBody": {"placeholders": {"count": {"type": "int"}}},
-  "termClipboardRequest": "An app in the remote terminal wants to write to this device's clipboard. If you allow it, apps in all remote terminals can write to the clipboard. You can change this in Settings under \"Terminal apps writing to clipboard\".",
+  "termClipboardRequest": "An app in the remote terminal wants to write to this device's clipboard. If you allow it, apps in all remote terminals can write to the clipboard. You can change this in Settings under \"Terminal apps writing to the clipboard\".",
   "termClipboardRequestName": "Clipboard write request",
   "termClipboardAllow": "Allow",
   "termClipboardDeny": "Deny",
