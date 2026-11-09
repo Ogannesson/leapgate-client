@@ -105,20 +105,22 @@ class ExitNodesModel extends ChangeNotifier {
     }
   }
 
-  /// [port] for [card]'s listener, or why not.
+  /// [port] for [card]'s listener, or why not: another exit card or a tunnel holds it (13
+  /// §1.1.3).
   ExitPortError? portError(int port, ExitCard card) {
     if (port < 1 || port > 65535) return ExitPortError.invalid;
-    if (_cards.any((c) => c != card && c.port == port)) {
+    if (_cards.any((c) => c != card && c.port == port) ||
+        appCore.tunnels.portsInUse().contains(port)) {
       return ExitPortError.taken;
     }
     return null;
   }
 
-  /// The port this device keeps (M5-6): the one it had, unless another card holds it; a new
-  /// one from [kExitFirstPort] skips the cards' ports and those other devices keep.
+  /// The port this device keeps (M5-6): the one it had, unless another card or a tunnel holds
+  /// it; a new one from [kExitFirstPort] skips those and the ports other devices keep.
   int _portFor(String id) {
     final ports = _ports();
-    final used = {for (final c in _cards) c.port};
+    final used = {for (final c in _cards) c.port, ...appCore.tunnels.portsInUse()};
     final kept = ports[id];
     if (kept != null && !used.contains(kept)) return kept;
     final taken = {

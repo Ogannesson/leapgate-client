@@ -17,11 +17,12 @@ import 'connection.dart' show ConnInput, ConnReason;
 class CardReason implements ConnReason {
   CardReason(this.code, [this.params = const {}, this.text = '']);
 
-  /// `{"code",…}` as the exit and tunnel events carry it; `other` keeps Rust's `text`.
-  factory CardReason.fromJson(Map<String, dynamic> m) {
-    final params = Map<String, dynamic>.of(m);
+  /// The `"reason"` object of an event (`{"code",…}`), and the event's `"text"` that comes
+  /// beside it for `other` (`LEAPGATE.md` §10.18 "事件").
+  factory CardReason.ofEvent(Map<String, dynamic> evt) {
+    final params = Map<String, dynamic>.from(evt['reason'] as Map);
     final code = params.remove('code') as String? ?? 'other';
-    final text = params.remove('text');
+    final text = evt['text'];
     return CardReason(code, params, text is String ? text : '');
   }
 
@@ -45,6 +46,7 @@ class CardLogin {
     this.declineInsecure,
     this.onError,
     this.onHostname,
+    this.onPlatform,
   });
 
   final SessionID sessionId;
@@ -62,6 +64,9 @@ class CardLogin {
 
   /// The remote host name, once logged in.
   final void Function(String hostname)? onHostname;
+
+  /// The remote platform (`kPeerPlatform*`), once logged in.
+  final void Function(String platform)? onPlatform;
 
   var _ended = false;
   StreamSubscription? _session;
@@ -121,6 +126,10 @@ class CardLogin {
       case 'peer_info':
         final host = evt['hostname'];
         if (host is String && host.isNotEmpty) onHostname?.call(host);
+        final platform = evt['platform'];
+        if (platform is String && platform.isNotEmpty) {
+          onPlatform?.call(platform);
+        }
     }
   }
 
