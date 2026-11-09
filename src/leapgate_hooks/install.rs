@@ -2,7 +2,8 @@
 //! upstream's installer, run so that a failure comes back to the card. The options are in
 //! `libs/leapgate` (`install`).
 //!
-//! The installer runs in a child of this process (`--leapgate-install <kind>`), not in it: this
+//! The installer runs in a child of this process (`--leapgate-install <kind> <path> <options>`,
+//! the last two for `install` only, M9a), not in it: this
 //! process holds the main IPC, and the `--server` that the installed service starts while the
 //! script still runs finds it taken and kills the process holding it
 //! (`server.rs` `stop_main_window_process`), before upstream's `run_after_run_cmds` would start
@@ -11,22 +12,24 @@
 
 use hbb_common::log;
 
-/// The child's argument, followed by the kind.
+/// The child's argument, followed by the kind, the path and the options.
 #[cfg(windows)]
 const CHILD_ARG: &str = "--leapgate-install";
 
-/// Installs (`install`) or upgrades (`upgrade`) in a child and exits on success; the failure
-/// otherwise, as `leapgate::install::failure`.
+/// Installs (`install`) to `path` (empty: the default location) with `options`
+/// (`leapgate::install::options`), or upgrades (`upgrade`, the installed path and options; `path`
+/// and `options` are ignored), in a child, and exits on success; the failure otherwise, as
+/// `leapgate::install::failure`.
 ///
 /// On success the child has started the installed copy and its tray; this process is usually gone
 /// by then, killed by the script's `taskkill`.
 #[cfg(windows)]
 #[cfg_attr(not(feature = "flutter"), allow(dead_code))]
-pub(crate) fn install(kind: &str) -> String {
+pub(crate) fn install(kind: &str, path: &str, options: &str) -> String {
     use std::io::Read;
     let child = std::env::current_exe().and_then(|exe| {
         std::process::Command::new(exe)
-            .args([CHILD_ARG, kind])
+            .args([CHILD_ARG, kind, path, options])
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
             .spawn()
@@ -57,7 +60,7 @@ pub(crate) fn install(kind: &str) -> String {
 }
 
 #[cfg(not(windows))]
-pub(crate) fn install(kind: &str) -> String {
+pub(crate) fn install(kind: &str, _path: &str, _options: &str) -> String {
     leapgate::install::failure(&format!("{kind} is not supported on this platform"))
 }
 
@@ -89,14 +92,14 @@ pub(crate) fn child(args: &[String]) {
         SetStdHandle(STD_OUTPUT_HANDLE, std::ptr::null_mut());
         pipe
     };
-    let kind = args.get(1).map(String::as_str).unwrap_or_default();
+    let (kind, path, options) = requested(args);
     let (options, path) = if kind == "upgrade" {
         (
             leapgate::install::upgrade_options(&crate::platform::get_install_options()),
             crate::ui_interface::install_path(),
         )
     } else {
-        (leapgate::install::INSTALL_OPTIONS.to_owned(), String::new())
+        (options.to_owned(), path.to_owned())
     };
     match crate::platform::install_me(&options, path, false, false) {
         Ok(()) => {
@@ -109,5 +112,40 @@ pub(crate) fn child(args: &[String]) {
             writeln!(pipe, "{}", leapgate::install::failure(&format!("{e:#}"))).ok();
             std::process::exit(1);
         }
+    }
+}
+
+/// The child's kind, path and options; a missing one is empty, an empty path the default location.
+#[cfg(any(windows, test))]
+fn requested(args: &[String]) -> (&str, &str, &str) {
+    let arg = |i: usize| args.get(i).map(String::as_str).unwrap_or_default();
+    (arg(1), arg(2), arg(3))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn the_child_takes_the_path_and_options_as_given() {
+        let a = args(&[
+            "--leapgate-install",
+            "install",
+            r"D:\Apps\Leap gate\Leapgate",
+            "startmenu printer",
+        ]);
+        assert_eq!(
+            requested(&a),
+            ("install", r"D:\Apps\Leap gate\Leapgate", "startmenu printer")
+        );
+        // An empty path is the default location; no options is an empty word list.
+        let a = args(&["--leapgate-install", "install", "", ""]);
+        assert_eq!(requested(&a), ("install", "", ""));
+        let a = args(&["--leapgate-install", "upgrade"]);
+        assert_eq!(requested(&a), ("upgrade", "", ""));
     }
 }

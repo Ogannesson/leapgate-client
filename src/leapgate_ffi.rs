@@ -429,9 +429,18 @@ pub fn leapgate_ft_resume(session_id: SessionID, id: i32) {
 // ---- Install (M8) ----
 // `LEAPGATE.md` §10.16.
 
-/// The home page's cards: `kind` is `install` (the default path and options) or `upgrade` (the
-/// installed path and options). Does not return on success: this process exits and the
-/// installed copy starts. A failure is `{"result":"uac_denied"|"failed","text":…}`.
-pub fn leapgate_install(kind: String) -> String {
-    crate::leapgate_hooks::install::install(&kind)
+/// The home page's cards and the install dialog (M9a): `kind` is `install` (to `path`, the whole
+/// path the UI built, empty for the default location, with the three options) or `upgrade` (the
+/// installed path and options; the other four are ignored). Does not return on success: this
+/// process exits and the installed copy starts. A failure is
+/// `{"result":"uac_denied"|"failed","text":…}`.
+pub fn leapgate_install(
+    kind: String,
+    path: String,
+    start_menu: bool,
+    desktop_shortcut: bool,
+    printer: bool,
+) -> String {
+    let options = leapgate::install::options(start_menu, desktop_shortcut, printer);
+    crate::leapgate_hooks::install::install(&kind, &path, &options)
 }
