@@ -43,7 +43,7 @@ class _Navigation implements MainNavigation {
           String password = '',
           bool isSharedPassword = false,
           bool forceRelay = false}) =>
-      views.add('$id|${kind.name}|$terminalAdmin');
+      views.add('$id|${kind.name}|$terminalAdmin|$password|$forceRelay');
 }
 
 void main() {
@@ -111,13 +111,10 @@ void main() {
     expect(navigation.views, isEmpty);
   });
 
-  test('the third round\'s kinds open nothing and say so in a toast', () {
+  test('the TCP tunnel and RDP open nothing and say so in a toast', () {
     for (final (kind, toast) in [
       ('port-forward', 'linkUnsupportedPortForward'),
       ('rdp', 'linkUnsupportedRdp'),
-      ('view-camera', 'linkUnsupportedCamera'),
-      ('terminal', 'linkUnsupportedTerminal'),
-      ('terminal-admin', 'linkUnsupportedTerminal'),
     ]) {
       expect(handleLink(Uri.parse('leapgate://$kind/100200300')), false);
       expect(appCore.toasts.current?.key, toast);
@@ -125,6 +122,25 @@ void main() {
     expect(navigation.connected, isEmpty);
     expect(navigation.fileTransfers, isEmpty);
     expect(navigation.views, isEmpty);
+  });
+
+  test('the terminals and the camera open their views with the password and the relay '
+      '(13 §2.1.1, §3.1.1)', () {
+    expect(handleLink(Uri.parse('leapgate://terminal/100200300')), true);
+    expect(
+        handleLink(Uri.parse(
+            'leapgate://terminal-admin/400500600?password=pw-1&relay=true')),
+        true);
+    expect(
+        handleLaunchArgs(['--view-camera', '700800900', '--password', 'pw-2'],
+            'leapgate://'),
+        true);
+    expect(navigation.views, [
+      '100200300|terminal|false||false',
+      '400500600|terminal|true|pw-1|true',
+      '700800900|viewCamera|false|pw-2|false',
+    ]);
+    expect(appCore.toasts.current, isNull);
   });
 
   test('the third round\'s kinds take the ID, the password and the relay (LEAPGATE.md §10.18)',

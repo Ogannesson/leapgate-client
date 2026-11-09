@@ -191,7 +191,8 @@ void main() {
       await tester.tap(find.text('远程桌面').first);
       await tester.pumpAndSettle();
       expect(find.text('文件传输'), findsOneWidget);
-      expect(find.text('未打开'), findsOneWidget);
+      // With the terminal and the camera (M9b): three views not open.
+      expect(find.text('未打开'), findsNWidgets(3));
       expect(
         find.descendant(
           of: find.widgetWithText(LgMenuItem, '远程桌面'),
