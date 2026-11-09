@@ -95,6 +95,47 @@ class TerminalViewPage extends StatefulWidget {
 class _TerminalViewPageState extends State<TerminalViewPage> {
   TerminalTabs get _tabs => widget.ffi.terminals!;
 
+  /// "断开" of "断开终端？", which takes the keyboard whenever the question is up in the shown
+  /// view: the dialog's autofocus works only when it is first built, and the view may have been
+  /// in the background then, or left and come back to.
+  final _disconnectFocus = FocusNode(debugLabel: 'terminal disconnect');
+  var _asking = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabs.addListener(_onTabs);
+  }
+
+  @override
+  void didUpdateWidget(TerminalViewPage old) {
+    super.didUpdateWidget(old);
+    if (widget.active && !old.active && _tabs.askingDisconnect) {
+      _focusQuestion();
+    }
+  }
+
+  @override
+  void dispose() {
+    _tabs.removeListener(_onTabs);
+    _disconnectFocus.dispose();
+    super.dispose();
+  }
+
+  void _onTabs() {
+    final asking = _tabs.askingDisconnect;
+    if (asking && !_asking) _focusQuestion();
+    _asking = asking;
+  }
+
+  void _focusQuestion() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && widget.active && _tabs.askingDisconnect) {
+        _disconnectFocus.requestFocus();
+      }
+    });
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -317,6 +358,7 @@ class _TerminalViewPageState extends State<TerminalViewPage> {
                           label: l10n.termDisconnect,
                           kind: LgButtonKind.primary,
                           isDefault: true,
+                          focusNode: _disconnectFocus,
                           onPressed: () => tabs.answerDisconnect(true),
                         ),
                       ],

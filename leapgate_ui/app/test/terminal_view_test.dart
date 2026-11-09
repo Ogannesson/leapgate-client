@@ -420,6 +420,41 @@ void main() {
     expect(appCore.sessions.sessionsOf('456789123'), isEmpty);
   });
 
+  testWidgets(
+    '"断开终端？" asked in the background takes Esc and Enter once the view shows',
+    (tester) async {
+      final v = await _pump(tester);
+      v.ffi.terminals!.add();
+      await tester.pump();
+      v.active.value = false;
+      await tester.pump();
+      final first = disconnectTerminalView(v.ffi);
+      await tester.pump();
+      v.active.value = true;
+      await tester.pump();
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
+      expect(find.text('断开终端？'), findsNothing);
+      await first;
+      expect(appCore.sessions.sessionsOf('456789123'), [v.ffi]);
+
+      // Asked while it shows, then away to another tab and back.
+      final second = disconnectTerminalView(v.ffi);
+      await tester.pump();
+      v.active.value = false;
+      await tester.pump();
+      v.active.value = true;
+      await tester.pump();
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      expect(v.ffi.terminals!.askingDisconnect, isFalse);
+      await second;
+      expect(appCore.sessions.sessionsOf('456789123'), isEmpty);
+    },
+  );
+
   testWidgets('the lines the terminal writes are in the UI\'s language', (
     tester,
   ) async {
