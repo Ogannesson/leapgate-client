@@ -2807,7 +2807,7 @@ M9 分三段，各自审查、验收、外观检查、合 main（M9-1）。和�
 |---|---|---|
 | `leapgate_install`（改） | `kind: String`、`path: String`、`start_menu: bool`、`desktop_shortcut: bool`、`printer: bool` | 返回和失败 JSON 同 §10.16；`upgrade` 时后四个忽略。`path` 是界面拼好的整条路径（选中的文件夹加 `\Leapgate`），空串走默认位置 |
 | `leapgate_session_display_names` | `session_id: SessionID` | `SyncReturn<String>`：JSON 字符串数组，对端信息里显示器（摄像头会话里是摄像头）的名称，顺序同编号；去掉控制字符、截到 64 个字符；没有会话或还没登录时 `[]` |
-| `leapgate_tunnel_session_add` | `session_id`、`id: String`、`rdp: bool`、`password: String`、`is_shared_password: bool`、`conn_token: Option<String>`、`force_relay: bool` | `SyncReturn<String>`：成功 `{}`；`{"error":"already"}`（TCP：这台设备已有端口转发会话，即出口卡片或没关完的隧道卡片；RDP：已有 RDP 会话）；`{"error":"invalid_id"}`；`{"error":"other","text":…}`。和出口卡片一样不调 `LocalConfig::set_remote_id`；不同的是 `args` 为空（出口卡片带三个参数、走上游的三参数分支），`ConnType` 是 `PORT_FORWARD` 或 `RDP`；成功后界面照常调块 1 的 `sessionStart` 拿会话事件流（提问在那条流上） |
+| `leapgate_tunnel_session_add` | `session_id`、`id: String`、`rdp: bool`、`password: String`、`is_shared_password: bool`、`conn_token: Option<String>`、`force_relay: bool` | `SyncReturn<String>`：成功 `{}`；`{"error":"already"}`（TCP：这台设备已有端口转发会话，即出口卡片或还开着的隧道卡片，正在关闭的不算；RDP：已有 RDP 会话）；`{"error":"invalid_id"}`；`{"error":"other","text":…}`。和出口卡片一样不调 `LocalConfig::set_remote_id`；不同的是 `args` 为空（出口卡片带三个参数、走上游的三参数分支），`ConnType` 是 `PORT_FORWARD` 或 `RDP`；成功后界面照常调块 1 的 `sessionStart` 拿会话事件流（提问在那条流上） |
 | `leapgate_tunnel_events` | 全局 `StreamSink<String>`，和出口的流分开 | 见"事件"；新订阅替换旧的，订阅时先补推每张卡片每一行最后一条状态（通知不补推） |
 | `leapgate_tunnel_retry` | `session_id`、`port: i32`（RDP 传 0） | `SyncReturn<bool>`：没有这张卡片或这一行时为假。"重试""重新连接"共用：监听关着（已停止、端口被占用）就重开，开成了马上登录；中断（监听开着、隧道没了）时马上登录；在用或正在连接时什么都不做 |
 
@@ -2854,11 +2854,11 @@ M9 分三段，各自审查、验收、外观检查、合 main（M9-1）。和�
 所有端口转发会话都经过这一行，所以 `take` 必须精确认出登记时的那个会话：登记表的键是（设备 ID，种类），值里存登记时的会话 ID，`take` 只在 `handler` 的会话 ID 和它相同时才取走，对不上一律返回 `None`（同一台设备的出口卡片会话、登记后没 `sessionStart` 就关掉又重开的会话都不会被认领）。不需要总开关；旧界面从不登记，照走上游原路。出口卡片的会话不登记进隧道表，照旧走三参数分支和出口挂钩。合并上游时核对这个分支的结构（`sender`、`port_forward_mux` 先设好）和 `Data::{AddPortForward, RemovePortForward, NewRDP, Close}`。
 
 **Rust 的做法**（14 §2.2、§4.2、§4.3）
-- R 的实现补充（2026-11-09 主会话确认）：`take` 认会话的办法是在会话表里按登记的会话 ID 找到会话、比较它和 `handler` 是不是同一个 `lc`（`Session<T>` 没有会话 ID 字段），效果等于按会话 ID 认；懒登录一律不打开远程桌面连接（含监听开好后的第一次 `in_use` 若是由本地连接触发的），只有卡片打开或"重试"成功后的那次和 `NewRDP` 打开；删一行后、`removed` 推出来之前，同一端口的 `AddPortForward` 被忽略，界面要等到 `removed` 再加；0.0.0.0 试绑只在 Windows 上做，RDP（本机端口 0）不做。
+- R 的实现补充（2026-11-09 主会话确认，审查后修订）：`take` 认会话的办法是登记时把会话的 `lc` 以 `Weak` 存进登记表，`take` 和 `handler.lc` 比是不是同一个（`Session<T>` 没有会话 ID 字段），效果等于按会话 ID 认，也不依赖会话表还在；懒登录一律不打开远程桌面连接（含监听开好后的第一次 `in_use` 若是由本地连接触发的），只有卡片刚打开、从"已停止"重试成功、`NewRDP`（正在连接时也打开，mstsc 的连接在 backlog 里等登录完）这三种打开，从"已中断"重新连接成功不打开（用户原来的窗口自己会重连）；删一行后、`removed` 推出来之前，同一端口的 `AddPortForward` 被忽略，界面要等到 `removed` 再加；查监听表只在 Windows 上做，RDP（本机端口 0）不做。正在关闭的卡片（已 `sessionClose`）不算 `already`，同出口：同一台设备可以马上再加，新卡片替换旧卡片后旧卡片剩下的事件（含它的 `closed`）都被丢掉，界面不要等旧卡片的 `closed`。
 - 卡片循环 `run`：TCP 卡片读 `handler.lc.port_forwards`，跳过出口占位和本机或远程端口 ≤ 0 的（同上游，界面的 `savedForwards` 用同一条规则），每条起一行；RDP 卡片端口照上游取 `rdp_port`（解析不了用 3389），起一行（本机端口 0）。收到 `AddPortForward` 起一行（已有同端口的忽略）、`RemovePortForward` 关那一行后推 `removed`、`NewRDP` 打开远程桌面连接、`Close` 或发送端没了就把关闭发给每一行、等全部收尾（照 `login_or_close`）、推 `closed` 再返回；其余 `Data`（登录、二次验证、不安全连接的回答）照上游广播给每一行。登记表照 `exit::cards`，键是（设备 ID，种类），和出口的表分开。
 - 单条转发照 `exit::cards::run_card` 另写一份，原函数不改。差别：登录目标是这一行的目标（RDP 是空主机加 RDP 端口、`is_rdp`）；不做 SOCKS 握手；结局不看出口能力（对端支持多路复用就用，不支持停在 `peer_too_old`）；登录失败不冷却；不安全连接被拒记 `insecure_declined`；没有改端口。占位连接、`login_or_close`、K0 守卫的三种结局、隧道结束后的懒重连照搬。
 - 按行的 `Interface` 包装 `RowUi`：只有提问类转给会话（要密码、重新输入密码、二次验证、等待对方接受、不安全连接，界面靠它们画提问区）；**报错类一律拦下**，不进会话流：`on_establish_connection_error`、`on_error`（含 `PEER_TOO_OLD`）、`msgbox` 里类型是 error 的（含 `handle_login_error` 转出的登录失败），原文记进这一行，行停下或中断时按 C3 分类当原因。`update_direct` 同时记进这一行。隧道在用时被控端拒绝打开通道（`on_frame` 来的，被控端有四种原文）一律推这一行的 `notice`：认得的三种按下表分类，其余是 `other` 带原文。所以界面不用处理会话流上的错误框（T 照此写 `CardLogin` 的隧道用法）。
-- **独占监听**（M9-3，14 §4.1 的实测）：不复用地址绑 `127.0.0.1:P`，成功后再绑一次 `0.0.0.0:P`（只 bind、不 listen，马上丢）。两次里任何一次报地址占用（`AddrInUse`）或拒绝访问（`PermissionDenied`，对方独占绑定、系统保留端口段都报这个）都算端口被占用：关掉刚开的监听、推 `port_in_use`。出口卡片和旧界面的出口代理换用同一个函数（出口回归一次）。
+- **独占监听**（M9-3，14 §4.1 的实测）：不复用地址绑 `127.0.0.1:P`；绑定报地址占用（`AddrInUse`）或拒绝访问（`PermissionDenied`，对方独占绑定、系统保留端口段都报这个）算端口被占用。绑上以后，在 Windows 上查 IPv4、IPv6 两张 TCP 监听表（`GetExtendedTcpTable`），`0.0.0.0:P` 或 `[::]:P` 上有 LISTEN 也算被占用：关掉刚开的监听、推 `port_in_use`。不用试绑 `0.0.0.0:P`：本机有一条源端口是 P 的出站连接时试绑也报占用，会凭空误报（2026-11-09 Rust 审查实测，本机动态端口 1024~15000 里约 1/27 的端口当时被出站连接占着）。出口卡片和旧界面的出口代理换用同一个函数（出口回归一次）。
 - RDP：一行进 `in_use` 时，如果是这次监听开好后的第一次（卡片刚打开或从"已停止"重试成功），打开一次远程桌面连接；懒重连成功不打开；`NewRDP` 随时打开。照上游 `run_rdp` 在 `tunnel.rs` 另写，用户名密码从本会话的选项取（会话开始时读进来的那份），不读也不写进程环境变量；`cmdkey`、`mstsc` 放 `spawn_blocking`；窗口标题用上游的 `set_rdp_window_title`。日志写一行 RDP 的本机端口（验收要用）。
 - 连接令牌 Rust 不改：两种卡片的导出都收 `conn_token`，界面传 `SessionRegistry.tokenOf` 的值（R3-Q7）。
 - 不对隧道会话调 `sessionReconnect`（同出口，会另起一个 `io_loop`）。
@@ -2877,7 +2877,7 @@ M9 分三段，各自审查、验收、外观检查、合 main（M9-1）。和�
 3. 刚停止又马上为同一台设备打开，旧监听可能还没关，新行先报"端口被占用"，再"重试"一次就好。
 4. 加了会话却没有 `sessionStart` 的卡片留在登记表里，下次同一台设备再加时替换。
 5. 隧道登录失败不冷却：应用一直重连而对方不在线时，每条本地连接都触发一次登录（上游同样）。
-6. 别的程序只监听 `[::]:P` 时认不出端口被占用；本机程序用 `localhost` 可能先连到 `::1` 那边。
+6. 查监听表和真正开始监听之间有一个很短的空档，别的程序在这期间开始监听通配地址时认不出来（下次打开卡片时才报）。
 7. `cmdkey /generic:localhost` 全机一个名字（13 §1.7 第 6 条）。
 
 **测试**：14 §5.2 列的各条。合入前：`git diff main -- flutter/` 为空；core analyze 不超出 91 条 info 的基线，app 0 条；复制件不跑格式化，改已有文件不对整个文件跑 `dart format`；新旧界面都要能编（Rust 改了上游 `ui_session_interface.rs` 和出口监听），旧界面的五项冒烟和出口 B15 冒烟照跑。
