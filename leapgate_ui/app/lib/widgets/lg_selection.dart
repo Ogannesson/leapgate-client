@@ -95,7 +95,8 @@ class LgCheckbox extends StatelessWidget {
     return LgPressable(
       onPressed: onChanged == null ? null : () => onChanged!(!value),
       semanticLabel: label,
-      toggled: value,
+      // A check box for a reader and a script, with its state (not a button that toggles).
+      checked: value,
       builder: (context, states) {
         final overlay = lgStateOverlay(c, states);
         final fill = value ? c.accent : null;

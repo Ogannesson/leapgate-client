@@ -185,6 +185,7 @@ class LgInstallDialog extends StatelessWidget {
                             busy: a.busy,
                             icon: a.icon,
                             iconSize: a.iconSize,
+                            focusNode: a.focusNode,
                             autofocus: a == defaultAction,
                             onPressed: a.onPressed,
                           ),
@@ -275,6 +276,7 @@ class LgInstallPathRow extends StatelessWidget {
     this.changeAutofocus = false,
     this.tone = LgPathTone.normal,
     this.message,
+    this.messageTooltip,
   });
 
   /// "安装位置".
@@ -296,6 +298,36 @@ class LgInstallPathRow extends StatelessWidget {
   /// Why the location is not usable ("无法安装到网络位置或可移动磁盘。请选择本机磁盘上的文件夹。") or
   /// the warning ("此文件夹中的现有文件将在安装或卸载 Leapgate 时被删除").
   final String? message;
+
+  /// What the pointer shows on the line of [message] and a screen reader reads after it: the
+  /// whole folder that the message is about ("无法安装到 Leapgate 当前所在的文件夹" and the path of
+  /// that folder, 13 §4.2 block A). Only that line has a tooltip; the path box keeps its own
+  /// (the cut path). Null: the line is as it was.
+  final String? messageTooltip;
+
+  /// The icon and the text of [message]; [fill] lets the text take the row (the line as it was)
+  /// or keeps the row to the text's width, so that the tooltip stands over the text only.
+  Widget _messageLine(LgTokens t, Color color, {required bool fill}) => Row(
+    mainAxisSize: fill ? MainAxisSize.max : MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Padding(
+        padding: const EdgeInsets.only(top: 1),
+        child: ExcludeSemantics(
+          child: LgIcon(
+            tone == LgPathTone.error ? LgIcons.err : LgIcons.warn,
+            size: 16,
+            color: color,
+          ),
+        ),
+      ),
+      const SizedBox(width: LgSpace.s2),
+      Flexible(
+        fit: fill ? FlexFit.tight : FlexFit.loose,
+        child: Text(message!, style: t.textS.copyWith(color: color)),
+      ),
+    ],
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -347,32 +379,28 @@ class LgInstallPathRow extends StatelessWidget {
             padding: const EdgeInsets.only(top: LgSpace.s2),
             // `role=alert` for an error, `status` for the warning: both are read out when they
             // appear.
-            child: Semantics(
-              liveRegion: true,
-              container: true,
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.only(top: 1),
-                    child: ExcludeSemantics(
-                      child: LgIcon(
-                        tone == LgPathTone.error ? LgIcons.err : LgIcons.warn,
-                        size: 16,
-                        color: msgColor,
+            child: messageTooltip == null
+                ? Semantics(
+                    liveRegion: true,
+                    container: true,
+                    child: _messageLine(t, msgColor, fill: true),
+                  )
+                // The tooltip has an anchor of its own, which a merged node would send on as an
+                // orphan (`LEAPGATE.md` §10.8): the line is read from here, with the tooltip's
+                // words after its own, so that a keyboard user gets them too.
+                : Semantics(
+                    liveRegion: true,
+                    container: true,
+                    label: '$message $messageTooltip',
+                    excludeSemantics: true,
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: LgTooltip(
+                        message: messageTooltip!,
+                        child: _messageLine(t, msgColor, fill: false),
                       ),
                     ),
                   ),
-                  const SizedBox(width: LgSpace.s2),
-                  Expanded(
-                    child: Text(
-                      message!,
-                      style: t.textS.copyWith(color: msgColor),
-                    ),
-                  ),
-                ],
-              ),
-            ),
           ),
       ],
     );
@@ -427,6 +455,8 @@ class _PathBoxState extends State<_PathBox> {
         final painter = TextPainter(
           text: TextSpan(text: widget.path, style: style),
           textDirection: Directionality.of(context),
+          // The text is drawn at the system's text size, so it is measured at it: a path that
+          // fits at 100 % may be cut at 150 %, and then it must show in full on hover.
           textScaler: MediaQuery.textScalerOf(context),
           maxLines: 1,
         )..layout();
@@ -518,7 +548,8 @@ class LgOptionCheck extends StatelessWidget {
       onPressed: onChanged == null ? null : () => onChanged!(!value),
       focusNode: focusNode,
       semanticLabel: description == null ? label : '$label. $description',
-      toggled: value,
+      // A check box for a reader and a script, with its state (not a button that toggles).
+      checked: value,
       builder: (context, states) {
         final overlay = lgStateOverlay(c, states);
         final fill = value ? c.accent : null;

@@ -173,6 +173,7 @@ class LgFormDialog extends StatelessWidget {
           busy: a.busy,
           icon: a.icon,
           iconSize: a.iconSize,
+          focusNode: a.focusNode,
           onPressed: a.onPressed,
         ),
     ],

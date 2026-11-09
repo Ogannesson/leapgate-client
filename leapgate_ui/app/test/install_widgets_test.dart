@@ -6,6 +6,7 @@
 // here compares pixels.
 
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:leapgate_ui/icons/lg_icon.dart';
@@ -15,6 +16,7 @@ import 'package:leapgate_ui/widgets/lg_feedback.dart';
 import 'package:leapgate_ui/widgets/lg_form_dialog.dart';
 import 'package:leapgate_ui/widgets/lg_install_dialog.dart';
 import 'package:leapgate_ui/widgets/lg_list_chrome.dart';
+import 'package:leapgate_ui/widgets/lg_selection.dart';
 
 import 'helpers.dart';
 
@@ -26,6 +28,7 @@ LgInstallPathRow _row({
   VoidCallback? onChange,
   LgPathTone tone = LgPathTone.normal,
   String? message,
+  String? messageTooltip,
 }) => LgInstallPathRow(
   label: '安装位置',
   path: path,
@@ -34,6 +37,7 @@ LgInstallPathRow _row({
   onChange: onChange,
   tone: tone,
   message: message,
+  messageTooltip: messageTooltip,
 );
 
 LgInstallDialog _dialog({
@@ -250,6 +254,75 @@ void main() {
       }
     });
 
+    group('messageTooltip', () {
+      const text = '无法安装到 Leapgate 当前所在的文件夹。请选择其他位置。';
+      const folder = r'C:\Users\zhangsan\Downloads\leapgate-0.4.0';
+
+      Widget row({String? tooltip, String path = _path}) => SizedBox(
+        width: 640,
+        child: _row(
+          path: path,
+          tone: LgPathTone.error,
+          message: text,
+          messageTooltip: tooltip,
+        ),
+      );
+
+      testWidgets('shows the folder while the pointer is on the red line', (
+        tester,
+      ) async {
+        await pumpLg(tester, row(tooltip: folder));
+        await hover(tester, find.text(text));
+        await tester.pump(const Duration(seconds: 1));
+        expect(find.text(folder), findsOneWidget);
+        // The text is still there once, and the line looks as it did: icon, then the text.
+        expect(find.text(text), findsOneWidget);
+      });
+
+      testWidgets('without it the line has no tooltip', (tester) async {
+        await pumpLg(tester, row());
+        await hover(tester, find.text(text));
+        await tester.pump(const Duration(seconds: 1));
+        expect(find.text(folder), findsNothing);
+      });
+
+      testWidgets('does not stack on the tooltip of a cut path', (
+        tester,
+      ) async {
+        await pumpLg(
+          tester,
+          SizedBox(
+            width: 480,
+            child: _row(
+              path: _longPath,
+              tone: LgPathTone.error,
+              message: text,
+              messageTooltip: folder,
+            ),
+          ),
+        );
+        await hover(tester, find.text(text));
+        await tester.pump(const Duration(seconds: 1));
+        // The pointer is on the line: the folder shows, the cut path does not.
+        expect(find.text(folder), findsOneWidget);
+        expect(find.text(_longPath), findsNothing);
+      });
+
+      testWidgets('the folder is read after the message', (tester) async {
+        final handle = tester.ensureSemantics();
+        await pumpLg(tester, row(tooltip: folder));
+        expect(find.bySemanticsLabel('$text $folder'), findsOneWidget);
+        handle.dispose();
+      });
+
+      testWidgets('the message is read as before without it', (tester) async {
+        final handle = tester.ensureSemantics();
+        await pumpLg(tester, row());
+        expect(find.bySemanticsLabel(text), findsOneWidget);
+        handle.dispose();
+      });
+    });
+
     testWidgets(
       'a long path is cut in the middle: the last folder stays whole',
       (tester) async {
@@ -284,6 +357,44 @@ void main() {
       await hover(tester, find.byType(LgInstallPathRow));
       await tester.pump(const Duration(seconds: 1));
       expect(find.text(_path), findsNothing);
+    });
+
+    group('under enlarged system text', () {
+      // At 100 % the path of the test above fits in 640 px; at 200 % its 25 letters are 750 px.
+      Widget scaled(double factor) => MediaQuery(
+        data: MediaQueryData(textScaler: TextScaler.linear(factor)),
+        child: SizedBox(width: 640, child: _row()),
+      );
+
+      testWidgets('a path that fits at 100 % is cut at 200 %', (tester) async {
+        await pumpLg(tester, scaled(2));
+        final head = tester.widget<Text>(
+          find.byWidgetPredicate(
+            (w) => w is Text && (w.data ?? '').startsWith(r'C:\Program'),
+          ),
+        );
+        expect(head.overflow, TextOverflow.ellipsis);
+        // The text really is drawn wider than the box: it is cut, not merely measured so.
+        final box = tester.getRect(find.byType(LgInstallPathRow));
+        expect(
+          tester.getRect(find.text(r'\Leapgate')).right,
+          lessThanOrEqualTo(box.right),
+        );
+      });
+
+      testWidgets('then the pointer shows the whole path', (tester) async {
+        await pumpLg(tester, scaled(2));
+        await hover(tester, find.byType(LgInstallPathRow));
+        await tester.pump(const Duration(seconds: 1));
+        expect(find.text(_path), findsOneWidget);
+      });
+
+      testWidgets('at 100 % the same path has no tooltip', (tester) async {
+        await pumpLg(tester, scaled(1));
+        await hover(tester, find.byType(LgInstallPathRow));
+        await tester.pump(const Duration(seconds: 1));
+        expect(find.text(_path), findsNothing);
+      });
     });
 
     testWidgets('the change button can take the keyboard at the start', (
@@ -343,7 +454,11 @@ void main() {
       await tester.tap(find.text('安装 Leapgate 打印机'), warnIfMissed: false);
       expect(
         tester.getSemantics(find.bySemanticsLabel(spoken)),
-        isSemantics(isButton: true, hasEnabledState: true, isEnabled: false),
+        isSemantics(
+          hasCheckedState: true,
+          hasEnabledState: true,
+          isEnabled: false,
+        ),
       );
       handle.dispose();
     });
@@ -353,13 +468,14 @@ void main() {
     ) async {
       final handle = tester.ensureSemantics();
       await pumpLg(tester, option((_) {}, value: true));
+      // A check box that is ticked: the Windows engine gives it the check box role and the
+      // checked state; a button would be Invoke only, and say nothing of the state.
       expect(
         tester.getSemantics(find.bySemanticsLabel(spoken)),
         isSemantics(
           label: spoken,
-          isButton: true,
-          hasToggledState: true,
-          isToggled: true,
+          hasCheckedState: true,
+          isChecked: true,
           hasEnabledState: true,
           isEnabled: true,
           hasTapAction: true,
@@ -367,6 +483,103 @@ void main() {
           isFocusable: true,
         ),
       );
+      handle.dispose();
+    });
+
+    testWidgets('unticked it says so, and is not a button', (tester) async {
+      final handle = tester.ensureSemantics();
+      await pumpLg(tester, option((_) {}));
+      final node = tester.getSemantics(find.bySemanticsLabel(spoken));
+      expect(
+        node,
+        isSemantics(
+          label: spoken,
+          hasCheckedState: true,
+          isChecked: false,
+          hasEnabledState: true,
+          isEnabled: true,
+          hasTapAction: true,
+          hasFocusAction: true,
+          isFocusable: true,
+        ),
+      );
+      // `isSemantics` says nothing of a flag it is not given; the role is the point.
+      expect(node.flagsCollection.isButton, isFalse);
+      handle.dispose();
+    });
+
+    testWidgets('pressing it by its semantic action toggles it', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      final seen = <bool>[];
+      await pumpLg(tester, option(seen.add));
+      tester.semantics.tap(find.semantics.byLabel(spoken));
+      await tester.pump();
+      expect(seen, [true]);
+      handle.dispose();
+    });
+
+    testWidgets('LgCheckbox is a check box too, ticked or not', (tester) async {
+      final handle = tester.ensureSemantics();
+      for (final on in [true, false]) {
+        await pumpLg(
+          tester,
+          LgCheckbox(value: on, label: '记住密码', onChanged: (_) {}),
+        );
+        final node = tester.getSemantics(find.bySemanticsLabel('记住密码'));
+        expect(
+          node,
+          isSemantics(
+            label: '记住密码',
+            hasCheckedState: true,
+            isChecked: on,
+            hasEnabledState: true,
+            isEnabled: true,
+            hasTapAction: true,
+            hasFocusAction: true,
+            isFocusable: true,
+          ),
+          reason: 'value $on',
+        );
+        expect(node.flagsCollection.isButton, isFalse);
+      }
+      handle.dispose();
+    });
+
+    testWidgets('a greyed LgCheckbox says it is disabled, still a check box', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      await pumpLg(
+        tester,
+        const LgCheckbox(value: true, label: '记住密码', onChanged: null),
+      );
+      expect(
+        tester.getSemantics(find.bySemanticsLabel('记住密码')),
+        isSemantics(
+          label: '记住密码',
+          hasCheckedState: true,
+          isChecked: true,
+          hasEnabledState: true,
+          isEnabled: false,
+        ),
+      );
+      handle.dispose();
+    });
+
+    testWidgets('pressing an LgCheckbox by its semantic action toggles it', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      final seen = <bool>[];
+      await pumpLg(
+        tester,
+        LgCheckbox(value: false, label: '记住密码', onChanged: seen.add),
+      );
+      tester.semantics.tap(find.semantics.byLabel('记住密码'));
+      await tester.pump();
+      expect(seen, [true]);
       handle.dispose();
     });
 
@@ -504,6 +717,140 @@ void main() {
     });
   });
 
+  group('a greyed button of a dialog is disabled in the semantics too', () {
+    // What `getSemantics` shows is what the engine is given; whether the Windows bridge passes
+    // "disabled" on to UI Automation is the engine's (see DS-components.md).
+    SemanticsNode node(WidgetTester tester, String label) =>
+        tester.getSemantics(find.bySemanticsLabel(label));
+
+    testWidgets('the install dialog: no location, then running', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      await pumpLg(tester, _stage(_dialog(installEnabled: false)));
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(
+        node(tester, '安装'),
+        isSemantics(
+          label: '安装',
+          isButton: true,
+          hasEnabledState: true,
+          isEnabled: false,
+        ),
+      );
+      // The way out is still there.
+      expect(
+        node(tester, '取消'),
+        isSemantics(
+          label: '取消',
+          isButton: true,
+          hasEnabledState: true,
+          isEnabled: true,
+          hasTapAction: true,
+          hasFocusAction: true,
+          isFocusable: true,
+        ),
+      );
+
+      await pumpLg(tester, _stage(_dialog(busy: true)));
+      await tester.pump(const Duration(milliseconds: 200));
+      for (final label in ['正在安装…', '取消']) {
+        expect(
+          node(tester, label),
+          isSemantics(
+            label: label,
+            isButton: true,
+            hasEnabledState: true,
+            isEnabled: false,
+          ),
+          reason: label,
+        );
+      }
+      handle.dispose();
+    });
+
+    testWidgets('LgConfirmDialog and LgFormDialog buttons, as before', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      await pumpLg(
+        tester,
+        _stage(
+          LgConfirmDialog(
+            title: '替换？',
+            actions: [
+              LgDialogAction(label: '跳过', onPressed: () {}),
+              const LgDialogAction(
+                label: '替换',
+                kind: LgButtonKind.primary,
+                onPressed: null,
+              ),
+            ],
+          ),
+        ),
+      );
+      expect(
+        node(tester, '替换'),
+        isSemantics(
+          label: '替换',
+          isButton: true,
+          hasEnabledState: true,
+          isEnabled: false,
+        ),
+      );
+      expect(
+        node(tester, '跳过'),
+        isSemantics(
+          label: '跳过',
+          isButton: true,
+          hasEnabledState: true,
+          isEnabled: true,
+          hasTapAction: true,
+          hasFocusAction: true,
+          isFocusable: true,
+        ),
+      );
+
+      await pumpLg(
+        tester,
+        _stage(
+          const LgFormDialog(
+            title: '登录到服务器',
+            actions: [
+              LgDialogAction(
+                label: '登录',
+                kind: LgButtonKind.primary,
+                onPressed: null,
+              ),
+            ],
+          ),
+        ),
+      );
+      expect(
+        node(tester, '登录'),
+        isSemantics(
+          label: '登录',
+          isButton: true,
+          hasEnabledState: true,
+          isEnabled: false,
+        ),
+      );
+      handle.dispose();
+    });
+
+    testWidgets('a button that is greyed gives no way to press it', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      await pumpLg(tester, _stage(_dialog(installEnabled: false)));
+      await tester.pump(const Duration(milliseconds: 200));
+      final n = node(tester, '安装');
+      expect(n.getSemanticsData().hasAction(SemanticsAction.tap), isFalse);
+      expect(n.getSemanticsData().hasAction(SemanticsAction.focus), isFalse);
+      handle.dispose();
+    });
+  });
+
   group('older components, new optional parameters', () {
     testWidgets(
       'LgDialogAction.icon reaches the buttons of the other dialogs',
@@ -614,6 +961,75 @@ void main() {
         ),
       );
       expect(find.byKey(const ValueKey('inner')), findsOneWidget);
+    });
+
+    testWidgets('LgDialogAction.focusNode is the focus node of the button', (
+      tester,
+    ) async {
+      final nodes = [FocusNode(), FocusNode(), FocusNode()];
+      for (final n in nodes) {
+        addTearDown(n.dispose);
+      }
+      final dialogs = <Widget>[
+        LgInstallDialog(
+          title: '安装 Leapgate',
+          actions: [
+            LgDialogAction(label: '安装', focusNode: nodes[0], onPressed: () {}),
+          ],
+        ),
+        LgFormDialog(
+          title: '登录',
+          actions: [
+            LgDialogAction(label: '登录', focusNode: nodes[1], onPressed: () {}),
+          ],
+        ),
+        LgConfirmDialog(
+          title: '确认？',
+          actions: [
+            LgDialogAction(label: '好', focusNode: nodes[2], onPressed: () {}),
+          ],
+        ),
+      ];
+      for (final (i, dialog) in dialogs.indexed) {
+        await pumpLg(tester, _stage(dialog));
+        await tester.pump();
+        // Moved to by the caller, as the install page does after a failed install: the node is
+        // the button's, so the button takes the keyboard.
+        nodes[i].requestFocus();
+        await tester.pump();
+        expect(nodes[i].hasPrimaryFocus, isTrue, reason: 'dialog $i');
+      }
+    });
+
+    testWidgets('Enter presses the button that was given the keyboard back', (
+      tester,
+    ) async {
+      var presses = 0;
+      final node = FocusNode();
+      addTearDown(node.dispose);
+      await pumpLg(
+        tester,
+        _stage(
+          LgInstallDialog(
+            title: '安装 Leapgate',
+            actions: [
+              LgDialogAction(label: '取消', onPressed: () {}),
+              LgDialogAction(
+                label: '安装',
+                kind: LgButtonKind.primary,
+                focusNode: node,
+                onPressed: () => presses++,
+              ),
+            ],
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(presses, 0);
+      node.requestFocus();
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      expect(presses, 1);
     });
 
     testWidgets('the default scrim still scrolls a tall child', (tester) async {
