@@ -80,7 +80,8 @@ String _cameraLabel(AppLocalizations l10n, List<String> names, int i) =>
     names[i].isEmpty ? l10n.camN(i + 1) : l10n.camNamed(i + 1, names[i]);
 
 /// The camera switch (13 §3.2 block B): the button says the camera shown, the list has a row
-/// per camera with its name as the second line, the one shown checked, then "全部摄像头".
+/// per camera with its name at the end of the row (`.mr .cn`), the one shown checked, then
+/// "全部摄像头".
 Widget _cameraMenu(FFI ffi, AppLocalizations l10n, {required bool all}) {
   final pi = ffi.ffiModel.pi;
   final current = pi.currentDisplay;
@@ -95,7 +96,7 @@ Widget _cameraMenu(FFI ffi, AppLocalizations l10n, {required bool all}) {
       for (var i = 0; i < names.length; i++)
         LgMenuItem(
           label: l10n.camN(i + 1),
-          description: names[i].isEmpty ? null : names[i],
+          trailing: names[i].isEmpty ? null : LgMenuRowNote(names[i]),
           checked: current == i,
           onPressed: () => openMonitor(ffi, i),
         ),
@@ -144,13 +145,15 @@ List<Widget> monitorToolbarItems(ToolbarEnv env) {
           semanticLabel: camera
               ? _cameraLabel(l10n, names, i)
               : l10n.toolbarMonitorN(i + 1),
+          // A camera's hover is its number over its name (`p10-cam-tiles`).
+          tooltip: camera ? l10n.camN(i + 1) : null,
+          tooltipNote: camera && names[i].isNotEmpty ? names[i] : null,
           selected: current == i,
           onPressed: () => openMonitor(ffi, i, updateCursorPos: false),
         ),
       if (all)
         LgToolbarButton(
-          // TODO(M9 整合): designer's `i-cameras` for the camera.
-          icon: LgIcons.displays,
+          icon: camera ? LgIcons.cameras : LgIcons.displays,
           label: camera ? l10n.camAll : l10n.toolbarAllMonitors,
           toggled: current == kAllDisplayValue,
           onPressed: () =>

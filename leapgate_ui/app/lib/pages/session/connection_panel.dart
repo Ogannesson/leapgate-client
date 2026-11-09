@@ -11,7 +11,7 @@ import '../../shell/navigation.dart';
 import '../../widgets/lg_connection_panel.dart';
 import '../../widgets/lg_panel_inputs.dart';
 import '../../widgets/lg_selection.dart';
-import '../../widgets/lg_text_field.dart';
+import '../../widgets/lg_terminal_parts.dart';
 import 'reasons.dart';
 import 'session_names.dart';
 
@@ -195,9 +195,10 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
     // upstream.
     void adminAccount() {
       final withPassword = conn.input != ConnInput.osAccount;
-      message = l10n.viewAdminAccount;
-      secondary = l10n.viewAdminAccountNote;
+      // The account's title and note are the section's; with the connection password the
+      // panel asks that first, as the password panel does (`d-cp-admin`, `d-cp-admin-pw`).
       if (withPassword) {
+        message = l10n.connEnterPassword;
         inputs
           ..add(LgPasswordField(
             controller: _password,
@@ -217,21 +218,19 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
             onChanged: (v) => setState(() => _remember = v),
           ));
       }
-      inputs
-        ..add(LgTextField(
-          controller: _osUsername,
-          focusNode: withPassword ? null : _inputFocus,
-          placeholder: l10n.viewAdminUsername,
-          semanticLabel: l10n.viewAdminUsername,
-          autofocus: !withPassword,
-        ))
-        ..add(LgPasswordField(
-          controller: _osPassword,
-          showLabel: l10n.connShowPassword,
-          hideLabel: l10n.connHidePassword,
-          placeholder: l10n.viewAdminPassword,
-          semanticLabel: l10n.viewAdminPassword,
-        ));
+      inputs.add(LgAdminAccountInputs(
+        title: l10n.viewAdminAccount,
+        description: l10n.viewAdminAccountNote,
+        userController: _osUsername,
+        passwordController: _osPassword,
+        userLabel: l10n.viewAdminUsername,
+        passwordLabel: l10n.viewAdminPassword,
+        showLabel: l10n.connShowPassword,
+        hideLabel: l10n.connHidePassword,
+        withRule: withPassword,
+        autofocus: !withPassword,
+        userFocusNode: withPassword ? null : _inputFocus,
+      ));
       final ready = _osUsername.text.trim().isNotEmpty &&
           (!withPassword || _password.text.trim().isNotEmpty);
       actions

@@ -1429,6 +1429,8 @@
   "termNewTip": "新建终端（Ctrl+Shift+T）",
   "termClose": "关闭终端",
   "termCloseTip": "关闭终端（Ctrl+Shift+W）",
+  "termCloseN": "关闭终端 {n}",
+  "termAll": "全部终端",
   "termMore": "更多",
   "termKeepSessions": "断开连接后保持终端会话",
   "termDisconnect": "断开",

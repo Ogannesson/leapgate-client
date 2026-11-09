@@ -19,24 +19,12 @@ import '../../theme/lg_tokens.dart';
 import '../../widgets/lg_button.dart';
 import '../../widgets/lg_feedback.dart';
 import '../../widgets/lg_menu.dart';
+import '../../widgets/lg_term_tabs.dart';
+import '../../widgets/lg_terminal_parts.dart';
+import '../../widgets/lg_terminal_theme.dart';
+import '../../widgets/lg_view_bar.dart';
+import '../files/file_view.dart' show kFileCompactBelowHeight;
 import '../session/connection_panel.dart';
-
-/// The terminal's colours, fixed dark and opaque whatever the UI theme (R3-Q14).
-// TODO(M9 整合): the designer's terminal colours (`--lg-term-*`); this placeholder is xterm's
-// default dark theme.
-const kTerminalTheme = TerminalThemes.defaultTheme;
-
-/// The terminal font: Cascadia Mono, else Consolas, at xterm's 13 and 1.2 (13 §2.2.2 block C).
-const kTerminalTextStyle = TerminalStyle(
-  fontFamily: 'Cascadia Mono',
-  fontFamilyFallback: ['Consolas', 'Courier New', 'monospace'],
-);
-
-/// The terminal's dim foreground for the lines it writes about itself, as a 24-bit SGR colour
-/// (not the 16 colours' bright black).
-// TODO(M9 整合): the dim foreground ("次要前景") of the designer's terminal colours, for #9A9A9A.
-const _kNoteColor = '\x1b[38;2;154;154;154m';
-const _kSgrReset = '\x1b[0m';
 
 /// Upstream's copy shortcuts without Ctrl+A, which goes to the remote terminal, and with
 /// Ctrl+Shift+A selecting all (R3-Q10). The copied table stays upstream's.
@@ -110,17 +98,19 @@ class _TerminalViewPageState extends State<TerminalViewPage> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // One locale for every view: the lines the terminals write (13 §2.2.2 block C).
+    // One locale for every view: the lines the terminals write (13 §2.2.2 block C), in the
+    // terminal's second foreground.
     final l10n = AppLocalizations.of(context)!;
-    terminalNoteText = (note, detail) {
-      final text = switch (note) {
+    final term = LgTokens.of(context).term;
+    terminalNoteText = (note, detail) => lgTerminalNote(
+      switch (note) {
         TerminalNote.openFailed => l10n.termNoteOpenFailed(detail),
         TerminalNote.openTimeout => l10n.termNoteOpenTimeout,
         TerminalNote.error => l10n.termNoteError(detail),
         TerminalNote.reconnectedNewShell => l10n.termNoteReconnected,
-      };
-      return '$_kNoteColor$text$_kSgrReset';
-    };
+      },
+      term,
+    );
   }
 
   /// "×" of a terminal: the last one is the view's "断开" (13 §2.2.2 block B).
@@ -220,54 +210,74 @@ class _TerminalViewPageState extends State<TerminalViewPage> {
               children: [
                 Column(
                   children: [
-                    _TerminalBar(
+                    LgViewBar(
                       viewSwitch: widget.viewSwitch,
                       route: widget.route,
-                      // Empty while the connection panel is up (13 §2.2.2 block A).
-                      tabs: connected
-                          ? _TerminalTabStrip(
-                              tabs: tabs,
-                              menuItems: _menuItems(l10n),
-                              onClose: _close,
-                            )
-                          : null,
-                      canAdd: tabs.canAdd,
-                      onAdd: tabs.add,
-                      menuItems: _menuItems(l10n),
+                      // Right click on the tabs opens the "⋯" menu (13 §2.2.2 block A, as
+                      // upstream's tab menu).
+                      middle: LgContextMenuRegion(
+                        items: _menuItems(l10n),
+                        child: LgTermTabs(
+                          // Empty while the connection panel is up (13 §2.2.2 block A).
+                          tabs: [
+                            if (connected)
+                              for (final m in tabs.terminals)
+                                LgTermTabItem(
+                                  label: l10n.termTab(m.terminalId),
+                                  closeLabel: l10n.termCloseN(m.terminalId),
+                                ),
+                          ],
+                          selected: tabs.selected,
+                          onSelect: tabs.select,
+                          onClose: (i) => _close(tabs.terminals[i]),
+                          onNew: tabs.canAdd ? tabs.add : null,
+                          semanticLabel: l10n.termTabs,
+                          newLabel: l10n.termNew,
+                          newTooltip: l10n.termNewTip,
+                          allLabel: l10n.termAll,
+                        ),
+                      ),
+                      more: LgViewMoreButton(
+                        label: l10n.termMore,
+                        items: _menuItems(l10n),
+                      ),
+                      disconnectLabel: l10n.termDisconnect,
                       onDisconnect: widget.onDisconnect,
+                      compact:
+                          MediaQuery.sizeOf(context).height <
+                          kFileCompactBelowHeight,
                     ),
                     Expanded(
                       child: Stack(
                         children: [
                           if (tabs.terminals.isNotEmpty)
-                            ExcludeFocus(
-                              excluding: !connected || asking,
-                              child: IndexedStack(
-                                index: tabs.selected,
-                                sizing: StackFit.expand,
-                                children: [
-                                  for (final (i, m) in tabs.terminals.indexed)
-                                    _TerminalPane(
-                                      key: ObjectKey(m),
-                                      model: m,
-                                      focused:
-                                          widget.active &&
-                                          connected &&
-                                          !asking &&
-                                          i == tabs.selected,
-                                      onKey: _onKey,
-                                    ),
-                                ],
+                            // Connected before: the terminal dims under the panel.
+                            LgTerminalSurface(
+                              dimmed: !connected,
+                              child: ExcludeFocus(
+                                excluding: !connected || asking,
+                                child: IndexedStack(
+                                  index: tabs.selected,
+                                  sizing: StackFit.expand,
+                                  children: [
+                                    for (final (i, m)
+                                        in tabs.terminals.indexed)
+                                      _TerminalPane(
+                                        key: ObjectKey(m),
+                                        model: m,
+                                        focused:
+                                            widget.active &&
+                                            connected &&
+                                            !asking &&
+                                            i == tabs.selected,
+                                        onKey: _onKey,
+                                      ),
+                                  ],
+                                ),
                               ),
                             ),
                           if (!connected) ...[
-                            // Connected before: the terminal dims under the panel.
-                            ModalBarrier(
-                              dismissible: false,
-                              color: tabs.terminals.isNotEmpty
-                                  ? t.colors.scrim
-                                  : null,
-                            ),
+                            const ModalBarrier(dismissible: false),
                             ConnectionPanel(
                               ffi: widget.ffi,
                               active: widget.active,
@@ -276,9 +286,9 @@ class _TerminalViewPageState extends State<TerminalViewPage> {
                           ],
                           if (connected && request != null)
                             Positioned(
-                              top: LgSpace.s2,
-                              left: LgSpace.s3,
-                              right: LgSpace.s3,
+                              top: 0,
+                              left: 0,
+                              right: 0,
                               child: _ClipboardBanner(
                                 tabs: tabs,
                                 persistAllowed: request.persistAllowed,
@@ -318,147 +328,9 @@ class _TerminalViewPageState extends State<TerminalViewPage> {
   }
 }
 
-/// The view title bar with the terminal tabs in it (R3-Q8).
-// TODO(M9 整合): `LgViewBar` with its middle slot.
-class _TerminalBar extends StatelessWidget {
-  const _TerminalBar({
-    required this.viewSwitch,
-    required this.route,
-    required this.tabs,
-    required this.canAdd,
-    required this.onAdd,
-    required this.menuItems,
-    required this.onDisconnect,
-  });
-
-  final Widget viewSwitch;
-  final Widget route;
-  final Widget? tabs;
-  final bool canAdd;
-  final VoidCallback onAdd;
-  final List<Widget> menuItems;
-  final VoidCallback onDisconnect;
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context)!;
-    final t = LgTokens.of(context);
-    final c = t.colors;
-    return Container(
-      height: t.sizes.bar,
-      padding: const EdgeInsets.symmetric(horizontal: LgSpace.s3),
-      decoration: BoxDecoration(
-        color: c.surface,
-        border: Border(bottom: BorderSide(color: c.border)),
-      ),
-      child: Row(
-        children: [
-          viewSwitch,
-          const SizedBox(width: LgSpace.s2),
-          route,
-          const SizedBox(width: LgSpace.s3),
-          Expanded(
-            child: Row(
-              children: [
-                if (tabs != null) Flexible(child: tabs!),
-                // TODO(M9 整合): the hovers with the keys, `termNewTip` and `termCloseTip`.
-                LgIconButton(
-                  icon: LgIcons.plus,
-                  label: l10n.termNew,
-                  onPressed: canAdd ? onAdd : null,
-                ),
-              ],
-            ),
-          ),
-          LgMenuAnchor(
-            items: menuItems,
-            builder: (context, controller) => LgIconButton(
-              icon: LgIcons.more,
-              label: l10n.termMore,
-              onPressed: () =>
-                  controller.isOpen ? controller.close() : controller.open(),
-            ),
-          ),
-          const SizedBox(width: LgSpace.s2),
-          LgButton(
-            label: l10n.termDisconnect,
-            icon: LgIcons.power,
-            kind: LgButtonKind.danger,
-            onPressed: onDisconnect,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// "终端 ‹n›" for each terminal, the selected one marked; right click opens the "⋯" menu.
-// TODO(M9 整合): `LgTermTabs`, with the dropdown of all terminals when they do not fit.
-class _TerminalTabStrip extends StatelessWidget {
-  const _TerminalTabStrip({
-    required this.tabs,
-    required this.menuItems,
-    required this.onClose,
-  });
-
-  final TerminalTabs tabs;
-  final List<Widget> menuItems;
-  final void Function(TerminalModel model) onClose;
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context)!;
-    final t = LgTokens.of(context);
-    final c = t.colors;
-    return Semantics(
-      container: true,
-      label: l10n.termTabs,
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: [
-            for (final (i, m) in tabs.terminals.indexed)
-              LgContextMenuRegion(
-                items: menuItems,
-                child: Container(
-                  margin: const EdgeInsets.only(right: LgSpace.s1),
-                  padding: const EdgeInsets.only(left: LgSpace.s2),
-                  decoration: BoxDecoration(
-                    color: i == tabs.selected ? c.active : null,
-                    borderRadius: BorderRadius.circular(LgRadius.r6),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Semantics(
-                        button: true,
-                        selected: i == tabs.selected,
-                        child: GestureDetector(
-                          onTap: () => tabs.select(i),
-                          child: Text(
-                            l10n.termTab(m.terminalId),
-                            style: t.text,
-                          ),
-                        ),
-                      ),
-                      LgIconButton(
-                        icon: LgIcons.x,
-                        label: l10n.termClose,
-                        onPressed: () => onClose(m),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 /// One terminal (upstream `desktop/pages/terminal_page.dart`): whole rows, the space left over
-/// split above and below; right click copies the selection or pastes.
+/// split above and below; right click copies the selection or pastes. The sides are the
+/// surface's ([LgTerminalSurface]).
 class _TerminalPane extends StatefulWidget {
   const _TerminalPane({
     super.key,
@@ -478,7 +350,7 @@ class _TerminalPane extends StatefulWidget {
 }
 
 class _TerminalPaneState extends State<_TerminalPane> {
-  static const _padding = EdgeInsets.symmetric(horizontal: 5.0, vertical: 2.0);
+  static const _padding = EdgeInsets.symmetric(vertical: 2.0);
 
   final _focus = FocusNode(debugLabel: 'terminal');
   final _shortcuts = leapgateTerminalShortcuts();
@@ -552,9 +424,11 @@ class _TerminalPaneState extends State<_TerminalPane> {
       widget.model.terminal,
       controller: widget.model.terminalController,
       focusNode: _focus,
-      theme: kTerminalTheme,
-      textStyle: kTerminalTextStyle,
+      theme: lgTerminalTheme(LgTokens.of(context).term),
+      textStyle: lgTerminalStyle(),
       padding: _paddingFor(constraints.maxHeight),
+      scrollbar: (controller, child) =>
+          LgTerminalScrollbar(controller: controller, child: child),
       shortcuts: _shortcuts,
       onKeyEvent: terminalCopyHandler(
         widget.model.terminal,
@@ -567,8 +441,8 @@ class _TerminalPaneState extends State<_TerminalPane> {
 }
 
 /// A remote program asks to write the clipboard (13 §2.2.2 block E): over the top of the
-/// terminal, not pushing it down.
-// TODO(M9 整合): the designer's banner with two buttons.
+/// terminal, not pushing it down. While an answer is being saved the buttons do nothing
+/// ([TerminalTabs.clipboardActionsEnabled]: the two calls return at once).
 class _ClipboardBanner extends StatelessWidget {
   const _ClipboardBanner({required this.tabs, required this.persistAllowed});
 
@@ -580,49 +454,17 @@ class _ClipboardBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final t = LgTokens.of(context);
-    final c = t.colors;
-    final enabled = tabs.clipboardActionsEnabled;
-    return Semantics(
-      container: true,
-      label: l10n.termClipboardRequestName,
-      child: Container(
-        padding: const EdgeInsets.all(LgSpace.s3),
-        decoration: BoxDecoration(
-          color: c.surface,
-          border: Border.all(color: c.border),
-          borderRadius: BorderRadius.circular(LgRadius.r12),
-        ),
-        child: Row(
-          children: [
-            LgIcon(LgIcons.clipboard, color: c.accent),
-            const SizedBox(width: LgSpace.s3),
-            Expanded(
-              child: Text(
-                l10n.termClipboardRequest,
-                style: t.text.copyWith(color: c.text),
-              ),
-            ),
-            const SizedBox(width: LgSpace.s3),
-            LgButton(
-              label: persistAllowed
-                  ? l10n.termClipboardDeny
-                  : l10n.termClipboardDismiss,
-              onPressed: enabled ? () => unawaited(tabs.denyClipboard()) : null,
-            ),
-            const SizedBox(width: LgSpace.s2),
-            LgButton(
-              label: persistAllowed
-                  ? l10n.termClipboardAllow
-                  : l10n.termClipboardCopy,
-              kind: LgButtonKind.primary,
-              onPressed: enabled
-                  ? () => unawaited(tabs.allowClipboard())
-                  : null,
-            ),
-          ],
-        ),
-      ),
+    return LgClipboardRequest(
+      text: l10n.termClipboardRequest,
+      allowLabel: persistAllowed
+          ? l10n.termClipboardAllow
+          : l10n.termClipboardCopy,
+      denyLabel: persistAllowed
+          ? l10n.termClipboardDeny
+          : l10n.termClipboardDismiss,
+      onAllow: () => unawaited(tabs.allowClipboard()),
+      onDeny: () => unawaited(tabs.denyClipboard()),
+      semanticLabel: l10n.termClipboardRequestName,
     );
   }
 }

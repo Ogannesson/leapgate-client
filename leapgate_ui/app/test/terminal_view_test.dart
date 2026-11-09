@@ -13,7 +13,7 @@ import 'package:leapgate_ui/pages/terminal/terminal_view.dart';
 import 'package:leapgate_ui/shell/tab_shortcuts.dart';
 import 'package:leapgate_ui/theme/lg_theme.dart';
 import 'package:leapgate_ui/theme/lg_tokens.dart';
-import 'package:leapgate_ui/widgets/lg_button.dart';
+import 'package:leapgate_ui/widgets/lg_view_bar.dart';
 import 'package:leapgate_ui/widgets/lg_feedback.dart';
 import 'package:leapgate_ui/widgets/lg_menu.dart';
 import 'package:xterm/xterm.dart';
@@ -134,8 +134,8 @@ const _alt = LogicalKeyboardKey.altLeft;
 
 Finder _button(String label) => find.bySemanticsLabel(label);
 
-LgIconButton _plus(WidgetTester tester) => tester.widget<LgIconButton>(
-  find.byWidgetPredicate((w) => w is LgIconButton && w.label == '新建终端'),
+LgBarIconButton _plus(WidgetTester tester) => tester.widget<LgBarIconButton>(
+  find.byWidgetPredicate((w) => w is LgBarIconButton && w.label == '新建终端'),
 );
 
 void main() {
@@ -175,9 +175,9 @@ void main() {
       await tester.tap(find.text('终端 1'));
       await tester.pump();
       expect(tabs.selected, 0);
-      await tester.tap(_button('关闭终端').first);
+      await tester.tap(_button('关闭终端 1'));
       await tester.pump();
-      await tester.tap(_button('关闭终端'));
+      await tester.tap(_button('关闭终端 3'));
       await tester.pump();
       expect([for (final m in tabs.terminals) m.terminalId], [3]);
       expect(v.disconnects, 1);
