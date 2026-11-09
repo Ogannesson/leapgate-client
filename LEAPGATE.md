@@ -1326,7 +1326,21 @@ Telegram 机器人设置改成两步（`leapgate_bot_lookup` 只查、什么都�
 | 失败后回车重试 | `1c3d3f44a` | 通过（用提权前的失败代替 UAC 取消）。把发布 zip 解到 `C:\100%\app` 起便携版，点"安装"：对话框里"安装"上方出现"安装失败：Installer path or name contains characters unsafe for cmd.exe"，对话框留着，焦点（语义树）在"安装"；按回车，`log\leapgate-install\` 里那条失败日志的时间戳变成新的（每次尝试重写一次），再次出现同一句错误，没有装上。UAC 被取消那条路径本身没走 |
 | 长路径悬停，系统文字放大到 125% 以上 | `1c3d3f44a` | 未验证（没有可看的画面；真实鼠标悬停后语义树里也没有提示节点，没有去改系统文字大小） |
 | 读屏 | `0c6b156d8`、`1c3d3f44a` | 部分通过。用 `scripts/e2e/leapgate-uia.ps1`（本次加了读取值和遗留 MSAA 状态的副本）读对话框：所有可操作控件都有名字（"修改安装位置""创建开始菜单快捷方式""创建桌面快捷方式""安装 Leapgate 打印机. ‹说明›""取消""安装"），标题"安装 Leapgate"，路径是名为"安装位置"的文本、值是完整路径，错误和提示行是文本节点；对话框开着时底下主页的控件不在树里（被遮）。**两处不满意**：①三个勾选行是 `Button`（只有 Invoke），没有 Toggle 模式，遗留状态里没有"已选中"，屏幕阅读器读不出有没有勾上；②位置不可用时"安装"灰显，但语义树里它的"启用"仍是真（只有 Invoke 无效这一条行为证据），读屏不会报"不可用"。需要时交 designer 看（同一个勾选行组件在别的页面里是不是一样没查） |
-| 旧界面编一次加五项冒烟 | — | 未做（14 §5.3 末行；这次任务没要求，Rust 改了 `libs/leapgate` 和 `src/leapgate_hooks/install.rs`） |
+| 旧界面 | `1c3d3f44a`（`-Ui upstream`，`patch,bridge,build`） | **通过**（14 §5.3 末行，细节见下面"旧界面五项"）。A、B 两端都是旧界面便携版：带密码连接、`--relay`、文件传输两个方向（哈希一致）、TCP 端口转发（200）、出口（socks5h 和 HTTP CONNECT 都 200）、ID 加盐（9 位且不小于 268435456） |
+
+**旧界面五项（2026-11-09 13:41~14:08，`1c3d3f44a`，台式机 A 和 msi B）**：用 `-Ui upstream -Steps patch,bridge,build` 在 `.wt\ui-m0-build` 编，`leapgate.exe` `7F7BFDD1…`、`libleapgate.dll` `6CD1612B…`（本次新编）、`flutter_windows.dll` `8667024A…`、`data/app.so` `B633D127…`。两端先停掉别的 Leapgate，A、B 测前备份配置、测后盖回，逐个哈希核对无差异（A 8 个文件，B 4 个）。B 被控端用 `Configure` 开 `leapgate-allow-exit` 并设固定密码，`Start -TraceIce`；A 的 `peers\<B>.toml` 的 `port_forwards` 换成 `[[21180, "leapgate-exit.invalid", 65536], [21181, "example.com", 80]]`。
+
+| 项 | 结果 |
+|---|---|
+| 连接（带密码） | 通过。A 日志 `leapgate ice: selected host/v6/ethernet <-> host/v6 in 2191 ms`，随后 `handle_peer_info`（出画面前登录成功）；B 日志 `Connection opened` |
+| 强制中继（`--relay`） | 通过。A 日志 `used to establish Relay connection`、没有 `leapgate ice:` 行，`handle_peer_info` 登录成功；测前的 peer 配置里没有 `force-always-relay`，测后整份配置盖回 |
+| 文件传输两个方向 | 通过。两栏用 peer 配置里的 `local_dir`、`remote_dir`（`[options]` 下，新旧界面共用）定位到测试文件夹，窗口里按坐标点：上传 24 MiB 的 `aa-ub.bin`（日志 `New job 1, read … to remote …`）、下载 24 MiB 的 `aa-db.bin`（`New job 2, write to … from remote …`），两边 SHA-256 与发送前一致（`41-ft-hashes.txt`） |
+| TCP 端口转发 | 通过。日志 `listening on port 127.0.0.1:21181`，curl 21181（Host: example.com）200，`port forward channel 1 ended` |
+| 出口 | 通过。日志 `leapgate exit: listening on 127.0.0.1:21180`、`tunnel up (direct)`，`--socks5-hostname` 和 `--proxy`（HTTP CONNECT）取 `https://example.com/` 都是 200 |
+| ID 加盐 | 通过。配置目录挪开、空配置起一次，日志 `Generated id 471945469`（9 位，不小于 268435456），测完放回 |
+| 本机端口被别的程序以 `0.0.0.0:P` 占着时出口报不报占用 | **这个构建里还没有这个行为，不是回归**。另起一个 `TcpListener` 占 `0.0.0.0:21182`，把出口占位映射写成 21182：旧界面照常绑上 `127.0.0.1:21182`（日志 `leapgate exit: listening on 127.0.0.1:21182`，没有占用报错；`Get-NetTCPConnection` 见两个监听、分属两个进程）。这和上游行为一致。14 §4.1 的"查系统监听表"（`GetExtendedTcpTable`）是 M9c 提交顺序的最后一步（"独占监听和出口回归"），`1c3d3f44a` 的 `src`、`libs` 里没有它。所以这一条要在 M9c 的构建上用旧界面再测一次（14 §5.1 的"独占端口"三种占法） |
+
+没做：被控端是 Leapgate 便携版、控制端是旧界面这一个组合之外的对端；旧界面文件传输窗口的语义树仍为空，所以是坐标点击加文件哈希做判定。窗口没有挪到副屏：台式机现在只有主屏和一块 1024×768 的小显示器。证据在 A 的 `C:\leapgate-e2e\evidence\m9a-upstream\`。
 
 **前提实测（13 R3-Q24 第 1、3 项，14 §5.1 第 2 条）**：用旧界面（`app-ui-m7a-upstream-b16f17cd1`）的安装页（没有任何检查）在测试虚拟机上装，每次装完清理（删服务、卸载项、快捷方式、`HKCR\leapgate`、防火墙规则）。
 
