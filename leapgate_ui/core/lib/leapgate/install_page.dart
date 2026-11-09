@@ -1,6 +1,7 @@
 // The install page (13 §4, M9a, `LEAPGATE.md` §10.18): where to install, the three options,
 // whether the location can be used (R3-Q24) and whether installing ends sessions. Installing
 // itself is `LocalStatusModel.install` (M8-1), which the page only starts.
+import 'dart:ffi';
 import 'dart:io';
 
 import 'package:ffi/ffi.dart';
@@ -36,6 +37,13 @@ abstract interface class InstallSystem {
   /// `GetDriveTypeW` of [root] ("D:\").
   int driveType(String root);
 
+  /// [root] ("S:\") is a `subst` drive: `QueryDosDeviceW` gives a `\??\` path for it.
+  bool isSubst(String root);
+
+  /// [folder] with its symbolic links and junctions resolved, as [programFolder] is; [folder]
+  /// itself when it can't be.
+  String resolveFolder(String folder);
+
   /// [folder] exists and has something in it.
   bool hasFiles(String folder);
 }
@@ -55,6 +63,25 @@ class WindowsInstallSystem implements InstallSystem {
   @override
   int driveType(String root) => using(
       (arena) => win32.GetDriveType(root.toNativeUtf16(allocator: arena)));
+
+  @override
+  bool isSubst(String root) => using((arena) {
+        const size = 1024;
+        final target = arena<Uint16>(size).cast<Utf16>();
+        final n = win32.QueryDosDevice(
+            root.substring(0, 2).toNativeUtf16(allocator: arena), target, size);
+        return n > 0 && target.toDartString().startsWith(r'\??\');
+      });
+
+  @override
+  String resolveFolder(String folder) {
+    try {
+      return Directory(folder).resolveSymbolicLinksSync();
+    } on FileSystemException {
+      // The default location's parent may be missing; nothing there to resolve.
+      return folder;
+    }
+  }
 
   @override
   bool hasFiles(String folder) {
@@ -88,14 +115,21 @@ bool isInFolder(String path, String folder) {
 
 /// The first of the four checks (R3-Q24) that [path] fails; null when it passes them all. Only
 /// a fixed disk is local: a mapped network drive, a removable disk, a CD drive and a RAM disk
-/// are not; `subst` drives are fixed, since they are on one.
+/// are not. Nor is a `subst` drive, though it reports fixed: it exists only in this user's
+/// unelevated session, and the elevated install script and the service (SYSTEM) don't see it.
+/// [path]'s parent, the folder picked, is resolved before it is compared with the program
+/// folder, which `Platform.resolvedExecutable` gives resolved.
 InstallLocationIssue? checkInstallLocation(String path, InstallSystem system) {
   final root = driveRoot(path);
-  if (root == null || system.driveType(root) != win32.DRIVE_FIXED) {
+  if (root == null ||
+      system.driveType(root) != win32.DRIVE_FIXED ||
+      system.isSubst(root)) {
     return InstallLocationIssue.notLocalDisk;
   }
   if (path.contains('%')) return InstallLocationIssue.percent;
-  if (isInFolder(path, system.programFolder)) {
+  final resolved = p.windows.join(
+      system.resolveFolder(p.windows.dirname(path)), p.windows.basename(path));
+  if (isInFolder(resolved, system.programFolder)) {
     return InstallLocationIssue.insideProgram;
   }
   if (system.hasFiles(path)) return InstallLocationIssue.notEmpty;

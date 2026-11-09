@@ -55,6 +55,13 @@ class _InstallDialogState extends State<InstallDialog> {
       ? _Focus.change
       : _Focus.install;
 
+  /// The sessions line follows them while the page is open; the status (busy, failed) is one
+  /// of them.
+  late final _changes = Listenable.merge([
+    widget.model,
+    widget.model.sessionsChanges,
+  ]);
+
   Future<void> _change() async {
     final folder = await FilePicker.platform.getDirectoryPath(
       initialDirectory: widget.model.pickerStart,
@@ -67,9 +74,7 @@ class _InstallDialogState extends State<InstallDialog> {
     final model = widget.model;
     final status = model.status;
     return ListenableBuilder(
-      // The sessions line follows them while the page is open; the status (busy, failed) is
-      // one of them.
-      listenable: Listenable.merge([model, model.sessionsChanges]),
+      listenable: _changes,
       builder: (context, _) {
         final l10n = AppLocalizations.of(context)!;
         final t = LgTokens.of(context);
@@ -279,9 +284,18 @@ class _MiddleEllipsisPath extends StatelessWidget {
     );
   }
 
-  String _cut(int keep) {
-    final head = (keep + 1) ~/ 2;
-    return '${path.substring(0, head)}…'
-        '${path.substring(path.length - (keep - head))}';
-  }
+  String _cut(int keep) => cutMiddle(path, keep);
+}
+
+/// [keep] UTF-16 units of [text], half from each end, around a "…"; a cut that falls inside a
+/// surrogate pair moves one unit off it.
+@visibleForTesting
+String cutMiddle(String text, int keep) {
+  bool high(int unit) => unit >= 0xD800 && unit <= 0xDBFF;
+  bool low(int unit) => unit >= 0xDC00 && unit <= 0xDFFF;
+  var head = (keep + 1) ~/ 2;
+  var tail = text.length - (keep - head);
+  if (head > 0 && high(text.codeUnitAt(head - 1))) head--;
+  if (tail < text.length && low(text.codeUnitAt(tail))) tail++;
+  return '${text.substring(0, head)}…${text.substring(tail)}';
 }

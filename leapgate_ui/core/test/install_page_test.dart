@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/install_page.dart';
@@ -7,6 +8,7 @@ import 'package:flutter_hbb/leapgate/session.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:win32/win32.dart' as win32;
 
+import 'exit_fakes.dart';
 import 'fakes.dart';
 
 /// Drives and folders as the checks see them. The paths here are made up.
@@ -35,6 +37,18 @@ class FakeInstallSystem implements InstallSystem {
     roots.add(root);
     return drives[root[0]] ?? win32.DRIVE_FIXED;
   }
+
+  /// Drive letters made with `subst`.
+  final substs = <String>{};
+
+  @override
+  bool isSubst(String root) => substs.contains(root[0]);
+
+  /// Folders that are junctions or symbolic links, and where they lead.
+  final links = <String, String>{};
+
+  @override
+  String resolveFolder(String folder) => links[folder] ?? folder;
 
   @override
   bool hasFiles(String folder) => full.contains(folder);
@@ -76,6 +90,13 @@ void main() {
       expect(system.roots, isEmpty);
     });
 
+    test('a subst drive is not local: the elevated installer does not see it',
+        () {
+      system.substs.add('S');
+      expect(checkInstallLocation(r'S:\Apps\Leapgate', system),
+          InstallLocationIssue.notLocalDisk);
+    });
+
     test(
         '"%", then the program folder, then a folder with files; the first one shows',
         () {
@@ -84,16 +105,39 @@ void main() {
       // The network drive comes before "%".
       expect(checkInstallLocation(r'Z:\100%\Leapgate', system),
           InstallLocationIssue.notLocalDisk);
+      // "%" comes before the program folder.
+      expect(
+          checkInstallLocation(
+              r'C:\Apps\Leap gate\leapgate-0.4.0\100%\Leapgate', system),
+          InstallLocationIssue.percent);
       expect(
           checkInstallLocation(
               r'C:\APPS\Leap gate\leapgate-0.4.0\Leapgate', system),
+          InstallLocationIssue.insideProgram);
+      // The program folder comes before a folder with files.
+      system.full.add(r'C:\Apps\Leap gate\leapgate-0.4.0\Leapgate');
+      expect(
+          checkInstallLocation(
+              r'C:\Apps\Leap gate\leapgate-0.4.0\Leapgate', system),
           InstallLocationIssue.insideProgram);
       system.full.add(r'D:\Tools\Leapgate');
       expect(checkInstallLocation(r'D:\Tools\Leapgate', system),
           InstallLocationIssue.notEmpty);
       expect(checkInstallLocation(r'D:\Apps\Leapgate', system), isNull);
     });
+
+    test('a junction to the program folder is the program folder', () {
+      system.links[r'D:\Shortcut'] = r'C:\Apps\Leap gate\leapgate-0.4.0';
+      expect(checkInstallLocation(r'D:\Shortcut\Leapgate', system),
+          InstallLocationIssue.insideProgram);
+    });
   });
+
+  test('on Windows the system answers for C:\\: a fixed disk, not subst', () {
+    const system = WindowsInstallSystem();
+    expect(system.driveType(r'C:\'), win32.DRIVE_FIXED);
+    expect(system.isSubst(r'C:\'), isFalse);
+  }, skip: !Platform.isWindows);
 
   group('InstallPageModel', () {
     late FakeInstallSystem system;
@@ -171,5 +215,20 @@ void main() {
       expect(page.sessionsEnd, isTrue);
       expect(changes, 2);
     });
+  });
+
+  test('sessions end: an exit node in use', () {
+    installExitFakes();
+    installSystem = FakeInstallSystem();
+    addTearDown(() => installSystem = const WindowsInstallSystem());
+    final page = InstallPageModel(LocalStatusModel());
+    var changes = 0;
+    page.sessionsChanges.addListener(() => changes++);
+    expect(page.sessionsEnd, isFalse);
+
+    appCore.exitNodes.use('100200300');
+    expect(appCore.backgroundCount, 1);
+    expect(page.sessionsEnd, isTrue);
+    expect(changes, greaterThan(0));
   });
 }

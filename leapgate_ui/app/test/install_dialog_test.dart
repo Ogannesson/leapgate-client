@@ -6,6 +6,7 @@ import 'package:flutter_hbb/leapgate/install_page.dart';
 import 'package:flutter_hbb/leapgate/local_status.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:leapgate_ui/l10n/app_localizations.dart';
+import 'package:leapgate_ui/pages/home/install_dialog.dart';
 import 'package:leapgate_ui/pages/settings/sections/remote_printing.dart';
 import 'package:leapgate_ui/pages/settings/settings_section_state.dart';
 import 'package:leapgate_ui/pages/settings/settings_status.dart';
@@ -35,8 +36,27 @@ class _System implements InstallSystem {
       root == r'Z:\' ? win32.DRIVE_REMOTE : win32.DRIVE_FIXED;
 
   @override
+  bool isSubst(String root) => false;
+
+  @override
+  String resolveFolder(String folder) => folder;
+
+  @override
   bool hasFiles(String folder) => false;
 }
+
+/// The line about what ends, whatever M9c makes of its wording.
+final _sessionsLine = find.textContaining('Leapgate 将关闭并重新打开');
+
+LgCheckbox _checkbox(String label) =>
+    find
+            .byWidgetPredicate((w) => w is LgCheckbox && w.label == label)
+            .evaluate()
+            .single
+            .widget
+        as LgCheckbox;
+
+const _options = ['创建开始菜单快捷方式', '创建桌面快捷方式', '安装 Leapgate 打印机'];
 
 /// A button of the install page (the hint card has an "安装" too).
 Finder _button(String label) => find.descendant(
@@ -44,14 +64,7 @@ Finder _button(String label) => find.descendant(
   matching: find.widgetWithText(LgButton, label),
 );
 
-bool _ticked(String label) =>
-    (find
-                .byWidgetPredicate((w) => w is LgCheckbox && w.label == label)
-                .evaluate()
-                .single
-                .widget
-            as LgCheckbox)
-        .value;
+bool _ticked(String label) => _checkbox(label).value;
 
 /// The dialog's fade; the home page and a busy button keep animating, so no pumpAndSettle.
 Future<void> _pumps(WidgetTester tester) async {
@@ -107,7 +120,7 @@ void main() {
       expect(_ticked('创建开始菜单快捷方式'), isTrue);
       expect(_ticked('创建桌面快捷方式'), isTrue);
       expect(_ticked('安装 Leapgate 打印机'), isFalse);
-      expect(find.text('Leapgate 将关闭并重新打开，所有会话和正在使用的出口都将断开。'), findsNothing);
+      expect(_sessionsLine, findsNothing);
 
       // The keyboard is on "安装": Enter starts it.
       expect(_focusedButton(), '安装');
@@ -116,6 +129,11 @@ void main() {
       expect(lg.installs, ['install']);
       expect(_button('正在安装…'), findsOneWidget);
       expect(tester.widget<LgButton>(_button('取消')).onPressed, isNull);
+      // Nothing on the page changes while it runs.
+      expect(tester.widget<LgButton>(_button('修改')).onPressed, isNull);
+      for (final option in _options) {
+        expect(_checkbox(option).onChanged, isNull, reason: option);
+      }
       // Esc does nothing while it runs.
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pump();
@@ -139,7 +157,7 @@ void main() {
         tester,
         setUp: (m) => m.incoming = const IncomingSessions(1, controlled: true),
       );
-      expect(find.text('Leapgate 将关闭并重新打开，所有会话和正在使用的出口都将断开。'), findsOneWidget);
+      expect(_sessionsLine, findsOneWidget);
       expect(_focusedButton(), '取消');
       await tester.sendKeyEvent(LogicalKeyboardKey.enter);
       await _pumps(tester);
@@ -157,8 +175,65 @@ void main() {
       ..incoming = const IncomingSessions(2, controlled: false)
       ..notifyListeners();
     await tester.pump();
-    expect(find.text('Leapgate 将关闭并重新打开，所有会话和正在使用的出口都将断开。'), findsOneWidget);
+    expect(_sessionsLine, findsOneWidget);
     await unmount(tester);
+  });
+
+  testWidgets('a failure without the installer\'s text, then with it', (
+    tester,
+  ) async {
+    lg.installAnswer = Completer();
+    await openFromCard(tester);
+    await tester.tap(_button('安装'));
+    await tester.pump();
+    lg.installAnswer.complete('{"result":"failed","text":""}');
+    await tester.pump();
+    expect(find.text('安装失败。'), findsOneWidget);
+
+    lg.installAnswer = Completer();
+    await tester.tap(_button('安装'));
+    await tester.pump();
+    // Clicking again clears the line until the answer.
+    expect(find.text('安装失败。'), findsNothing);
+    lg.installAnswer.complete(
+      '{"result":"failed","text":"Cannot install the EXE package over an existing MSI installation"}',
+    );
+    await tester.pump();
+    expect(
+      find.text(
+        '安装失败：Cannot install the EXE package over an existing MSI installation',
+      ),
+      findsOneWidget,
+    );
+    await unmount(tester);
+  });
+
+  testWidgets('a long location is cut in the middle and read out whole', (
+    tester,
+  ) async {
+    const long = r'D:\工作资料\常用软件\远程工具\公司内部\某个很长的文件夹名称\Leapgate';
+    system.defaultPath = long;
+    await openFromCard(tester);
+    final shown = tester
+        .widget<Text>(
+          find.byWidgetPredicate(
+            (w) => w is Text && (w.data?.startsWith(r'D:\') ?? false),
+          ),
+        )
+        .data!;
+    expect(shown, contains('…'));
+    expect(shown, endsWith('Leapgate'));
+    expect(shown.length, lessThan(long.length));
+    expect(find.bySemanticsLabel(long), findsOneWidget);
+    await unmount(tester);
+  });
+
+  test('the cut never splits a surrogate pair', () {
+    // a b 😀 c d: a head of three units would end inside the pair.
+    expect(cutMiddle('ab😀cd', 5), 'ab…cd');
+    // a b c 😀 d: a tail of two units would start inside the pair.
+    expect(cutMiddle('abc😀d', 4), 'ab…d');
+    expect(cutMiddle('abcdef', 4), 'ab…ef');
   });
 
   testWidgets('a location in the program folder greys "安装" and says why', (
