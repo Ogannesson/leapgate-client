@@ -730,7 +730,13 @@ class _NavItem extends StatelessWidget {
                     ),
                   ),
                 ),
-                if (count > 0) LgCountMark(count, alert: attention),
+                // The mockup's `.navi` gap is 12; the number pulls 8 back (4 px from
+                // the text), the reminder mark 6 on both sides (6 px each way). A
+                // name that does not fit ends in "…" ahead of this.
+                if (count > 0) ...[
+                  SizedBox(width: attention ? 6 : LgSpace.s1),
+                  LgCountMark(count, alert: attention, gap: 6),
+                ],
               ],
             ),
             ),
