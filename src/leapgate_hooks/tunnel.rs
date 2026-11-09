@@ -238,10 +238,31 @@ pub(crate) trait TunnelSession: Interface + Sync {
         token: &str,
         target: &Target,
     ) -> (ResultType<Option<LoginOutcome>>, bool);
+    /// Opens Remote Desktop Connection to the RDP row's local `port`.
+    fn open_rdp(&self, port: u16);
 }
 
 #[async_trait::async_trait]
 impl<T: InvokeUiSession> TunnelSession for Session<T> {
+    fn open_rdp(&self, port: u16) {
+        // The credentials this session read when it started, never the process environment:
+        // upstream's RDP sessions share it, so two cards could pick up each other's.
+        let (commands, name) = {
+            let lc = self.lc.read().unwrap();
+            let commands = rdp::commands(
+                port,
+                &lc.get_option("rdp_username"),
+                &lc.get_option("rdp_password"),
+            );
+            (commands, rdp::display_name(&lc, &self.get_id()))
+        };
+        log::info!(
+            "leapgate tunnel: opening Remote Desktop Connection to 127.0.0.1:{}",
+            port
+        );
+        tokio::task::spawn_blocking(move || rdp::run(commands, name));
+    }
+
     async fn login(
         &self,
         ui: RowUi<Self>,
@@ -267,6 +288,102 @@ impl<T: InvokeUiSession> TunnelSession for Session<T> {
         )
         .await;
         (res, insecure_declined)
+    }
+}
+
+/// Upstream's `run_rdp` and `rdp_display_name` (`port_forward.rs`), with the credentials passed
+/// in. Check them against upstream's on a merge.
+mod rdp {
+    use crate::client::LoginConfigHandler;
+    use hbb_common::log;
+
+    /// The programs to run and their arguments, in order: `cmdkey` drops the stored `localhost`
+    /// credential and stores this one, if any; `mstsc` connects.
+    pub(super) fn commands(
+        port: u16,
+        username: &str,
+        password: &str,
+    ) -> Vec<(&'static str, Vec<String>)> {
+        let mut commands = vec![("cmdkey", vec!["/delete:localhost".to_owned()])];
+        if !username.is_empty() || !password.is_empty() {
+            let mut args = vec!["/generic:localhost".to_owned()];
+            if !username.is_empty() {
+                args.push(format!("/user:{}", username));
+            }
+            if !password.is_empty() {
+                args.push(format!("/pass:{}", password));
+            }
+            commands.push(("cmdkey", args));
+        }
+        // As upstream, /v rather than a generated .rdp file: mstsc keeps the user's Default.rdp
+        // settings and shows no unsigned-file warning.
+        commands.push(("mstsc", vec![format!("/v:localhost:{}", port)]));
+        commands
+    }
+
+    /// Blocking: `cmdkey` is waited for. Never run from the tests.
+    pub(super) fn run(commands: Vec<(&'static str, Vec<String>)>, name: String) {
+        for (program, args) in commands {
+            let mut command = std::process::Command::new(program);
+            command.args(&args);
+            if program != "mstsc" {
+                command.output().ok();
+                continue;
+            }
+            match command.spawn() {
+                Ok(child) => {
+                    #[cfg(windows)]
+                    crate::platform::set_rdp_window_title(child, name.clone());
+                    #[cfg(not(windows))]
+                    let _ = child;
+                }
+                Err(err) => log::warn!("leapgate tunnel: failed to launch mstsc: {}", err),
+            }
+        }
+    }
+
+    /// The peer's alias or ID, with its hostname.
+    pub(super) fn display_name(lc: &LoginConfigHandler, id: &str) -> String {
+        let alias = lc
+            .options
+            .get("alias")
+            .map(|s| s.trim())
+            .unwrap_or_default();
+        let hostname = lc.info.hostname.trim();
+        let identity = if !alias.is_empty() { alias } else { id };
+        if hostname.is_empty() || hostname == identity {
+            identity.to_owned()
+        } else {
+            format!("{} ({})", identity, hostname)
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        fn spelled(commands: &[(&str, Vec<String>)]) -> Vec<String> {
+            commands
+                .iter()
+                .map(|(program, args)| format!("{} {}", program, args.join(" ")))
+                .collect()
+        }
+
+        #[test]
+        fn mstsc_gets_the_sessions_credentials_through_cmdkey() {
+            assert_eq!(
+                spelled(&commands(50123, "alice", "secret")),
+                [
+                    "cmdkey /delete:localhost",
+                    "cmdkey /generic:localhost /user:alice /pass:secret",
+                    "mstsc /v:localhost:50123",
+                ]
+            );
+            assert_eq!(
+                spelled(&commands(50123, "", "")),
+                ["cmdkey /delete:localhost", "mstsc /v:localhost:50123"]
+            );
+        }
     }
 }
 
@@ -435,6 +552,9 @@ async fn run_row<S: TunnelSession>(
     if !login_now {
         row.report(State::PortInUse);
     }
+    // RDP: no tunnel yet since the listener opened. The first one opens Remote Desktop
+    // Connection unless a local connection (one the user opened) brought it.
+    let mut fresh = true;
     loop {
         // The local connection a lazy login is for; none when the row logs in itself.
         let mut waiting = None;
@@ -462,10 +582,17 @@ async fn run_row<S: TunnelSession>(
                                 row.report(State::PortInUse);
                                 continue;
                             }
+                            fresh = true;
                         } else if up.is_some() {
                             continue;
                         }
                         // Reopened, or interrupted: log in now.
+                    }
+                    Some(RowCtl::Ui(Data::NewRDP)) => {
+                        if let Some(port) = local_port(&listener).filter(|_| target.rdp) {
+                            session.open_rdp(port);
+                        }
+                        continue;
                     }
                     Some(RowCtl::Ui(Data::Close)) | None => break,
                     Some(RowCtl::Ui(_)) => continue,
@@ -532,6 +659,12 @@ async fn run_row<S: TunnelSession>(
                     Transport::Relay
                 };
                 row.report(State::InUse { transport });
+                if target.rdp && fresh && !lazy {
+                    if let Some(port) = local_port(&listener) {
+                        session.open_rdp(port);
+                    }
+                }
+                fresh = false;
                 if lazy && !o.local_eof {
                     let (socket, prebuf) = take_socket(forward, o.prebuf);
                     if handle
@@ -643,6 +776,11 @@ async fn listen(port: i32, target: &Target) -> Option<TcpListener> {
             None
         }
     }
+}
+
+/// The port the listener got: the row's, or for RDP the one the system picked.
+fn local_port(listener: &Option<TcpListener>) -> Option<u16> {
+    listener.as_ref()?.local_addr().ok().map(|a| a.port())
 }
 
 /// What a row's logins and tunnel saw, apart from the other rows of the card.
@@ -800,13 +938,15 @@ mod tests {
         Hang(Option<(KcpStream, Stream)>),
     }
 
-    /// Logins by the row's remote port.
-    #[derive(Clone)]
+    /// Logins by the row's remote port; the session's message boxes and the ports Remote Desktop
+    /// Connection was opened to, as they came.
+    #[derive(Clone, Default)]
     struct Fake {
         id: String,
         lc: Arc<RwLock<LoginConfigHandler>>,
         logins: Arc<Mutex<HashMap<i32, VecDeque<Login>>>>,
         boxes: Arc<Mutex<Vec<String>>>,
+        rdp_opened: Arc<Mutex<Vec<u16>>>,
     }
 
     #[async_trait::async_trait]
@@ -891,6 +1031,10 @@ mod tests {
                 None => std::future::pending().await,
             }
         }
+
+        fn open_rdp(&self, port: u16) {
+            self.rdp_opened.lock().unwrap().push(port);
+        }
     }
 
     struct Card {
@@ -898,7 +1042,7 @@ mod tests {
         kind: Kind,
         session_id: SessionID,
         tx: mpsc::UnboundedSender<Data>,
-        boxes: Arc<Mutex<Vec<String>>>,
+        fake: Fake,
     }
 
     impl Card {
@@ -948,28 +1092,31 @@ mod tests {
 
     /// A TCP card with no saved forwards: rows come with `AddPortForward`, as the UI adds them.
     fn start(id: &'static str, logins: Vec<(i32, Login)>) -> Card {
+        start_kind(id, Kind::Tcp, logins)
+    }
+
+    /// An RDP card's one row (local port 0) logs in to 3389: the session has no `rdp_port`.
+    fn start_kind(id: &'static str, kind: Kind, logins: Vec<(i32, Login)>) -> Card {
         let session_id = SessionID::new_v4();
-        register(id, Kind::Tcp, session_id);
-        let card = take_if(id, Kind::Tcp, |s| *s == session_id).unwrap();
+        register(id, kind, session_id);
+        let card = take_if(id, kind, |s| *s == session_id).unwrap();
         let mut by_port = HashMap::<i32, VecDeque<Login>>::new();
         for (port, login) in logins {
             by_port.entry(port).or_default().push_back(login);
         }
-        let boxes = Arc::new(Mutex::new(Vec::new()));
         let fake = Fake {
             id: id.to_owned(),
-            lc: Default::default(),
             logins: Arc::new(Mutex::new(by_port)),
-            boxes: boxes.clone(),
+            ..Default::default()
         };
         let (tx, rx) = mpsc::unbounded_channel();
-        tokio::spawn(run_card(fake, card, rx, "", ""));
+        tokio::spawn(run_card(fake.clone(), card, rx, "", ""));
         Card {
             id,
-            kind: Kind::Tcp,
+            kind,
             session_id,
             tx,
-            boxes,
+            fake,
         }
     }
 
@@ -1101,6 +1248,7 @@ mod tests {
         assert!(listening(port).await);
         // No error box reached the session's stream.
         assert!(card
+            .fake
             .boxes
             .lock()
             .unwrap()
@@ -1136,7 +1284,11 @@ mod tests {
             r#""state":"stopped","reason":{"code":"no_permission","feature":"port_forward"}"#,
         )
         .await;
-        assert!(card.boxes.lock().unwrap().is_empty(), "{:?}", card.boxes);
+        assert!(
+            card.fake.boxes.lock().unwrap().is_empty(),
+            "{:?}",
+            card.fake.boxes
+        );
         assert!(retry(&card.session_id, port));
         card.wait_for(port, r#""state":"in_use""#).await;
         assert!(listening(port).await);
@@ -1185,15 +1337,48 @@ mod tests {
         assert!(!listening(port).await);
     }
 
+    #[tokio::test]
+    async fn rdp_opens_on_its_first_tunnel_and_when_asked_not_on_a_lazy_one() {
+        let (first, mut peer) = secured_pair().await;
+        let (again, _peer_again) = secured_pair().await;
+        let card = start_kind(
+            "tunnel-rdp",
+            Kind::Rdp,
+            vec![
+                (3389, Login::Use(first, true)),
+                (3389, Login::Use(again, true)),
+            ],
+        );
+        card.wait_for(0, r#""kind":"rdp","port":0,"state":"in_use""#)
+            .await;
+        let opened = card.fake.rdp_opened.clone();
+        let port = opened.lock().unwrap()[0];
+        // Remote Desktop Connection's connection goes to the peer's RDP port.
+        let _mstsc = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        assert_eq!(next_open(&mut peer).await, (String::new(), 3389));
+        drop(peer);
+        card.wait_for(0, r#""state":"interrupted","cause":"tunnel_ended""#)
+            .await;
+        // Remote Desktop Connection, already open, connects again: no second window.
+        let _again = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        card.wait_for(0, r#""state":"in_use""#).await;
+        assert_eq!(*opened.lock().unwrap(), [port]);
+        card.send(Data::NewRDP);
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while opened.lock().unwrap().len() < 2 {
+            assert!(Instant::now() < deadline, "NewRDP opened nothing");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(*opened.lock().unwrap(), [port, port]);
+    }
+
     #[test]
     fn a_row_keeps_its_errors_and_passes_its_prompts_on() {
-        let boxes = Arc::new(Mutex::new(Vec::new()));
         let fake = Fake {
             id: "tunnel-ui".to_owned(),
-            lc: Default::default(),
-            logins: Default::default(),
-            boxes: boxes.clone(),
+            ..Default::default()
         };
+        let boxes = fake.boxes.clone();
         let row = Row {
             id: "tunnel-ui".to_owned(),
             kind: Kind::Tcp,
