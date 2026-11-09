@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/exit_directory.dart';
 import 'package:flutter_hbb/leapgate/exit_nodes.dart';
+import 'package:flutter_hbb/leapgate/tunnel_api.dart' show TunnelKind;
 
+import '../../../icons/lg_icon.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../shell/navigation.dart';
 import '../../../shell/tab_overlays.dart';
@@ -10,9 +12,11 @@ import '../../../widgets/lg_exit_card.dart';
 import '../../../widgets/lg_exit_page.dart';
 import 'exit_card_view.dart';
 import 'exit_directory_view.dart';
+import 'tunnel_section.dart';
 
-// The exit page (01 P1 block I): a sentence, the cards in use, the directory, by ID, drawn by
-// [LgExitPage] (`LEAPGATE.md` §10.12 "组件接口").
+// The exit page (01 P1 block I), "出口与隧道" since M9c (13 §1.3 block A): the exit nodes (a
+// sentence, the cards in use, the directory, by ID) and the tunnels, drawn by [LgExitPage]
+// (`LEAPGATE.md` §10.12 "组件接口", §10.18).
 
 class ExitPage extends StatefulWidget {
   const ExitPage({super.key, required this.overlays});
@@ -53,22 +57,33 @@ class _ExitPageState extends State<ExitPage> {
   void _onRequest() {
     final request = exitPageRequests.take();
     if (request == null) return;
+    final tunnel = request.tunnel;
     // A new card logs in for the user who asked for it.
-    if (!request.highlight) focusExitPromptOf(request.id);
-    _scrollTo(request.id, highlight: request.highlight);
+    if (!request.highlight) {
+      tunnel == null
+          ? focusExitPromptOf(request.id)
+          : focusTunnelPromptOf(request.id, tunnel);
+    }
+    _scrollTo(
+      tunnel == null ? request.id : _tunnelKey(request.id, tunnel),
+      highlight: request.highlight,
+    );
   }
 
+  /// A tunnel card's entry in [_cardKeys] and [_flashes]; an exit card's is its ID.
+  static String _tunnelKey(String id, TunnelKind kind) => '${kind.name}:$id';
+
   /// After the next frame, when the card is built.
-  void _scrollTo(String id, {bool highlight = false}) {
+  void _scrollTo(String key, {bool highlight = false}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final context = _cardKeys[id]?.currentContext;
+      final context = _cardKeys[key]?.currentContext;
       if (context == null || !mounted) return;
       Scrollable.ensureVisible(
         context,
         duration: const Duration(milliseconds: 200),
         alignment: 0.1,
       );
-      if (highlight) setState(() => _flashes[id] = (_flashes[id] ?? 0) + 1);
+      if (highlight) setState(() => _flashes[key] = (_flashes[key] ?? 0) + 1);
     });
   }
 
@@ -105,6 +120,15 @@ class _ExitPageState extends State<ExitPage> {
 
   Widget _page(AppLocalizations l10n) {
     return LgExitPage(
+      // "出口与隧道" (R3-Q1): the exit nodes, then the tunnels.
+      sectionTitle: l10n.tunnelSectionExits,
+      sectionIcon: LgIcons.exit,
+      tunnels: TunnelSection(
+        overlays: widget.overlays,
+        cardKey: (id, kind) =>
+            _cardKeys.putIfAbsent(_tunnelKey(id, kind), GlobalKey.new),
+        flashes: (id, kind) => _flashes[_tunnelKey(id, kind)] ?? 0,
+      ),
       lede: l10n.exitLede,
       inUseTitle: l10n.exitInUseTitle,
       inUse: ListenableBuilder(

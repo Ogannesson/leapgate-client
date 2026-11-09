@@ -1,6 +1,8 @@
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/bridge.dart';
+import 'package:flutter_hbb/leapgate/tunnel_api.dart' show TunnelKind;
 
+import '../pages/home/exit/open_tunnel.dart';
 import 'navigation.dart';
 
 // Links and `--connect`: `leapgate.exe --connect <ID>` (with `--password`, `--relay`) and
@@ -181,9 +183,14 @@ bool _open(List<String>? args) {
     // TODO(M9b): the terminals and the camera.
     case LinkKind.terminal || LinkKind.terminalAdmin || LinkKind.camera:
       return _unsupported(link.kind);
-    // TODO(M9c): the TCP tunnel and RDP.
+    // The card on the exit page (13 §1.1.2).
     case LinkKind.tcpTunnel || LinkKind.rdp:
-      return _unsupported(link.kind);
+      openTunnel(
+        link.id,
+        link.kind == LinkKind.rdp ? TunnelKind.rdp : TunnelKind.tcp,
+        password: link.password,
+        forceRelay: link.forceRelay,
+      );
   }
   appCore.window.bringToFront();
   return true;
@@ -193,8 +200,6 @@ bool _unsupported(LinkKind kind) {
   lgBind.leapgateLog(
       level: 3, msg: 'leapgate ui: link not handled: ${kind.name}');
   appCore.toasts.show(switch (kind) {
-    LinkKind.tcpTunnel => 'linkUnsupportedPortForward',
-    LinkKind.rdp => 'linkUnsupportedRdp',
     LinkKind.camera => 'linkUnsupportedCamera',
     _ => 'linkUnsupportedTerminal',
   });

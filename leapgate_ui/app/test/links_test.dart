@@ -113,8 +113,6 @@ void main() {
 
   test('the third round\'s kinds open nothing and say so in a toast', () {
     for (final (kind, toast) in [
-      ('port-forward', 'linkUnsupportedPortForward'),
-      ('rdp', 'linkUnsupportedRdp'),
       ('view-camera', 'linkUnsupportedCamera'),
       ('terminal', 'linkUnsupportedTerminal'),
       ('terminal-admin', 'linkUnsupportedTerminal'),

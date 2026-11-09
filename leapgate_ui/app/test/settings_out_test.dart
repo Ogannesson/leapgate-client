@@ -516,8 +516,8 @@ void main() {
     testWidgets('portable: three choices for closing, each explained', (tester) async {
       await _pump(tester, otherSection);
       expect(_on(tester, '关闭窗口前确认断开会话'), isTrue);
-      expect(find.text('本机将无法接受远程连接，正在使用的出口也将停止'), findsOneWidget);
-      expect(find.text('服务和正在使用的出口将继续运行。再次启动 Leapgate 即可恢复窗口。'),
+      expect(find.text('本机将无法接受远程连接，正在使用的出口和隧道也将停止'), findsOneWidget);
+      expect(find.text('服务和正在使用的出口、隧道将继续运行。再次启动 Leapgate 即可恢复窗口。'),
           findsOneWidget);
       expect(find.text('硬件编解码'), findsNothing);
 

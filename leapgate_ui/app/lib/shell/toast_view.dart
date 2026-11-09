@@ -40,8 +40,6 @@ String? toastText(AppLocalizations l10n, String? key) => switch (key) {
       // The two-factor authentication section's.
       'settingsTwoFactorEnabled' => l10n.settingsTwoFactorEnabled,
       // Links to the third round's sessions (M8-7).
-      'linkUnsupportedPortForward' => l10n.linkUnsupportedPortForward,
-      'linkUnsupportedRdp' => l10n.linkUnsupportedRdp,
       'linkUnsupportedCamera' => l10n.linkUnsupportedCamera,
       'linkUnsupportedTerminal' => l10n.linkUnsupportedTerminal,
       _ => translate(key),

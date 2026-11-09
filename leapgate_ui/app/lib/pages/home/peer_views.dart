@@ -7,6 +7,7 @@ import 'package:flutter_hbb/leapgate/exit_nodes.dart' show isExitId;
 import 'package:flutter_hbb/leapgate/peer_list.dart';
 import 'package:flutter_hbb/leapgate/peer_tabs.dart';
 import 'package:flutter_hbb/leapgate/recent_peers.dart';
+import 'package:flutter_hbb/leapgate/tunnel_api.dart' show TunnelKind;
 import 'package:flutter_hbb/models/peer_model.dart';
 
 import '../../l10n/app_localizations.dart';
@@ -18,6 +19,8 @@ import '../../widgets/lg_menu.dart';
 import '../../widgets/lg_menu_items.dart';
 import '../peer_platform.dart';
 import 'address_book/address_book.dart';
+import 'exit/open_tunnel.dart';
+import 'exit/rdp_settings_dialog.dart';
 import 'home_dialogs.dart';
 
 // The device cards, the list view rows and the "⋯" menu of the devices page (01 P1 block F).
@@ -257,8 +260,6 @@ List<Widget> peerMenuItems(
   bool built(PeerAction action) => switch (action) {
     // TODO(M9b): the terminal, administrator terminal and camera items.
     PeerAction.terminal || PeerAction.terminalAdmin || PeerAction.camera => false,
-    // TODO(M9c): the TCP tunnel and RDP items.
-    PeerAction.tcpTunnel || PeerAction.rdp => false,
     PeerAction.useAsExit => isExitId(id),
     _ => true,
   };
@@ -382,8 +383,23 @@ List<Widget> peerMenuItems(
     PeerAction.terminal ||
     PeerAction.terminalAdmin ||
     PeerAction.camera => const SizedBox.shrink(),
-    // TODO(M9c): the TCP tunnel and RDP items.
-    PeerAction.tcpTunnel || PeerAction.rdp => const SizedBox.shrink(),
+    // The cards on the exit page (13 §1.1.2); the pencil only opens the RDP settings.
+    PeerAction.tcpTunnel => LgMenuItem(
+      label: l10n.tunnelKindTcp,
+      onPressed: () => openTunnel(id, TunnelKind.tcp,
+          name: name == formatPeerId(id) ? null : name,
+          category: item.category),
+    ),
+    PeerAction.rdp => LgMenuItem(
+      label: 'RDP',
+      onPressed: () => openTunnel(id, TunnelKind.rdp,
+          name: name == formatPeerId(id) ? null : name,
+          category: item.category),
+      trailing: LgMenuRowButton(
+        label: l10n.tunnelRdpSettings,
+        onPressed: () => showRdpSettings(overlays, id, name: name),
+      ),
+    ),
   };
   return [
     for (final group in groups) ...[

@@ -41,7 +41,7 @@ void main() {
     appCore.exitNodes.use(_id);
     await _settle(tester);
 
-    final name = tester.getRect(inNav(find.text('出口')));
+    final name = tester.getRect(inNav(find.text('出口与隧道')));
     final badge = tester.getRect(inNav(find.byType(LgBadge)));
     expect(badge.left - name.right, 4);
     expect(inNav(find.byType(LgBadge)), findsOneWidget);
@@ -57,7 +57,7 @@ void main() {
     );
     await _settle(tester);
 
-    final name = tester.getRect(inNav(find.text('出口')));
+    final name = tester.getRect(inNav(find.text('出口与隧道')));
     final badge = tester.getRect(inNav(find.byType(LgBadge)));
     // 6, the 16 px triangle, 6, then the number.
     expect(badge.left - name.right, 6 + 16 + 6);

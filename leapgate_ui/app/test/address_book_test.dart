@@ -521,6 +521,8 @@ void _categoryTests() {
       _item(_peer('123456789'), PeerCategory.recent),
       hasPassword: true,
     );
+    // The connection group grew with the third round's kinds (M9).
+    await tester.ensureVisible(find.text('清除保存的密码'));
     await tester.tap(find.text('清除保存的密码'));
     await _settle(tester);
     expect(api.callsTo('updatePeer'), [

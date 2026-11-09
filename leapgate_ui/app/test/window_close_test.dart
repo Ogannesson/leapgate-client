@@ -70,9 +70,9 @@ void main() {
     await _closeWindow(tester);
     expect(find.text('断开全部 1 个会话并关闭窗口？'), findsOneWidget);
     expect(find.text('退出 Leapgate'), findsOneWidget);
-    expect(find.text('本机将无法接受远程连接，正在使用的出口也将停止'), findsOneWidget);
+    expect(find.text('本机将无法接受远程连接，正在使用的出口和隧道也将停止'), findsOneWidget);
     expect(find.text('在后台运行'), findsOneWidget);
-    expect(find.text('服务和正在使用的出口将继续运行。再次启动 Leapgate 即可恢复窗口。'),
+    expect(find.text('服务和正在使用的出口、隧道将继续运行。再次启动 Leapgate 即可恢复窗口。'),
         findsOneWidget);
     expect(find.text('记住此选择'), findsOneWidget);
     expect(find.text('不再提示'), findsOneWidget);

@@ -67,7 +67,9 @@ Future<void> closeMainWindow(TabOverlays overlays) async {
     remembered: rememberedCloseAction(local),
   );
   var action = plan.action;
-  final exits = appCore.backgroundCount;
+  // What runs on the exit page goes on in the background or stops with it (13 §1.3 block F).
+  final exits = appCore.exitNodes.runningCount;
+  final tunnels = appCore.tunnels.runningCount;
   // Unfinished transfers are asked about even after "Don't show again" (R2-Q28, 02 §3.1).
   final transfers = unfinishedTransfers(views);
   if (plan.askSessions || plan.askAction || transfers > 0) {
@@ -79,6 +81,7 @@ Future<void> closeMainWindow(TabOverlays overlays) async {
                 plan: plan,
                 sessions: views.length,
                 exits: exits,
+                tunnels: tunnels,
                 transfers: transfers,
                 onClose: close)));
     if (answer == null) return;
@@ -89,13 +92,14 @@ Future<void> closeMainWindow(TabOverlays overlays) async {
     if (answer.remember) {
       await local.set(kOptionLeapgateCloseAction, answer.action.name);
     }
-  } else if (exits > 0 && action == CloseAction.exit) {
-    // Quitting stops the exit nodes: asked even when "Quit" is remembered (M5-11).
+  } else if (appCore.backgroundCount > 0 && action == CloseAction.exit) {
+    // Quitting stops the exit nodes and tunnels: asked even when "Quit" is remembered (M5-11).
     final quit = await overlays.show<bool>(
         kWindowScope,
         (context, close) => LgDialogScrim(
             onEscape: () => close(null),
-            child: _QuitWithExitsDialog(exits: exits, onClose: close)));
+            child: _QuitWithExitsDialog(
+                exits: exits, tunnels: tunnels, onClose: close)));
     if (quit != true) return;
   }
   try {
@@ -118,6 +122,22 @@ Future<void> closeMainWindow(TabOverlays overlays) async {
   }
 }
 
+/// What happens to the exit nodes and tunnels running (13 §1.3 block F "关窗和退出"): they go on
+/// in the background, or stop when [quit].
+String backgroundSentence(AppLocalizations l10n,
+        {required int exits, required int tunnels, required bool quit}) =>
+    switch ((exits > 0, tunnels > 0)) {
+      (_, false) => quit
+          ? l10n.exitCloseQuitBody(exits)
+          : l10n.exitCloseBackground(exits),
+      (false, true) => quit
+          ? l10n.closingTunnelsQuit(tunnels)
+          : l10n.closingTunnelsBackground(tunnels),
+      (true, true) => quit
+          ? l10n.closingBothQuit(exits, tunnels)
+          : l10n.closingBothBackground(exits, tunnels),
+    };
+
 /// The close confirmation (01 §3.2 block G); Enter is the main button, Esc cancels.
 class CloseDialog extends StatefulWidget {
   const CloseDialog(
@@ -125,6 +145,7 @@ class CloseDialog extends StatefulWidget {
       required this.plan,
       required this.sessions,
       this.exits = 0,
+      this.tunnels = 0,
       this.transfers = 0,
       required this.onClose});
 
@@ -133,6 +154,9 @@ class CloseDialog extends StatefulWidget {
 
   /// Exit nodes running: they go on in the background, or stop with a remembered "Quit".
   final int exits;
+
+  /// Tunnel cards running, as [exits] (13 §1.3 block F).
+  final int tunnels;
 
   /// Unfinished file transfers: one more sentence, beside the exit nodes' one.
   final int transfers;
@@ -154,6 +178,9 @@ class _CloseDialogState extends State<CloseDialog> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final plan = widget.plan;
+    final running = widget.exits + widget.tunnels > 0;
+    String background({required bool quit}) => backgroundSentence(l10n,
+        exits: widget.exits, tunnels: widget.tunnels, quit: quit);
     return LgConfirmDialog(
       title: plan.askSessions
           ? l10n.closingDisconnectAll(widget.sessions)
@@ -198,30 +225,34 @@ class _CloseDialogState extends State<CloseDialog> {
             onChanged: (v) => setState(() => _dontShowAgain = v),
           ),
         // Not in the question asked only for the transfers (02 §3.1).
-        if (widget.exits > 0 && (plan.askSessions || plan.askAction))
+        if (running && (plan.askSessions || plan.askAction))
           if ((plan.askAction ? _action : plan.action) ==
               CloseAction.background)
-            Text(l10n.exitCloseBackground(widget.exits))
+            Text(background(quit: false))
           // The "Quit" choice says so itself.
           else if (!plan.askAction)
-            Text(l10n.exitCloseQuitBody(widget.exits)),
+            Text(background(quit: true)),
         if (widget.transfers > 0) Text(l10n.ftUnfinished(widget.transfers)),
-        // Quitting with exit nodes is asked anyway (M5-11): one dialog with both sentences.
-        if (widget.exits > 0 &&
+        // Quitting with exit nodes or tunnels is asked anyway (M5-11): one dialog with both
+        // sentences.
+        if (running &&
             !plan.askSessions &&
             !plan.askAction &&
             plan.action == CloseAction.exit)
-          Text(l10n.exitCloseQuitBody(widget.exits)),
+          Text(background(quit: true)),
       ],
     );
   }
 }
 
-/// Quitting the portable version with exit nodes running (01 §2.1, M5-11).
+/// Quitting the portable version with exit nodes or tunnels running (01 §2.1, M5-11, 13 §1.3
+/// block F).
 class _QuitWithExitsDialog extends StatelessWidget {
-  const _QuitWithExitsDialog({required this.exits, required this.onClose});
+  const _QuitWithExitsDialog(
+      {required this.exits, required this.tunnels, required this.onClose});
 
   final int exits;
+  final int tunnels;
   final void Function(bool? quit) onClose;
 
   @override
@@ -229,7 +260,7 @@ class _QuitWithExitsDialog extends StatelessWidget {
     final l10n = AppLocalizations.of(context)!;
     return LgConfirmDialog(
       title: l10n.exitCloseQuitTitle,
-      body: l10n.exitCloseQuitBody(exits),
+      body: backgroundSentence(l10n, exits: exits, tunnels: tunnels, quit: true),
       actions: [
         LgDialogAction(label: l10n.connCancel, onPressed: () => onClose(null)),
         LgDialogAction(

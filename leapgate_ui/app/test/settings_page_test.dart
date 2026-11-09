@@ -579,7 +579,7 @@ void main() {
         await tapText(tester, '停止服务');
         expect(find.text('停止服务？'), findsOneWidget);
         expect(
-          find.text('本机将无法接受远程连接。Leapgate 将关闭并重新打开，所有会话和正在使用的出口都将断开。'),
+          find.text('本机将无法接受远程连接。Leapgate 将关闭并重新打开，所有会话和正在使用的出口、隧道都将断开。'),
           findsOneWidget,
         );
         expect(kindOf(tester, '停止服务'), LgButtonKind.dangerSolid);
