@@ -265,8 +265,9 @@ class LgBadge extends StatelessWidget {
 /// "需要处理". The mark and the number are decoration for a screen reader: the
 /// control that holds them names both ("出口，2 个正在使用，需要处理").
 ///
-/// [gap] between mark and number: 16 in the navigation (`.navi` gap 12 plus the
-/// 4 px of `.rmd+.badge`), 12 on the tab.
+/// [gap] between mark and number: 6 in the navigation (`.navi` gap 12, the mark
+/// pulls 6 back; M9 made it 6 from 16 so that "出口与隧道" fits next to both),
+/// 12 on the tab. The default is the old navigation value.
 class LgCountMark extends StatelessWidget {
   const LgCountMark(this.count, {super.key, this.alert = false, this.gap = 16});
 

@@ -446,6 +446,8 @@ class LgLocalNotice extends StatelessWidget {
     this.onAction,
     this.actionBusy = false,
     this.actionError,
+    this.actionIcon,
+    this.actionKind = LgButtonKind.secondary,
   }) : assert(actionLabel == null || onAction != null);
 
   final LgTone tone;
@@ -453,6 +455,15 @@ class LgLocalNotice extends StatelessWidget {
   final LgIcons? icon;
   final String? actionLabel;
   final VoidCallback? onAction;
+
+  /// Before the label of the button: the shield (drawn at 18) of "升级", which
+  /// asks for administrator permission at once, the arrow of "安装" (20).
+  /// A busy button shows its spinner instead.
+  final LgIcons? actionIcon;
+
+  /// The mockup's button here is [LgButtonKind.primary] (`.pcard .btn.pri`,
+  /// `p1-hint-upgrade`); the default is the one this card has always drawn.
+  final LgButtonKind actionKind;
 
   /// The action is on its way: the button is busy and [actionLabel] says so.
   final bool actionBusy;
@@ -525,6 +536,9 @@ class LgLocalNotice extends StatelessWidget {
               const SizedBox(height: LgSpace.s2),
               LgButton(
                 label: actionLabel!,
+                kind: actionKind,
+                icon: actionIcon,
+                iconSize: actionIcon == LgIcons.uac ? 18 : 20,
                 busy: actionBusy,
                 onPressed: actionBusy ? null : onAction,
               ),
