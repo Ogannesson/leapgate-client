@@ -14,7 +14,8 @@ import 'session.dart';
 String Function(SessionID sessionId) sessionDisplayNames =
     (_) => throw UnimplementedError('TODO(M9 整合)');
 
-/// Read once per peer info, kept with its first display: each peer info makes new ones.
+/// Read once per first display object, which each peer info makes anew; switching cameras may
+/// make a new one too and read again.
 final _names = Expando<List<String>>();
 
 /// The name of each of [ffi]'s cameras, by number; an empty string where the remote device gave

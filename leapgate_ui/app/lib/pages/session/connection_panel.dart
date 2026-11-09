@@ -138,10 +138,11 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
     _conn.login(password: _password.text, remember: _remember);
   }
 
+  /// The account alone has no password field: nothing typed before goes with it.
   void _loginAdmin() => _conn.login(
       osUsername: _osUsername.text,
       osPassword: _osPassword.text,
-      password: _password.text,
+      password: _conn.input == ConnInput.osAccount ? '' : _password.text,
       remember: _remember);
 
   void _submit2fa() => _conn.submit2fa(_code.text, trustThisDevice: _trust);
@@ -188,6 +189,60 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
           LgPanelStep(l10n.connStepVerify, verify),
         ];
 
+    // The administrator terminal (13 §2.2.2 block H, `A-P2.html#c-terminal`): an administrator
+    // account of the remote device; without a saved password or a token, the connection
+    // password first, as the password panel asks it. The system password may stay empty, as
+    // upstream.
+    void adminAccount() {
+      final withPassword = conn.input != ConnInput.osAccount;
+      message = l10n.viewAdminAccount;
+      secondary = l10n.viewAdminAccountNote;
+      if (withPassword) {
+        inputs
+          ..add(LgPasswordField(
+            controller: _password,
+            focusNode: _inputFocus,
+            showLabel: l10n.connShowPassword,
+            hideLabel: l10n.connHidePassword,
+            placeholder: l10n.connPassword,
+            semanticLabel: l10n.connPassword,
+            autofocus: true,
+            errorText: conn.reason?.code == 'wrong_password'
+                ? l10n.connWrongPassword
+                : null,
+          ))
+          ..add(LgCheckbox(
+            value: _remember,
+            label: l10n.connRememberPassword,
+            onChanged: (v) => setState(() => _remember = v),
+          ));
+      }
+      inputs
+        ..add(LgTextField(
+          controller: _osUsername,
+          focusNode: withPassword ? null : _inputFocus,
+          placeholder: l10n.viewAdminUsername,
+          semanticLabel: l10n.viewAdminUsername,
+          autofocus: !withPassword,
+        ))
+        ..add(LgPasswordField(
+          controller: _osPassword,
+          showLabel: l10n.connShowPassword,
+          hideLabel: l10n.connHidePassword,
+          placeholder: l10n.viewAdminPassword,
+          semanticLabel: l10n.viewAdminPassword,
+        ));
+      final ready = _osUsername.text.trim().isNotEmpty &&
+          (!withPassword || _password.text.trim().isNotEmpty);
+      actions
+        ..add(cancel)
+        ..add(LgPanelAction(
+            label: l10n.viewAdminSignIn,
+            onPressed: ready ? _loginAdmin : null,
+            primary: true,
+            isDefault: true));
+    }
+
     switch (conn.stage) {
       case ConnStage.connecting:
         steps = twoSteps(LgStepState.current, LgStepState.todo);
@@ -209,6 +264,11 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
       case ConnStage.verifying:
         steps = twoSteps(LgStepState.done, LgStepState.current);
         switch (conn.input) {
+          // A wrong connection password of the administrator terminal is asked again as a
+          // plain password (`re-input-password`): without the account the remote device would
+          // open a normal shell.
+          case ConnInput.password when ffi.terminalAdmin:
+            adminAccount();
           case ConnInput.password:
             // The panel's sentence names the field, as its password specimens (`c-pwd-wrong`).
             message = l10n.connEnterPassword;
@@ -292,56 +352,9 @@ class _ConnectionPanelState extends State<ConnectionPanel> {
               primary: true,
               isDefault: true,
             ));
-          // The administrator terminal (13 §2.2.2 block H, `A-P2.html#c-terminal`): an
-          // administrator account of the remote device; without a saved password or a token,
-          // the connection password first, as the password panel asks it. The system password
-          // may stay empty, as upstream.
           case ConnInput.osAccount:
           case ConnInput.osAccountAndPassword:
-            final withPassword = conn.input == ConnInput.osAccountAndPassword;
-            message = l10n.viewAdminAccount;
-            secondary = l10n.viewAdminAccountNote;
-            if (withPassword) {
-              inputs
-                ..add(LgPasswordField(
-                  controller: _password,
-                  focusNode: _inputFocus,
-                  showLabel: l10n.connShowPassword,
-                  hideLabel: l10n.connHidePassword,
-                  placeholder: l10n.connPassword,
-                  semanticLabel: l10n.connPassword,
-                  autofocus: true,
-                ))
-                ..add(LgCheckbox(
-                  value: _remember,
-                  label: l10n.connRememberPassword,
-                  onChanged: (v) => setState(() => _remember = v),
-                ));
-            }
-            inputs
-              ..add(LgTextField(
-                controller: _osUsername,
-                focusNode: withPassword ? null : _inputFocus,
-                placeholder: l10n.viewAdminUsername,
-                semanticLabel: l10n.viewAdminUsername,
-                autofocus: !withPassword,
-              ))
-              ..add(LgPasswordField(
-                controller: _osPassword,
-                showLabel: l10n.connShowPassword,
-                hideLabel: l10n.connHidePassword,
-                placeholder: l10n.viewAdminPassword,
-                semanticLabel: l10n.viewAdminPassword,
-              ));
-            final ready = _osUsername.text.trim().isNotEmpty &&
-                (!withPassword || _password.text.trim().isNotEmpty);
-            actions
-              ..add(cancel)
-              ..add(LgPanelAction(
-                  label: l10n.viewAdminSignIn,
-                  onPressed: ready ? _loginAdmin : null,
-                  primary: true,
-                  isDefault: true));
+            adminAccount();
           case ConnInput.none:
             message = l10n.connVerifying;
             busy = true;

@@ -117,7 +117,7 @@ Widget _nextMonitorButton(FFI ffi, AppLocalizations l10n) {
   final current = pi.currentDisplay;
   final inRange = current >= 0 && current < pi.displays.length;
   return LgToolbarButton(
-    icon: LgIcons.displays,
+    icon: _camera(ffi) ? LgIcons.camera : LgIcons.displays,
     label: '${inRange ? current + 1 : '*'}/${pi.displays.length}',
     semanticLabel: _nextLabel(ffi, l10n),
     showText: true,

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/camera_names.dart';
 import 'package:flutter_hbb/leapgate/recent_peers.dart' show PeerCategory;
@@ -208,8 +209,8 @@ void main() {
     );
 
     testMainWindow(
-      'the terminal: the view switch names the administrator\'s, its tab alone closes through '
-      'its "断开", the tab shortcut closes it',
+      'the terminal: the view switch names the administrator\'s and goes to it; the tab '
+      'shortcut "关闭标签" is the shell\'s while it shows',
       (tester) async {
         await pumpMainWindow(tester);
         final terminal = await open(
@@ -245,12 +246,12 @@ void main() {
           tester.widget<TerminalViewPage>(find.byType(TerminalViewPage)).active,
           true,
         );
-
-        await appCore.sessions.close(appCore.sessions.sessionsOf(_id).last);
-        await tester.pump();
-        titleBar(tester).onCloseTab(1);
-        await settle(tester);
-        expect(appCore.sessions.devices, isEmpty);
+        expect(
+          tester.widget<TabShortcuts>(find.byType(TabShortcuts)).onCloseTab,
+          isNotNull,
+        );
+        // The tab of the terminal alone closing through its "断开" (R3-Q15) is tested once the
+        // terminal view asks (`LEAPGATE.md` §10.18, integration).
       },
     );
   });
@@ -323,7 +324,8 @@ void main() {
         await settle(tester);
         expect(find.text('Integrated Camera'), findsOneWidget);
         expect(find.text('摄像头 2'), findsOneWidget);
-        // Read once for the peer info, however often the toolbar builds.
+        // Read once for the peer info, however often the toolbar builds, as long as no other
+        // camera was switched to (that may make a new first display and read again).
         expect(reads, 1);
       },
     );
@@ -344,6 +346,44 @@ void main() {
           'recording': 'false',
         });
         expect(find.text('对方已关闭录制权限'), findsOneWidget);
+      },
+    );
+
+    testMainWindow(
+      'the input menu\'s shortcuts are the remote desktop\'s: in the camera they do nothing '
+      '(13 §3.2 "键盘")',
+      (tester) async {
+        await pumpMainWindow(tester);
+        final desk = await open(tester, ConnType.defaultConn);
+        await ready(tester, desk);
+        final camera = await open(tester, ConnType.viewCamera);
+        await ready(tester, camera);
+        for (final s in [desk, camera]) {
+          s.shortcutModel.onTriggered(kShortcutActionToggleReverseMouseWheel);
+          await settle(tester);
+        }
+        expect(
+          callsTo(
+            fakes,
+            #sessionSetReverseMouseWheel,
+          ).map((c) => c[#sessionId]),
+          [desk.sessionId],
+        );
+      },
+    );
+
+    testMainWindow(
+      'a screenshot while all cameras show: the notice says cameras (13 §3.2 block E)',
+      (tester) async {
+        sessionDisplayNames = (_) => '[]';
+        await pumpMainWindow(tester);
+        final camera = await open(tester, ConnType.viewCamera);
+        await ready(tester, camera, displays: 2);
+        camera.ffiModel.pi.currentDisplay = kAllDisplayValue;
+        camera.requests.takeScreenshot();
+        await tester.pump();
+        expect(find.text('显示全部摄像头时无法截图，请先切换到单个摄像头'), findsOneWidget);
+        expect(find.text('显示全部显示器时无法截图，请先切换到单个显示器'), findsNothing);
       },
     );
   });
@@ -424,6 +464,53 @@ void main() {
         expect(login[#password], 'pw-1');
         expect(login[#osUsername], 'admin');
         expect(login[#osPassword], '');
+      },
+    );
+
+    testWidgets(
+      'a wrong connection password asks again with the account: the shell stays the '
+      'administrator\'s',
+      (tester) async {
+        final s = await panel(tester);
+        fakes.lg.reasons['Wrong Password'] = 'wrong_password';
+        await emit(
+          tester,
+          fakes,
+          s,
+          msgbox('terminal-admin-login-password', 'Terminal', ''),
+        );
+        await tester.pump(const Duration(milliseconds: 200));
+        final fields = find.byType(EditableText);
+        await tester.enterText(fields.at(0), 'bad');
+        await tester.enterText(fields.at(1), 'admin');
+        await tester.pump();
+        await tester.tap(find.text('登录'));
+        await tester.pump();
+
+        await emit(
+          tester,
+          fakes,
+          s,
+          msgbox('re-input-password', 'Login Error', 'Wrong Password'),
+        );
+        await tester.pump(const Duration(milliseconds: 200));
+        expect(find.text('远程设备上的管理员账户'), findsOneWidget);
+        expect(find.text('密码错误'), findsOneWidget);
+        expect(fields, findsNWidgets(3));
+        // Without the username nothing goes.
+        await tester.enterText(fields.at(1), '');
+        await tester.enterText(fields.at(0), 'pw-2');
+        await tester.pump();
+        await tester.tap(find.text('登录'));
+        await tester.pump();
+        expect(callsTo(fakes, #sessionLogin), hasLength(1));
+        await tester.enterText(fields.at(1), 'admin');
+        await tester.pump();
+        await tester.tap(find.text('登录'));
+        await tester.pump();
+        final login = callsTo(fakes, #sessionLogin).last;
+        expect(login[#osUsername], 'admin');
+        expect(login[#password], 'pw-2');
       },
     );
 
