@@ -240,28 +240,8 @@ void main() {
     },
   );
 
+  // "安装" opens the install page since M9a: install_dialog_test.dart.
   group('install card (01 P1 block B, M8)', () {
-    testWidgets('portable: "安装" is busy while it runs, then says why it failed', (
-      tester,
-    ) async {
-      // Made in the test's zone, so its answer arrives on the next pump.
-      final lg = lgBind as FakeLeapgate..installAnswer = Completer();
-      await pumpHome(tester, id: '135792468', setUp: (m) => m.installed = false);
-      expect(find.textContaining('安装后，对方远程控制本机时'), findsOneWidget);
-      await tester.tap(find.text('安装'));
-      await tester.pump();
-      expect(lg.installs, ['install']);
-      expect(find.text('正在安装…'), findsOneWidget);
-
-      lg.installAnswer.complete(
-        '{"result":"uac_denied","text":"The operation was canceled by the user. (0x800704C7)"}',
-      );
-      await tester.pump();
-      expect(find.text('未获得管理员权限，未安装。'), findsOneWidget);
-      expect(find.text('安装'), findsOneWidget);
-      await unmount(tester);
-    });
-
     testWidgets('an older installed version: "升级", a failure with its text', (
       tester,
     ) async {

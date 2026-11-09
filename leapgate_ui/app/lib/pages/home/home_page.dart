@@ -24,6 +24,7 @@ import 'account/account.dart';
 import 'devices_page.dart';
 import 'exit/exit_page.dart';
 import 'home_dialogs.dart';
+import 'install_dialog.dart';
 import 'password_row.dart';
 
 /// Pages of the home tab's navigation (01 §3.1 block C).
@@ -388,7 +389,8 @@ class _SideColumn extends StatelessWidget {
                       LgLocalNotice(tone: LgTone.error, text: status.systemError),
                     ] else if (status.installCard case final card?) ...[
                       SizedBox(height: short ? LgSpace.s2 : LgSpace.s3),
-                      _InstallNotice(status: status, card: card),
+                      _InstallNotice(
+                          status: status, card: card, overlays: overlays),
                     ],
                   ],
                 ),
@@ -448,41 +450,44 @@ class _SideColumn extends StatelessWidget {
   }
 }
 
-/// "安装" on the portable version, "升级" over an older installed one (01 P1 block B, M8-1):
-/// busy while the installer runs, the reason under the button when it failed. On success
-/// this process exits.
+/// "安装" on the portable version opens the install page (R3-Q20), which shows the installer's
+/// progress and failure itself. "升级" over an older installed one installs at once (01 P1
+/// block B, M8-1): busy while the installer runs, the reason under the button when it failed.
+/// On success this process exits.
 class _InstallNotice extends StatelessWidget {
-  const _InstallNotice({required this.status, required this.card});
+  const _InstallNotice(
+      {required this.status, required this.card, required this.overlays});
 
   final LocalStatusModel status;
   final InstallCard card;
+  final TabOverlays overlays;
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final install = card == InstallCard.install;
+    if (card == InstallCard.install) {
+      return LgLocalNotice(
+        tone: LgTone.info,
+        text: l10n.homeInstallText,
+        actionLabel: l10n.homeInstallButton,
+        onAction: () => showInstallDialog(overlays, status),
+      );
+    }
     final failure =
         status.installFailure?.card == card ? status.installFailure : null;
+    // TODO(M9 整合): the shield on "升级" (02 §1.2.6) once LgLocalNotice's button takes an icon.
     return LgLocalNotice(
       tone: LgTone.info,
-      text: install ? l10n.homeInstallText : l10n.homeUpgradeText,
-      actionLabel: switch ((install, status.installing)) {
-        (true, false) => l10n.homeInstallButton,
-        (true, true) => l10n.homeInstalling,
-        (false, false) => l10n.homeUpgradeButton,
-        (false, true) => l10n.homeUpgrading,
-      },
+      text: l10n.homeUpgradeText,
+      actionLabel:
+          status.installing ? l10n.homeUpgrading : l10n.homeUpgradeButton,
       onAction: () => status.install(card),
       actionBusy: status.installing,
       actionError: switch (failure) {
         null => null,
-        InstallFailure(uacDenied: true) =>
-          install ? l10n.homeInstallUacDenied : l10n.homeUpgradeUacDenied,
-        InstallFailure(text: '') =>
-          install ? l10n.homeInstallFailed : l10n.homeUpgradeFailed,
-        InstallFailure(:final text) => install
-            ? l10n.homeInstallFailedText(text)
-            : l10n.homeUpgradeFailedText(text),
+        InstallFailure(uacDenied: true) => l10n.homeUpgradeUacDenied,
+        InstallFailure(text: '') => l10n.homeUpgradeFailed,
+        InstallFailure(:final text) => l10n.homeUpgradeFailedText(text),
       },
     );
   }

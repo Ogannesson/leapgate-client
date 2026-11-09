@@ -7,6 +7,7 @@ import '../consts.dart';
 import '../models/platform_model.dart';
 import 'app_core.dart';
 import 'bridge.dart';
+import 'install_page.dart' show InstallOptions;
 import 'settings/server_config.dart' show readSocks;
 
 enum ServiceStatus { ready, connecting, notReady, stopped }
@@ -164,13 +165,19 @@ class LocalStatusModel extends ChangeNotifier {
   /// on success this process is ended (by the install script, or by Rust) and the installed copy
   /// starts. A second click while it runs does nothing; the export
   /// throwing or answering something unreadable counts as `failed` with the error's text.
-  Future<void> install(InstallCard card) async {
+  /// [path] and [options] are the install page's (13 §4, M9a); "升级" passes neither and keeps
+  /// the installed location and options.
+  Future<void> install(InstallCard card,
+      {String? path, InstallOptions? options}) async {
     if (installing) return;
     _installing = card;
     installFailure = null;
     notifyListeners();
     InstallFailure failure;
     try {
+      // TODO(M9 整合): pass [path] and [options] once the bridge has the new
+      // `leapgate_install(kind, path, start_menu, desktop_shortcut, printer)` (LEAPGATE.md
+      // §10.18); until then Rust installs to the default location with both shortcuts.
       final answer = jsonDecode(await lgBind.leapgateInstall(kind: card.name))
           as Map<String, dynamic>;
       failure = InstallFailure(
