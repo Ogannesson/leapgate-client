@@ -37,7 +37,7 @@ use leapgate::{
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
-    sync::{Arc, Mutex, RwLock},
+    sync::{Arc, Mutex, RwLock, Weak},
     time::Duration,
 };
 
@@ -54,8 +54,11 @@ struct Card {
     /// Tells this card from a later one for the same device whose session was added while this
     /// one was still closing.
     gen: u64,
-    /// The card's session, carried by every event and matched by `take`.
+    /// The card's session, carried by every event.
     session_id: SessionID,
+    /// That session's `lc`, its own: `take` knows the session by it. Weak, so the allocation
+    /// stays while the card does and no other session's can come at the same address.
+    lc: Weak<RwLock<LoginConfigHandler>>,
     /// Each row's last state event, by local port, sent again to a new subscriber.
     rows: BTreeMap<i32, String>,
     #[cfg_attr(not(any(feature = "flutter", test)), allow(dead_code))]
@@ -69,8 +72,9 @@ struct Card {
 static CARDS: Mutex<BTreeMap<(String, Kind), Card>> = Mutex::new(BTreeMap::new());
 #[cfg(any(feature = "flutter", test))]
 static NEXT_GEN: AtomicU64 = AtomicU64::new(0);
-#[cfg(feature = "flutter")]
-static EVENTS: Mutex<Option<StreamSink<String>>> = Mutex::new(None);
+/// Where the events go: the UI's stream (`set_events`), a collector in the tests.
+type Sink = Box<dyn Fn(String) + Send>;
+static EVENTS: Mutex<Option<Sink>> = Mutex::new(None);
 
 /// What `run` takes from the registry.
 pub(crate) struct Taken {
@@ -106,17 +110,18 @@ pub(crate) fn session_add(
         is_shared_password,
         conn_token,
         force_relay,
-        || register(id, kind, *session_id),
+        |session| register(id, kind, *session_id, Arc::downgrade(&session.lc)),
     )
 }
 
 /// Replaces a card left by a session that never started.
 #[cfg(any(feature = "flutter", test))]
-fn register(id: &str, kind: Kind, session_id: SessionID) {
+fn register(id: &str, kind: Kind, session_id: SessionID, lc: Weak<RwLock<LoginConfigHandler>>) {
     let (ctl, ctl_rx) = mpsc::unbounded_channel();
     let card = Card {
         gen: NEXT_GEN.fetch_add(1, Ordering::Relaxed),
         session_id,
+        lc,
         rows: BTreeMap::new(),
         ctl,
         ctl_rx: Some(ctl_rx),
@@ -125,46 +130,26 @@ fn register(id: &str, kind: Kind, session_id: SessionID) {
 }
 
 /// The hook in `io_loop`: the card registered for this very session, or `None` for any other
-/// port forward session (an exit card's, the old UI's, one added after the card's).
+/// port forward session (an exit card's, the old UI's, one added after the card's). Known by the
+/// session's `lc`, not looked up in the session table: a session closed meanwhile is gone from
+/// the table, and its `io_loop` would then run upstream's branch.
 pub(crate) fn take<T: InvokeUiSession>(handler: &Session<T>) -> Option<Taken> {
-    #[cfg(feature = "flutter")]
-    {
-        use crate::flutter::sessions;
-        let kind = if handler.is_rdp() {
-            Kind::Rdp
-        } else {
-            Kind::Tcp
-        };
-        // A session's `lc` is its own: the registered ID's session is this one when they share it.
-        take_if(&handler.get_id(), kind, |session_id| {
-            sessions::get_session_by_session_id(session_id)
-                .is_some_and(|s| std::sync::Arc::ptr_eq(&s.lc, &handler.lc))
-        })
-    }
-    #[cfg(not(feature = "flutter"))]
-    {
-        let _ = handler;
-        None
-    }
+    let kind = if handler.is_rdp() {
+        Kind::Rdp
+    } else {
+        Kind::Tcp
+    };
+    take_lc(&handler.get_id(), kind, &handler.lc)
 }
 
-/// `is_session` is asked without `CARDS` held: it takes upstream's session locks.
-#[cfg_attr(not(any(feature = "flutter", test)), allow(dead_code))]
-fn take_if(id: &str, kind: Kind, is_session: impl FnOnce(&SessionID) -> bool) -> Option<Taken> {
-    let key = (id.to_owned(), kind);
-    let (gen, session_id) = {
-        let cards = CARDS.lock().unwrap();
-        let card = cards.get(&key)?;
-        (card.gen, card.session_id)
-    };
-    if !is_session(&session_id) {
-        return None;
-    }
+fn take_lc(id: &str, kind: Kind, lc: &Arc<RwLock<LoginConfigHandler>>) -> Option<Taken> {
     let mut cards = CARDS.lock().unwrap();
-    let card = cards.get_mut(&key).filter(|card| card.gen == gen)?;
+    let card = cards
+        .get_mut(&(id.to_owned(), kind))
+        .filter(|card| std::ptr::eq(card.lc.as_ptr(), Arc::as_ptr(lc)))?;
     Some(Taken {
         kind,
-        gen,
+        gen: card.gen,
         ctl: card.ctl_rx.take()?,
     })
 }
@@ -181,12 +166,19 @@ pub(crate) fn retry(session_id: &SessionID, port: i32) -> bool {
         .map_or(false, |card| card.ctl.send(Ctl::Retry(port)).is_ok())
 }
 
-/// Each row's last state first, then every change. A new subscription replaces the old one.
 #[cfg(feature = "flutter")]
 pub(crate) fn set_events(sink: StreamSink<String>) {
+    subscribe(Box::new(move |event| {
+        sink.add(event);
+    }));
+}
+
+/// Each row's last state first, then every change. A new subscription replaces the old one.
+#[cfg(any(feature = "flutter", test))]
+fn subscribe(sink: Sink) {
     let cards = CARDS.lock().unwrap();
     for event in cards.values().flat_map(|card| card.rows.values()) {
-        sink.add(event.clone());
+        sink(event.clone());
     }
     *EVENTS.lock().unwrap() = Some(sink);
 }
@@ -199,9 +191,8 @@ fn push(id: &str, kind: Kind, gen: u64, port: Option<i32>, state: &State) {
         return;
     };
     let event = tunnel::event(id, &card.session_id.to_string(), kind, port, state);
-    #[cfg(feature = "flutter")]
     if let Some(sink) = EVENTS.lock().unwrap().as_ref() {
-        sink.add(event.clone());
+        sink(event.clone());
     }
     match (state, port) {
         (State::Closed, _) => {
@@ -251,6 +242,9 @@ impl<T: InvokeUiSession> TunnelSession for Session<T> {
     fn open_rdp(&self, port: u16) {
         // The credentials this session read when it started, never the process environment:
         // upstream's RDP sessions share it, so two cards could pick up each other's.
+        // Before the lock: `get_id` takes the same read lock, and a second read lock on one
+        // thread can deadlock behind a waiting writer (Windows' SRW locks).
+        let id = self.get_id();
         let (commands, name) = {
             let lc = self.lc.read().unwrap();
             let commands = rdp::commands(
@@ -258,7 +252,7 @@ impl<T: InvokeUiSession> TunnelSession for Session<T> {
                 &lc.get_option("rdp_username"),
                 &lc.get_option("rdp_password"),
             );
-            (commands, rdp::display_name(&lc, &self.get_id()))
+            (commands, rdp::display_name(&lc, &id))
         };
         log::info!(
             "leapgate tunnel: opening Remote Desktop Connection to 127.0.0.1:{}",
@@ -564,18 +558,24 @@ async fn run_row<S: TunnelSession>(
         let mut waiting = None;
         if !login_now {
             tokio::select! {
-                Ok(socket) = accept(&listener) => match tunnel.claim() {
-                    Claim::Muxed(handle) => {
+                accepted = accept(&listener) => match accepted.map(|socket| (tunnel.claim(), socket)) {
+                    Ok((Claim::Muxed(handle), socket)) => {
                         if handle.open(&target.host, target.port, socket, Vec::new()).is_err() {
                             throttled_log!(LOG_INTERVAL, info, "leapgate tunnel: local connection dropped, tunnel unavailable");
                         }
                         continue;
                     }
-                    _ => waiting = Some(socket),
+                    Ok((_, socket)) => waiting = Some(socket),
+                    // Not a failed pattern: that would leave the listener unpolled until something
+                    // else came.
+                    Err(err) => {
+                        throttled_log!(LOG_INTERVAL, info, "leapgate tunnel: accept failed: {}", err);
+                        continue;
+                    }
                 },
                 _ = tunnel.ended(), if up.is_some() => {
                     up = None;
-                    row.report(State::Interrupted { cause: Cause::TunnelEnded, reason: None });
+                    row.report(State::Interrupted { cause: Cause::TunnelEnded, reason: None, text: None });
                     continue;
                 }
                 c = ctl.recv() => match c {
@@ -650,7 +650,9 @@ async fn run_row<S: TunnelSession>(
             Next::Use => {
                 let Ok(Some(o)) = res else { continue };
                 let direct = ui.direct() == Some(true);
-                log::info!(
+                throttled_log!(
+                    LOG_INTERVAL,
+                    info,
                     "leapgate tunnel: row {} up ({})",
                     row.port,
                     if direct { "direct" } else { "relayed" }
@@ -683,7 +685,7 @@ async fn run_row<S: TunnelSession>(
                     }
                 }
             }
-            Next::Stop(reason) => {
+            Next::Stop(stopped) => {
                 // As K0: the KCP guard outlives the refused session so its close reaches the peer.
                 if let Ok(Some(o)) = res {
                     drop(o.stream);
@@ -691,19 +693,16 @@ async fn run_row<S: TunnelSession>(
                 }
                 listener = None;
                 log::info!("leapgate tunnel: row {} stopped, listener closed", row.port);
-                row.report(State::Stopped { reason });
+                row.report(stopped);
             }
-            Next::Interrupt(reason) => {
+            Next::Interrupt(interrupted) => {
                 throttled_log!(
                     LOG_INTERVAL,
                     info,
                     "leapgate tunnel: row login failed: {:?}",
                     error.map(|(_, text)| text)
                 );
-                row.report(State::Interrupted {
-                    cause: Cause::LoginFailed,
-                    reason: Some(reason),
-                });
+                row.report(interrupted);
             }
         }
     }
@@ -713,14 +712,8 @@ async fn run_row<S: TunnelSession>(
 
 fn login_failed(err: &str) -> State {
     match after_login(LoginEnd::Failed, Some(("Connection Error", err))) {
-        Next::Interrupt(reason) => State::Interrupted {
-            cause: Cause::LoginFailed,
-            reason: Some(reason),
-        },
-        _ => State::Interrupted {
-            cause: Cause::LoginFailed,
-            reason: None,
-        },
+        Next::Use => State::Connecting,
+        Next::Stop(state) | Next::Interrupt(state) => state,
     }
 }
 
@@ -745,6 +738,12 @@ async fn login_or_close<S: TunnelSession>(
             res = &mut login => return Some(res),
             c = ctl.recv() => match c {
                 Some(RowCtl::Ui(Data::Close)) | None => break,
+                // "随时打开": a new Remote Desktop Connection while this one logs in.
+                Some(RowCtl::Ui(Data::NewRDP)) => {
+                    if let Some(port) = local_port(listener).filter(|_| target.rdp) {
+                        session.open_rdp(port);
+                    }
+                }
                 Some(RowCtl::Ui(d)) => {
                     let _ = tx.send(d);
                 }
@@ -936,10 +935,14 @@ mod tests {
         Old(Stream, Option<KcpStream>),
         /// The login error box the peer's refusal shows.
         Refused(&'static str),
+        /// The insecure-connection prompt answered "断开".
+        Insecure,
         Fail,
         /// Logging in until the card closes, then closing this connection as
         /// `connect_and_login_mux` does, its KCP guard kept for the FIN.
         Hang(Option<(KcpStream, Stream)>),
+        /// Logging in until the card closes, then taking this long to close.
+        Linger(Duration),
     }
 
     /// Logins by the row's remote port; the session's message boxes and the ports Remote Desktop
@@ -1023,6 +1026,7 @@ mod tests {
                     crate::client::handle_login_error(ui.get_lch(), err, &ui);
                     (Ok(None), false)
                 }
+                Some(Login::Insecure) => (Ok(None), true),
                 Some(Login::Fail) => (Err(anyhow!("Remote desktop is offline")), false),
                 Some(Login::Hang(conn)) => {
                     while rx.recv().await.is_some() {}
@@ -1030,6 +1034,11 @@ mod tests {
                         drop(stream);
                         release_kcp(Some(guard)).await;
                     }
+                    (Ok(None), false)
+                }
+                Some(Login::Linger(closing)) => {
+                    while rx.recv().await.is_some() {}
+                    tokio::time::sleep(closing).await;
                     (Ok(None), false)
                 }
                 None => std::future::pending().await,
@@ -1101,9 +1110,6 @@ mod tests {
 
     /// An RDP card's one row (local port 0) logs in to 3389: the session has no `rdp_port`.
     fn start_kind(id: &'static str, kind: Kind, logins: Vec<(i32, Login)>) -> Card {
-        let session_id = SessionID::new_v4();
-        register(id, kind, session_id);
-        let card = take_if(id, kind, |s| *s == session_id).unwrap();
         let mut by_port = HashMap::<i32, VecDeque<Login>>::new();
         for (port, login) in logins {
             by_port.entry(port).or_default().push_back(login);
@@ -1113,6 +1119,9 @@ mod tests {
             logins: Arc::new(Mutex::new(by_port)),
             ..Default::default()
         };
+        let session_id = SessionID::new_v4();
+        register(id, kind, session_id, Arc::downgrade(&fake.lc));
+        let card = take_lc(id, kind, &fake.lc).unwrap();
         let (tx, rx) = mpsc::unbounded_channel();
         tokio::spawn(run_card(fake.clone(), card, rx, "", ""));
         Card {
@@ -1169,15 +1178,53 @@ mod tests {
         (ours.unwrap(), theirs.unwrap())
     }
 
-    /// The target of the next frame, which must be a channel open.
-    async fn next_open(peer: &mut Stream) -> (String, i32) {
+    /// The next frame, which must be a channel open.
+    async fn next_channel(peer: &mut Stream) -> PortForwardOpen {
         let bytes = timeout(5000, peer.next()).await.unwrap().unwrap().unwrap();
         match Message::parse_from_bytes(&bytes).unwrap().union {
             Some(message::Union::PortForwardChannel(PortForwardChannel {
                 union: Some(port_forward_channel::Union::Open(open)),
                 ..
-            })) => (open.host, open.port),
+            })) => open,
             other => panic!("expected a channel open, got {:?}", other),
+        }
+    }
+
+    /// The target of the next frame, which must be a channel open.
+    async fn next_open(peer: &mut Stream) -> (String, i32) {
+        let open = next_channel(peer).await;
+        (open.host, open.port)
+    }
+
+    /// Every event pushed since `collect` first ran, in order, all cards' (the tests run at once).
+    static SEEN: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+    fn collect() {
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| subscribe(Box::new(|event| SEEN.lock().unwrap().push(event))));
+    }
+
+    fn events(id: &str) -> Vec<String> {
+        let id = format!(r#""id":"{}""#, id);
+        SEEN.lock()
+            .unwrap()
+            .iter()
+            .filter(|event| event.contains(&id))
+            .cloned()
+            .collect()
+    }
+
+    async fn wait_event(id: &str, want: &str) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !events(id).iter().any(|event| event.contains(want)) {
+            assert!(
+                Instant::now() < deadline,
+                "no {} for {}: {:?}",
+                want,
+                id,
+                events(id)
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
         }
     }
 
@@ -1358,6 +1405,144 @@ mod tests {
         card.wait_for(port, r#""state":"in_use""#).await;
     }
 
+    /// As for 0.0.0.0, for a program on IPv6 only.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_port_another_program_listens_on_for_ipv6_only_is_taken() {
+        let port = free_port();
+        // Windows sockets are IPv6-only unless told otherwise.
+        let _other = std::net::TcpListener::bind(("::", port as u16)).unwrap();
+        assert!(listen_local(port).await.is_err());
+    }
+
+    /// A port an outgoing connection uses as its source port is not taken: a bind of
+    /// 0.0.0.0:port would fail there, the listener tables do not list it.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_port_an_outgoing_connection_uses_is_not_taken() {
+        let server = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        // Bound implicitly, as an outgoing connection is, to the source port on all addresses.
+        let client = TcpStream::connect(server.local_addr().unwrap())
+            .await
+            .unwrap();
+        let port = client.local_addr().unwrap().port();
+        assert!(
+            listen_local(i32::from(port)).await.is_ok(),
+            "port {} reported taken",
+            port
+        );
+    }
+
+    #[tokio::test]
+    async fn retry_while_interrupted_logs_in_at_once() {
+        let port = free_port();
+        let (secured, _peer) = secured_pair().await;
+        let card = start(
+            "tunnel-retry-interrupted",
+            vec![(22, Login::Fail), (22, Login::Use(secured, true))],
+        );
+        card.send(add(port, 22));
+        card.wait_for(port, r#""state":"interrupted","cause":"login_failed""#)
+            .await;
+        // No local connection: the retry itself logs in.
+        assert!(retry(&card.session_id, port));
+        card.wait_for(port, r#""state":"in_use""#).await;
+    }
+
+    #[tokio::test]
+    async fn a_port_being_removed_takes_no_new_row_until_removed() {
+        let port = free_port();
+        let (secured, _peer) = secured_pair().await;
+        let card = start(
+            "tunnel-removing",
+            vec![
+                (80, Login::Linger(Duration::from_millis(400))),
+                (80, Login::Use(secured, true)),
+            ],
+        );
+        card.send(add(port, 80));
+        card.wait_for(port, r#""state":"connecting""#).await;
+        card.send(Data::RemovePortForward(port));
+        // While the row closes: ignored.
+        card.send(add(port, 80));
+        card.wait_removed(port).await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(card.last(port).is_none(), "{:?}", card.last(port));
+        assert!(!listening(port).await);
+        // Once removed, the port takes a row again.
+        card.send(add(port, 80));
+        card.wait_for(port, r#""state":"in_use""#).await;
+    }
+
+    #[tokio::test]
+    async fn a_channel_the_peer_refuses_is_the_rows_notice_and_is_not_replayed() {
+        collect();
+        let (id, port) = ("tunnel-notice", free_port());
+        let (ours, mut peer) = secured_pair().await;
+        let card = start(id, vec![(80, Login::Use(ours, true))]);
+        card.send(add(port, 80));
+        card.wait_for(port, r#""state":"in_use""#).await;
+        let _app = TcpStream::connect(("127.0.0.1", port as u16))
+            .await
+            .unwrap();
+        let open = next_channel(&mut peer).await;
+        let refused = crate::port_forward_mux::opened_msg(
+            open.channel_id,
+            false,
+            "Too many port forward channels",
+            0,
+        );
+        peer.send(&refused).await.unwrap();
+        let notice = format!(
+            r#""port":{},"state":"notice","reason":{{"code":"tunnel_too_many_channels"}}"#,
+            port
+        );
+        wait_event(id, &notice).await;
+        assert_eq!(events(id).iter().filter(|e| e.contains(&notice)).count(), 1);
+        // A new subscriber gets the row's state, not the notice; the session got no error box.
+        assert!(card.last(port).unwrap().contains(r#""state":"in_use""#));
+        assert!(card.fake.boxes.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_insecure_connection_turned_down_stops_the_row() {
+        let port = free_port();
+        let card = start("tunnel-insecure", vec![(80, Login::Insecure)]);
+        card.send(add(port, 80));
+        card.wait_for(
+            port,
+            r#""state":"stopped","reason":{"code":"insecure_declined"}"#,
+        )
+        .await;
+        wait_not_listening(port).await;
+    }
+
+    #[tokio::test]
+    async fn a_card_is_closed_only_once_every_row_is_done() {
+        collect();
+        let (id, a, b) = ("tunnel-closed-last", free_port(), free_port());
+        let (secured, _peer) = secured_pair().await;
+        let card = start(
+            id,
+            vec![
+                (80, Login::Linger(Duration::from_millis(500))),
+                (443, Login::Use(secured, true)),
+            ],
+        );
+        card.send(add(a, 80));
+        card.send(add(b, 443));
+        card.wait_for(a, r#""state":"connecting""#).await;
+        card.wait_for(b, r#""state":"in_use""#).await;
+        card.send(Data::Close);
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(
+            !events(id).iter().any(|e| e.contains(r#""state":"closed""#)),
+            "closed while a row was still closing"
+        );
+        card.wait_closed().await;
+        assert!(events(id).last().unwrap().contains(r#""state":"closed""#));
+    }
+
     #[tokio::test]
     async fn rdp_opens_on_its_first_tunnel_and_when_asked_not_on_a_lazy_one() {
         let (first, mut peer) = secured_pair().await;
@@ -1422,23 +1607,24 @@ mod tests {
 
     #[test]
     fn take_claims_only_the_registered_session_once() {
-        let (id, sid, other) = ("tunnel-take", SessionID::new_v4(), SessionID::new_v4());
-        register(id, Kind::Tcp, sid);
+        let id = "tunnel-take";
+        let (lc, other): (
+            Arc<RwLock<LoginConfigHandler>>,
+            Arc<RwLock<LoginConfigHandler>>,
+        ) = Default::default();
+        register(id, Kind::Tcp, SessionID::new_v4(), Arc::downgrade(&lc));
         // Another session of the device (an exit card's, one added later) is not the card's.
-        assert!(take_if(id, Kind::Tcp, |s| *s == other).is_none());
-        assert!(take_if(id, Kind::Rdp, |s| *s == sid).is_none());
-        assert!(take_if(id, Kind::Tcp, |s| *s == sid).is_some());
-        assert!(
-            take_if(id, Kind::Tcp, |s| *s == sid).is_none(),
-            "taken twice"
-        );
+        assert!(take_lc(id, Kind::Tcp, &other).is_none());
+        assert!(take_lc(id, Kind::Rdp, &lc).is_none());
+        assert!(take_lc(id, Kind::Tcp, &lc).is_some());
+        assert!(take_lc(id, Kind::Tcp, &lc).is_none(), "taken twice");
         CARDS.lock().unwrap().remove(&(id.to_owned(), Kind::Tcp));
     }
 
     #[test]
     fn retry_reaches_a_row_of_the_card_only() {
         let (id, sid) = ("tunnel-retry", SessionID::new_v4());
-        register(id, Kind::Tcp, sid);
+        register(id, Kind::Tcp, sid, Weak::new());
         let gen = CARDS.lock().unwrap()[&(id.to_owned(), Kind::Tcp)].gen;
         assert!(!retry(&sid, 8080), "no such row yet");
         push(id, Kind::Tcp, gen, Some(8080), &State::PortInUse);

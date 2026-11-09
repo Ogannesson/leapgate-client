@@ -95,25 +95,30 @@ pub(crate) async fn run<T: InvokeUiSession>(
 }
 
 /// A10, and M9-3 for exits and tunnels alike: a listener on 127.0.0.1:`port` without
-/// SO_REUSEADDR. On Windows that bind succeeds while another program listens on 0.0.0.0:`port`,
-/// and local connections would then come here; so a bind of 0.0.0.0:`port` is tried too (not
-/// listened on, dropped at once), and its address in use or access denied (an exclusive bind, a
-/// reserved range) is the port taken. Our own listeners bind 127.0.0.1 only and do not stop it.
-/// Elsewhere the specific and the wildcard bind conflict, so there is no second bind. Port 0 is
-/// the system's pick.
+/// SO_REUSEADDR; a bind refused as access denied (another program's exclusive bind, a reserved
+/// range) is the port taken as well. On Windows that bind succeeds while another program listens
+/// on 0.0.0.0:`port` or [::]:`port`, and local connections would then come here, so such a
+/// listener counts as the port taken too (`leapgate::tunnel::listened_on_all_addresses`; our own
+/// listeners are on 127.0.0.1 only). Elsewhere the specific and the wildcard bind conflict and the
+/// bind alone tells. Port 0 is the system's pick.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(super) async fn listen_local(port: i32) -> hbb_common::ResultType<tokio::net::TcpListener> {
     let listener = tcp::new_listener(format!("127.0.0.1:{}", port), false).await?;
     #[cfg(windows)]
     if port != 0 {
-        use std::io::ErrorKind::{AddrInUse, PermissionDenied};
         // The bind above took `port`, so it is in range.
-        let any = std::net::SocketAddr::from(([0, 0, 0, 0], port as u16));
-        let probe = tokio::net::TcpSocket::new_v4().and_then(|socket| socket.bind(any));
-        if let Err(err) = probe {
-            if matches!(err.kind(), AddrInUse | PermissionDenied) {
-                return Err(err.into());
-            }
+        let port = port as u16;
+        let taken = tokio::task::spawn_blocking(move || {
+            leapgate::tunnel::listened_on_all_addresses(port)
+        })
+        .await
+        .unwrap_or(false);
+        if taken {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AddrInUse,
+                format!("another program listens on port {} for all addresses", port),
+            )
+            .into());
         }
     }
     Ok(listener)
@@ -333,14 +338,15 @@ pub(crate) mod cards {
             is_shared_password,
             conn_token,
             force_relay,
-            || register(id, session_id.to_string()),
+            |_| register(id, session_id.to_string()),
         )
     }
 
     /// A card's session, the exit's or a tunnel's (M9c): upstream's `session_add` with `args`
-    /// as given and without `LocalConfig::set_remote_id`. `register` registers the card once the
-    /// session is known to be good, before it goes into the session table. `{}`, or the export's
-    /// error: `already` (the device has a session of `conn_type`), `invalid_id`, `other`.
+    /// as given and without `LocalConfig::set_remote_id`. `register` registers the card, given the
+    /// session, once it is known to be good and before it goes into the session table. `{}`, or
+    /// the export's error: `already` (the device has a session of `conn_type`), `invalid_id`,
+    /// `other`.
     #[cfg(feature = "flutter")]
     pub(in crate::leapgate_hooks) fn add_session(
         session_id: &crate::flutter_ffi::SessionID,
@@ -351,7 +357,7 @@ pub(crate) mod cards {
         is_shared_password: bool,
         conn_token: Option<String>,
         force_relay: bool,
-        register: impl FnOnce(),
+        register: impl FnOnce(&Session<crate::flutter::FlutterHandler>),
     ) -> String {
         use crate::flutter::{get_adapter_luid, sessions, FlutterHandler};
         use hbb_common::serde_json::json;
@@ -390,7 +396,7 @@ pub(crate) mod cards {
         if session.get_id() != id {
             return json!({ "error": "invalid_id" }).to_string();
         }
-        register();
+        register(&session);
         sessions::insert_session(*session_id, conn_type, Arc::new(session));
         "{}".to_owned()
     }
@@ -537,8 +543,11 @@ pub(crate) mod cards {
             let mut waiting = None;
             if !login_now {
                 tokio::select! {
-                    Ok(socket) = accept(&listener) => {
-                        handshake(socket, ready_tx.clone());
+                    accepted = accept(&listener) => {
+                        match accepted {
+                            Ok(socket) => handshake(socket, ready_tx.clone()),
+                            Err(err) => throttled_log!(LOG_INTERVAL, info, "leapgate exit: accept failed: {}", err),
+                        }
                         continue;
                     }
                     Some((mut socket, req)) = ready.recv() => match tunnel.claim() {
@@ -635,7 +644,9 @@ pub(crate) mod cards {
                     let Ok(Some(o)) = res else { continue };
                     let direct = session.get_lch().read().unwrap().direct == Some(true);
                     session.tunnel_up(direct);
-                    log::info!(
+                    throttled_log!(
+                        LOG_INTERVAL,
+                        info,
                         "leapgate exit: card tunnel up ({})",
                         if direct { "direct" } else { "relayed" }
                     );

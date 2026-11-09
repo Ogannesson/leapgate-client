@@ -24,10 +24,10 @@ pub enum LoginEnd {
 
 pub enum Next {
     Use,
-    /// Close the listener and wait for a retry.
-    Stop(Option<Reason>),
-    /// Keep listening; the next local connection logs in again.
-    Interrupt(Reason),
+    /// Close the listener and wait for a retry; the `Stopped` state to report.
+    Stop(State),
+    /// Keep listening; the next local connection logs in again. The `Interrupted` state.
+    Interrupt(State),
 }
 
 /// `error` is the row's last error: for `Failed` the login's error, otherwise the error message
@@ -35,18 +35,38 @@ pub enum Next {
 /// look at the peer's exit feature nor at an unsecured stream (the user chose to go on), and a
 /// failure has no cooldown.
 pub fn after_login(end: LoginEnd, error: Option<(&str, &str)>) -> Next {
-    let classify = |(title, text): (&str, &str)| reason::classify("error", title, text);
+    let stopped = |reason: Option<Reason>, text| State::Stopped { reason, text };
     match end {
         LoginEnd::Peer { mux: true } => Next::Use,
-        LoginEnd::Peer { mux: false } => Next::Stop(Some(Reason::PeerTooOld {
-            feature: Feature::PortForward,
-        })),
+        LoginEnd::Peer { mux: false } => Next::Stop(stopped(
+            Some(Reason::PeerTooOld {
+                feature: Feature::PortForward,
+            }),
+            None,
+        )),
         LoginEnd::Refused {
             insecure_declined: true,
-        } => Next::Stop(Some(Reason::InsecureDeclined)),
-        LoginEnd::Refused { .. } => Next::Stop(error.map(classify)),
-        LoginEnd::Failed => Next::Interrupt(error.map_or(Reason::Other, classify)),
+        } => Next::Stop(stopped(Some(Reason::InsecureDeclined), None)),
+        LoginEnd::Refused { .. } => match error.map(classified) {
+            Some((reason, text)) => Next::Stop(stopped(Some(reason), text)),
+            None => Next::Stop(stopped(None, None)),
+        },
+        LoginEnd::Failed => {
+            let (reason, text) = error.map_or((Reason::Other, None), classified);
+            Next::Interrupt(State::Interrupted {
+                cause: Cause::LoginFailed,
+                reason: Some(reason),
+                text,
+            })
+        }
     }
+}
+
+/// The C3 reason of an error box, and its text, clipped, when the reason is `Other`.
+fn classified((title, text): (&str, &str)) -> (Reason, Option<String>) {
+    let reason = reason::classify("error", title, text);
+    let text = (reason == Reason::Other).then(|| reason::clip(text).to_owned());
+    (reason, text)
 }
 
 /// A channel the peer refused while the tunnel is up, from the peer's text.
@@ -67,6 +87,79 @@ pub fn notice(text: &str) -> State {
     State::Notice { reason, text }
 }
 
+/// Whether a program listens on `port` for all addresses, `0.0.0.0` or `[::]` (M9-3, 14 §4.1).
+/// On Windows a listener on 127.0.0.1:`port` binds alongside it and would take its local
+/// connections, so the tunnels and exits count the port as taken. Asked of the system's TCP
+/// listener tables, not by binding: a bind of `0.0.0.0:port` also fails while an outgoing
+/// connection happens to use `port` as its source port. `false` when the tables cannot be read.
+#[cfg(windows)]
+pub fn listened_on_all_addresses(port: u16) -> bool {
+    use windows::Win32::{
+        NetworkManagement::IpHelper::{
+            MIB_TCP6ROW_OWNER_PID, MIB_TCPROW_OWNER_PID, MIB_TCP_STATE_LISTEN,
+        },
+        Networking::WinSock::{AF_INET, AF_INET6},
+    };
+    let listen = MIB_TCP_STATE_LISTEN.0 as u32;
+    // The port is in network byte order, in the low 16 bits.
+    let local_port = |dw: u32| u16::from_be(dw as u16);
+    listeners::<MIB_TCPROW_OWNER_PID>(AF_INET.0.into())
+        .iter()
+        .any(|r| r.dwState == listen && r.dwLocalAddr == 0 && local_port(r.dwLocalPort) == port)
+        || listeners::<MIB_TCP6ROW_OWNER_PID>(AF_INET6.0.into())
+            .iter()
+            .any(|r| {
+                r.dwState == listen && r.ucLocalAddr == [0; 16] && local_port(r.dwLocalPort) == port
+            })
+}
+
+/// The rows of `GetExtendedTcpTable`'s `TCP_TABLE_OWNER_PID_LISTENER` for `family`:
+/// `MIB_TCPTABLE_OWNER_PID` or `MIB_TCP6TABLE_OWNER_PID`, a count and then the rows.
+#[cfg(windows)]
+fn listeners<Row: Copy>(family: u32) -> Vec<Row> {
+    use hbb_common::log;
+    use windows::Win32::{
+        Foundation::{ERROR_INSUFFICIENT_BUFFER, NO_ERROR},
+        NetworkManagement::IpHelper::{GetExtendedTcpTable, TCP_TABLE_OWNER_PID_LISTENER},
+    };
+    // u32s, for the count's and the rows' alignment; the rows follow the count directly.
+    let mut table: Vec<u32> = Vec::new();
+    let mut size = 0u32;
+    // The table can grow between the call that sizes it and the one that fills it.
+    for _ in 0..3 {
+        let ptr = (!table.is_empty()).then(|| table.as_mut_ptr().cast());
+        let ret = unsafe {
+            GetExtendedTcpTable(
+                ptr,
+                &mut size,
+                false,
+                family,
+                TCP_TABLE_OWNER_PID_LISTENER,
+                0,
+            )
+        };
+        if ret == ERROR_INSUFFICIENT_BUFFER.0 {
+            table = vec![0; (size as usize).div_ceil(4)];
+            continue;
+        }
+        if ret != NO_ERROR.0 {
+            log::warn!("leapgate: no TCP listener table ({}): {}", family, ret);
+            return Vec::new();
+        }
+        let Some(&count) = table.first() else {
+            return Vec::new();
+        };
+        let bytes = table.len() * 4;
+        let row = std::mem::size_of::<Row>();
+        let count = (count as usize).min(bytes.saturating_sub(4) / row);
+        let rows = unsafe { table.as_ptr().add(1).cast::<Row>() };
+        return (0..count)
+            .map(|i| unsafe { std::ptr::read_unaligned(rows.add(i)) })
+            .collect();
+    }
+    Vec::new()
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Kind {
@@ -83,15 +176,20 @@ pub enum State {
     /// The row's own connection: the rows of a card log in each on their own connection.
     InUse { transport: Transport },
     /// The listener stays open; the next local connection logs in again, with no cooldown.
+    /// `text` (here and in `Stopped`) is the error's, clipped, for `Reason::Other` only.
     Interrupted {
         cause: Cause,
         #[serde(skip_serializing_if = "Option::is_none")]
         reason: Option<Reason>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        text: Option<String>,
     },
     /// The listener is closed; the row waits for a retry or to be removed.
     Stopped {
         #[serde(skip_serializing_if = "Option::is_none")]
         reason: Option<Reason>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        text: Option<String>,
     },
     /// The row's local port is taken by another program.
     PortInUse,
@@ -137,64 +235,68 @@ mod tests {
 
     #[test]
     fn a_login_ends_as_the_row_shows_it() {
-        let reason = |next: Next| match next {
-            Next::Use => panic!("in use"),
-            Next::Stop(reason) => (true, reason),
-            Next::Interrupt(reason) => (false, Some(reason)),
+        let shown = |end: LoginEnd, error: Option<(&str, &str)>| match after_login(end, error) {
+            Next::Use => "in_use".to_owned(),
+            Next::Stop(state) | Next::Interrupt(state) => event("1", "s", Kind::Tcp, None, &state),
         };
-        assert!(matches!(
-            after_login(LoginEnd::Peer { mux: true }, None),
-            Next::Use
-        ));
-        assert_eq!(
-            reason(after_login(LoginEnd::Peer { mux: false }, None)),
+        let head = r#"{"id":"1","session_id":"s","kind":"tcp","#;
+        let refused = LoginEnd::Refused {
+            insecure_declined: false,
+        };
+        assert_eq!(shown(LoginEnd::Peer { mux: true }, None), "in_use");
+        let cases = [
             (
-                true,
-                Some(Reason::PeerTooOld {
-                    feature: Feature::PortForward
-                })
-            )
-        );
-        assert_eq!(
-            reason(after_login(
-                LoginEnd::Refused {
-                    insecure_declined: true
-                },
-                None
-            )),
-            (true, Some(Reason::InsecureDeclined))
-        );
-        // The peer refused the login: its error box, classified as C3 does.
-        assert_eq!(
-            reason(after_login(
-                LoginEnd::Refused {
-                    insecure_declined: false
-                },
-                Some(("Login Error", "No permission of IP tunneling"))
-            )),
+                shown(LoginEnd::Peer { mux: false }, None),
+                r#""state":"stopped","reason":{"code":"peer_too_old","feature":"port_forward"}}"#,
+            ),
             (
-                true,
-                Some(Reason::NoPermission {
-                    feature: Feature::PortForward
-                })
-            )
-        );
-        assert_eq!(
-            reason(after_login(
-                LoginEnd::Refused {
-                    insecure_declined: false
-                },
-                None
-            )),
-            (true, None)
-        );
-        assert_eq!(
-            reason(after_login(
-                LoginEnd::Failed,
-                Some(("Connection Error", "Remote desktop is offline"))
-            )),
-            (false, Some(Reason::PeerOffline))
-        );
+                shown(
+                    LoginEnd::Refused {
+                        insecure_declined: true,
+                    },
+                    None,
+                ),
+                r#""state":"stopped","reason":{"code":"insecure_declined"}}"#,
+            ),
+            // The peer refused the login: its error box, classified as C3 does.
+            (
+                shown(
+                    LoginEnd::Refused {
+                        insecure_declined: false,
+                    },
+                    Some(("Login Error", "No permission of IP tunneling")),
+                ),
+                r#""state":"stopped","reason":{"code":"no_permission","feature":"port_forward"}}"#,
+            ),
+            (shown(refused, None), r#""state":"stopped"}"#),
+            // Not recognized: the text goes along.
+            (
+                shown(
+                    LoginEnd::Refused {
+                        insecure_declined: false,
+                    },
+                    Some(("Login Error", "Your account is not allowed here")),
+                ),
+                r#""state":"stopped","reason":{"code":"other"},"text":"Your account is not allowed here"}"#,
+            ),
+            (
+                shown(
+                    LoginEnd::Failed,
+                    Some(("Connection Error", "Remote desktop is offline")),
+                ),
+                r#""state":"interrupted","cause":"login_failed","reason":{"code":"peer_offline"}}"#,
+            ),
+            (
+                shown(
+                    LoginEnd::Failed,
+                    Some(("Connection Error", "deadline has elapsed")),
+                ),
+                r#""state":"interrupted","cause":"login_failed","reason":{"code":"other"},"text":"deadline has elapsed"}"#,
+            ),
+        ];
+        for (shown, tail) in cases {
+            assert_eq!(shown, head.to_owned() + tail);
+        }
     }
 
     #[test]
@@ -266,6 +368,7 @@ mod tests {
                 State::Interrupted {
                     cause: Cause::TunnelEnded,
                     reason: None,
+                    text: None,
                 },
                 r#""state":"interrupted","cause":"tunnel_ended"}"#,
             ),
@@ -275,24 +378,27 @@ mod tests {
                 State::Interrupted {
                     cause: Cause::LoginFailed,
                     reason: Some(Reason::PeerOffline),
+                    text: None,
                 },
                 r#""state":"interrupted","cause":"login_failed","reason":{"code":"peer_offline"}}"#,
             ),
             (
                 Kind::Tcp,
                 Some(8080),
-                State::Stopped { reason: None },
+                State::Stopped {
+                    reason: None,
+                    text: None,
+                },
                 r#""state":"stopped"}"#,
             ),
             (
                 Kind::Tcp,
                 Some(8080),
                 State::Stopped {
-                    reason: Some(Reason::PeerTooOld {
-                        feature: Feature::PortForward,
-                    }),
+                    reason: Some(Reason::Other),
+                    text: Some("refused".to_owned()),
                 },
-                r#""state":"stopped","reason":{"code":"peer_too_old","feature":"port_forward"}}"#,
+                r#""state":"stopped","reason":{"code":"other"},"text":"refused"}"#,
             ),
             (
                 Kind::Tcp,

@@ -467,7 +467,7 @@ pub fn leapgate_session_display_names(session_id: SessionID) -> SyncReturn<Strin
 
 /// A TCP tunnel (`rdp` false) or RDP card's session, registered as a card; then `session_start`
 /// as usual (the prompts are on that stream). `{}`, or `{"error":"already"}` (the device has a
-/// port forward session, an exit card's or a closing tunnel card's; for RDP, an RDP session),
+/// port forward session, an exit card's; for RDP, an RDP session),
 /// `{"error":"invalid_id"}`, `{"error":"other","text":…}`.
 pub fn leapgate_tunnel_session_add(
     session_id: SessionID,
