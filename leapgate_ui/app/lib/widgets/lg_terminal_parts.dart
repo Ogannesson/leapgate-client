@@ -6,6 +6,7 @@
 // Only draw: the texts, the controllers and the callbacks are the caller's (`LEAPGATE.md` §10.18).
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../icons/lg_icon.dart';
 import '../theme/lg_tokens.dart';
@@ -160,6 +161,16 @@ class LgAdminAccountInputs extends StatelessWidget {
   final ValueChanged<String>? onSubmitted;
   final bool enabled;
 
+  /// From the user name to the password.
+  void _moveOn(BuildContext context) {
+    final next = passwordFocusNode;
+    if (next != null) {
+      next.requestFocus();
+    } else {
+      FocusScope.of(context).nextFocus();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = LgTokens.of(context);
@@ -198,22 +209,30 @@ class LgAdminAccountInputs extends StatelessWidget {
               ),
             ),
           const SizedBox(height: 14),
-          LgTextField(
-            controller: userController,
-            focusNode: userFocusNode,
-            placeholder: userLabel,
-            semanticLabel: userLabel,
-            enabled: enabled,
-            autofocus: autofocus,
-            onChanged: onChanged,
-            onSubmitted: (_) {
-              final next = passwordFocusNode;
-              if (next != null) {
-                next.requestFocus();
-              } else {
-                FocusScope.of(context).nextFocus();
+          // Enter in the user name moves on here, before a default button around the panel
+          // (`LgDefaultEnter`) takes it and signs in with an empty password.
+          Focus(
+            canRequestFocus: false,
+            skipTraversal: true,
+            onKeyEvent: (node, event) {
+              final key = event.logicalKey;
+              if (key != LogicalKeyboardKey.enter &&
+                  key != LogicalKeyboardKey.numpadEnter) {
+                return KeyEventResult.ignored;
               }
+              if (event is KeyDownEvent) _moveOn(context);
+              return KeyEventResult.handled;
             },
+            child: LgTextField(
+              controller: userController,
+              focusNode: userFocusNode,
+              placeholder: userLabel,
+              semanticLabel: userLabel,
+              enabled: enabled,
+              autofocus: autofocus,
+              onChanged: onChanged,
+              onSubmitted: (_) => _moveOn(context),
+            ),
           ),
           const SizedBox(height: 14),
           LgPasswordField(

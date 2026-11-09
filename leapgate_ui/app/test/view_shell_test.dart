@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/camera_names.dart';
@@ -473,6 +474,31 @@ void main() {
       await emit(tester, fakes, s, connectionReady());
       return s;
     }
+
+    testWidgets('Enter in the username moves on to the system password, no login', (
+      tester,
+    ) async {
+      final s = await panel(tester);
+      await emit(
+        tester,
+        fakes,
+        s,
+        msgbox('terminal-admin-login', 'Terminal', ''),
+      );
+      await tester.pump(const Duration(milliseconds: 200));
+      final fields = find.byType(EditableText);
+      await tester.enterText(fields.at(0), 'admin');
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      expect(callsTo(fakes, #sessionLogin), isEmpty);
+      expect(tester.widget<EditableText>(fields.at(1)).focusNode.hasFocus, true);
+
+      // Enter in the system password signs in.
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      expect(callsTo(fakes, #sessionLogin).single[#osUsername], 'admin');
+    });
 
     testWidgets('the administrator account: "登录" once the username is in', (
       tester,
