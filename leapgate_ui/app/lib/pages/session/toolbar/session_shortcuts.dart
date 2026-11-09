@@ -35,11 +35,15 @@ void registerSessionShortcuts(
     kDisplayMenuActions,
     () => displayMenuEntries(env),
   );
-  registerMenuShortcuts(
-    shortcuts,
-    kInputMenuActions,
-    () => inputMenuEntries(env),
-  );
+  // The input menu is the remote desktop's; a camera session would send what the remote device
+  // does not take from it (13 §3.2 "键盘", §3.4.7).
+  if (env.isDefaultConn) {
+    registerMenuShortcuts(
+      shortcuts,
+      kInputMenuActions,
+      () => inputMenuEntries(env),
+    );
+  }
   registerMenuShortcuts(
     shortcuts,
     kActionMenuActions,

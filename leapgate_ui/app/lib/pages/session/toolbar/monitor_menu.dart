@@ -5,16 +5,20 @@
 // `_MainMonitorSwitchButton` :1007-1058, `_MonitorMenu` :1060-1300,
 // `_MinimizedMonitorSwitchButton` :3753-3821) and the display shortcuts of
 // `flutter/lib/models/shortcut_model.dart:338-403`. "全部显示器" shows them merged in this tab
-// (`kAllDisplayValue`); upstream's "open each in its own window" is gone (01 §8 Q11).
+// (`kAllDisplayValue`); upstream's "open each in its own window" is gone (01 §8 Q11). In a camera
+// view the monitors are the cameras (13 §3.2 block B): the button names the one shown and opens a
+// list with their names instead of the arrangement.
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
+import 'package:flutter_hbb/leapgate/camera_names.dart';
 import 'package:flutter_hbb/leapgate/session.dart';
 
 import '../../../icons/lg_icon.dart';
 import '../../../l10n/app_localizations.dart';
+import '../../../widgets/lg_menu.dart';
 import '../../../widgets/lg_menu_items.dart';
 import '../../../widgets/lg_session_toolbar.dart';
 import 'toolbar_env.dart';
@@ -58,14 +62,52 @@ bool _allShown(FFI ffi) =>
     ffi.ffiModel.pi.isSupportMultiDisplay &&
     ffi.ffiModel.pi.displays.length > 1;
 
+bool _camera(FFI ffi) => ffi.connType == ConnType.viewCamera;
+
 String _nextLabel(FFI ffi, AppLocalizations l10n) {
   final pi = ffi.ffiModel.pi;
   final current = pi.currentDisplay;
   final inRange = current >= 0 && current < pi.displays.length;
   // "*" for the merged view, as upstream.
-  return l10n.toolbarNextMonitor(
-    inRange ? '${current + 1}' : '*',
-    pi.displays.length,
+  final n = inRange ? '${current + 1}' : '*';
+  return _camera(ffi)
+      ? l10n.camNext(n, pi.displays.length)
+      : l10n.toolbarNextMonitor(n, pi.displays.length);
+}
+
+/// "摄像头 ‹n›", with its name when the remote device gave one ("摄像头 1，Integrated Camera").
+String _cameraLabel(AppLocalizations l10n, List<String> names, int i) =>
+    names[i].isEmpty ? l10n.camN(i + 1) : l10n.camNamed(i + 1, names[i]);
+
+/// The camera switch (13 §3.2 block B): the button says the camera shown, the list has a row
+/// per camera with its name as the second line, the one shown checked, then "全部摄像头".
+Widget _cameraMenu(FFI ffi, AppLocalizations l10n, {required bool all}) {
+  final pi = ffi.ffiModel.pi;
+  final current = pi.currentDisplay;
+  final names = cameraNames(ffi);
+  final merged = current == kAllDisplayValue;
+  return LgToolbarMenuButton(
+    label: merged ? l10n.camAll : l10n.camN(current + 1),
+    icon: LgIcons.displays,
+    semanticLabel:
+        merged ? l10n.camSwitchAllLabel : l10n.camSwitchLabel(current + 1),
+    items: [
+      for (var i = 0; i < names.length; i++)
+        LgMenuItem(
+          label: l10n.camN(i + 1),
+          description: names[i].isEmpty ? null : names[i],
+          checked: current == i,
+          onPressed: () => openMonitor(ffi, i),
+        ),
+      if (all) ...[
+        const LgMenuDivider(),
+        LgMenuSwitchItem(
+          label: l10n.camAll,
+          value: merged,
+          onChanged: (on) => openMonitor(ffi, on ? kAllDisplayValue : 0),
+        ),
+      ],
+    ],
   );
 }
 
@@ -91,25 +133,32 @@ List<Widget> monitorToolbarItems(ToolbarEnv env) {
   final pi = ffi.ffiModel.pi;
   final current = pi.currentDisplay;
   final all = _allShown(ffi);
+  final camera = _camera(ffi);
+  final names = camera ? cameraNames(ffi) : const <String>[];
   return [
     if (_nextButton) _nextMonitorButton(ffi, l10n),
     if (_flat) ...[
       for (var i = 0; i < pi.displays.length; i++)
         LgToolbarTextButton(
           label: '${i + 1}',
-          semanticLabel: l10n.toolbarMonitorN(i + 1),
+          semanticLabel: camera
+              ? _cameraLabel(l10n, names, i)
+              : l10n.toolbarMonitorN(i + 1),
           selected: current == i,
           onPressed: () => openMonitor(ffi, i, updateCursorPos: false),
         ),
       if (all)
         LgToolbarButton(
+          // TODO(M9 整合): designer's `i-cameras` for the camera.
           icon: LgIcons.displays,
-          label: l10n.toolbarAllMonitors,
+          label: camera ? l10n.camAll : l10n.toolbarAllMonitors,
           toggled: current == kAllDisplayValue,
           onPressed: () =>
               openMonitor(ffi, kAllDisplayValue, updateCursorPos: false),
         ),
-    ] else
+    ] else if (camera)
+      _cameraMenu(ffi, l10n, all: all)
+    else
       LgToolbarMenuButton(
         label: l10n.toolbarMonitor,
         icon: LgIcons.displays,

@@ -377,7 +377,8 @@ class _SessionToolbarState extends State<SessionToolbar> {
                 disabledReason: env.keyboardReason),
           _menu(l10n.toolbarActions, LgIcons.bolt, actionMenuEntries,
               refresh: _ffi.requests.screenshotPending, width: 380),
-          session,
+          // Its rows are the remote desktop's only; the camera has no "会话" (13 §3.2 block A).
+          if (env.isDefaultConn) session,
         ],
         if (talk.isNotEmpty) talk,
         if (routeMark != null) [routeMark],

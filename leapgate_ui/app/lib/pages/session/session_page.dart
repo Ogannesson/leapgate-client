@@ -23,7 +23,8 @@ import 'session_notices.dart';
 import 'session_toolbar.dart';
 
 /// A remote desktop view in its session tab (01 P2): the image, keyboard and mouse, the
-/// connection panel while there is no image, the toolbar and the notices.
+/// connection panel while there is no image, the toolbar and the notices. The camera view is
+/// this page too (13 §3.2, R3-Q16); the copied input model sends nothing for it.
 ///
 /// Keyboard (`04-M2a拆法.md` §4, upstream `desktop/pages/remote_page.dart`, its Windows paths):
 /// the image takes the keyboard only when its tab is [active], no panel or dialog covers the

@@ -87,6 +87,18 @@ enum NextStep {
       ),
     'inactivity' => (l10n.connReasonInactivity, [NextStep.reconnect]),
     'no_displays' => (l10n.connReasonNoDisplays, close),
+    // The terminal and the camera (13 §2.2.3, §3.2 "连接过程和中断"). The remote device has
+    // ended the connection after a wrong administrator account, so "重试" connects again.
+    'terminal_unsupported' => (l10n.connReasonTerminalUnsupported, close),
+    'os_login_failed' => (l10n.connReasonOsLoginFailed, retryClose),
+    'no_console_user' => (l10n.connReasonNoConsoleUser, retryClose),
+    'os_login_backoff' => (
+        l10n.connReasonOsLoginBackoff(
+            (reason.params['seconds'] as num).toInt()),
+        close
+      ),
+    'no_cameras' => (l10n.connReasonNoCameras, close),
+    'camera_unsupported' => (l10n.connReasonCameraUnsupported, close),
     _ => (reason.text, retryClose),
   };
   return (text: text, steps: steps.isEmpty ? close : steps);
