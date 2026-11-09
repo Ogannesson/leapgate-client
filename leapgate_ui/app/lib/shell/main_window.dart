@@ -242,16 +242,33 @@ class _MainWindowState extends State<MainWindow>
   /// As [connect], for the file transfer view (02 §2.1.1).
   @override
   Future<void> openFileTransfer(String id,
-      {String password = '',
+          {String password = '',
+          bool isSharedPassword = false,
+          bool forceRelay = false}) =>
+      openView(id, ConnType.fileTransfer,
+          password: password,
+          isSharedPassword: isSharedPassword,
+          forceRelay: forceRelay);
+
+  /// As [connect], for a view of [kind] (`LEAPGATE.md` §10.18).
+  @override
+  Future<void> openView(String id, ConnType kind,
+      {bool terminalAdmin = false,
+      String password = '',
       bool isSharedPassword = false,
       bool forceRelay = false}) async {
+    assert(kind == ConnType.defaultConn ||
+        kind == ConnType.fileTransfer ||
+        kind == ConnType.terminal ||
+        kind == ConnType.viewCamera);
     id = id.replaceAll(' ', '');
     if (id.isEmpty) return;
     final oldId = id;
     id = await bind.mainHandleRelayId(id: id);
     if (id.isEmpty) return;
     forceRelay = id != oldId || forceRelay;
-    _show(appCore.sessions.open(id, ConnType.fileTransfer,
+    _show(appCore.sessions.open(id, kind,
+        terminalAdmin: terminalAdmin,
         forceRelay: forceRelay,
         password: password,
         isSharedPassword: isSharedPassword));
@@ -408,13 +425,13 @@ class _MainWindowState extends State<MainWindow>
           s.chatModel,
           if (isFileView(s)) fileTransferFor(s).jobs,
         ],
-        appCore.exitNodes,
+        appCore.backgroundListenable,
       ]),
       builder: (context, _) {
         _syncTitle(_selected == null
             ? l10n.appName
             : l10n.sessionWindowTitle(deviceName(_currentOf(_selected!))));
-        final exits = appCore.exitNodes.runningCount;
+        final exits = appCore.backgroundCount;
         return LgTitleBar(
           labels: LgTitleBarLabels(
             home: l10n.home,
@@ -430,10 +447,10 @@ class _MainWindowState extends State<MainWindow>
           selected: selectedIndex,
           // The exit nodes running and whether one waits for the user (M5-8).
           homeBadge: exits,
-          homeAlert: exits > 0 && appCore.exitNodes.needsAttention,
+          homeAlert: exits > 0 && appCore.backgroundAttention,
           homeSemanticLabel: exits == 0
               ? null
-              : appCore.exitNodes.needsAttention
+              : appCore.backgroundAttention
               ? l10n.exitHomeLabelAttention(exits)
               : l10n.exitHomeLabel(exits),
           onSelect: (i) => _select(i == 0 ? null : devices[i - 1]),

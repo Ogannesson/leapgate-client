@@ -227,7 +227,7 @@ class LocalStatusModel extends ChangeNotifier {
       stop ||
       bind.mainIsInstalled() &&
           (appCore.sessions.devices.isNotEmpty ||
-              appCore.exitNodes.runningCount > 0);
+              appCore.backgroundCount > 0);
 
   /// Stops or starts the service: Rust stops or starts it when `stop-service` is set or cleared
   /// (upstream `common.dart` `start_service`; the superuser check there is macOS only). Not

@@ -82,6 +82,9 @@ part 'gallery_m4.dart';
 part 'gallery_m5.dart';
 part 'gallery_m6.dart';
 part 'gallery_m7.dart';
+part 'gallery_m9a.dart';
+part 'gallery_m9b.dart';
+part 'gallery_m9c.dart';
 
 const _exportDir = String.fromEnvironment('LG_GALLERY_EXPORT');
 
@@ -773,6 +776,9 @@ List<Specimen> buildSpecimens() {
   list.addAll(_m5Specimens());
   list.addAll(_m6Specimens());
   list.addAll(_m7Specimens());
+  list.addAll(_m9aSpecimens());
+  list.addAll(_m9bSpecimens());
+  list.addAll(_m9cSpecimens());
   return list;
 }
 

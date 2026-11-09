@@ -2720,3 +2720,163 @@ tester 原先的推断是"跳过以后接着传时目标不对"。主会话查 A
 - Rust：开关关着时每个挂钩都不认领；下载续传起点（"上一个刚改名、下一个还没开始"的空档）；上传读方序号；按原因码分跳过和整任务停；4 GiB 规则。`cargo test -p leapgate` 和根 crate 的 `leapgate_hooks` 测试照跑。
 - Dart：12 §5.2 列的各条。
 - 合入前：`git diff main -- flutter/` 为空；core analyze 不超出 91 条 info 的基线，app 0 条；新界面和旧界面都要能编（Rust 改了 `io_loop.rs`）。
+
+### 10.18 M9 的分工约定
+
+依据：总仓库 `docs/新界面/14-M9拆法.md`（下称"14"；维护者 2026-11-09 把 M9-1~M9-8 全部按推荐定）。界面行为以 `13-第三轮内容与逻辑说明.md`（下称"13"，R3-Q1~R3-Q24 和 14 §1.2 的更正已回写）为准；样稿 `A-P8-隧道.html`、`A-P9-终端.html`、`A-P10-摄像头.html`、`A-P11-安装.html`，菜单和本机提示卡看 `A-P1.html`，终端的连接面板看 `A-P2.html#c-terminal`。14 §7 列的不做：手机终端页和摄像头页（随 M11）、"不安装直接运行"、隧道登录失败的冷却、修改一条转发、驱动改名、终端内容的逐行读屏。
+
+**三段和分支**
+
+M9 分三段，各自审查、验收、外观检查、合 main（M9-1）。和前几个里程碑不同，本节和第 0 步的挂载点先单独合进 main（分支 `ui/m9-0`），各路都从 main 切分支。
+
+| 分支 | 谁 | 段 | 合到 |
+|---|---|---|---|
+| `ui/rust-m9` | coder R | 三段共用 | 各段的整合分支只合自己要的提交（顺序见"Rust 的做法"末条） |
+| `ui/m9-ds` | designer | 共用 → M9a → M9b → M9c，每段的组件单独提交 | 同上 |
+| `ui/m9a` | coder I | M9a | 本身就是 M9a 的整合分支 |
+| `ui/m9b-views` | coder A | M9b | `ui/m9b`（A、B 都做完后由主会话从 main 切出、合入两路） |
+| `ui/m9b-term` | coder B | M9b | `ui/m9b` |
+| `ui/m9c` | coder T | M9c，M9a 合入 main 后从 main 切 | 本身就是 M9c 的整合分支 |
+
+- 块 2 的桥在 Rust 合进整合分支后由主会话重新生成。整合 worktree 一次只给一段用（`.wt/ui-m4` 里有桥和 pub 缓存）。
+- 合 main 的大致顺序是 M9a → M9b → M9c；后合的段先把 main 合进来再验收。
+
+**文件边界**
+
+| 谁 | 只改这些 |
+|---|---|
+| R | `libs/leapgate/src/reason.rs`（9 个码）、`install.rs`（选项拼法）、新文件 `tunnel.rs`（事件 JSON、登录结局到下一步的纯函数、通道被拒原文的分类）、名称截断的纯函数（`libs/leapgate` 里，文件自定）、`lib.rs`；`src/leapgate_hooks/` 下新文件 `tunnel.rs`，`exit.rs`（抽出建会话的共用函数、几处改 `pub(super)`、监听换成共用的独占监听函数；出口行为和现有测试不变），`install.rs`（子进程参数）；`src/leapgate_hooks.rs`（`mod tunnel`）；`src/leapgate_ffi.rs`（原地改 `leapgate_install` 的签名，其余在末尾追加 M9 一段）；上游只一处，见"挂钩" |
+| designer | `app/lib/widgets/`（新组件；`lg_exit_card.dart` 的私有部件拆成公共部件、`LgExitCard` 改用它们拼，对外参数和外观不变；`LgViewBar`、`LgBanner`、`LgLocalNotice`、`LgExitPage`、`LgExitSection`、`LgConnectionPanel` 这类现成组件只加参数、默认值不变）、`app/lib/icons/`（重跑 `tools/gen_icons.dart`）、`app/lib/pages/home/home_page.dart` 里只动 `_NavItem` 这一个类、画廊 `gallery_m9a.dart`、`gallery_m9b.dart`、`gallery_m9c.dart`（第 0 步已登记）、组件的测试 |
+| I | core 新文件 `leapgate/install_page.dart`（`InstallPageModel`、四项位置检查）、`leapgate/local_status.dart` 的 `install`；app 新文件 `pages/home/install_dialog.dart`、`home_page.dart` 里本机提示卡的 `_InstallNotice` 类和它的构造处（打开对话框要的 `overlays` 从构造处传进去；卡片不再显示进行中和失败；"升级"卡带盾牌；`_NavItem` 归 designer）、`pages/settings/sections/remote_printing.dart`、`main.dart` 的 `--install` 分支（只改注释和日志文字）；`consts.dart` 只在"M9a"下追加；ARB `install` 前缀；测试；总仓库 `scripts/windows/build-client.ps1` 的打印机驱动一步（见"打印机驱动"） |
+| A | `app/lib/shell/` 的 `main_window.dart`（含 `openView` 的实现，第 0 步已按文件传输那条路写好，A 按需要改）、`session_views.dart`、`tab_menu.dart`、`links.dart` 的终端、管理员终端、摄像头三支；`app/lib/pages/session/` 全部（连接面板、原因文案、会话页、工具栏、通知、画面提示、录制、聊天）；core 的 `session_requests.dart`、摄像头名称的取值函数（新文件）；`peer_views.dart`、`devices_page.dart` 里终端、终端（管理员）、摄像头三支菜单项，以及照 `openFileTransferPeer` 写的带地址簿共享密码的打开函数；`consts.dart` 只在"M9b views"下追加；ARB `cam`、`view`、`tabMenu`、`connClose`、`connReason`、`link` 前缀；测试 |
+| B | core `models/terminal_*.dart`、`models/rustdesk_terminal.dart`（复制件）、`leapgate/terminal/`（`terminals.dart` 里第 0 步写好的 `TerminalOpen`、`terminalOpenState` 不改，`TerminalTabs` 空壳由 B 写满）、`leapgate/session.dart`、`session_registry.dart`、`ffi_model.dart` 的终端部分；app `pages/terminal/`（`terminal_view.dart` 换掉占位，`disconnectTerminalView` 加确认）；`consts.dart` 只在"M9b terminal"下追加；ARB `term` 前缀；测试 |
+| T | core 新文件 `leapgate/tunnels.dart`、`tunnel_card.dart`、`card_login.dart`（从 `exit_card.dart` 抽出），`exit_card.dart`、`exit_nodes.dart`（端口互查）、`exit_api.dart`（只改令牌那一行）、`tunnel_api.dart` 分隔线以下、`app_core.dart`（`tunnels` 和三个后台 getter 加上隧道）；app `pages/home/exit/`（`exit_page.dart` 加插槽、`open_tunnel.dart` 写实现、新文件 `tunnel_section.dart`、隧道卡片、RDP 设置对话框）、`shell/window_close.dart`、`links.dart` 的 TCP 隧道和 RDP 两支、`peer_views.dart` 和 `devices_page.dart` 里 TCP 隧道、RDP 两支和 RDP 行的编辑按钮；`consts.dart` 只在"M9c"下追加；ARB `tunnel` 前缀和关窗新句子的 `closing` 前缀，另改 14 §2.5 列的几个值和 `exitHomeLabel`、`exitHomeLabelAttention`（主页标签读屏名，14 §1.2）；测试 |
+
+- 第 0 步写好的接口（下一小节）谁都不改，确实要改先报主会话。
+- ARB 加在两个 ARB 文件末尾，中英同时加，文案照 13 逐字照抄，英文照 13 的英文表，没有的新写并列进提交说明；改完跑 `flutter gen-l10n`。合并时只会有追加冲突。
+- coder 先用现成组件和占位把逻辑写通，整合时换成 designer 的组件；行为测试按文字和语义标签找控件。
+- 块 2 的新导出在 R 合入、桥重新生成之前不存在：调用它们的 Rust 实现一律抛 `UnimplementedError`（`TODO(M9 整合)`），由主会话整合时换成真实调用；测试一律用假实现。改了签名的 `leapgate_install` 例外：I 保留现在的 `lgBind.leapgateInstall(kind:)` 调用，位置和三个选项先只存在 `InstallPageModel` 和 `LocalStatusModel.install` 的参数里（`TODO(M9 整合)`）；桥重新生成后，`core/lib/leapgate/local_status.dart` 的调用和 `core/test/fakes.dart` 里 `FakeLeapgate` 的重写由主会话一起改。
+- B 可以 import `app/lib/shell/tab_shortcuts.dart` 用 `matchShortcut`（终端区先拦会话快捷键，拦到的返回 `ignored` 交给 `TabShortcuts`）；只剩终端一个视图时"关闭标签"的 `onCloseTab` 归 A 放开。
+- core analyze 的基线是 91 条 info（第 0 步合入时），app 0 条。
+
+**第 0 步放好的**（分支 `ui/m9-0`，合 main 后各路照用）
+
+- **设备菜单**：`PeerAction` 加 `terminal`、`terminalAdmin`、`camera`、`tcpTunnel`、`rdp`。`peerMenu` 的 `bool peerWindows` 换成 `String peerPlatform = ''`（`kPeerPlatform*` 之一，空串是未知）。连接组照样稿 `A-P1.html` 的顺序列全，平台已知不支持的不列、未知照列（R3-Q12，01 §3.1 区块 F）：终端、TCP 隧道在对端不是 Android 时列；终端（管理员）只在对端已知是 Windows 时列（13 §2.1.1）；摄像头在对端不是 macOS、Android 时列；RDP 在本机是 Windows、对端不是已知的非 Windows 时列（13 §1.1.2）；用作出口照旧（对端不是已知的非 Windows；app 另要求 ID 能当出口，`isExitId`）。连接组的规则在私有的 `_connectGroup` 里，`peerMenu` 和 `connectMenu` 共用。连接按钮下拉和"连接到 ‹输入›"的"⋯"改成按 core 新函数 `connectMenu(String peerPlatform, {bool? windows})` 列（`windows` 是本机平台，不传按本机，给测试用）：样稿 `p1-cb-menu` 的八项（远程桌面、文件传输、终端、摄像头、TCP 隧道、用作出口、RDP、经中继），不列终端（管理员）（14 §1.2）。
+- app 里按 `PeerAction` 建菜单项的地方（`peer_views.dart`、`devices_page.dart` 两处下拉），五个新值第 0 步不建（跳过，`TODO(M9b)` / `TODO(M9c)`），A、T 各填各的。
+- **链接**：`ConnectLink` 的 `bool fileTransfer` 换成 `LinkKind kind`（`remoteDesktop`、`fileTransfer`、`terminal`、`terminalAdmin`、`camera`、`tcpTunnel`、`rdp`），第三轮的五种也取 ID 和 `--password`、`--relay`；`_open` 按种类分派，五种新的照旧出轻提示，A、T 各换各的。
+- **打开视图**：`MainNavigation.openView(String id, ConnType kind, {bool terminalAdmin = false, String password = '', bool isSharedPassword = false, bool forceRelay = false})`；`openFileTransfer` 留着、转调它（M7a 的调用和测试不动）。主窗口的实现和 `openFileTransfer` 同一条路（`SessionRegistry.open(id, kind, terminalAdmin:)`、切标签、显示那个视图）；视图容器里终端一支挂 `TerminalViewPage`，摄像头一支挂 `SessionPage`。菜单不列、链接不开，所以第 0 步里走不到。
+- **会话对象**：`FFI(id, connType, {bool terminalAdmin = false})`，字段 `final bool terminalAdmin`、`TerminalTabs? terminals`（第 0 步恒为空）；`SessionRegistry.open(…, {bool terminalAdmin = false})` 新建时传给 `FFI`；`SessionRegistry.tokenOf(String id)`（这台设备标签里任一视图的连接令牌，`open` 改用它）。
+- **终端**：core `leapgate/terminal/terminals.dart` 里 `class TerminalTabs extends ChangeNotifier`（空壳）；`enum TerminalOpen { none, normal, admin }` 和 `TerminalOpen terminalOpenState(String id)`（写好：这台设备的标签里有没有终端视图、是不是管理员终端），设备菜单和视图切换共用（R3-Q9）。app `pages/terminal/terminal_view.dart`：`TerminalViewPage({required FFI ffi, required bool active, required bool lastView, required Widget viewSwitch, required Widget route, required VoidCallback onDisconnect})`（和 `FileView` 同形、没有 `model`），第 0 步是占位；`Future<void> disconnectTerminalView(FFI view)`（和 `disconnectFileView` 同形），第 0 步直接关视图，B 加 R3-Q15 的确认。
+- **后台计数**：`AppCore.backgroundCount`、`backgroundAttention`、`backgroundListenable`，第 0 步只数出口（`exitNodes.runningCount`、`exitNodes.needsAttention`、`exitNodes`）；导航、主页标签、关窗确认、服务启停确认四处改调它们，行为不变。T 在 `app_core.dart` 里加上隧道（`backgroundListenable` 改成 `late final` 的 `Listenable.merge`，不要每次读都新建）；I 的安装页直接用。
+- **隧道入口**：`ExitPageRequests.request(id, {highlight, TunnelKind? tunnel})`（空是出口卡片），`take()` 带回 `tunnel`；顶层函数 `openTunnel(String id, TunnelKind kind, {String? name, PeerCategory? category, String password = '', bool forceRelay = false})` 在新文件 `app/lib/pages/home/exit/open_tunnel.dart`，第 0 步只记日志，T 照 `useAsExit` 写。
+- **TunnelApi**：core `leapgate/tunnel_api.dart`，分隔线以上是接口，以下是 `RustTunnelApi`（块 1 的调用写真的，块 2 的抛 `UnimplementedError`）；`test/tunnel_fakes.dart`（core、app 各一份，内容相同）里是 `FakeTunnelApi`：
+
+  ```dart
+  enum TunnelKind { tcp, rdp }
+  typedef TunnelForward = ({int localPort, String host, int remotePort});
+  typedef RdpSettings = ({String port, String username, String password});
+
+  abstract interface class TunnelApi {
+    /// leapgate_tunnel_session_add; null when added, then block 1's sessionStart as for an exit card.
+    TunnelAddError? sessionAdd(SessionID sessionId, String id, TunnelKind kind,
+        {String password = '', bool isSharedPassword = false, String? connToken, bool forceRelay = false});
+    /// leapgate_tunnel_events as JSON maps; subscribing again replaces the old subscription.
+    Stream<Map<String, dynamic>> events();
+    /// leapgate_tunnel_retry; [port] is 0 for RDP; false without such a card or forward.
+    bool retry(SessionID sessionId, int port);
+    /// Block 1: sessionAddPortForward, sessionRemovePortForward, sessionNewRdp, sessionClose.
+    Future<void> addForward(SessionID sessionId, int localPort, String host, int remotePort);
+    Future<void> removeForward(SessionID sessionId, int localPort);
+    Future<void> newRdp(SessionID sessionId);
+    Future<void> close(SessionID sessionId);
+    /// Block 1 mainGetPeerSync's port_forwards, without the exit sentinel and a local or remote port ≤ 0.
+    List<TunnelForward> savedForwards(String id);
+    /// rdp_port, rdp_username, rdp_password with mainGetPeerOption / mainSetPeerOption.
+    RdpSettings rdpSettings(String id);
+    Future<void> setRdpSettings(String id, RdpSettings settings);
+  }
+  ```
+
+  出口占位的两个常量（目标 `leapgate-exit.invalid:65536`）从 `cm_core.dart` 挪到 `consts.dart`，CM 和 `savedForwards` 共用；解析存下的转发是公开的纯函数 `parseSavedForwards`（`tunnel_api.dart`）。
+- **依赖**：core `xterm: 4.0.0`（钉死，和上游同版本）、app `xterm: any`，用同一个 `PUB_CACHE` 重新生成两份 lock（14 §2.4）。
+- **画廊和常量**：`gallery_m9a.dart`、`gallery_m9b.dart`、`gallery_m9c.dart` 登记进 `gallery_main.dart`；`consts.dart` 加"M9a""M9b views""M9b terminal""M9c"四个锚点。
+
+**Rust 导出（块 2）**
+
+| 导出 | 参数 | 返回 / 事件 |
+|---|---|---|
+| `leapgate_install`（改） | `kind: String`、`path: String`、`start_menu: bool`、`desktop_shortcut: bool`、`printer: bool` | 返回和失败 JSON 同 §10.16；`upgrade` 时后四个忽略。`path` 是界面拼好的整条路径（选中的文件夹加 `\Leapgate`），空串走默认位置 |
+| `leapgate_session_display_names` | `session_id: SessionID` | `SyncReturn<String>`：JSON 字符串数组，对端信息里显示器（摄像头会话里是摄像头）的名称，顺序同编号；去掉控制字符、截到 64 个字符；没有会话或还没登录时 `[]` |
+| `leapgate_tunnel_session_add` | `session_id`、`id: String`、`rdp: bool`、`password: String`、`is_shared_password: bool`、`conn_token: Option<String>`、`force_relay: bool` | `SyncReturn<String>`：成功 `{}`；`{"error":"already"}`（TCP：这台设备已有端口转发会话，即出口卡片或没关完的隧道卡片；RDP：已有 RDP 会话）；`{"error":"invalid_id"}`；`{"error":"other","text":…}`。和出口卡片一样不调 `LocalConfig::set_remote_id`；不同的是 `args` 为空（出口卡片带三个参数、走上游的三参数分支），`ConnType` 是 `PORT_FORWARD` 或 `RDP`；成功后界面照常调块 1 的 `sessionStart` 拿会话事件流（提问在那条流上） |
+| `leapgate_tunnel_events` | 全局 `StreamSink<String>`，和出口的流分开 | 见"事件"；新订阅替换旧的，订阅时先补推每张卡片每一行最后一条状态（通知不补推） |
+| `leapgate_tunnel_retry` | `session_id`、`port: i32`（RDP 传 0） | `SyncReturn<bool>`：没有这张卡片或这一行时为假。"重试""重新连接"共用：监听关着（已停止、端口被占用）就重开，开成了马上登录；中断（监听开着、隧道没了）时马上登录；在用或正在连接时什么都不做 |
+
+增删转发、停止、新建 RDP 连接、读存下的转发、RDP 设置都用块 1 现成的导出（见 `TunnelApi`）。界面先做 13 §1.3 区块 B 的三条校验，Rust 不另查。
+
+**事件**（`leapgate_tunnel_events`）：每条带 `"id"`（设备 ID）、`"session_id"`、`"kind"`（`tcp` / `rdp`）；行事件另带 `"port"`（本机端口，RDP 一律 0），卡片事件不带。
+
+| `state` | 类别 | 其余字段 | 说明 |
+|---|---|---|---|
+| `connecting` | 行 | — | 首次登录、重试或懒重连正在进行；要输入什么看会话事件流 |
+| `in_use` | 行 | `"transport"`：`direct` / `relay` | 这一行自己的连接方式（按行记，不读会话共用的 `lc.direct`） |
+| `interrupted` | 行 | `"cause"`：`tunnel_ended` / `login_failed`；`login_failed` 时带 `"reason"`（C3 的原因对象） | 监听还开着，下一条本地连接进来就懒重连；没有冷却 |
+| `stopped` | 行 | 有原因时带 `"reason"` | 监听已关，等重试或删除。原因：`peer_too_old`（`feature: port_forward`）、`insecure_declined`、被控端拒绝登录的 C3 分类（`no_permission`、`too_many_attempts`、`not_allowed`、`blocked`……）；会再问的（例如重新输入密码）不算结局 |
+| `port_in_use` | 行 | — | 本机端口被占用（见"独占监听"） |
+| `notice` | 行 | `"reason"`；`other` 时另带 `"text"`（截到 200 个字符） | 不改变行状态：被控端拒绝打开一条通道（13 §1.3 区块 E），上游已按原文 10 秒去重 |
+| `removed` | 行 | — | 这一行已删、监听已关 |
+| `closed` | 卡片 | — | 卡片循环结束，各行都已收尾 |
+
+卡片的状态和原因都以本流为准，会话流只用来知道要输入什么；报错类回调由 `RowUi` 拦下（见"Rust 的做法"），会话流上不会出现 error 类的消息框，所以没有 §10.12 已知限制第 3 条的两流先后问题。`session_id` 是小写带连字符的 UUID 字符串（和块 1 的 `SessionID` 序列化一致）。
+
+**原因码**（`libs/leapgate/src/reason.rs`，界面文案归各自的路：终端、摄像头的在 `reasons.dart`（A），隧道的在隧道卡片的原因表（T））
+
+| 码 | 参数 | 原文（整串相等，除注明的） |
+|---|---|---|
+| `tunnel_unreachable` | `target` | 前缀 `Failed to access remote `，取到 `. Please make sure` 之前；旧式裸管道登录时以登录错误出现的同一句也认 |
+| `tunnel_too_many_channels` | — | `Too many port forward channels` |
+| `insecure_declined` | — | Rust 自己产生（不安全连接选了"断开"），不从原文匹配 |
+| `terminal_unsupported` | — | `Remote terminal is not supported by the remote side` |
+| `os_login_failed` | — | `Incorrect username or password.` |
+| `no_console_user` | — | `No active console user logged on, please connect and logon first.` |
+| `os_login_backoff` | `seconds` | 前缀 `Please try again in `，取数字（`second.` / `seconds.`）；解析失败落 `other` |
+| `no_cameras` | — | `No cameras` |
+| `camera_unsupported` | — | `view_camera_unsupported_tip` |
+
+`No permission of IP tunneling` 沿用已有的 `no_permission`（`port_forward`）；`Port forward target not authorized` 是 `other`。
+
+**挂钩**（上游唯一一处，03 §7.5 具名例外，M9-2）：`src/ui_session_interface.rs` `io_loop` 端口转发分支里，`handler.lc.write().unwrap().port_forward_mux = crate::port_forward::mux_enabled();` 之后、RDP 判断之前：
+
+```rust
+        // leapgate: a new UI tunnel card runs its own loop (LEAPGATE.md §10.18)
+        if let Some(card) = crate::leapgate_hooks::tunnel::take(&handler) { return crate::leapgate_hooks::tunnel::run(handler, card, receiver, &key, &token).await; }
+```
+
+所有端口转发会话都经过这一行，所以 `take` 必须精确认出登记时的那个会话：登记表的键是（设备 ID，种类），值里存登记时的会话 ID，`take` 只在 `handler` 的会话 ID 和它相同时才取走，对不上一律返回 `None`（同一台设备的出口卡片会话、登记后没 `sessionStart` 就关掉又重开的会话都不会被认领）。不需要总开关；旧界面从不登记，照走上游原路。出口卡片的会话不登记进隧道表，照旧走三参数分支和出口挂钩。合并上游时核对这个分支的结构（`sender`、`port_forward_mux` 先设好）和 `Data::{AddPortForward, RemovePortForward, NewRDP, Close}`。
+
+**Rust 的做法**（14 §2.2、§4.2、§4.3）
+- 卡片循环 `run`：TCP 卡片读 `handler.lc.port_forwards`，跳过出口占位和本机或远程端口 ≤ 0 的（同上游，界面的 `savedForwards` 用同一条规则），每条起一行；RDP 卡片端口照上游取 `rdp_port`（解析不了用 3389），起一行（本机端口 0）。收到 `AddPortForward` 起一行（已有同端口的忽略）、`RemovePortForward` 关那一行后推 `removed`、`NewRDP` 打开远程桌面连接、`Close` 或发送端没了就把关闭发给每一行、等全部收尾（照 `login_or_close`）、推 `closed` 再返回；其余 `Data`（登录、二次验证、不安全连接的回答）照上游广播给每一行。登记表照 `exit::cards`，键是（设备 ID，种类），和出口的表分开。
+- 单条转发照 `exit::cards::run_card` 另写一份，原函数不改。差别：登录目标是这一行的目标（RDP 是空主机加 RDP 端口、`is_rdp`）；不做 SOCKS 握手；结局不看出口能力（对端支持多路复用就用，不支持停在 `peer_too_old`）；登录失败不冷却；不安全连接被拒记 `insecure_declined`；没有改端口。占位连接、`login_or_close`、K0 守卫的三种结局、隧道结束后的懒重连照搬。
+- 按行的 `Interface` 包装 `RowUi`：只有提问类转给会话（要密码、重新输入密码、二次验证、等待对方接受、不安全连接，界面靠它们画提问区）；**报错类一律拦下**，不进会话流：`on_establish_connection_error`、`on_error`（含 `PEER_TOO_OLD`）、`msgbox` 里类型是 error 的（含 `handle_login_error` 转出的登录失败），原文记进这一行，行停下或中断时按 C3 分类当原因。`update_direct` 同时记进这一行。隧道在用时被控端拒绝打开通道（`on_frame` 来的，被控端有四种原文）一律推这一行的 `notice`：认得的三种按下表分类，其余是 `other` 带原文。所以界面不用处理会话流上的错误框（T 照此写 `CardLogin` 的隧道用法）。
+- **独占监听**（M9-3，14 §4.1 的实测）：不复用地址绑 `127.0.0.1:P`，成功后再绑一次 `0.0.0.0:P`（只 bind、不 listen，马上丢）。两次里任何一次报地址占用（`AddrInUse`）或拒绝访问（`PermissionDenied`，对方独占绑定、系统保留端口段都报这个）都算端口被占用：关掉刚开的监听、推 `port_in_use`。出口卡片和旧界面的出口代理换用同一个函数（出口回归一次）。
+- RDP：一行进 `in_use` 时，如果是这次监听开好后的第一次（卡片刚打开或从"已停止"重试成功），打开一次远程桌面连接；懒重连成功不打开；`NewRDP` 随时打开。照上游 `run_rdp` 在 `tunnel.rs` 另写，用户名密码从本会话的选项取（会话开始时读进来的那份），不读也不写进程环境变量；`cmdkey`、`mstsc` 放 `spawn_blocking`；窗口标题用上游的 `set_rdp_window_title`。日志写一行 RDP 的本机端口（验收要用）。
+- 连接令牌 Rust 不改：两种卡片的导出都收 `conn_token`，界面传 `SessionRegistry.tokenOf` 的值（R3-Q7）。
+- 不对隧道会话调 `sessionReconnect`（同出口，会另起一个 `io_loop`）。
+- 提交顺序：M9a 的 `leapgate_install` → M9b 的原因码和 `leapgate_session_display_names` → 隧道登记表和导出骨架（事件格式按本节定死，T 对着假实现写）→ 单条转发和 `RowUi` → RDP → 独占监听和出口回归。每个提交单独能编、单测全过；各段的整合分支合到自己那一步为止。
+
+**各段的要点**（细节在 14 §2.3~§2.5，这里只列接口性的）
+- M9a：`LocalStatusModel.install(card, {String? path, InstallOptions? options})`，本机提示卡"安装"改成打开对话框，卡片自己不再显示进行中和失败；对话框用 `overlays.show(null, …)`（只遮主页标签），读 `LocalStatusModel` 已有的 `installing`、`installFailure`。四项位置检查在 core，纯函数加一层取系统信息的薄壳，可注入。"修改"从当前位置的上一级开始（14 §1.2）。有会话时那一行看 `appCore.sessions`、`appCore.backgroundCount`、`LocalStatusModel.incoming`，不复用 `serviceAsksFirst`。runner 的 `--install` 分支留着。
+- M9b 视图框架（A）：`session_views.dart` 里按 `ConnType` 的 `switch`，另加 `hasImage`、`usesViewBar`，不建类层次；13 §5.4 的各处加 14 §1.2 补的 5 处。终端（B）：`FFI.start` 在 `sessionAddSync` 之前按 `terminalAdmin` 设 `IS_TERMINAL_ADMIN`，`terminal` 类型登记 `terminal_response`，`close()` 清终端，`ffi_model.dart` 补 `onReady` 的终端一支；终端区给 `TerminalMouseInteraction` 传 Leapgate 的快捷键表（去掉 Ctrl+A、加 Ctrl+Shift+A），会话快捷键在终端区 `onKeyEvent` 里用 `matchShortcut` 先拦；写进终端的提示行经 core 可注入的 `terminalNoteText`。管理员账户的连接面板输入归 A，B 只调 `conn.login`。摄像头（A）：名称在对端信息到了以后取一次，没有时只写编号；"全部摄像头"先做，验收不能用就去掉。
+- M9c（T）：`TunnelsModel` 另起，和出口只共享后台计数、本机端口占用表、抽出的 `CardLogin`（不安全连接按参数分"自动拒绝"（出口）和"问用户"（隧道），抽完先跑出口现有测试）；提问区在没有任何一行还在 `connecting` 时才收起；冲突要等出口卡片移除才解除（14 §1.2、§4.4）。
+
+**打印机驱动**（M9-4）：`build-client.ps1` 照上游 CI（`.github/workflows/flutter-build.yml` 打印机驱动那一步）下载驱动和适配器两个 zip、按 sha256 核对、解到程序旁的 `drivers/`。I 写好这一步，但不跑下载：第一次带这一步构建之前，主会话把文件名、来源和大小告诉维护者，等点头。
+
+**已知限制**（写进各段验收记录前先照这里）
+1. 停止一张走 KCP、隧道在用的卡片，被控端约 20 秒后才关（每条隧道各自 20 秒，并行），同出口（§10.12）。
+2. 停在不安全连接提示时取消或点"断开"，被控端约 30 秒后关，同出口。
+3. 刚停止又马上为同一台设备打开，旧监听可能还没关，新行先报"端口被占用"，再"重试"一次就好。
+4. 加了会话却没有 `sessionStart` 的卡片留在登记表里，下次同一台设备再加时替换。
+5. 隧道登录失败不冷却：应用一直重连而对方不在线时，每条本地连接都触发一次登录（上游同样）。
+6. 别的程序只监听 `[::]:P` 时认不出端口被占用；本机程序用 `localhost` 可能先连到 `::1` 那边。
+7. `cmdkey /generic:localhost` 全机一个名字（13 §1.7 第 6 条）。
+
+**测试**：14 §5.2 列的各条。合入前：`git diff main -- flutter/` 为空；core analyze 不超出 91 条 info 的基线，app 0 条；复制件不跑格式化，改已有文件不对整个文件跑 `dart format`；新旧界面都要能编（Rust 改了上游 `ui_session_interface.rs` 和出口监听），旧界面的五项冒烟和出口 B15 冒烟照跑。

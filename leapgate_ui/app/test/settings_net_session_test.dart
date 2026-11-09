@@ -1,4 +1,5 @@
 import 'package:flutter_hbb/leapgate/app_core.dart';
+import 'package:flutter_hbb/leapgate/session.dart' show ConnType;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:leapgate_ui/shell/navigation.dart';
 
@@ -43,6 +44,18 @@ class _Recorder implements MainNavigation {
           bool isSharedPassword = false,
           bool forceRelay = false}) =>
       real.openFileTransfer(id,
+          password: password,
+          isSharedPassword: isSharedPassword,
+          forceRelay: forceRelay);
+
+  @override
+  void openView(String id, ConnType kind,
+          {bool terminalAdmin = false,
+          String password = '',
+          bool isSharedPassword = false,
+          bool forceRelay = false}) =>
+      real.openView(id, kind,
+          terminalAdmin: terminalAdmin,
           password: password,
           isSharedPassword: isSharedPassword,
           forceRelay: forceRelay);

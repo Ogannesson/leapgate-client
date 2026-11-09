@@ -21,23 +21,30 @@ class SessionRegistry extends ChangeNotifier {
   /// The views open in the tab of device [id], in the order they opened.
   List<FFI> sessionsOf(String id) => List.unmodifiable(_tabs[id] ?? const []);
 
+  /// The connection token of any view in the tab of device [id], for another view or a tunnel
+  /// card of it to log in without the password; null without one (R3-Q7, `LEAPGATE.md` §10.18).
+  String? tokenOf(String id) =>
+      (_tabs[id] ?? const <FFI>[]).map((s) => s.connToken).nonNulls.firstOrNull;
+
   /// Opens [view] of device [id], or returns it when it is already open. Another view of a
   /// device whose tab is open logs in with that tab's connection token, without the password
   /// (upstream `connectWithToken`, `common/widgets/toolbar.dart:580-610`).
   ///
   /// [password], [isSharedPassword] and [switchUuid] go to Rust as upstream's pages passed them
   /// to `FFI.start` (`--connect --password`, a shared address book password, switch sides); a
-  /// view that is already open ignores them.
+  /// view that is already open ignores them, as it ignores [terminalAdmin] (a terminal view is
+  /// made as the administrator's or not, `LEAPGATE.md` §10.18).
   FFI open(String id, ConnType view,
       {bool forceRelay = false,
       String password = '',
       bool isSharedPassword = false,
-      String switchUuid = ''}) {
+      String switchUuid = '',
+      bool terminalAdmin = false}) {
     final views = _tabs[id] ?? const <FFI>[];
     for (final s in views) {
       if (s.connType == view) return s;
     }
-    final token = views.map((s) => s.connToken).nonNulls.firstOrNull;
+    final token = tokenOf(id);
     if (singleSession) {
       final open = _tabs.values.expand((v) => v).toList();
       _tabs.clear();
@@ -45,7 +52,7 @@ class SessionRegistry extends ChangeNotifier {
         unawaited(s.close());
       }
     }
-    final session = FFI(id, view);
+    final session = FFI(id, view, terminalAdmin: terminalAdmin);
     (_tabs[id] ??= []).add(session);
     session.start(
         forceRelay: forceRelay,

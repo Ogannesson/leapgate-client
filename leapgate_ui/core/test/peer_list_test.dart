@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/peer_list.dart';
 import 'package:flutter_hbb/leapgate/recent_peers.dart';
@@ -83,10 +84,22 @@ void main() {
             {bool favorite = false, bool hasPassword = true}) =>
         peerMenu(c,
             favorite: favorite, hasPassword: hasPassword, windows: true);
+    // A device whose platform is not known offers every connection type but the administrator
+    // terminal (R3-Q12).
+    const connect = [
+      PeerAction.remoteDesktop,
+      PeerAction.fileTransfer,
+      PeerAction.terminal,
+      PeerAction.camera,
+      PeerAction.tcpTunnel,
+      PeerAction.useAsExit,
+      PeerAction.rdp,
+      PeerAction.viaRelay,
+    ];
 
     test('Recent: rename, favorites, saved password, "Delete"', () {
       expect(menu(PeerCategory.recent), [
-        [PeerAction.remoteDesktop, PeerAction.fileTransfer, PeerAction.viaRelay],
+        connect,
         [PeerAction.alwaysRelay, PeerAction.createShortcut],
         [PeerAction.rename, PeerAction.addFavorite, PeerAction.clearPassword],
         [PeerAction.delete],
@@ -97,7 +110,7 @@ void main() {
 
     test('Favorites: no danger group, "Remove from favorites" does it', () {
       expect(menu(PeerCategory.favorites, favorite: true), [
-        [PeerAction.remoteDesktop, PeerAction.fileTransfer, PeerAction.viaRelay],
+        connect,
         [PeerAction.alwaysRelay, PeerAction.createShortcut],
         [
           PeerAction.rename,
@@ -109,7 +122,7 @@ void main() {
 
     test('LAN: wake-on-LAN and "Remove", no rename or saved password', () {
       expect(menu(PeerCategory.lan), [
-        [PeerAction.remoteDesktop, PeerAction.fileTransfer, PeerAction.viaRelay],
+        connect,
         [
           PeerAction.alwaysRelay,
           PeerAction.wakeOnLan,
@@ -125,6 +138,79 @@ void main() {
           peerMenu(PeerCategory.recent,
               favorite: false, hasPassword: false, windows: false)[1],
           [PeerAction.alwaysRelay]);
+    });
+  });
+
+  group('connection types by the remote platform (LEAPGATE.md §10.18, A-P1.html)', () {
+    List<PeerAction> group(String platform, {bool windows = true}) =>
+        peerMenu(PeerCategory.recent,
+            favorite: false,
+            hasPassword: false,
+            windows: windows,
+            peerPlatform: platform)[0];
+    const rd = PeerAction.remoteDesktop;
+    const ft = PeerAction.fileTransfer;
+    const relay = PeerAction.viaRelay;
+
+    test('Windows: all, the administrator terminal after the terminal', () {
+      final all = [
+        rd,
+        ft,
+        PeerAction.terminal,
+        PeerAction.terminalAdmin,
+        PeerAction.camera,
+        PeerAction.tcpTunnel,
+        PeerAction.useAsExit,
+        PeerAction.rdp,
+        relay,
+      ];
+      expect(group(kPeerPlatformWindows), all);
+      // The connect box's menu has no administrator terminal (14 §1.2).
+      expect(connectMenu(kPeerPlatformWindows, windows: true),
+          [for (final a in all) if (a != PeerAction.terminalAdmin) a]);
+    });
+
+    test('Linux: no administrator terminal, exit node or RDP', () {
+      const linux = [
+        rd,
+        ft,
+        PeerAction.terminal,
+        PeerAction.camera,
+        PeerAction.tcpTunnel,
+        relay,
+      ];
+      expect(group(kPeerPlatformLinux), linux);
+      expect(connectMenu(kPeerPlatformLinux, windows: true), linux);
+    });
+
+    test('macOS: no camera either', () {
+      const mac = [rd, ft, PeerAction.terminal, PeerAction.tcpTunnel, relay];
+      expect(group(kPeerPlatformMacOS), mac);
+      expect(connectMenu(kPeerPlatformMacOS, windows: true), mac);
+    });
+
+    test('Android: no terminal, camera or TCP tunnel', () {
+      expect(group(kPeerPlatformAndroid), [rd, ft, relay]);
+      expect(connectMenu(kPeerPlatformAndroid, windows: true), [rd, ft, relay]);
+    });
+
+    test('not known: all but the administrator terminal; RDP only from Windows', () {
+      const unknown = [
+        rd,
+        ft,
+        PeerAction.terminal,
+        PeerAction.camera,
+        PeerAction.tcpTunnel,
+        PeerAction.useAsExit,
+        PeerAction.rdp,
+        relay,
+      ];
+      expect(group(''), unknown);
+      expect(connectMenu('', windows: true), unknown);
+      expect(connectMenu('', windows: false),
+          [for (final a in unknown) if (a != PeerAction.rdp) a]);
+      expect(group(kPeerPlatformWindows, windows: false),
+          isNot(contains(PeerAction.rdp)));
     });
   });
 

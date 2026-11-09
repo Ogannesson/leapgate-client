@@ -615,3 +615,19 @@ const String kOptionFtColumns = "leapgate-ft-columns";
 
 /// Where the divider between the panes is, the local pane's share of the width ("0.5").
 const String kOptionFtDivider = "leapgate-ft-divider";
+
+/// The login target of an exit tunnel; same values as `leapgate::exit` in Rust and
+/// `flutter/lib/leapgate/exit_tunnel.dart`. The CM gets the normalized `host:port`; the old UI
+/// keeps it among a device's port forwards, which the tunnels skip (`LEAPGATE.md` §10.18).
+const String kLeapgateExitHost = 'leapgate-exit.invalid';
+const int kLeapgateExitPort = 65536;
+
+// M9: each lane appends its LocalConfig keys under its heading (`LEAPGATE.md` §10.18).
+
+// M9a (coder I): the install page.
+
+// M9b views (coder A): the view framework and the camera.
+
+// M9b terminal (coder B): the terminal.
+
+// M9c (coder T): the tunnels.

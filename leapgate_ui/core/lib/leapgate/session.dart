@@ -24,6 +24,7 @@ import 'options.dart';
 import 'prompts.dart';
 import 'session_events.dart';
 import 'session_requests.dart';
+import 'terminal/terminals.dart';
 
 /// `index` goes to Rust as the connection type (upstream `FfiModel`), so the order stays
 /// upstream's. A session tab shows `defaultConn` (remote desktop) and `fileTransfer`; camera and
@@ -43,7 +44,8 @@ enum ConnType {
 ///
 /// Unlike upstream, it holds only the session's own models; the global ones are on [AppCore].
 class FFI {
-  FFI(this.id, this.connType) : sessionId = const Uuid().v4obj() {
+  FFI(this.id, this.connType, {this.terminalAdmin = false})
+      : sessionId = const Uuid().v4obj() {
     options = SessionOptions(sessionId);
     imageModel = ImageModel(WeakReference(this));
     ffiModel = FfiModel(WeakReference(this));
@@ -141,6 +143,13 @@ class FFI {
   final String id;
 
   final ConnType connType;
+
+  /// A `ConnType.terminal` session that runs as the administrator (13 §2.1.1); set once, when
+  /// it is made (`LEAPGATE.md` §10.18).
+  final bool terminalAdmin;
+
+  /// The terminal tabs of a `ConnType.terminal` session (M9b); null otherwise.
+  TerminalTabs? terminals;
 
   /// Set by [close] and by Rust's `close` event.
   var closed = false;

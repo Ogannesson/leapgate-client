@@ -238,10 +238,16 @@ void main() {
             windows: true,
             ab: ab.menuFlags(PeerCategory.group)),
         [
+          // Every connection type but the administrator terminal, the platform not being known.
           [
             PeerAction.remoteDesktop,
             PeerAction.fileTransfer,
-            PeerAction.viaRelay
+            PeerAction.terminal,
+            PeerAction.camera,
+            PeerAction.tcpTunnel,
+            PeerAction.useAsExit,
+            PeerAction.rdp,
+            PeerAction.viaRelay,
           ],
           [PeerAction.addToAb],
         ]);

@@ -400,12 +400,11 @@ class _SideColumn extends StatelessWidget {
                   // The exit nodes running and whether one waits for the user (M5-8); no
                   // mark while the exit page shows.
                   ListenableBuilder(
-                    listenable: appCore.exitNodes,
+                    listenable: appCore.backgroundListenable,
                     builder: (context, _) {
-                      final exits = appCore.exitNodes;
-                      final count = exits.runningCount;
+                      final count = appCore.backgroundCount;
                       final attention =
-                          exits.needsAttention && s != section;
+                          appCore.backgroundAttention && s != section;
                       return _NavItem(
                         icon: LgIcons.exit,
                         label: l10n.navExitNodes,

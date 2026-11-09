@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/exit_nodes.dart' show isExitId;
 import 'package:flutter_hbb/leapgate/recent_peers.dart' show PeerCategory;
+import 'package:flutter_hbb/leapgate/session.dart' show ConnType;
+import 'package:flutter_hbb/leapgate/tunnel_api.dart' show TunnelKind;
 
 import '../pages/settings/settings_ids.dart';
 
@@ -25,6 +27,15 @@ abstract class MainNavigation {
   /// handled as in [connect].
   void openFileTransfer(String id,
       {String password = '',
+      bool isSharedPassword = false,
+      bool forceRelay = false});
+
+  /// Opens the [kind] view of [id] and shows it, as [openFileTransfer] (M9, `LEAPGATE.md`
+  /// §10.18): the remote desktop, file transfer, terminal ([terminalAdmin] for the
+  /// administrator terminal, only when the view is new) or camera view.
+  void openView(String id, ConnType kind,
+      {bool terminalAdmin = false,
+      String password = '',
       bool isSharedPassword = false,
       bool forceRelay = false});
 
@@ -57,19 +68,20 @@ class ConnectBoxFocusRequests extends ChangeNotifier {
 final connectBoxFocusRequests = ConnectBoxFocusRequests();
 
 /// Requests to show the exit page scrolled to a card. The home page switches to the exit page;
-/// the exit page takes [id] once it is built.
+/// the exit page takes [id] once it is built. [tunnel] is the kind of a tunnel card, null for an
+/// exit card (M9c, `LEAPGATE.md` §10.18).
 class ExitPageRequests extends ChangeNotifier {
-  ({String id, bool highlight})? _request;
+  ({String id, bool highlight, TunnelKind? tunnel})? _request;
 
   /// The card to scroll to, and whether to mark it, once; null when there is none.
-  ({String id, bool highlight})? take() {
+  ({String id, bool highlight, TunnelKind? tunnel})? take() {
     final request = _request;
     _request = null;
     return request;
   }
 
-  void request(String id, {bool highlight = false}) {
-    _request = (id: id, highlight: highlight);
+  void request(String id, {bool highlight = false, TunnelKind? tunnel}) {
+    _request = (id: id, highlight: highlight, tunnel: tunnel);
     notifyListeners();
   }
 }

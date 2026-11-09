@@ -10,13 +10,24 @@ import 'navigation.dart';
 // `flutter/lib/common.dart:2256-2523` (`handleUriLink`, `urlLinkToCmdArgs`). A remote desktop and
 // a file transfer open (M8-7); the third round's kinds are logged and say so in a toast.
 
-/// A remote desktop, or with [fileTransfer] a file transfer, to open.
+/// What a link or `--<kind>` asks to open (`LEAPGATE.md` §10.18).
+enum LinkKind {
+  remoteDesktop,
+  fileTransfer,
+  terminal,
+  terminalAdmin,
+  camera,
+  tcpTunnel,
+  rdp,
+}
+
+/// A device to open as [kind].
 typedef ConnectLink = ({
   String id,
   String password,
   String switchUuid,
   bool forceRelay,
-  bool fileTransfer,
+  LinkKind kind,
 });
 
 /// Upstream `urlLinkToCmdArgs` without the phone-only parts (`config`, `password`, the direct
@@ -74,33 +85,33 @@ List<String>? linkToArgs(Uri uri) {
   ];
 }
 
-/// The remote desktop or file transfer that [args] ask for (upstream `handleUriLink`'s loop);
-/// null for anything else. A kind of the third round is logged and gets a toast.
+/// What [args] ask to open (upstream `handleUriLink`'s loop: the last kind given counts); null
+/// without a device.
 ConnectLink? connectLinkOf(List<String> args) {
   String? id;
   var password = '';
   var switchUuid = '';
   var forceRelay = false;
-  var fileTransfer = false;
-  String? other;
+  var kind = LinkKind.remoteDesktop;
   for (var i = 0; i < args.length; i++) {
     final next = i + 1 < args.length ? args[i + 1] : null;
+    final given = switch (args[i]) {
+      '--connect' || '--play' => LinkKind.remoteDesktop,
+      '--file-transfer' => LinkKind.fileTransfer,
+      '--terminal' => LinkKind.terminal,
+      '--terminal-admin' => LinkKind.terminalAdmin,
+      '--view-camera' => LinkKind.camera,
+      '--port-forward' => LinkKind.tcpTunnel,
+      '--rdp' => LinkKind.rdp,
+      _ => null,
+    };
+    if (given != null) {
+      id = next;
+      kind = given;
+      i++;
+      continue;
+    }
     switch (args[i]) {
-      case '--connect':
-      case '--play':
-        id = next;
-        i++;
-      case '--file-transfer':
-        id = next;
-        fileTransfer = true;
-        i++;
-      case '--view-camera':
-      case '--port-forward':
-      case '--rdp':
-      case '--terminal':
-      case '--terminal-admin':
-        other = args[i];
-        i++;
       case '--password':
         password = next ?? '';
         i++;
@@ -111,25 +122,13 @@ ConnectLink? connectLinkOf(List<String> args) {
         forceRelay = true;
     }
   }
-  if (other != null) {
-    // Port forwarding, RDP, camera and terminal come with the third round.
-    lgBind.leapgateLog(level: 3, msg: 'leapgate ui: link not handled: $other');
-    appCore.toasts.show(switch (other) {
-      '--port-forward' => 'linkUnsupportedPortForward',
-      '--rdp' => 'linkUnsupportedRdp',
-      '--view-camera' => 'linkUnsupportedCamera',
-      _ => 'linkUnsupportedTerminal',
-    });
-    appCore.window.bringToFront();
-    return null;
-  }
   if (id == null) return null;
   return (
     id: id,
     password: password,
     switchUuid: switchUuid,
     forceRelay: forceRelay,
-    fileTransfer: fileTransfer,
+    kind: kind,
   );
 }
 
@@ -168,15 +167,37 @@ bool _open(List<String>? args) {
   }
   final link = connectLinkOf(args);
   if (link == null) return false;
-  if (link.fileTransfer) {
-    mainNavigation.openFileTransfer(link.id,
-        password: link.password, forceRelay: link.forceRelay);
-  } else {
-    mainNavigation.connect(link.id,
-        password: link.password,
-        switchUuid: link.switchUuid,
-        forceRelay: link.forceRelay);
+  switch (link.kind) {
+    case LinkKind.remoteDesktop:
+      mainNavigation.connect(link.id,
+          password: link.password,
+          switchUuid: link.switchUuid,
+          forceRelay: link.forceRelay);
+    case LinkKind.fileTransfer:
+      mainNavigation.openFileTransfer(link.id,
+          password: link.password, forceRelay: link.forceRelay);
+    // Until their segments build them (`LEAPGATE.md` §10.18), these are logged and say so in a
+    // toast.
+    // TODO(M9b): the terminals and the camera.
+    case LinkKind.terminal || LinkKind.terminalAdmin || LinkKind.camera:
+      return _unsupported(link.kind);
+    // TODO(M9c): the TCP tunnel and RDP.
+    case LinkKind.tcpTunnel || LinkKind.rdp:
+      return _unsupported(link.kind);
   }
   appCore.window.bringToFront();
   return true;
+}
+
+bool _unsupported(LinkKind kind) {
+  lgBind.leapgateLog(
+      level: 3, msg: 'leapgate ui: link not handled: ${kind.name}');
+  appCore.toasts.show(switch (kind) {
+    LinkKind.tcpTunnel => 'linkUnsupportedPortForward',
+    LinkKind.rdp => 'linkUnsupportedRdp',
+    LinkKind.camera => 'linkUnsupportedCamera',
+    _ => 'linkUnsupportedTerminal',
+  });
+  appCore.window.bringToFront();
+  return false;
 }

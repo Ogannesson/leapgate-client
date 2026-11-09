@@ -13,6 +13,7 @@ import '../pages/files/file_view.dart';
 import '../pages/session/reasons.dart';
 import '../pages/session/session_names.dart';
 import '../pages/session/session_page.dart';
+import '../pages/terminal/terminal_view.dart';
 import '../widgets/lg_file_marks.dart';
 import '../widgets/lg_menu.dart';
 import '../widgets/lg_session_toolbar.dart';
@@ -89,6 +90,24 @@ class SessionTabView extends StatelessWidget {
 
   Widget _view(FFI view) {
     final active = selected && view == current;
+    // M9 (`LEAPGATE.md` §10.18); nothing opens a terminal view before M9b. The camera view is a
+    // `SessionPage`, as the remote desktop.
+    if (view.connType == ConnType.terminal) {
+      return ListenableBuilder(
+        listenable: overlays,
+        builder: (context, _) => TerminalViewPage(
+          ffi: view,
+          active: active &&
+              !overlays.isOpen(view.id) &&
+              !overlays.isOpen(kWindowScope),
+          lastView: views.length == 1,
+          viewSwitch: SessionViewSwitch(ffi: view),
+          // TODO(M9b views): the terminal's connection method mark.
+          route: const SizedBox.shrink(),
+          onDisconnect: () => disconnectTerminalView(view),
+        ),
+      );
+    }
     if (!isFileView(view)) {
       return SessionPage(
         ffi: view,

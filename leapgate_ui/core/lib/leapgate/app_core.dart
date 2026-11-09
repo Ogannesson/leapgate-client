@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 import '../models/platform_model.dart';
 import 'account.dart';
 import 'account_api.dart';
@@ -55,6 +57,17 @@ class AppCore {
   /// or a device is used as an exit node.
   late final exitDirectory = ExitDirectoryModel(exitApi);
   late final exitNodes = ExitNodesModel(exitApi);
+
+  /// What runs on the home tab's exit page (M9, `LEAPGATE.md` §10.18): the number in the
+  /// navigation and on the home tab, the close and service confirmations. Only the exit nodes
+  /// until M9c adds the tunnels.
+  int get backgroundCount => exitNodes.runningCount;
+
+  /// One of them waits for the user.
+  bool get backgroundAttention => exitNodes.needsAttention;
+
+  /// Notifies when [backgroundCount] or [backgroundAttention] may have changed.
+  Listenable get backgroundListenable => exitNodes;
 
   /// The global event stream's table. The connection manager (M3) and the address book (M4)
   /// register their events here, not on a session's.
