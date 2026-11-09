@@ -185,6 +185,7 @@ class LgInstallDialog extends StatelessWidget {
                             busy: a.busy,
                             icon: a.icon,
                             iconSize: a.iconSize,
+                            focusNode: a.focusNode,
                             autofocus: a == defaultAction,
                             onPressed: a.onPressed,
                           ),
@@ -454,6 +455,9 @@ class _PathBoxState extends State<_PathBox> {
         final painter = TextPainter(
           text: TextSpan(text: widget.path, style: style),
           textDirection: Directionality.of(context),
+          // The text is drawn at the system's text size, so it is measured at it: a path that
+          // fits at 100 % may be cut at 150 %, and then it must show in full on hover.
+          textScaler: MediaQuery.textScalerOf(context),
           maxLines: 1,
         )..layout();
         final cutOff = painter.width > room;

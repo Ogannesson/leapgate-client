@@ -428,10 +428,15 @@ class LgDialogAction {
     this.busy = false,
     this.icon,
     this.iconSize = 20,
+    this.focusNode,
   });
 
   final String label;
   final VoidCallback? onPressed;
+
+  /// The button's focus node, for a caller that must give the keyboard back to this button (the
+  /// install dialog after a failed install). Without it the button has one of its own.
+  final FocusNode? focusNode;
 
   /// Before the label (the shield on "安装", which asks for administrator
   /// permission, at [iconSize] 18). A busy button shows its spinner there.
@@ -578,6 +583,7 @@ class LgConfirmDialog extends StatelessWidget {
             busy: a.busy,
             icon: a.icon,
             iconSize: a.iconSize,
+            focusNode: a.focusNode,
             autofocus: a == defaultAction,
             onPressed: a.onPressed,
           ),

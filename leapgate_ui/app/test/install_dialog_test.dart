@@ -357,6 +357,44 @@ void main() {
       expect(find.text(_path), findsNothing);
     });
 
+    group('under enlarged system text', () {
+      // At 100 % the path of the test above fits in 640 px; at 200 % its 25 letters are 750 px.
+      Widget scaled(double factor) => MediaQuery(
+        data: MediaQueryData(textScaler: TextScaler.linear(factor)),
+        child: SizedBox(width: 640, child: _row()),
+      );
+
+      testWidgets('a path that fits at 100 % is cut at 200 %', (tester) async {
+        await pumpLg(tester, scaled(2));
+        final head = tester.widget<Text>(
+          find.byWidgetPredicate(
+            (w) => w is Text && (w.data ?? '').startsWith(r'C:\Program'),
+          ),
+        );
+        expect(head.overflow, TextOverflow.ellipsis);
+        // The text really is drawn wider than the box: it is cut, not merely measured so.
+        final box = tester.getRect(find.byType(LgInstallPathRow));
+        expect(
+          tester.getRect(find.text(r'\Leapgate')).right,
+          lessThanOrEqualTo(box.right),
+        );
+      });
+
+      testWidgets('then the pointer shows the whole path', (tester) async {
+        await pumpLg(tester, scaled(2));
+        await hover(tester, find.byType(LgInstallPathRow));
+        await tester.pump(const Duration(seconds: 1));
+        expect(find.text(_path), findsOneWidget);
+      });
+
+      testWidgets('at 100 % the same path has no tooltip', (tester) async {
+        await pumpLg(tester, scaled(1));
+        await hover(tester, find.byType(LgInstallPathRow));
+        await tester.pump(const Duration(seconds: 1));
+        expect(find.text(_path), findsNothing);
+      });
+    });
+
     testWidgets('the change button can take the keyboard at the start', (
       tester,
     ) async {
@@ -685,6 +723,75 @@ void main() {
         ),
       );
       expect(find.byKey(const ValueKey('inner')), findsOneWidget);
+    });
+
+    testWidgets('LgDialogAction.focusNode is the focus node of the button', (
+      tester,
+    ) async {
+      final nodes = [FocusNode(), FocusNode(), FocusNode()];
+      for (final n in nodes) {
+        addTearDown(n.dispose);
+      }
+      final dialogs = <Widget>[
+        LgInstallDialog(
+          title: '安装 Leapgate',
+          actions: [
+            LgDialogAction(label: '安装', focusNode: nodes[0], onPressed: () {}),
+          ],
+        ),
+        LgFormDialog(
+          title: '登录',
+          actions: [
+            LgDialogAction(label: '登录', focusNode: nodes[1], onPressed: () {}),
+          ],
+        ),
+        LgConfirmDialog(
+          title: '确认？',
+          actions: [
+            LgDialogAction(label: '好', focusNode: nodes[2], onPressed: () {}),
+          ],
+        ),
+      ];
+      for (final (i, dialog) in dialogs.indexed) {
+        await pumpLg(tester, _stage(dialog));
+        await tester.pump();
+        // Moved to by the caller, as the install page does after a failed install: the node is
+        // the button's, so the button takes the keyboard.
+        nodes[i].requestFocus();
+        await tester.pump();
+        expect(nodes[i].hasPrimaryFocus, isTrue, reason: 'dialog $i');
+      }
+    });
+
+    testWidgets('Enter presses the button that was given the keyboard back', (
+      tester,
+    ) async {
+      var presses = 0;
+      final node = FocusNode();
+      addTearDown(node.dispose);
+      await pumpLg(
+        tester,
+        _stage(
+          LgInstallDialog(
+            title: '安装 Leapgate',
+            actions: [
+              LgDialogAction(label: '取消', onPressed: () {}),
+              LgDialogAction(
+                label: '安装',
+                kind: LgButtonKind.primary,
+                focusNode: node,
+                onPressed: () => presses++,
+              ),
+            ],
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(presses, 0);
+      node.requestFocus();
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      expect(presses, 1);
     });
 
     testWidgets('the default scrim still scrolls a tall child', (tester) async {
