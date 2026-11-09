@@ -14,6 +14,7 @@ import '../theme/lg_tokens.dart';
 import 'lg_banner.dart';
 import 'lg_button.dart';
 import 'lg_device.dart';
+import 'lg_page_section.dart';
 import 'lg_pressable.dart';
 import 'lg_text_field.dart';
 import 'lg_tooltip.dart';
@@ -43,6 +44,9 @@ class LgExitPage extends StatelessWidget {
     required this.byIdTitle,
     required this.byId,
     this.controller,
+    this.sectionTitle,
+    this.sectionIcon,
+    this.tunnels,
   });
 
   /// "通过其他设备的网络访问互联网。仅对已配置代理的应用生效，且只支持 TCP 连接。"
@@ -60,9 +64,22 @@ class LgExitPage extends StatelessWidget {
   final Widget byId;
   final ScrollController? controller;
 
+  /// "出口". With it the page has three levels of heading (`A-P8-隧道.html`): the page title the
+  /// home page draws, then this section with [sectionIcon] and [lede] under it (an
+  /// [LgPageSection]), and the three parts ("正在使用", "可用的出口", "按 ID 指定出口") as
+  /// small titles inside it. Without it the page is as the M5 mockups show: [lede] right under
+  /// the page title and the three parts as section titles.
+  final String? sectionTitle;
+  final LgIcons? sectionIcon;
+
+  /// The second section, "隧道": an [LgPageSection] that is not `first`, with the tunnel cards
+  /// ([LgTunnelStack]) in it. Only drawn with [sectionTitle].
+  final Widget? tunnels;
+
   @override
   Widget build(BuildContext context) {
     final t = LgTokens.of(context);
+    if (sectionTitle != null) return _threeLevels();
     return SingleChildScrollView(
       controller: controller,
       child: Padding(
@@ -92,20 +109,79 @@ class LgExitPage extends StatelessWidget {
       ),
     );
   }
+
+  Widget _threeLevels() {
+    const sub = LgExitSectionLevel.sub;
+    return SingleChildScrollView(
+      controller: controller,
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: LgSpace.s6),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            LgPageSection(
+              first: true,
+              icon: sectionIcon,
+              title: sectionTitle!,
+              lede: lede,
+              children: [
+                LgExitSection(title: inUseTitle, level: sub),
+                const SizedBox(height: LgSpace.s2),
+                inUse,
+                LgExitSection(
+                  title: directoryTitle,
+                  level: sub,
+                  action: LgButton(
+                    label: refreshLabel,
+                    icon: LgIcons.refresh,
+                    kind: LgButtonKind.text,
+                    onPressed: onRefresh,
+                  ),
+                ),
+                directory,
+                LgExitSection(title: byIdTitle, level: sub),
+                const SizedBox(height: LgSpace.s2),
+                byId,
+              ],
+            ),
+            if (tunnels != null) tunnels!,
+          ],
+        ),
+      ),
+    );
+  }
 }
 
-/// A section title (`.xsec`): bold, 24 px above, at least as high as a button,
-/// with an optional button at its end. The button stands 8 px out of the
-/// content column, so that its words line up with the right edge.
+/// How high in the page a title [LgExitSection] is.
+enum LgExitSectionLevel {
+  /// `.xsec`: bold at the number size, in the text colour.
+  section,
+
+  /// `.xsub`, a part of an [LgPageSection] (level three): bold at the body size, in the second
+  /// colour.
+  sub,
+}
+
+/// A section title (`.xsec`; with [level] `sub` `.xsub`): bold, 24 px above, at
+/// least as high as a button, with an optional button at its end. The button
+/// stands 8 px out of the content column, so that its words line up with the
+/// right edge.
 class LgExitSection extends StatelessWidget {
-  const LgExitSection({super.key, required this.title, this.action});
+  const LgExitSection({
+    super.key,
+    required this.title,
+    this.action,
+    this.level = LgExitSectionLevel.section,
+  });
 
   final String title;
   final Widget? action;
+  final LgExitSectionLevel level;
 
   @override
   Widget build(BuildContext context) {
     final t = LgTokens.of(context);
+    final sub = level == LgExitSectionLevel.sub;
     return Padding(
       padding: const EdgeInsets.only(top: LgSpace.s6),
       child: ConstrainedBox(
@@ -115,10 +191,11 @@ class LgExitSection extends StatelessWidget {
             Expanded(
               child: Semantics(
                 header: true,
+                headingLevel: sub ? 3 : null,
                 child: Text(
                   title,
-                  style: t.textN.copyWith(
-                    color: t.colors.text,
+                  style: (sub ? t.text : t.textN).copyWith(
+                    color: sub ? t.colors.text2 : t.colors.text,
                     fontWeight: FontWeight.w700,
                   ),
                 ),

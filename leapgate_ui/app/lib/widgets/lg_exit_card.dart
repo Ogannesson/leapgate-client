@@ -112,6 +112,7 @@ class LgExitAction {
     this.expanded,
     this.semanticLabel,
     this.focusNode,
+    this.autofocus = false,
   });
 
   final String label;
@@ -123,6 +124,10 @@ class LgExitAction {
 
   /// For giving the focus back to "修改端口" after the port edit closes.
   final FocusNode? focusNode;
+
+  /// Takes the keyboard when it is first built: the safe answer of the question about an
+  /// insecure connection ("断开").
+  final bool autofocus;
 }
 
 /// The card asks for a password: the password field with the show button, the
@@ -315,38 +320,66 @@ class LgExitCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final t = LgTokens.of(context);
-    final c = t.colors;
-    final parts = <Widget>[
-      // The group's name says the device; the header is for the eyes.
-      ExcludeSemantics(
-        child: _Header(name: name, id: id, platform: platform),
-      ),
-      _StatusLine(status),
-      if (password != null) _PasswordBlock(password!),
-      if (code != null) _CodeBlock(code!),
-      for (final a in addresses) _AddressRow(a),
-      for (final n in notices)
-        KeyedSubtree(
-          key: ValueKey('notice-${n.id}'),
-          child: LgBanner(
-            tone: LgTone.info,
-            slim: true,
-            text: n.text,
-            dismissLabel: n.dismissLabel,
-            onDismiss: n.onDismiss,
-          ),
+    return LgExitCardFrame(
+      semanticLabel: semanticLabel ?? '$name $id',
+      parts: [
+        // The group's name says the device; the header is for the eyes.
+        ExcludeSemantics(
+          child: LgExitCardHeader(name: name, id: id, platform: platform),
         ),
-      if (portEdit != null)
-        _PortEditBlock(portEdit!)
-      else if (leadingActions.isNotEmpty || actions.isNotEmpty)
-        _ActionRow(leading: leadingActions, trailing: actions),
-    ];
+        LgExitStatusLine(status),
+        if (password != null) LgExitPasswordBlock(password!),
+        if (code != null) LgExitCodeBlock(code!),
+        for (final a in addresses) LgExitAddressRow(a),
+        for (final n in notices)
+          KeyedSubtree(
+            key: ValueKey('notice-${n.id}'),
+            child: LgBanner(
+              tone: LgTone.info,
+              slim: true,
+              text: n.text,
+              dismissLabel: n.dismissLabel,
+              onDismiss: n.onDismiss,
+            ),
+          ),
+        if (portEdit != null)
+          LgExitPortEditBlock(portEdit!)
+        else if (leadingActions.isNotEmpty || actions.isNotEmpty)
+          LgExitActionRow(leading: leadingActions, trailing: actions),
+      ],
+      reveal: help == null ? null : LgExitHelpBlock(help!),
+    );
+  }
+}
+
+/// The surface of a card of the exit page (`.xc`): 16 px padding, the surface
+/// colour, rounded 16, the [parts] one under the other 12 px apart (two
+/// [LgExitAddressRow]s 4 px), and last the place where [reveal] unfolds
+/// ([LgExitReveal]). The exit card and the tunnel card are built on it. It is a
+/// group for a screen reader, named [semanticLabel]; wrap a part in
+/// `ExcludeSemantics` when the name already says it (the header).
+class LgExitCardFrame extends StatelessWidget {
+  const LgExitCardFrame({
+    super.key,
+    required this.semanticLabel,
+    required this.parts,
+    this.reveal,
+  });
+
+  final String semanticLabel;
+  final List<Widget> parts;
+
+  /// What unfolds at the end (the browser help); null is closed.
+  final Widget? reveal;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = LgTokens.of(context).colors;
     final column = <Widget>[];
     for (final (i, part) in parts.indexed) {
       if (i > 0) {
         // `.xa+.xa`: two addresses stand 4 px apart, everything else 12.
-        final both = part is _AddressRow && parts[i - 1] is _AddressRow;
+        final both = part is LgExitAddressRow && parts[i - 1] is LgExitAddressRow;
         column.add(SizedBox(height: both ? LgSpace.s1 : LgSpace.s3));
       }
       column.add(part);
@@ -354,7 +387,7 @@ class LgExitCard extends StatelessWidget {
     return Semantics(
       container: true,
       explicitChildNodes: true,
-      label: semanticLabel ?? '$name $id',
+      label: semanticLabel,
       child: Container(
         padding: const EdgeInsets.all(LgSpace.s4),
         decoration: BoxDecoration(
@@ -367,10 +400,7 @@ class LgExitCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             mainAxisSize: MainAxisSize.min,
-            children: [
-              ...column,
-              _Reveal(child: help == null ? null : _HelpBlock(help!)),
-            ],
+            children: [...column, LgExitReveal(child: reveal)],
           ),
         ),
       ),
@@ -378,13 +408,21 @@ class LgExitCard extends StatelessWidget {
   }
 }
 
-/// The platform tile, the name and the ID (`.xh`).
-class _Header extends StatelessWidget {
-  const _Header({required this.name, required this.id, required this.platform});
+/// The platform tile, the name and the ID (`.xh`); [trailing] is at the far
+/// end of the row (the kind mark of a tunnel card, [LgTunnelKindMark]).
+class LgExitCardHeader extends StatelessWidget {
+  const LgExitCardHeader({
+    super.key,
+    required this.name,
+    required this.id,
+    required this.platform,
+    this.trailing,
+  });
 
   final String name;
   final String id;
   final LgPlatform platform;
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -414,6 +452,10 @@ class _Header extends StatelessWidget {
             ],
           ),
         ),
+        if (trailing != null) ...[
+          const SizedBox(width: LgSpace.s3),
+          trailing!,
+        ],
       ],
     );
   }
@@ -422,8 +464,8 @@ class _Header extends StatelessWidget {
 /// The status line (`.xs`). The mark, the label and the reason are announced
 /// when they change: a card that asks for a password or goes down is news for
 /// a screen reader. The elapsed time and the note are not (see [LgExitStatus]).
-class _StatusLine extends StatelessWidget {
-  const _StatusLine(this.status);
+class LgExitStatusLine extends StatelessWidget {
+  const LgExitStatusLine(this.status, {super.key});
 
   final LgExitStatus status;
 
@@ -519,8 +561,10 @@ class _StatusLine extends StatelessWidget {
   }
 }
 
-class _PasswordBlock extends StatelessWidget {
-  const _PasswordBlock(this.area);
+/// The password field with its show button and the "记住密码" check box
+/// (`.xpw`), as [LgExitPasswordArea] describes them.
+class LgExitPasswordBlock extends StatelessWidget {
+  const LgExitPasswordBlock(this.area, {super.key});
 
   final LgExitPasswordArea area;
 
@@ -556,8 +600,10 @@ class _PasswordBlock extends StatelessWidget {
   }
 }
 
-class _CodeBlock extends StatelessWidget {
-  const _CodeBlock(this.area);
+/// The code boxes and the "信任本机" check box, as [LgExitCodeArea] describes
+/// them.
+class LgExitCodeBlock extends StatelessWidget {
+  const LgExitCodeBlock(this.area, {super.key});
 
   final LgExitCodeArea area;
 
@@ -594,8 +640,8 @@ class _CodeBlock extends StatelessWidget {
 }
 
 /// `.xa`: the address on the page background, the copy button at its end.
-class _AddressRow extends StatelessWidget {
-  const _AddressRow(this.address);
+class LgExitAddressRow extends StatelessWidget {
+  const LgExitAddressRow(this.address, {super.key});
 
   final LgExitAddress address;
 
@@ -645,8 +691,12 @@ class _AddressRow extends StatelessWidget {
 /// `.xf`: text buttons at the left, the card's main buttons at the right. The
 /// first text button stands 8 px out, so that its icon lines up with the text
 /// above (the mockup's negative margin).
-class _ActionRow extends StatelessWidget {
-  const _ActionRow({required this.leading, required this.trailing});
+class LgExitActionRow extends StatelessWidget {
+  const LgExitActionRow({
+    super.key,
+    this.leading = const [],
+    this.trailing = const [],
+  });
 
   final List<LgExitAction> leading;
   final List<LgExitAction> trailing;
@@ -665,6 +715,7 @@ class _ActionRow extends StatelessWidget {
       expanded: a.expanded,
       horizontalPadding: leading ? LgSpace.s2 : null,
       focusNode: a.focusNode,
+      autofocus: a.autofocus,
       onPressed: a.onPressed,
     );
   }
@@ -694,8 +745,10 @@ class _ActionRow extends StatelessWidget {
   }
 }
 
-class _PortEditBlock extends StatelessWidget {
-  const _PortEditBlock(this.edit);
+/// The port edited in place: the field, "确定" and "取消", and under them the
+/// error or the hint (see [LgExitPortEdit]).
+class LgExitPortEditBlock extends StatelessWidget {
+  const LgExitPortEditBlock(this.edit, {super.key});
 
   final LgExitPortEdit edit;
 
@@ -760,8 +813,8 @@ class _PortEditBlock extends StatelessWidget {
 
 /// Opens and closes the unfolded help (the gap above it included) in 160 ms,
 /// without motion when the system asks for none.
-class _Reveal extends StatelessWidget {
-  const _Reveal({required this.child});
+class LgExitReveal extends StatelessWidget {
+  const LgExitReveal({super.key, required this.child});
 
   final Widget? child;
 
@@ -789,8 +842,8 @@ const _monoFallback = ['Cascadia Mono', 'Courier New'];
 /// `.xhelp`: the browser setup help on the page background, a bold title and a
 /// bullet list. Everything in it can be selected; the start parameter is set
 /// in a monospace face.
-class _HelpBlock extends StatelessWidget {
-  const _HelpBlock(this.help);
+class LgExitHelpBlock extends StatelessWidget {
+  const LgExitHelpBlock(this.help, {super.key});
 
   final LgExitHelp help;
 
