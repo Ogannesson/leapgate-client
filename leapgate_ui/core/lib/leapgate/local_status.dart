@@ -171,8 +171,14 @@ class LocalStatusModel extends ChangeNotifier {
     notifyListeners();
     InstallFailure failure;
     try {
-      final answer = jsonDecode(await lgBind.leapgateInstall(kind: card.name))
-          as Map<String, dynamic>;
+      // M8's options (M9a's install page passes its own; this branch has the M9a export).
+      final answer = jsonDecode(await lgBind.leapgateInstall(
+        kind: card.name,
+        path: '',
+        startMenu: true,
+        desktopShortcut: true,
+        printer: false,
+      )) as Map<String, dynamic>;
       failure = InstallFailure(
         card: card,
         uacDenied: answer['result'] == 'uac_denied',

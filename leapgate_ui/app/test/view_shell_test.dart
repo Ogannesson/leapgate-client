@@ -5,6 +5,7 @@ import 'package:flutter_hbb/leapgate/camera_names.dart';
 import 'package:flutter_hbb/leapgate/recent_peers.dart' show PeerCategory;
 import 'package:flutter_hbb/leapgate/session.dart';
 import 'package:flutter_hbb/models/peer_model.dart';
+import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/models/state_model.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:leapgate_ui/l10n/app_localizations.dart';
@@ -19,12 +20,18 @@ import 'package:leapgate_ui/shell/tab_shortcuts.dart';
 import 'package:leapgate_ui/theme/lg_theme.dart';
 import 'package:leapgate_ui/theme/lg_tokens.dart';
 import 'package:leapgate_ui/widgets/lg_device.dart';
+import 'package:leapgate_ui/widgets/lg_feedback.dart';
 import 'package:leapgate_ui/widgets/lg_menu.dart';
 import 'package:leapgate_ui/widgets/lg_session_toolbar.dart';
 import 'package:leapgate_ui/widgets/lg_title_bar.dart';
 
+import '../../core/test/terminal_fakes.dart' show TerminalBindCalls;
 import 'home_fakes.dart' show FakeNavigation;
 import 'session_fakes.dart';
+
+/// The app's fakes with the terminal's calls (`FFI.start` sets `IS_TERMINAL_ADMIN`, a terminal
+/// view opens its terminals).
+class _TerminalBind extends AppFakeBind with TerminalBindCalls {}
 
 /// [child] in Chinese, light, compact.
 Widget _app(Widget child) => MaterialApp(
@@ -44,11 +51,15 @@ const _id = '100200300';
 
 void main() {
   late AppFakes fakes;
+  final realDisplayNames = sessionDisplayNames;
 
-  setUp(() => fakes = installAppFakes());
-  tearDown(
-    () => sessionDisplayNames = (_) => throw UnimplementedError('TODO(M9 整合)'),
-  );
+  setUp(() {
+    final app = installAppFakes();
+    final bind = _TerminalBind();
+    platformFFI.setBindingForTesting(bind);
+    fakes = (bind: bind, lg: app.lg, window: app.window);
+  });
+  tearDown(() => sessionDisplayNames = realDisplayNames);
 
   Future<FFI> open(
     WidgetTester tester,
@@ -250,8 +261,65 @@ void main() {
           tester.widget<TabShortcuts>(find.byType(TabShortcuts)).onCloseTab,
           isNotNull,
         );
-        // The tab of the terminal alone closing through its "断开" (R3-Q15) is tested once the
-        // terminal view asks (`LEAPGATE.md` §10.18, integration).
+      },
+    );
+
+    /// The terminal view of [_id] with [count] terminals, in a background tab: the remote
+    /// desktop of another device is opened after it and selected.
+    Future<FFI> backgroundTerminal(WidgetTester tester, int count) async {
+      await pumpMainWindow(tester);
+      final terminal = await open(tester, ConnType.terminal);
+      await ready(tester, terminal, platform: 'Linux');
+      for (var i = 1; i < count; i++) {
+        terminal.terminals!.add();
+      }
+      await tester.pump();
+      expect(terminal.terminals!.terminals, hasLength(count));
+      await ready(
+        tester,
+        await open(tester, ConnType.defaultConn, id: '100200301'),
+      );
+      expect(titleBar(tester).selected, 2);
+      return terminal;
+    }
+
+    testMainWindow(
+      'a background tab of the terminal alone, two terminals not kept: "×" selects it and '
+      'asks as its "断开" (R3-Q15)',
+      (tester) async {
+        final terminal = await backgroundTerminal(tester, 2);
+        expect(terminal.terminals!.needsDisconnectConfirm, true);
+        titleBar(tester).onCloseTab(1);
+        await tester.pump();
+        await tester.pump();
+        expect(titleBar(tester).selected, 1);
+        expect(find.text('断开终端？'), findsOneWidget);
+        await tester.tap(
+          find.descendant(
+            of: find.byType(LgConfirmDialog),
+            matching: find.text('断开'),
+          ),
+        );
+        await tester.pump();
+        await tester.pump();
+        expect(appCore.sessions.sessionsOf(_id), isEmpty);
+      },
+    );
+
+    testMainWindow(
+      'a background tab of the terminal alone that does not ask: "×" closes it where it is, '
+      'the selected tab stays',
+      (tester) async {
+        await backgroundTerminal(tester, 1);
+        titleBar(tester).onCloseTab(1);
+        await tester.pump();
+        await tester.pump();
+        expect(appCore.sessions.sessionsOf(_id), isEmpty);
+        expect(find.text('断开终端？'), findsNothing);
+        // Selecting it first would have left the home page selected once it closed.
+        expect(titleBar(tester).selected, 1);
+        expect(titleBar(tester).sessions, hasLength(1));
+        expect(appCore.sessions.devices, ['100200301']);
       },
     );
   });

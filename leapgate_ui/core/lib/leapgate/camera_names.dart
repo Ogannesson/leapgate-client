@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import '../common.dart' show SessionID;
+import 'bridge.dart';
 import 'session.dart';
 
 // The names of a camera session's cameras (13 §3.2 block B, R3-Q18; `LEAPGATE.md` §10.18): the
@@ -9,10 +10,8 @@ import 'session.dart';
 
 /// `leapgate_session_display_names`: a JSON array of strings, the names in the order of the
 /// numbers, `[]` without a session or before the login. Tests set a fake.
-// TODO(M9 整合): `lgBind.leapgateSessionDisplayNames(sessionId: sessionId)` once the bridge is
-// regenerated.
 String Function(SessionID sessionId) sessionDisplayNames =
-    (_) => throw UnimplementedError('TODO(M9 整合)');
+    (id) => lgBind.leapgateSessionDisplayNames(sessionId: id);
 
 /// Read once per first display object, which each peer info makes anew; switching cameras may
 /// make a new one too and read again.

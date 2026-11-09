@@ -121,10 +121,11 @@ Future<void> closeSessionTab(TabOverlays overlays, String device,
   final unfinished = unfinishedTransfers(views);
   final confirm = views.length > 1 &&
       appCore.options.local.getBool(kOptionEnableConfirmClosingTabs);
-  // Whether the terminal asks is the terminal view's ([disconnectTerminalView]).
-  // TODO(M9 整合): skip [show] when it will not ask, once `TerminalTabs` says so.
-  final terminal =
-      views.length == 1 && views.single.connType == ConnType.terminal;
+  // Whether the terminal asks is the terminal view's ([disconnectTerminalView]): the tab is
+  // selected only when it will ask, otherwise it closes where it is.
+  final terminal = views.length == 1 &&
+      views.single.connType == ConnType.terminal &&
+      views.single.terminals?.needsDisconnectConfirm == true;
   if (!confirm && unfinished == 0 && !terminal) {
     return appCore.sessions.closeDevice(device);
   }

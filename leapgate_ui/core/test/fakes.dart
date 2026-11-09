@@ -198,7 +198,13 @@ class FakeLeapgate implements lg.Leapgate {
   Completer<String> installAnswer = Completer();
 
   @override
-  Future<String> leapgateInstall({required String kind, dynamic hint}) {
+  Future<String> leapgateInstall(
+      {required String kind,
+      required String path,
+      required bool startMenu,
+      required bool desktopShortcut,
+      required bool printer,
+      dynamic hint}) {
     installs.add(kind);
     return installAnswer.future;
   }
