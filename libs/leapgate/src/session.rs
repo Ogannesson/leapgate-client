@@ -229,6 +229,24 @@ pub fn connection(id: &str, conn_type: i32, alive: impl Fn(&str, i32) -> bool) -
         .unwrap_or_default()
 }
 
+/// At most this many characters of a name the peer gave are kept.
+const MAX_NAME_CHARS: usize = 64;
+
+/// The names of the peer's displays (its cameras in a camera session), in display order, as a
+/// JSON array of strings (M9b). They come from the peer: control characters go and each is cut.
+pub fn display_names<'a>(names: impl IntoIterator<Item = &'a str>) -> String {
+    let names: Vec<String> = names
+        .into_iter()
+        .map(|name| {
+            name.chars()
+                .filter(|c| !c.is_control())
+                .take(MAX_NAME_CHARS)
+                .collect()
+        })
+        .collect();
+    hbb_common::serde_json::to_string(&names).unwrap_or_else(|_| "[]".to_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -436,5 +454,14 @@ mod tests {
             Connection::default(),
             "reconnecting"
         );
+    }
+
+    #[test]
+    fn display_names_lose_control_characters_and_are_cut() {
+        let long = "摄".repeat(MAX_NAME_CHARS + 3);
+        let names = display_names(["HD Webcam", "Cam\u{0}\r\n 2", &long]);
+        let names: Vec<String> = hbb_common::serde_json::from_str(&names).unwrap();
+        assert_eq!(names, ["HD Webcam", "Cam 2", &"摄".repeat(MAX_NAME_CHARS)]);
+        assert_eq!(display_names([]), "[]");
     }
 }
