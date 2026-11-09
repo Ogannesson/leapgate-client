@@ -60,6 +60,24 @@ pub enum Reason {
     },
     ExitBlocked,
     ExitFakeIpLiteral,
+    /// The peer has no terminal (M9b).
+    TerminalUnsupported,
+    /// The administrator terminal's Windows account was refused.
+    OsLoginFailed,
+    NoConsoleUser,
+    /// The administrator terminal's login is blocked for `seconds` after wrong attempts.
+    OsLoginBackoff {
+        seconds: u32,
+    },
+    NoCameras,
+    CameraUnsupported,
+    /// The peer cannot reach a tunnel's target (M9c), as the peer wrote it.
+    TunnelUnreachable {
+        target: String,
+    },
+    TunnelTooManyChannels,
+    /// A tunnel row's insecure-connection prompt was answered "断开". Rust's own, not matched.
+    InsecureDeclined,
     /// Not recognized: the UI shows the original text.
     Other,
 }
@@ -144,6 +162,21 @@ fn match_reason(msgtype: &str, title: &str, text: &str) -> Reason {
     {
         return LocalPortInUse { port };
     }
+    if let Some(seconds) = text
+        .strip_prefix("Please try again in ")
+        .and_then(|rest| {
+            rest.strip_suffix(" seconds.")
+                .or_else(|| rest.strip_suffix(" second."))
+        })
+        .and_then(|seconds| seconds.parse().ok())
+    {
+        return OsLoginBackoff { seconds };
+    }
+    if let Some(target) = unreachable_target(text) {
+        return TunnelUnreachable {
+            target: target.to_owned(),
+        };
+    }
     match text {
         "ID does not exist" => IdNotExist,
         "Remote desktop is offline" => PeerOffline,
@@ -183,8 +216,22 @@ fn match_reason(msgtype: &str, title: &str, text: &str) -> Reason {
         exit::MSG_NEED_ENCRYPTION => ExitNeedEncryption,
         exit::MSG_BLOCKED => ExitBlocked,
         exit::MSG_FAKE_IP_LITERAL => ExitFakeIpLiteral,
+        "Remote terminal is not supported by the remote side" => TerminalUnsupported,
+        "Incorrect username or password." => OsLoginFailed,
+        "No active console user logged on, please connect and logon first." => NoConsoleUser,
+        "No cameras" => NoCameras,
+        "view_camera_unsupported_tip" => CameraUnsupported,
+        "Too many port forward channels" => TunnelTooManyChannels,
         _ => Other,
     }
+}
+
+/// The target in the peer's "cannot reach it" text, a refused channel's or a raw pipe's login
+/// error.
+pub(crate) fn unreachable_target(text: &str) -> Option<&str> {
+    text.strip_prefix("Failed to access remote ")?
+        .split_once(". Please make sure")
+        .map(|(target, _)| target)
 }
 
 #[cfg(test)]
@@ -402,6 +449,74 @@ mod tests {
                 ),
                 LocalPortInUse { port: 1080 },
             ),
+            // M9b, line numbers as of leapgate-client `f2168b917`.
+            // io_loop.rs:1539 `check_terminal_support`, a peer that reports no terminal
+            (
+                (
+                    "error",
+                    "Error",
+                    "Remote terminal is not supported by the remote side",
+                ),
+                TerminalUnsupported,
+            ),
+            // connection.rs:213 TERMINAL_OS_LOGIN_FAILED_MSG, client.rs `handle_login_error`
+            (
+                ("error", "Login Error", "Incorrect username or password."),
+                OsLoginFailed,
+            ),
+            // connection.rs:3029/4170; ui_session_interface.rs:1835
+            (
+                (
+                    "error",
+                    "Login Error",
+                    "No active console user logged on, please connect and logon first.",
+                ),
+                NoConsoleUser,
+            ),
+            // login_failure_check.rs:133 `check_failure`
+            (
+                ("error", "Login Error", "Please try again in 1 second."),
+                OsLoginBackoff { seconds: 1 },
+            ),
+            (
+                ("error", "Login Error", "Please try again in 45 seconds."),
+                OsLoginBackoff { seconds: 45 },
+            ),
+            // ui_session_interface.rs:1843 `handle_peer_info`
+            (("error", "Error", "No cameras"), NoCameras),
+            // io_loop.rs:1521 `check_view_camera_support`
+            (
+                ("error", "Error", "view_camera_unsupported_tip"),
+                CameraUnsupported,
+            ),
+            // M9c. server/port_forward_mux.rs:282 `unreachable_message`, a refused channel shown
+            // by port_forward_mux.rs:731 `tunnel_loop`; connection.rs:1839/1851, a raw pipe's
+            // login. Both write "RDP" for an RDP target.
+            (
+                (
+                    "error",
+                    "Error",
+                    "Failed to access remote 192.0.2.10:8080. Please make sure it is reachable/open.",
+                ),
+                TunnelUnreachable {
+                    target: "192.0.2.10:8080".to_owned(),
+                },
+            ),
+            (
+                (
+                    "error",
+                    "Login Error",
+                    "Failed to access remote RDP. Please make sure it is reachable/open.",
+                ),
+                TunnelUnreachable {
+                    target: "RDP".to_owned(),
+                },
+            ),
+            // server/port_forward_mux.rs:123 `on_open`
+            (
+                ("error", "Error", "Too many port forward channels"),
+                TunnelTooManyChannels,
+            ),
         ];
         for ((msgtype, title, text), expected) in cases {
             assert_eq!(classify(msgtype, title, text), expected, "{text}");
@@ -417,10 +532,10 @@ mod tests {
                 "Connection Error",
                 "Your account is not allowed here",
             ),
-            // io_loop.rs:1513 `check_view_camera_support`
-            ("error", "Error", "view_camera_unsupported_tip"),
-            // ui_session_interface.rs:1847 `handle_peer_info`
-            ("error", "Error", "No cameras"),
+            // a backoff whose seconds do not parse
+            ("error", "Login Error", "Please try again in a while."),
+            // server/port_forward_mux.rs:147 `on_open` (13 §1.3: should not happen)
+            ("error", "Error", "Port forward target not authorized"),
             // a port that does not parse
             ("error", "Error", "Failed to listen on 70000: invalid port"),
             // MSG_NEED_MUX never reaches a Leapgate controller (01 §4.3)
@@ -459,5 +574,16 @@ mod tests {
             json(&LocalPortInUse { port: 1080 }),
             r#"{"code":"local_port_in_use","port":1080}"#
         );
+        assert_eq!(
+            json(&OsLoginBackoff { seconds: 45 }),
+            r#"{"code":"os_login_backoff","seconds":45}"#
+        );
+        assert_eq!(
+            json(&TunnelUnreachable {
+                target: "192.0.2.10:8080".to_owned()
+            }),
+            r#"{"code":"tunnel_unreachable","target":"192.0.2.10:8080"}"#
+        );
+        assert_eq!(json(&InsecureDeclined), r#"{"code":"insecure_declined"}"#);
     }
 }

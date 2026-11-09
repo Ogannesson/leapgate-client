@@ -24,5 +24,6 @@ pub mod server_info;
 pub mod session;
 pub mod settings;
 pub mod sign;
+pub mod tunnel;
 pub mod ui;
 pub mod update;

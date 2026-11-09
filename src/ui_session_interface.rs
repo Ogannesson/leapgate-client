@@ -1986,6 +1986,8 @@ pub async fn io_loop<T: InvokeUiSession>(handler: Session<T>, round: u32) {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     if handler.is_port_forward() {
         handler.lc.write().unwrap().port_forward_mux = crate::port_forward::mux_enabled();
+        // leapgate: a new UI tunnel card runs its own loop (LEAPGATE.md §10.18)
+        if let Some(card) = crate::leapgate_hooks::tunnel::take(&handler) { return crate::leapgate_hooks::tunnel::run(handler, card, receiver, &key, &token).await; }
         if handler.is_rdp() {
             let port = handler
                 .get_option("rdp_port".to_owned())

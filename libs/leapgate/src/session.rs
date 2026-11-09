@@ -229,6 +229,31 @@ pub fn connection(id: &str, conn_type: i32, alive: impl Fn(&str, i32) -> bool) -
         .unwrap_or_default()
 }
 
+/// At most this many characters of a name the peer gave are kept.
+const MAX_NAME_CHARS: usize = 64;
+
+/// The names of the peer's displays (its cameras in a camera session), in display order, as a
+/// JSON array of strings (M9b). They come from the peer: control characters and bidirectional
+/// formatting characters (which could reorder the text around them) go, and each is cut.
+pub fn display_names<'a>(names: impl IntoIterator<Item = &'a str>) -> String {
+    let bidi = |c: char| {
+        matches!(
+            c,
+            '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}'
+        )
+    };
+    let names: Vec<String> = names
+        .into_iter()
+        .map(|name| {
+            name.chars()
+                .filter(|&c| !c.is_control() && !bidi(c))
+                .take(MAX_NAME_CHARS)
+                .collect()
+        })
+        .collect();
+    hbb_common::serde_json::to_string(&names).unwrap_or_else(|_| "[]".to_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -436,5 +461,18 @@ mod tests {
             Connection::default(),
             "reconnecting"
         );
+    }
+
+    #[test]
+    fn display_names_lose_control_characters_and_are_cut() {
+        let long = "摄".repeat(MAX_NAME_CHARS + 3);
+        let spoofed = "Cam\u{202E}3pm.exe\u{202C}\u{2066}\u{200F}";
+        let names = display_names(["HD Webcam", "Cam\u{0}\r\n 2", &long, spoofed]);
+        let names: Vec<String> = hbb_common::serde_json::from_str(&names).unwrap();
+        assert_eq!(
+            names,
+            ["HD Webcam", "Cam 2", &"摄".repeat(MAX_NAME_CHARS), "Cam3pm.exe"]
+        );
+        assert_eq!(display_names([]), "[]");
     }
 }
