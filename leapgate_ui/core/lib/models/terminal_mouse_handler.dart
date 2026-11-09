@@ -1,4 +1,4 @@
-// 上游：flutter/lib/models/terminal_mouse_handler.dart@bd9262397（改写，不格式化：TerminalMouseInteraction 加 theme 参数传给 TerminalView，新界面的终端配色从这里进去；其余原样）
+// 上游：flutter/lib/models/terminal_mouse_handler.dart@bd9262397（改写，不格式化：TerminalMouseInteraction 加 theme 参数传给 TerminalView，新界面的终端配色从这里进去；加 scrollbar 参数，用内部的滚动控制器包上新界面的滚动条；其余原样）
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -31,6 +31,7 @@ class TerminalMouseInteraction extends StatefulWidget {
     this.backgroundOpacity = 1,
     this.padding,
     this.onSecondaryTapDown,
+    this.scrollbar,
   });
 
   final Terminal terminal;
@@ -46,6 +47,7 @@ class TerminalMouseInteraction extends StatefulWidget {
   final double backgroundOpacity;
   final EdgeInsets? padding;
   final void Function(TapDownDetails, CellOffset)? onSecondaryTapDown;
+  final Widget Function(ScrollController controller, Widget child)? scrollbar;
 
   @override
   State<TerminalMouseInteraction> createState() =>
@@ -267,7 +269,8 @@ class _TerminalMouseInteractionState extends State<TerminalMouseInteraction> {
 
   @override
   Widget build(BuildContext context) {
-    return Listener(
+    final scrollbar = widget.scrollbar;
+    final view = Listener(
       onPointerDown: _handlePointerDown,
       onPointerMove: _handlePointerMove,
       onPointerUp: _handlePointerEnd,
@@ -295,5 +298,6 @@ class _TerminalMouseInteractionState extends State<TerminalMouseInteraction> {
         onSecondaryTapDown: widget.onSecondaryTapDown,
       ),
     );
+    return scrollbar == null ? view : scrollbar(_scrollController, view);
   }
 }
