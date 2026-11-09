@@ -14,6 +14,10 @@ mixin TerminalBindCalls on FakeBind {
   /// The session toggle options by name ("terminal-persistent").
   final toggles = <String, bool>{};
 
+  /// `isDisableSettings`, `mainIsOptionFixed`: settings hidden, an option fixed.
+  var settingsDisabled = false;
+  var optionFixed = false;
+
   @override
   dynamic noSuchMethod(Invocation invocation) {
     final args = invocation.namedArguments;
@@ -28,8 +32,9 @@ mixin TerminalBindCalls on FakeBind {
         calls.add(invocation);
         return null;
       case #isDisableSettings:
+        return settingsDisabled;
       case #mainIsOptionFixed:
-        return false;
+        return optionFixed;
       case #sessionGetToggleOptionSync:
         return toggles[args[#arg]] ?? false;
       case #sessionToggleOption:
@@ -89,11 +94,13 @@ Future<void> terminalOpened(FFI ffi, int id,
       if (persistent.isNotEmpty) 'persistent_sessions': persistent,
     });
 
-/// The system clipboard: what was written, or a failure for every write.
+/// The system clipboard: what was written, or a failure for every write; [content] is what a
+/// read gets.
 class FakeClipboard {
-  FakeClipboard({this.fail = false}) {
+  FakeClipboard({this.fail = false, this.content}) {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == 'Clipboard.getData') return {'text': content};
       if (call.method != 'Clipboard.setData') return null;
       if (fail) throw PlatformException(code: 'clipboard');
       written.add((call.arguments as Map)['text'] as String);
@@ -102,6 +109,7 @@ class FakeClipboard {
   }
 
   final bool fail;
+  final String? content;
   final written = <String>[];
 }
 

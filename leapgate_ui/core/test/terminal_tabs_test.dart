@@ -48,6 +48,9 @@ Future<String> _text(WidgetTester tester, TerminalModel m) async {
 void main() {
   test('the administrator flag is set just before the session is added', () {
     final bind = installTerminalFakes();
+    // Another kind never sets it: Rust clears it only for a terminal session.
+    appCore.sessions
+        .open('700800900', ConnType.fileTransfer, terminalAdmin: true);
     appCore.sessions.open('400500600', ConnType.terminal, terminalAdmin: true);
     appCore.sessions.open(_id, ConnType.terminal);
 
@@ -56,7 +59,8 @@ void main() {
         if (c.memberName == #mainSetEnv || c.memberName == #sessionAddSync)
           c.memberName
     ];
-    expect(names, [#mainSetEnv, #sessionAddSync, #sessionAddSync]);
+    expect(names,
+        [#sessionAddSync, #mainSetEnv, #sessionAddSync, #sessionAddSync]);
     final env = bind.callsTo(#mainSetEnv).single.namedArguments;
     expect([env[#key], env[#value]], ['IS_TERMINAL_ADMIN', 'Y']);
   });
@@ -68,6 +72,11 @@ void main() {
     tabs.add();
     expect(tabs.terminals, isEmpty);
     expect(tabs.canAdd, isFalse);
+    // Connected, and the first terminal not made yet: "+" would ask for terminal 1 twice.
+    ffi.connection.onPeerInfo();
+    expect(tabs.canAdd, isFalse);
+    tabs.add();
+    expect(bind.callsTo(#sessionOpenTerminal), isEmpty);
 
     await ffi.events.dispatch({..._peerInfo});
     expect(tabs.canAdd, isTrue);
@@ -180,14 +189,21 @@ void main() {
 
   group('clipboard write requests', () {
     Future<
-        ({
-          FFI ffi,
-          TerminalTabs tabs,
-          TerminalFakeBind bind,
-          TerminalModel m
-        })> request(String setting, {bool remoteClipboard = true}) async {
+            ({
+              FFI ffi,
+              TerminalTabs tabs,
+              TerminalFakeBind bind,
+              TerminalModel m
+            })>
+        request(String setting,
+            {bool remoteClipboard = true,
+            bool settingsDisabled = false,
+            bool optionFixed = false}) async {
       final t = await _connected();
       t.bind.local[kOptionAllowTerminalClipboardWrite] = setting;
+      t.bind
+        ..settingsDisabled = settingsDisabled
+        ..optionFixed = optionFixed;
       t.ffi.ffiModel.setPermissions({'clipboard': remoteClipboard});
       // Made after the setting, as upstream decides per tab whether it may ask.
       t.tabs.add();
@@ -203,6 +219,20 @@ void main() {
       final r = await request(kTerminalClipboardWriteUnconfigured,
           remoteClipboard: false);
       expect(r.tabs.clipboardRequest, isNull);
+      expect(clipboard.written, isEmpty);
+    });
+
+    test('"ask" with the settings locked is a silent "deny"', () async {
+      final clipboard = FakeClipboard();
+      for (final locked in [
+        (settingsDisabled: true, optionFixed: false),
+        (settingsDisabled: false, optionFixed: true),
+      ]) {
+        final r = await request(kTerminalClipboardWriteUnconfigured,
+            settingsDisabled: locked.settingsDisabled,
+            optionFixed: locked.optionFixed);
+        expect(r.tabs.clipboardRequest, isNull, reason: '$locked');
+      }
       expect(clipboard.written, isEmpty);
     });
 

@@ -21,8 +21,10 @@ import '../../widgets/lg_feedback.dart';
 import '../../widgets/lg_menu.dart';
 import '../session/connection_panel.dart';
 
-// TODO(M9 整合): the designer's terminal colours (`--lg-term-*`); the copied
-// `TerminalMouseInteraction` takes no theme, so the terminal shows xterm's default dark one.
+/// The terminal's colours, fixed dark and opaque whatever the UI theme (R3-Q14).
+// TODO(M9 整合): the designer's terminal colours (`--lg-term-*`); this placeholder is xterm's
+// default dark theme.
+const kTerminalTheme = TerminalThemes.defaultTheme;
 
 /// The terminal font: Cascadia Mono, else Consolas, at xterm's 13 and 1.2 (13 §2.2.2 block C).
 const kTerminalTextStyle = TerminalStyle(
@@ -32,6 +34,7 @@ const kTerminalTextStyle = TerminalStyle(
 
 /// The terminal's dim foreground for the lines it writes about itself, as a 24-bit SGR colour
 /// (not the 16 colours' bright black).
+// TODO(M9 整合): the dim foreground ("次要前景") of the designer's terminal colours, for #9A9A9A.
 const _kNoteColor = '\x1b[38;2;154;154;154m';
 const _kSgrReset = '\x1b[0m';
 
@@ -131,7 +134,10 @@ class _TerminalViewPageState extends State<TerminalViewPage> {
 
   /// The terminal's own keys and the session shortcuts, before xterm (13 §2.2.4).
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    if (event is KeyUpEvent) return KeyEventResult.ignored;
+    // A held key repeats: the repeats are stopped as the first press was, and do nothing more
+    // (held Alt+→ would send `ESC[1;3C` to the remote terminal).
+    final repeat = event is KeyRepeatEvent;
     final k = HardwareKeyboard.instance;
     // The tab switch and "关闭标签" belong to the window (`TabShortcuts`, a late handler): xterm
     // must not see them, and nothing in between may handle them. `ignored` would let xterm send
@@ -152,31 +158,29 @@ class _TerminalViewPageState extends State<TerminalViewPage> {
     final tabs = _tabs;
     if (k.isControlPressed && k.isShiftPressed) {
       if (key == LogicalKeyboardKey.keyT) {
-        tabs.add();
+        if (!repeat) tabs.add();
         return KeyEventResult.handled;
       }
       final current = tabs.current;
-      // With one terminal it goes on to the remote terminal, as upstream's.
-      if (key == LogicalKeyboardKey.keyW &&
-          current != null &&
-          tabs.terminals.length > 1) {
-        _close(current);
+      if (key == LogicalKeyboardKey.keyW && current != null) {
+        // With one terminal it does nothing: neither the remote terminal nor the view gets it.
+        if (!repeat && tabs.terminals.length > 1) _close(current);
         return KeyEventResult.handled;
       }
     }
     if (k.isAltPressed) {
       if (key == LogicalKeyboardKey.arrowLeft) {
-        tabs.select(tabs.selected - 1);
+        if (!repeat) tabs.select(tabs.selected - 1);
         return KeyEventResult.handled;
       }
       if (key == LogicalKeyboardKey.arrowRight) {
-        tabs.select(tabs.selected + 1);
+        if (!repeat) tabs.select(tabs.selected + 1);
         return KeyEventResult.handled;
       }
     }
     final digit = _digits.indexOf(key);
     if (k.isControlPressed && digit >= 0 && digit < tabs.terminals.length) {
-      tabs.select(digit);
+      if (!repeat) tabs.select(digit);
       return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;
@@ -548,6 +552,7 @@ class _TerminalPaneState extends State<_TerminalPane> {
       widget.model.terminal,
       controller: widget.model.terminalController,
       focusNode: _focus,
+      theme: kTerminalTheme,
       textStyle: kTerminalTextStyle,
       padding: _paddingFor(constraints.maxHeight),
       shortcuts: _shortcuts,

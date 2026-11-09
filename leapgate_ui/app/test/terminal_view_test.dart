@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/consts.dart';
@@ -15,6 +16,7 @@ import 'package:leapgate_ui/theme/lg_tokens.dart';
 import 'package:leapgate_ui/widgets/lg_button.dart';
 import 'package:leapgate_ui/widgets/lg_feedback.dart';
 import 'package:leapgate_ui/widgets/lg_menu.dart';
+import 'package:xterm/xterm.dart';
 
 import '../../core/test/terminal_fakes.dart';
 import 'session_fakes.dart';
@@ -32,9 +34,20 @@ class _View {
   var disconnects = 0;
   var nextTabs = 0;
 
-  List<String> get sent => [
+  /// The view is the shown one of the selected tab.
+  final active = ValueNotifier(true);
+
+  /// Keys that went on past the terminal view.
+  final passedOn = <LogicalKeyboardKey>[];
+
+  List<String> get sent => [for (final s in sentTo) s.data];
+
+  List<({int terminal, String data})> get sentTo => [
     for (final c in bind.callsTo(#sessionSendTerminalInput))
-      c.namedArguments[#data] as String,
+      (
+        terminal: c.namedArguments[#terminalId] as int,
+        data: c.namedArguments[#data] as String,
+      ),
   ];
 }
 
@@ -62,13 +75,23 @@ Future<_View> _pump(WidgetTester tester, {bool connected = true}) async {
         body: TabShortcuts(
           onNext: () => v.nextTabs++,
           onPrevious: () {},
-          child: TerminalViewPage(
-            ffi: ffi,
-            active: true,
-            lastView: true,
-            viewSwitch: const Text('视图切换'),
-            route: const Text('直连'),
-            onDisconnect: () => v.disconnects++,
+          // What neither the terminal view nor xterm took goes on up from here.
+          child: Focus(
+            onKeyEvent: (node, event) {
+              if (event is KeyDownEvent) v.passedOn.add(event.logicalKey);
+              return KeyEventResult.ignored;
+            },
+            child: ValueListenableBuilder(
+              valueListenable: v.active,
+              builder: (context, active, _) => TerminalViewPage(
+                ffi: ffi,
+                active: active,
+                lastView: true,
+                viewSwitch: const Text('视图切换'),
+                route: const Text('直连'),
+                onDisconnect: () => v.disconnects++,
+              ),
+            ),
           ),
         ),
       ),
@@ -172,6 +195,93 @@ void main() {
     await _keys(tester, LogicalKeyboardKey.keyA, held: [_ctrl, _shift]);
     expect(v.sent, ['\x01']);
     expect(v.ffi.terminals!.current!.terminalController.selection, isNotNull);
+  });
+
+  testWidgets('Ctrl+Shift+W with one terminal does nothing', (tester) async {
+    final v = await _pump(tester);
+    await _opened(tester, v, 1);
+    await _keys(tester, LogicalKeyboardKey.keyW, held: [_ctrl, _shift]);
+    expect(v.sent, isEmpty);
+    expect(v.passedOn, isNot(contains(LogicalKeyboardKey.keyW)));
+    expect(v.disconnects, 0);
+    expect(v.ffi.terminals!.terminals, hasLength(1));
+  });
+
+  testWidgets('a held Alt+→ switches once and sends nothing', (tester) async {
+    final v = await _pump(tester);
+    v.ffi.terminals!
+      ..add()
+      ..add()
+      ..select(0);
+    await tester.pump();
+    for (final id in [1, 2, 3]) {
+      await _opened(tester, v, id);
+    }
+    await tester.sendKeyDownEvent(_alt);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowRight);
+    await tester.sendKeyRepeatEvent(LogicalKeyboardKey.arrowRight);
+    await tester.sendKeyRepeatEvent(LogicalKeyboardKey.arrowRight);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowRight);
+    await tester.sendKeyUpEvent(_alt);
+    await tester.pump();
+    expect(v.ffi.terminals!.selected, 1);
+    expect(v.sent, isEmpty);
+  });
+
+  testWidgets('only the selected terminal of the shown view gets the keys', (
+    tester,
+  ) async {
+    final v = await _pump(tester);
+    v.ffi.terminals!.add();
+    await tester.pump();
+    await _opened(tester, v, 1);
+    await _opened(tester, v, 2);
+    await _keys(tester, LogicalKeyboardKey.keyA, held: [_ctrl]);
+    await _keys(tester, LogicalKeyboardKey.digit1, held: [_ctrl]);
+    await _keys(tester, LogicalKeyboardKey.keyA, held: [_ctrl]);
+    expect(v.sentTo, [
+      (terminal: 2, data: '\x01'),
+      (terminal: 1, data: '\x01'),
+    ]);
+
+    v.active.value = false;
+    await tester.pump();
+    await _keys(tester, LogicalKeyboardKey.keyA, held: [_ctrl]);
+    expect(v.sentTo, hasLength(2));
+  });
+
+  testWidgets('right click copies a selection or pastes; Ctrl+C copies it', (
+    tester,
+  ) async {
+    final clipboard = FakeClipboard(content: 'uptime');
+    final v = await _pump(tester);
+    await _opened(tester, v, 1);
+    final m = v.ffi.terminals!.current!;
+    m.terminal.write('backup  media  scripts');
+    await tester.pump();
+    Future<void> rightClick() async {
+      await tester.tapAt(
+        tester.getCenter(find.byType(TerminalView)),
+        buttons: kSecondaryMouseButton,
+      );
+      for (var i = 0; i < 3; i++) {
+        await tester.pump();
+      }
+    }
+
+    await _keys(tester, LogicalKeyboardKey.keyA, held: [_ctrl, _shift]);
+    await _keys(tester, LogicalKeyboardKey.keyC, held: [_ctrl]);
+    expect(clipboard.written.single, contains('backup  media  scripts'));
+    expect(v.sent, isEmpty);
+    expect(m.terminalController.selection, isNotNull);
+
+    await rightClick();
+    expect(clipboard.written, hasLength(2));
+    expect(m.terminalController.selection, isNull);
+
+    await rightClick();
+    expect(v.sent.join(), contains('uptime'));
+    expect(clipboard.written, hasLength(2));
   });
 
   testWidgets('the session shortcuts reach the window, not the terminal', (

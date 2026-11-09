@@ -39,8 +39,10 @@ class TerminalTabs extends ChangeNotifier {
   TerminalModel? get current =>
       _terminals.isEmpty ? null : _terminals[_selected];
 
-  /// "+", "新建终端" and Ctrl+Shift+T work only while connected (13 §2.2.2 block B).
-  bool get canAdd => _ffi.connection.stage == ConnStage.connected;
+  /// "+", "新建终端" and Ctrl+Shift+T work only while connected (13 §2.2.2 block B), and once
+  /// [onReady] has made the first terminal: before it, a new one would ask for terminal 1 again.
+  bool get canAdd =>
+      _ffi.connection.stage == ConnStage.connected && _terminals.isNotEmpty;
 
   void select(int index) {
     if (index < 0 || index >= _terminals.length || index == _selected) return;
@@ -257,7 +259,7 @@ class TerminalTabs extends ChangeNotifier {
   /// The banner goes with the connection: the connection panel covers the terminal then
   /// (13 §2.2.2 block E).
   void _onConnection() {
-    final connected = canAdd;
+    final connected = _ffi.connection.stage == ConnStage.connected;
     if (connected == _connected) return;
     _connected = connected;
     if (!connected) _notice.clear();

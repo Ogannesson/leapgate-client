@@ -1,4 +1,4 @@
-// 上游：flutter/lib/models/terminal_mouse_handler.dart@bd9262397（原样复制，不格式化）
+// 上游：flutter/lib/models/terminal_mouse_handler.dart@bd9262397（改写，不格式化：TerminalMouseInteraction 加 theme 参数传给 TerminalView，新界面的终端配色从这里进去；其余原样）
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -27,6 +27,7 @@ class TerminalMouseInteraction extends StatefulWidget {
     this.reportTouchInput = false,
     this.shortcuts,
     this.onKeyEvent,
+    this.theme = TerminalThemes.defaultTheme,
     this.backgroundOpacity = 1,
     this.padding,
     this.onSecondaryTapDown,
@@ -41,6 +42,7 @@ class TerminalMouseInteraction extends StatefulWidget {
   final bool reportTouchInput;
   final Map<ShortcutActivator, Intent>? shortcuts;
   final FocusOnKeyEventCallback? onKeyEvent;
+  final TerminalTheme theme;
   final double backgroundOpacity;
   final EdgeInsets? padding;
   final void Function(TapDownDetails, CellOffset)? onSecondaryTapDown;
@@ -284,6 +286,7 @@ class _TerminalMouseInteractionState extends State<TerminalMouseInteraction> {
         autofocus: widget.autofocus,
         textStyle: widget.textStyle,
         deleteDetection: widget.deleteDetection,
+        theme: widget.theme,
         backgroundOpacity: widget.backgroundOpacity,
         padding: widget.padding,
         shortcuts: widget.shortcuts ?? platformTerminalShortcuts(),

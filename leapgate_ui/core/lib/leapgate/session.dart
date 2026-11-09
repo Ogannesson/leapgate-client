@@ -209,8 +209,10 @@ class FFI {
     }
     // Upstream sets it where a terminal is asked for (`common.dart:2251-2253`), so an open
     // terminal window left it set for the next session; Rust clears it at the end of
-    // `session_add_sync` (`src/flutter_ffi.rs:175-179`).
-    if (terminalAdmin) bind.mainSetEnv(key: 'IS_TERMINAL_ADMIN', value: 'Y');
+    // `session_add_sync` (`src/flutter_ffi.rs:175-179`), only for a terminal session.
+    if (terminalAdmin && connType == ConnType.terminal) {
+      bind.mainSetEnv(key: 'IS_TERMINAL_ADMIN', value: 'Y');
+    }
     bind.sessionAddSync(
       sessionId: sessionId,
       id: id,
