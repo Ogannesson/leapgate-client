@@ -467,7 +467,7 @@ Leapgate 自己的文件里和挂钩配套的：`report/heartbeat.rs` 在开关�
 
 - 新界面 runner 的窗口类：主窗口 `LEAPGATE_UI_MAIN`，CM（`--cm`）`LEAPGATE_UI_CM`，安装页（`--install`）`LEAPGATE_UI_INSTALL`。三者分开，按主窗口类名找时不会找到另外两个。主窗口的类名（`leapgate_ui/app/windows/runner/main.cpp` 的 `kMainWindowClass`）和 `libs/leapgate/src/ui.rs` 的 `MAIN_WINDOW_CLASS` 要一致；另外两个 Rust 不找，只在 runner 里。
 - 合并上游时核对：`core_main_invoke_new_connection` 的 Windows 分支仍按 `send_message_to_hnwd` 加 `WM_USER + 2` 把链接交给已有窗口（`uni_links_desktop` 认这个消息号）；上游有没有新增按 `FLUTTER_RUNNER_WIN32_WINDOW_CLASS` 或窗口标题找窗口的地方（`git grep -n "FLUTTER_RUNNER_WIN32_WINDOW\|FindWindow"`）。
-- 已知限制：新界面还没有安装页（第三轮）。exe 名以 `install.exe` 结尾时，core_main 会注入 `--install`、不起服务，runner 按安装页处理，新界面写一行日志后退出。M8 起构建脚本出的便携单文件叫 `leapgate-‹版本›-x86_64.exe`，不带 `install`（M8-2），只有用户自己把 exe 或便携包改名成以 `install.exe` 结尾、或者手动带 `--install` 才会碰到；安装改由主页的"安装"提示卡发起（§10.16）。安装页做出来以前保持这样。
+- 已知限制：新界面还没有安装页（第三轮）。exe 名以 `install.exe` 结尾时，core_main 会注入 `--install`、不起服务，runner 按安装页处理，新界面写一行日志后退出。M8 起构建脚本出的便携单文件叫 `leapgate-‹版本›-x86_64.exe`，不带 `install`（M8-2），只有用户自己把 exe 或便携包改名成以 `install.exe` 结尾、或者手动带 `--install` 才会碰到；安装改由主页的"安装"提示卡发起（§10.16）。M9a 起这是长期行为（R3-Q22）：`--install` 写日志后退出，安装从便携版主页的安装页发起（§10.18）。
 - `Msg`（`libs/leapgate/src/ipc.rs`）按 `name` 字段区分，`snake_case`；CM 的事件就是 `Msg` 本身的 JSON，所以改名等于同时改进程间消息和界面事件。以后 Leapgate 的进程间消息都追加在 `Msg` 里，不改已有变体的顺序和含义。
 - C1、C2、S7 的已知限制：新旧版本的进程短暂同时在跑时，旧进程收到 `Data::Leapgate` 解码失败（上游 `next()` 返回 `Ok(None)`，两头都静默忽略），C1 返回 `{}`、C2 和 S7 没有效果。新界面便携版和旧界面不同时运行（03 §7.1），日常碰不到。`ShowCm` 在 CM 页面订阅之前到达时丢掉，不补发。
 - C1、C2、S7 合并上游时核对：`Data` 枚举末尾有没有新变体（`Leapgate` 要留在最后，冲突固定在这一处）；`ipc.rs` 的 `handle`、`ui_cm_interface.rs` 的 `IpcTaskRunner::run` 两处消息循环仍以兜底的 `_ => {}` 结尾、分发仍在里面；`AUTHED_CONNS`、`AuthConnType`（新增类型要在 `src/leapgate_hooks/ipc.rs` 的映射和 `Counts` 里加）、`Connection::alive_conns()`、`send_to_cm` 有没有变；`connect_port_forward_if_needed` 的复用分支是否仍是出口登录唯一建 mux 的地方。
@@ -2554,7 +2554,7 @@ tester 原先的推断是"跳过以后接着传时目标不对"。主会话查 A
 
 | 导出 | 参数 | 返回 |
 |---|---|---|
-| `leapgate_install` | `kind: String`：`install` 或 `upgrade` | 非 `SyncReturn`（frb 在工作线程里跑，Dart 拿到 `Future<String>`）。**成功时不返回**：安装在子进程里跑（见下），子进程退出码是 0 时本进程 `std::process::exit(0)`。失败时返回 JSON `{"result":"uac_denied"\|"failed","text":"‹原文›"}` |
+| `leapgate_install` | `kind: String`：`install` 或 `upgrade`（M9a 起加了 `path` 和三个选项，`install` 不再用 `INSTALL_OPTIONS`，子进程参数是 `‹kind› ‹path› ‹options›`，见 §10.18；下面两条说的是 M8 的样子） | 非 `SyncReturn`（frb 在工作线程里跑，Dart 拿到 `Future<String>`）。**成功时不返回**：安装在子进程里跑（见下），子进程退出码是 0 时本进程 `std::process::exit(0)`。失败时返回 JSON `{"result":"uac_denied"\|"failed","text":"‹原文›"}` |
 
 - `install`：路径传空串（`install_me` 用 `get_default_install_info()` 的默认路径，`src/platform/windows.rs:1641-1647`），选项是默认的开始菜单和桌面快捷方式、**不装打印机**（构建里没带驱动）。选项照上游安装页的写法：不是 JSON，是空格分隔的词（`install_page.dart:286-288` 拼成 `startmenu desktopicon printer` 的子集，`install_me` 用 `contains` 认），所以"安装"传 `startmenu desktopicon`（`leapgate::install::INSTALL_OPTIONS`）。
 - `upgrade`：路径 `ui_interface::install_path()`，选项由 `platform::get_install_options()`（`:1377`，注册表值的 JSON `STARTMENUSHORTCUTS`、`DESKTOPSHORTCUTS`、`PRINTER`）照安装页的读法换成上面的词（`leapgate::install::upgrade_options`：快捷方式没记 `"0"` 就要，打印机记了 `"1"` 才要；安装页另外会实查打印机装没装，这里不查）。
@@ -2869,7 +2869,8 @@ M9 分三段，各自审查、验收、外观检查、合 main（M9-1）。和�
 - M9b 视图框架（A）：`session_views.dart` 里按 `ConnType` 的 `switch`，另加 `hasImage`、`usesViewBar`，不建类层次；13 §5.4 的各处加 14 §1.2 补的 5 处。终端（B）：`FFI.start` 在 `sessionAddSync` 之前按 `terminalAdmin` 设 `IS_TERMINAL_ADMIN`，`terminal` 类型登记 `terminal_response`，`close()` 清终端，`ffi_model.dart` 补 `onReady` 的终端一支；终端区给 `TerminalMouseInteraction` 传 Leapgate 的快捷键表（去掉 Ctrl+A、加 Ctrl+Shift+A），会话快捷键在终端区 `onKeyEvent` 里用 `matchShortcut` 先拦；写进终端的提示行经 core 可注入的 `terminalNoteText`。复制件 `terminal_mouse_handler.dart` 的 `TerminalMouseInteraction` 加一个 `theme` 参数传给 `TerminalView`（上游没有这个参数，终端配色接不进去），这个文件因此从原样档改成改写档，来源行注明这一处（2026-11-09 主会话定）。R3-Q15 的"断开终端？"由终端视图自己画在视图上（`TerminalTabs.askDisconnect`），不经 prompter；从没选中的标签点 × 时，A 的 `closeSessionTab` 只在 `terminals.needsDisconnectConfirm` 为真时先切到那个标签再调 `disconnectTerminalView`，不问时直接关、不切标签（2026-11-09 主会话定）。只剩一个终端时 Ctrl+Shift+W 照 13 不起作用（吞掉，不发给远程）。管理员账户的连接面板输入归 A，B 只调 `conn.login`；面板的键用 `viewAdmin` 前缀（属 A 的 `view`）。摄像头（A）：名称在对端信息到了以后取一次，没有时只写编号；"全部摄像头"先做，验收不能用就去掉。
 - M9c（T）：`TunnelsModel` 另起，和出口只共享后台计数、本机端口占用表、抽出的 `CardLogin`（不安全连接按参数分"自动拒绝"（出口）和"问用户"（隧道），抽完先跑出口现有测试）；提问区在没有任何一行还在 `connecting` 时才收起；冲突要等出口卡片移除才解除（14 §1.2、§4.4）。
 
-**打印机驱动**（M9-4）：`build-client.ps1` 照上游 CI（`.github/workflows/flutter-build.yml` 打印机驱动那一步）下载驱动和适配器两个 zip、按 sha256 核对、解到程序旁的 `drivers/`。I 写好这一步，但不跑下载：第一次带这一步构建之前，主会话把文件名、来源和大小告诉维护者，等点头。
+**打印机驱动**（M9-4）：`build-client.ps1` 照上游 CI（`.github/workflows/flutter-build.yml` 打印机驱动那一步）下载驱动和适配器两个 zip、按 sha256 核对、解到程序旁的 `drivers/`。I 写好这一步，但不跑下载：第一次带这一步构建之前，主会话把文件名、来源和大小告诉维护者，等点头（2026-11-09 维护者同意，三个文件 34.8 KB、534.6 KB、291 B）。第一次下载后主会话把脚本打印的两个 zip 的 sha256 填进 `scripts/windows/env.ps1` 的 `$LeapgatePins`（`PrinterDriverSha256`、`PrinterAdapterSha256`），之后以它为准，上游换了文件就中止构建。
+- 安装页"修改"的选择框起始位置是已知限制：`file_picker` 5.5.0 在 Windows 上不处理 `initialDirectory`（插件里设置起始文件夹那段是注释掉的 TODO），选择框打开在系统记住的上次位置；第二次打开时系统回到上次选的文件夹（就是上一级）。界面照传 `initialDirectory`、加 `lockParentWindow: true`。13 §4.2 区块 A 已注明（2026-11-09 按 M9a 整体审查定，不自写选择框）。
 
 **已知限制**（写进各段验收记录前先照这里）
 1. 停止一张走 KCP、隧道在用的卡片，被控端约 20 秒后才关（每条隧道各自 20 秒，并行），同出口（§10.12）。
