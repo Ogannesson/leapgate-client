@@ -55,7 +55,7 @@ pub(crate) async fn run<T: InvokeUiSession>(
         return cards::run_card(handler, gen, port, receiver, ctl, key, token).await;
     }
     // A10: loopback only, no SO_REUSEADDR, no other port when this one is taken.
-    let listener = match tcp::new_listener(format!("127.0.0.1:{}", port), false).await {
+    let listener = match listen_local(port).await {
         Ok(listener) => listener,
         Err(err) => {
             handler.on_error(&format!("Failed to listen on {}: {}", port, err));
@@ -92,6 +92,31 @@ pub(crate) async fn run<T: InvokeUiSession>(
             },
         }
     }
+}
+
+/// A10, and M9-3 for exits and tunnels alike: a listener on 127.0.0.1:`port` without
+/// SO_REUSEADDR. On Windows that bind succeeds while another program listens on 0.0.0.0:`port`,
+/// and local connections would then come here; so a bind of 0.0.0.0:`port` is tried too (not
+/// listened on, dropped at once), and its address in use or access denied (an exclusive bind, a
+/// reserved range) is the port taken. Our own listeners bind 127.0.0.1 only and do not stop it.
+/// Elsewhere the specific and the wildcard bind conflict, so there is no second bind. Port 0 is
+/// the system's pick.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub(super) async fn listen_local(port: i32) -> hbb_common::ResultType<tokio::net::TcpListener> {
+    let listener = tcp::new_listener(format!("127.0.0.1:{}", port), false).await?;
+    #[cfg(windows)]
+    if port != 0 {
+        use std::io::ErrorKind::{AddrInUse, PermissionDenied};
+        // The bind above took `port`, so it is in range.
+        let any = std::net::SocketAddr::from(([0, 0, 0, 0], port as u16));
+        let probe = tokio::net::TcpSocket::new_v4().and_then(|socket| socket.bind(any));
+        if let Err(err) = probe {
+            if matches!(err.kind(), AddrInUse | PermissionDenied) {
+                return Err(err.into());
+            }
+        }
+    }
+    Ok(listener)
 }
 
 /// One handshaken local connection. Establishing the tunnel is awaited right here, as upstream's
@@ -706,7 +731,7 @@ pub(crate) mod cards {
 
     /// A10, as `run`.
     async fn listen(port: i32) -> Option<TcpListener> {
-        match tcp::new_listener(format!("127.0.0.1:{}", port), false).await {
+        match listen_local(port).await {
             Ok(listener) => {
                 log::info!("leapgate exit: card listening on 127.0.0.1:{}", port);
                 Some(listener)

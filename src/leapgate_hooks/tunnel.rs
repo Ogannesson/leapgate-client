@@ -5,7 +5,10 @@
 //! Each row logs in on its own connection as soon as it listens, and reports its state on one
 //! event stream for all cards. The old UI never registers and keeps upstream's loop.
 
-use super::exit::cards::{accept, loopback_pair};
+use super::exit::{
+    cards::{accept, loopback_pair},
+    listen_local,
+};
 use crate::{
     client::{Data, Interface, LoginConfigHandler},
     port_forward::{connect_and_login_mux, release_kcp, take_socket, LoginOutcome},
@@ -16,7 +19,7 @@ use base::message_proto::{Hash, PeerInfo, TestDelay, WindowsSession};
 #[cfg(feature = "flutter")]
 use flutter_rust_bridge::StreamSink;
 use hbb_common::{
-    log, tcp, throttled_log,
+    log, throttled_log,
     tokio::{
         self,
         net::{TcpListener, TcpStream},
@@ -30,12 +33,11 @@ use leapgate::{
     exit::card::{Cause, Transport},
     tunnel::{self, after_login, Kind, LoginEnd, Next, State},
 };
+#[cfg(any(feature = "flutter", test))]
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc, Mutex, RwLock,
-    },
+    sync::{Arc, Mutex, RwLock},
     time::Duration,
 };
 
@@ -65,6 +67,7 @@ struct Card {
 /// Keyed on the device ID and the kind: a device's TCP and RDP cards are apart, and apart from
 /// its exit card (`exit::cards`).
 static CARDS: Mutex<BTreeMap<(String, Kind), Card>> = Mutex::new(BTreeMap::new());
+#[cfg(any(feature = "flutter", test))]
 static NEXT_GEN: AtomicU64 = AtomicU64::new(0);
 #[cfg(feature = "flutter")]
 static EVENTS: Mutex<Option<StreamSink<String>>> = Mutex::new(None);
@@ -108,6 +111,7 @@ pub(crate) fn session_add(
 }
 
 /// Replaces a card left by a session that never started.
+#[cfg(any(feature = "flutter", test))]
 fn register(id: &str, kind: Kind, session_id: SessionID) {
     let (ctl, ctl_rx) = mpsc::unbounded_channel();
     let card = Card {
@@ -759,9 +763,9 @@ async fn login_or_close<S: TunnelSession>(
     None
 }
 
-/// The row's listener on 127.0.0.1, without SO_REUSEADDR; RDP's on a port the system picks.
+/// The row's listener (`exit::listen_local`, as an exit's); RDP's on a port the system picks.
 async fn listen(port: i32, target: &Target) -> Option<TcpListener> {
-    match tcp::new_listener(format!("127.0.0.1:{}", port), false).await {
+    match listen_local(port).await {
         Ok(listener) => {
             if target.rdp {
                 let port = listener.local_addr().map(|a| a.port()).unwrap_or_default();
@@ -1335,6 +1339,23 @@ mod tests {
         assert!(card.last(port).is_none());
         assert!(card.last(0).is_none());
         assert!(!listening(port).await);
+    }
+
+    /// M9-3 (14 §4.1): on Windows the 127.0.0.1 bind alone succeeds here and would take the other
+    /// program's local connections.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_port_another_program_listens_on_for_all_addresses_is_taken() {
+        let port = free_port();
+        let other = std::net::TcpListener::bind(("0.0.0.0", port as u16)).unwrap();
+        let (secured, _peer) = secured_pair().await;
+        let card = start("tunnel-wildcard", vec![(80, Login::Use(secured, true))]);
+        card.send(add(port, 80));
+        card.wait_for(port, r#""state":"port_in_use""#).await;
+        // Once the port is free, a retry logs in.
+        drop(other);
+        assert!(retry(&card.session_id, port));
+        card.wait_for(port, r#""state":"in_use""#).await;
     }
 
     #[tokio::test]
