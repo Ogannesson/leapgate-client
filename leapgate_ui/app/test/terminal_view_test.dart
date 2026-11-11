@@ -256,6 +256,25 @@ void main() {
     expect(config['viewId'], tester.view.viewId);
   });
 
+  testWidgets('a new terminal laid out before it opened gets the size of its view', (
+    tester,
+  ) async {
+    // The open request leaves before the first layout (80 × 24); the layout's resize comes
+    // before the answer, so the remote shell kept 80 × 24 until the window was resized.
+    final v = await _pump(tester);
+    await _opened(tester, v, 1);
+    final t = v.ffi.terminals!.current!.terminal;
+    expect(t.viewWidth, greaterThan(80));
+    expect(t.viewHeight, greaterThan(24));
+    final sized = [
+      for (final c in v.bind.calls)
+        if (c.memberName == #sessionOpenTerminal ||
+            c.memberName == #sessionResizeTerminal)
+          [c.namedArguments[#cols], c.namedArguments[#rows]],
+    ];
+    expect(sized.last, [t.viewWidth, t.viewHeight]);
+  });
+
   testWidgets('Ctrl+Shift+W with one terminal does nothing', (tester) async {
     final v = await _pump(tester);
     await _opened(tester, v, 1);

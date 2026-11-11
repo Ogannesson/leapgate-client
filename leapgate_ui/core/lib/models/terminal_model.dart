@@ -1,4 +1,4 @@
-// 上游：flutter/lib/models/terminal_model.dart@bd9262397（改写，不格式化：删多窗口导入和 dismissAll；留着的 shell 经 onPersistentSessions 交给 lib/leapgate/terminal/terminals.dart；写进终端的提示行经 terminalNoteText，原文截到 200 个字符；退出那一行不写；重新连接成新 shell 时写一行（R3-Q11））
+// 上游：flutter/lib/models/terminal_model.dart@bd9262397（改写，不格式化：删多窗口导入和 dismissAll；留着的 shell 经 onPersistentSessions 交给 lib/leapgate/terminal/terminals.dart；写进终端的提示行经 terminalNoteText，原文截到 200 个字符；退出那一行不写；重新连接成新 shell 时写一行（R3-Q11）；打开的回应到了时视图大小和打开请求里的不同，补发一次 resize（请求和回应之间的排版上游不发，LEAPGATE.md §10.18））
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -115,6 +115,10 @@ class TerminalModel with ChangeNotifier {
 
   /// This open request reopens a terminal after the connection came back (R3-Q11).
   bool _reopening = false;
+
+  /// The columns and rows the last open request asked for. A layout between the request and
+  /// its answer sends no resize (the terminal is not open yet), so the answer does.
+  (int, int) _openSize = (80, 24);
 
   Future<void> _handleInput(String data) async {
     // xterm can complete asynchronous input after the Flutter page has gone
@@ -267,6 +271,7 @@ class TerminalModel with ChangeNotifier {
     if (terminal.viewWidth > 0) {
       cols = terminal.viewWidth;
     }
+    _openSize = (cols, rows);
 
     debugPrint(
         '[TerminalModel] Opening terminal $terminalId, sessionId: ${parent.sessionId}, size: ${cols}x$rows');
@@ -452,6 +457,17 @@ class TerminalModel with ChangeNotifier {
     _reopening = false;
     if (success) {
       _terminalOpened = true;
+      if (_openSize != (terminal.viewWidth, terminal.viewHeight)) {
+        bind
+            .sessionResizeTerminal(
+              sessionId: parent.sessionId,
+              terminalId: terminalId,
+              rows: terminal.viewHeight,
+              cols: terminal.viewWidth,
+            )
+            .catchError(
+                (e) => debugPrint('[TerminalModel] Error resizing terminal: $e'));
+      }
       // Without "keep terminal sessions" the remote device ended the old shell when the
       // connection dropped: the answer is a new one, not "Reconnected to existing terminal".
       if (reopening && !message.startsWith('Reconnected')) {
