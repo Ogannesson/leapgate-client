@@ -6,6 +6,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <cctype>
 #include <iostream>
 
 #include "win32_desktop.h"
@@ -27,6 +28,40 @@ constexpr const wchar_t kCmWindowClass[] = L"LEAPGATE_UI_CM";
 constexpr const wchar_t kInstallWindowClass[] = L"LEAPGATE_UI_INSTALL";
 
 void setWindowClassName(const wchar_t* name);
+
+// leapgate: `--terminal-admin <ID>` as the link it stands for (`<app>://terminal-admin/<ID>`, with
+// the password and relay as query), empty without it. The Rust core turns `--terminal`,
+// `--view-camera` and the other kinds into such a link for the running main window
+// (src/core_main.rs core_main_invoke_new_connection), but its list has no `--terminal-admin`, and
+// DispatchToUniLinksDesktop below hands over only the first argument. Built the same way as there.
+std::string TerminalAdminLink(const std::vector<std::string>& args, const std::wstring& app_name) {
+  std::string id;
+  bool found = false;
+  std::vector<std::string> params;
+  for (size_t i = 0; i < args.size(); i++) {
+    const bool has_next = i + 1 < args.size();
+    if (args[i] == "--terminal-admin") {
+      found = has_next;
+      if (has_next) id = args[++i];
+    } else if (args[i] == "--password") {
+      if (has_next) params.push_back("password=" + args[++i]);
+    } else if (args[i] == "--relay") {
+      params.push_back("relay=true");
+    } else if (args[i] == "--switch_uuid") {
+      if (has_next) params.push_back("switch_uuid=" + args[++i]);
+    }
+  }
+  if (!found) return "";
+  // Utf8FromUtf16 keeps the terminating NUL in the string.
+  std::string scheme(Utf8FromUtf16(app_name.c_str()).c_str());
+  std::transform(scheme.begin(), scheme.end(), scheme.begin(),
+                 [](unsigned char c) { return static_cast<char>(::tolower(c)); });
+  std::string link = scheme + "://terminal-admin/" + id;
+  for (size_t i = 0; i < params.size(); i++) {
+    link += (i == 0 ? "?" : "&") + params[i];
+  }
+  return link;
+}
 
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command)
@@ -129,7 +164,17 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
           ::AllowSetForegroundWindow(pid);
         }
         // Dispatch command line arguments
-        DispatchToUniLinksDesktop(hwnd);
+        // leapgate: `--terminal-admin` goes as its link, as the plugin sends one (TerminalAdminLink).
+        const std::string link = TerminalAdminLink(command_line_arguments, app_name);
+        if (!link.empty()) {
+          COPYDATASTRUCT cds = {0};
+          cds.dwData = UNI_LINKS_DESKTOP_MSG_ID;
+          cds.cbData = static_cast<DWORD>(link.size() + 1);
+          cds.lpData = (PVOID)link.c_str();
+          ::SendMessage(hwnd, WM_COPYDATA, 0, (LPARAM)&cds);
+        } else {
+          DispatchToUniLinksDesktop(hwnd);
+        }
       } else {
         // Not called with arguments, or just open the app shortcut on desktop.
         // So we just show the main window instead.
