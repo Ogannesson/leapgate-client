@@ -2886,7 +2886,7 @@ M9 分三段，各自审查、验收、外观检查、合 main（M9-1）。和�
 
 - **设备菜单**：`PeerAction` 加 `terminal`、`terminalAdmin`、`camera`、`tcpTunnel`、`rdp`。`peerMenu` 的 `bool peerWindows` 换成 `String peerPlatform = ''`（`kPeerPlatform*` 之一，空串是未知）。连接组照样稿 `A-P1.html` 的顺序列全，平台已知不支持的不列、未知照列（R3-Q12，01 §3.1 区块 F）：终端、TCP 隧道在对端不是 Android 时列；终端（管理员）只在对端已知是 Windows 时列（13 §2.1.1）；摄像头在对端不是 macOS、Android 时列；RDP 在本机是 Windows、对端不是已知的非 Windows 时列（13 §1.1.2）；用作出口照旧（对端不是已知的非 Windows；app 另要求 ID 能当出口，`isExitId`）。连接组的规则在私有的 `_connectGroup` 里，`peerMenu` 和 `connectMenu` 共用。连接按钮下拉和"连接到 ‹输入›"的"⋯"改成按 core 新函数 `connectMenu(String peerPlatform, {bool? windows})` 列（`windows` 是本机平台，不传按本机，给测试用）：样稿 `p1-cb-menu` 的八项（远程桌面、文件传输、终端、摄像头、TCP 隧道、用作出口、RDP、经中继），不列终端（管理员）（14 §1.2）。
 - app 里按 `PeerAction` 建菜单项的地方（`peer_views.dart`、`devices_page.dart` 两处下拉），五个新值第 0 步不建（跳过，`TODO(M9b)` / `TODO(M9c)`），A、T 各填各的。
-- **链接**：`ConnectLink` 的 `bool fileTransfer` 换成 `LinkKind kind`（`remoteDesktop`、`fileTransfer`、`terminal`、`terminalAdmin`、`camera`、`tcpTunnel`、`rdp`），第三轮的五种也取 ID 和 `--password`、`--relay`；`_open` 按种类分派，五种新的照旧出轻提示，A、T 各换各的。
+- **链接**：`ConnectLink` 的 `bool fileTransfer` 换成 `LinkKind kind`（`remoteDesktop`、`fileTransfer`、`terminal`、`terminalAdmin`、`camera`、`tcpTunnel`、`rdp`），第三轮的五种也取 ID 和 `--password`、`--relay`；`_open` 按种类分派，五种新的照旧出轻提示，A、T 各换各的。主窗口已在运行时，Rust 只把它列表里的几种（`--terminal`、`--view-camera` 等，`src/core_main.rs` `core_main_invoke_new_connection`）转成链接交给主窗口，列表里没有 `--terminal-admin`，runner 的 `DispatchToUniLinksDesktop` 又只转第一个参数，所以 `leapgate.exe --terminal-admin <ID>` 到主窗口只剩 `--terminal-admin`（M9b 验收必须改 2）。新界面 runner（`app/windows/runner/main.cpp` `TerminalAdminLink`）照 Rust 的拼法把它拼成 `leapgate://terminal-admin/<ID>?password=…&relay=true` 再发，上游文件不改；冷启动时 Dart 从自己的命令行读，本来就认。
 - **打开视图**：`MainNavigation.openView(String id, ConnType kind, {bool terminalAdmin = false, String password = '', bool isSharedPassword = false, bool forceRelay = false})`；`openFileTransfer` 留着、转调它（M7a 的调用和测试不动）。主窗口的实现和 `openFileTransfer` 同一条路（`SessionRegistry.open(id, kind, terminalAdmin:)`、切标签、显示那个视图）；视图容器里终端一支挂 `TerminalViewPage`，摄像头一支挂 `SessionPage`。菜单不列、链接不开，所以第 0 步里走不到。
 - **会话对象**：`FFI(id, connType, {bool terminalAdmin = false})`，字段 `final bool terminalAdmin`、`TerminalTabs? terminals`（第 0 步恒为空）；`SessionRegistry.open(…, {bool terminalAdmin = false})` 新建时传给 `FFI`；`SessionRegistry.tokenOf(String id)`（这台设备标签里任一视图的连接令牌，`open` 改用它）。
 - **终端**：core `leapgate/terminal/terminals.dart` 里 `class TerminalTabs extends ChangeNotifier`（空壳）；`enum TerminalOpen { none, normal, admin }` 和 `TerminalOpen terminalOpenState(String id)`（写好：这台设备的标签里有没有终端视图、是不是管理员终端），设备菜单和视图切换共用（R3-Q9）。app `pages/terminal/terminal_view.dart`：`TerminalViewPage({required FFI ffi, required bool active, required bool lastView, required Widget viewSwitch, required Widget route, required VoidCallback onDisconnect})`（和 `FileView` 同形、没有 `model`），第 0 步是占位；`Future<void> disconnectTerminalView(FFI view)`（和 `disconnectFileView` 同形），第 0 步直接关视图，B 加 R3-Q15 的确认。
@@ -2921,7 +2921,7 @@ M9 分三段，各自审查、验收、外观检查、合 main（M9-1）。和�
   ```
 
   出口占位的两个常量（目标 `leapgate-exit.invalid:65536`）从 `cm_core.dart` 挪到 `consts.dart`，CM 和 `savedForwards` 共用；解析存下的转发是公开的纯函数 `parseSavedForwards`（`tunnel_api.dart`）。
-- **依赖**：core `xterm: 4.0.0`（钉死，和上游同版本）、app `xterm: any`，用同一个 `PUB_CACHE` 重新生成两份 lock（14 §2.4）。
+- **依赖**：core `xterm: 4.0.0`（钉死，和上游同版本）、app `xterm: any`，用同一个 `PUB_CACHE` 重新生成两份 lock（14 §2.4）。M9b 验收后改成复制件：xterm 4.0.0 的文本输入连接（`custom_text_edit.dart` 的 `TextInput.attach`）不带 `viewId`，Flutter 3.44 起的 Windows 引擎拒收（`Could not set client, view ID is null`），终端里打不进可打印字符和粘贴（验收必须改 1）；pub.dev 上最新就是 4.0.0。维护者定把包复制到 `leapgate_ui/third_party/xterm/`（`lib/`、LICENSE 等原样，`example/`、`test/` 等不带），只在那一处加 `viewId: View.of(context).viewId`（`// leapgate:` 注释），core 和 app 都用 path 依赖指过去；来源、改动和"上游出了带 viewId 的版本就删掉副本改回 pub"写在包里的 `LEAPGATE.md`。它是第三方包，不是从上游 `flutter/` 复制的，不走 §10.1 的来源行和三方合并；不在 core、app 目录下，两边的 analyze 本来就不扫它。
 - **画廊和常量**：`gallery_m9a.dart`、`gallery_m9b.dart`、`gallery_m9c.dart` 登记进 `gallery_main.dart`；`consts.dart` 加"M9a""M9b views""M9b terminal""M9c"四个锚点。
 
 **Rust 导出（块 2）**
@@ -3003,5 +3003,7 @@ M9 分三段，各自审查、验收、外观检查、合 main（M9-1）。和�
 5. 隧道登录失败不冷却：应用一直重连而对方不在线时，每条本地连接都触发一次登录（上游同样）。
 6. 查监听表和真正开始监听之间有一个很短的空档，别的程序在这期间开始监听通配地址时认不出来（下次打开卡片时才报）。
 7. `cmdkey /generic:localhost` 全机一个名字（13 §1.7 第 6 条）。
+8. 旧界面（`flutter/` 用的还是 pub 上的 xterm 4.0.0）的终端窗口在路线 C 引擎下同样打不进可打印字符（M9b 验收看到），原因同上面"依赖"那条，旧界面不修。
+9. 管理员终端的系统用户名和系统密码都去掉首尾空格再发，末尾带空格的系统密码登不上（M9b 验收看到）。上游登录对话框也是这样（`common/widgets/dialog.dart` `_connectDialog` 的 `submit`：`osUsernameController`、`osPasswordController`、`passwordController` 都 `trim()`），新界面 `ConnectionModel.login`（`core/lib/leapgate/connection.dart`）照它，不改。
 
 **测试**：14 §5.2 列的各条。合入前：`git diff main -- flutter/` 为空；core analyze 不超出 91 条 info 的基线，app 0 条；复制件不跑格式化，改已有文件不对整个文件跑 `dart format`；新旧界面都要能编（Rust 改了上游 `ui_session_interface.rs` 和出口监听），旧界面的五项冒烟和出口 B15 冒烟照跑。
