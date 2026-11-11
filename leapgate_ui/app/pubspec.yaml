@@ -42,8 +42,9 @@ dependencies:
   # (pages/files/); the version upstream's flutter/pubspec.lock pins (10-M7a拆法.md §2.4).
   # Its Windows plugin is registered by the code `flutter pub get` generates.
   desktop_drop: 0.4.4
-  # The terminal view (pages/terminal/); core pins the version (14-M9拆法.md §2.4).
-  xterm: any
+  # The terminal view (pages/terminal/); the same patched copy as core (third_party/xterm/LEAPGATE.md).
+  xterm:
+    path: ../third_party/xterm
 
 dev_dependencies:
   flutter_test:

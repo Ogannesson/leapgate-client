@@ -241,6 +241,21 @@ void main() {
     expect(v.ffi.terminals!.current!.terminalController.selection, isNotNull);
   });
 
+  testWidgets('the focused terminal opens a text input connection for its view', (
+    tester,
+  ) async {
+    // The Windows engine refuses a client without a view ID, and typed text then never reaches
+    // the remote shell (third_party/xterm/LEAPGATE.md).
+    final v = await _pump(tester);
+    await _opened(tester, v, 1);
+    final setClient = tester.testTextInput.log.where(
+      (c) => c.method == 'TextInput.setClient',
+    );
+    expect(setClient, isNotEmpty);
+    final config = (setClient.last.arguments as List)[1] as Map;
+    expect(config['viewId'], tester.view.viewId);
+  });
+
   testWidgets('Ctrl+Shift+W with one terminal does nothing', (tester) async {
     final v = await _pump(tester);
     await _opened(tester, v, 1);
