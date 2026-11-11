@@ -6,6 +6,7 @@ import 'dart:convert';
 import '../common.dart';
 import '../consts.dart';
 import '../models/platform_model.dart';
+import 'bridge.dart';
 
 /// A tunnel card's kind: the TCP tunnel with a device's port forwards, or RDP.
 enum TunnelKind { tcp, rdp }
@@ -63,29 +64,42 @@ abstract interface class TunnelApi {
 TunnelApi tunnelApi = const RustTunnelApi();
 
 // ---------------------------------------------------------------------------------------------
-// Above: the interface (step 0, unchanged by the lanes). Below: coder T's; block 2's calls are
-// put in when M9c is integrated.
+// Above: the interface (step 0, unchanged by the lanes). Below: coder T's.
 
-/// Blocks 1 and 2. Block 2's exports come with the Rust lane; until the bridge is generated
-/// again they throw.
+/// Blocks 1 and 2.
 class RustTunnelApi implements TunnelApi {
   const RustTunnelApi();
 
+  /// `{}` is null; otherwise the error code and Rust's text.
   @override
   TunnelAddError? sessionAdd(SessionID sessionId, String id, TunnelKind kind,
-          {String password = '',
-          bool isSharedPassword = false,
-          String? connToken,
-          bool forceRelay = false}) =>
-      throw UnimplementedError('TODO(M9 整合)');
+      {String password = '',
+      bool isSharedPassword = false,
+      String? connToken,
+      bool forceRelay = false}) {
+    final m = jsonDecode(lgBind.leapgateTunnelSessionAdd(
+      sessionId: sessionId,
+      id: id,
+      rdp: kind == TunnelKind.rdp,
+      password: password,
+      isSharedPassword: isSharedPassword,
+      connToken: connToken,
+      forceRelay: forceRelay,
+    )) as Map<String, dynamic>;
+    final code = m['error'];
+    return code == null
+        ? null
+        : TunnelAddError(code as String, (m['text'] as String?) ?? '');
+  }
 
   @override
-  Stream<Map<String, dynamic>> events() =>
-      throw UnimplementedError('TODO(M9 整合)');
+  Stream<Map<String, dynamic>> events() => lgBind
+      .leapgateTunnelEvents()
+      .map((e) => jsonDecode(e) as Map<String, dynamic>);
 
   @override
   bool retry(SessionID sessionId, int port) =>
-      throw UnimplementedError('TODO(M9 整合)');
+      lgBind.leapgateTunnelRetry(sessionId: sessionId, port: port);
 
   @override
   Future<void> addForward(
