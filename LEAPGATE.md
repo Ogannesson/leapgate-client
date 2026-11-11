@@ -1424,6 +1424,25 @@ Telegram 机器人设置改成两步（`leapgate_bot_lookup` 只查、什么都�
 
 **环境**：A 8 个配置文件盖回，与测前（`r3-00-A-config-before.txt`）逐个哈希一致；B 4 个与备份（`pre-m9b-r3-hashes.txt`）一致，B 上 `app-ui-m9b-2b6ccc231`、zip、断网脚本和计划任务 `lg-nic-cut` 已删，以太网已恢复；A、B 的 Leapgate 全停，没有残留计划任务、没有 MSIX 包内副本；A 上 `Videos\Leapgate` 里测试生成的录像、远程桌面截图、剪贴板已清。
 
+**第四轮（`de691c4ea`，2026-11-12 06:00~06:55）**
+
+**结论：R3-Q11 的修订没有生效，仍有一条必须改。按 14 §5.6 没做最终外观检查。**
+
+构建（A，`.wt\ui-m0-build` 在 `de691c4ea`，`-Ui leapgate -ForceBridge`，BelowNormal，开跑前 CPU 17%、GPU 3D 1%、可用提交内存 11.9 GB）：`app-ui-m9b-de691c4ea`，`leapgate.exe` `1AE978F9…`，`libleapgate.dll` `507960EB…`，`flutter_windows.dll` `8667024A…`，`data\app.so` `05AF3EC6…`，zip `C9428D6D…`。对端 B（msi 便携版同一份构建，Windows、pwsh 加 oh-my-posh 提示符）。
+
+**必须改**
+
+1. **自动或手动重连成新 shell 后，提示符下一行仍没有"已重新连接。原终端会话已结束，当前为新的终端会话。"**。保持会话是关的（更多菜单没有对勾）。三种重连各做一次，都没有：①B 停进程 3~4 秒后重启，A 自动重连（日志 `Peer stopped answering, reconnecting`，3 秒后 `handle_peer_info`），新提示符的时间是新的，提示符下面是空的；②B 断以太网 24 秒：A 的重连在 B 刚恢复时失败（`Failed to connect via rendezvous server: Please try later`），面板"无法连接服务器"，点"重试"后连上，终端同样没有这一行；③B 停掉后面板"无法连接服务器"，B 重启后点"重试"，同样没有。另有一次用 A 的终端本身触发 B 重启（计划任务 `schtasks /run` 结束再启动 Leapgate），每 0.17 秒截一次终端前三行（170 帧，每 4 帧取 1 帧拼成 `r4-seq-sheet.png`）：断线时终端变暗，重连后先是只有光标的空屏，接着出现提示符，前三行里从没出现过这一行（取样间隔约 0.7 秒，短于这个时间的闪现看不到）。没有进"再敲一条命令看被盖掉的样子"这一步，因为这一行本身没出现。证据 `r4-a3-c.png`、`r4-b1-c.png`、`r4-c3-c.png`、`r4-seq-sheet.png`。原因没查；对端是 Windows 的 ConPTY，pwsh 启动时 oh-my-posh 和 PSReadLine 会再画一次提示符和右侧时间，可能擦掉，建议修的人在这个环境（B 上 oh-my-posh）复现，而不是用不带这些的 shell。
+
+**其他**
+- 管理员终端 `whoami`：未验证。vm110 的 telechir 仍是"agent not connected"（开始和结束各查一次），按说明没动它，等维护者同步时间。
+- Mac 三项：未验证，接手步骤同第三轮。
+- 第三轮的未验证项（会话快捷键、V1 日志、输入法候选框位置）没有新的办法，不再重做。
+
+**最终外观检查**：因有必须改项，未做；画廊导出开了又停了，没有留产物。
+
+**环境**：A 8 个配置文件盖回，与测前逐个哈希一致（`r4-99-A-config-after.txt`）；B 4 个与备份一致，B 上构建、zip、脚本、计划任务 `lg-r4` 和 `lg-nic-cut` 已删，以太网已恢复；A、B 的 Leapgate 全停，没有残留计划任务、没有 MSIX 包内副本。B 的 telechir 在两次断网和一次重启后各有一段（最长约 20 分钟）不响应，期间用 A 上打开的终端在 B 上建过一个计划任务。
+
 #### M9a 安装页（测试虚拟机，2026-11-09 11:28~13:30，被测 `0c6b156d8`，几项在 `1c3d3f44a` 上复测）
 
 按 14 §5.3。构建（`-Ui leapgate -ForceBridge -PrinterDriver`）：`0c6b156d8` 的 `leapgate.exe` `304FB91C…`、`libleapgate.dll` `5F14E611…`、`data/app.so` `4BAC2CEF…`、便携单文件 `9B078767…`、zip `7EC0B2BF…`；`1c3d3f44a` 的 `libleapgate.dll` `19458F7A…`、`data/app.so` `4CED07A1…`、便携单文件 `A19B4D56…`、zip `EE0662A4…`（`leapgate.exe`、`flutter_windows.dll` `8667024A…` 两版相同）。打印机驱动经维护者同意下载，脚本打印的 sha256：`rustdesk_printer_driver_v4-1.4.zip` `c4cf4d3b48c4d9079b243edc43bb1db03b076282bc259c9f49883e9db20fa8b5`、`printer_driver_adapter.zip` `e90e5d52c8807b4c6293c78a52479338715e0bf396b1b34802777b8c452e6781`（两个都是"还没钉住，按 sha256sums 核对通过"）；发布目录里有 `drivers\RustDeskPrinterDriver\`（6 个文件）和 `printer_driver_adapter.dll`。端点：测试虚拟机用便携单文件（解到 `%LOCALAPPDATA%\leapgate`）当被测，A 的便携版当控制端（有会话那条）。开测前测试虚拟机上装着 `d3073a33d` 的安装版（服务在跑），先 `--uninstall` 卸掉再测；没有回滚，用它当时的状态。
