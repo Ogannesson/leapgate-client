@@ -1,4 +1,4 @@
-// 上游：flutter/lib/models/terminal_model.dart@bd9262397（改写，不格式化：删多窗口导入和 dismissAll；留着的 shell 经 onPersistentSessions 交给 lib/leapgate/terminal/terminals.dart；写进终端的提示行经 terminalNoteText，原文截到 200 个字符；退出那一行不写；重新连接成新 shell 时写一行（R3-Q11）；打开的回应到了时视图大小和打开请求里的不同，补发一次 resize（请求和回应之间的排版上游不发，LEAPGATE.md §10.18））
+// 上游：flutter/lib/models/terminal_model.dart@bd9262397（改写，不格式化：删多窗口导入和 dismissAll；留着的 shell 经 onPersistentSessions 交给 lib/leapgate/terminal/terminals.dart；写进终端的提示行经 terminalNoteText，原文截到 200 个字符；退出那一行不写；重新连接成新 shell 时写一行（R3-Q11），新 shell 一开头清屏（ConPTY）时在光标下一行再写一次；打开的回应到了时视图大小和打开请求里的不同，补发一次 resize（请求和回应之间的排版上游不发，LEAPGATE.md §10.18））
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -119,6 +119,10 @@ class TerminalModel with ChangeNotifier {
   /// The columns and rows the last open request asked for. A layout between the request and
   /// its answer sends no resize (the terminal is not open yet), so the answer does.
   (int, int) _openSize = (80, 24);
+
+  /// The R3-Q11 line is written and the new shell has shown nothing yet: a Windows shell's
+  /// ConPTY starts by clearing the screen, which takes the line with it.
+  bool _noteBeforeShell = false;
 
   Future<void> _handleInput(String data) async {
     // xterm can complete asynchronous input after the Flutter page has gone
@@ -470,7 +474,8 @@ class TerminalModel with ChangeNotifier {
       }
       // Without "keep terminal sessions" the remote device ended the old shell when the
       // connection dropped: the answer is a new one, not "Reconnected to existing terminal".
-      if (reopening && !message.startsWith('Reconnected')) {
+      _noteBeforeShell = reopening && !message.startsWith('Reconnected');
+      if (_noteBeforeShell) {
         _writeToTerminal(
             '\r\n${terminalNoteText(TerminalNote.reconnectedNewShell, '')}\r\n');
       }
@@ -555,9 +560,28 @@ class TerminalModel with ChangeNotifier {
         }
 
         _writeToTerminal(text, suppressTerminalOutput: suppressTerminalOutput);
+        _noteAfterClear(text);
       } catch (e) {
         debugPrint('[TerminalModel] Failed to process terminal data: $e');
       }
+    }
+  }
+
+  static final _escapes =
+      RegExp(r'\x1b(\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(\x07|\x1b\\)|[@-_])');
+
+  /// Until the new shell shows text: if its output cleared the screen (a ConPTY's first frame),
+  /// the R3-Q11 line goes again on the line below the cursor, and the cursor back where the
+  /// shell has it. A ConPTY paints by its own screen, so the line stays until the shell's output
+  /// reaches that line.
+  void _noteAfterClear(String text) {
+    if (!_noteBeforeShell) return;
+    if (text.contains('\x1b[2J')) {
+      _noteBeforeShell = false;
+      _writeToTerminal(
+          '\x1b7\r\n${terminalNoteText(TerminalNote.reconnectedNewShell, '')}\x1b8');
+    } else if (text.replaceAll(_escapes, '').trim().isNotEmpty) {
+      _noteBeforeShell = false;
     }
   }
 

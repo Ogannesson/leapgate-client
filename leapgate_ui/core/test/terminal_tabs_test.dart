@@ -173,6 +173,32 @@ void main() {
     expect(t.bind.terminalIds(#sessionOpenTerminal), [1, 1, 1]);
   });
 
+  testWidgets(
+      'R3-Q11: the line stays when the new shell starts by clearing the screen',
+      (tester) async {
+    // A Windows shell runs in a ConPTY, whose first frame clears the screen and homes the
+    // cursor (it is not made with PSEUDOCONSOLE_INHERIT_CURSOR).
+    final t = await _connected();
+    final m = t.tabs.terminals.single;
+    await terminalOpened(t.ffi, 1);
+    await _text(tester, m);
+    await t.ffi.events.dispatch({..._peerInfo});
+    await terminalOpened(t.ffi, 1);
+    Future<void> data(String s) => terminalEvent(t.ffi, {
+          'type': 'data',
+          'terminal_id': 1,
+          'data': base64Encode(utf8.encode(s)),
+        });
+    await data('\x1b[?9001h\x1b[?1004h');
+    await data('\x1b[?25l\x1b[2J\x1b[m\x1b[HPS C:\\> \x1b]0;pwsh\x07\x1b[?25h');
+    await tester.pump();
+    final lines = m.terminal.buffer.getText().split('\n');
+    expect(lines.first, startsWith('PS C:\\>'));
+    expect(lines[1], startsWith('Reconnected. The previous terminal session ended'));
+    // The cursor is back after the prompt, where the shell has it.
+    expect([m.terminal.buffer.cursorX, m.terminal.buffer.cursorY], [8, 0]);
+  });
+
   testWidgets('the remote device\'s text in a line is cut to 200 characters',
       (tester) async {
     final t = await _connected();
