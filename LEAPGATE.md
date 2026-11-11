@@ -1307,6 +1307,49 @@ Telegram 机器人设置改成两步（`leapgate_bot_lookup` 只查、什么都�
 
 **环境说明**：测试虚拟机测完回滚到 `m6-admin` 并强制关机（`stopped`）；A 的配置文件和测前备份逐个哈希一致，A 上的一次性数据已删；Mac 上的测试目录已删，Mac 的 RustDesk 和配置没动。测试虚拟机上装好、改了服务器以后本机 ID 从 9 位变成 10 位：测试服务上这个 9 位 ID 被以前几轮装的（不同密钥的）安装版锁过公钥，新装的换了密钥，注册回 `UUID_MISMATCH`，客户端随机换了 ID（第三期 01 的锁定规则，整机回滚的环境才会碰到）。证据在 A 的 `C:\leapgate-e2e\evidence\m7a-p2-1106\`（`results.txt`、`shots\`、`tools\`）。
 
+#### M9b 终端和摄像头（台式机 A、msi B、测试虚拟机，2026-11-11 22:16~2026-11-12 00:40，被测 `5ca858868`）
+
+**结论：有必须改的。终端里打不进可打印字符（Flutter 文本输入连接建不起来）。按 14 §5.6 没做最终外观检查，修完再做。**
+
+构建（A，`.wt\ui-m0-build` 在 `5ca858868`）：新界面 `app-ui-m9b-5ca858868`（`libleapgate.dll` `87A8B616…`，`flutter_windows.dll` `8667024A…`，便携单文件 exe `A4D4DD5C…`，zip `6E002B5F…`）；旧界面 `app-ui-m9b-upstream-5ca858868`（`libleapgate.dll` `24FDB101…`）。证据 `C:\leapgate-e2e\evidence\m9b-accept\`（运行手册 §34）。对端：B（msi 便携版，有摄像头"HD Webcam"）、测试虚拟机（先便携版、后覆盖成安装版）。Mac 的项和第二个摄像头没做。
+
+**必须改**
+
+1. **终端里无法输入可打印字符**（新界面，3.44.9 和最新 stable 3.47.9 都一样）。现象：点进终端区后，真实键盘（计划任务里 `keybd_event` 带扫描码、`SendKeys`）和投递的 `WM_KEYDOWN`+`WM_CHAR` 敲的字母、数字、粘贴（Ctrl+V）都到不了远程 shell（B 的 pwsh、测试虚拟机的 powershell 都试过；文件写入命令没有生效，回显也没有）；Enter、方向这类有按键映射的键能到。同一时刻主页的搜索输入框能收到同样方式敲的数字，所以注入方式本身是通的。日志：每次聚焦终端区，`leapgate_rCURRENT.log` 出现 `PlatformException(Bad Arguments, Could not set client, view ID is null.)` 和 `PlatformException(Internal Consistency Error, Set editing state has been invoked, but no client is set.)`（A 上 22:30~22:56 一份日志 13 次，随后每次聚焦各 1~2 次；3.47.9 构建同样出现，证据 `A-log-viewid-lines.txt`）。判断的原因：xterm 4.0.0 的文本输入连接（`TextInput.attach`）没带 `viewId`，Flutter 3.44 起的 Windows 引擎要求有，连接建不起来，字符走的 `TextInputClient` 路径就断了；有映射的键走 `onKeyEvent`，所以 Enter 正常。要修：给 xterm 的输入连接补 `viewId`（用 `View.of(context).viewId` 重新实现 `CustomTextEdit`，或改成包一层自己的 `TextInputClient`），或让它走硬件键盘字符路径。复现：A 上 `leapgate.exe --terminal <ID> --password …`，点终端区，敲 `echo hi > 某文件`，看对端文件。旧界面终端窗口（同一个 xterm）用同样方式也打不进去，没在日志里看到同样的错（旧界面是子窗口，stderr 没进日志），原因未单独确认。
+2. **`leapgate.exe --terminal-admin <ID>` 打不开**：日志 `leapgate ui: link received ://`、`link not handled: ://`（带或不带 `--password` 都一样）。`leapgate://terminal-admin/<ID>` 能开管理员终端面板，`--terminal`、`--view-camera` 正常。
+
+**受上面影响没能验证的**：Ctrl+A 到远程、Ctrl+Shift+A 全选、选中后 Ctrl+C 和右键复制粘贴、vim/htop 鼠标模式、改窗口大小行列跟着变、中文输入法候选框、OSC 52 剪贴板横幅（三种设置）、保持会话的回放和"断网 2~10 秒"那条（13 §2.7 第 2 条）、`whoami`（管理员终端只看到提示符 `PS C:\WINDOWS\system32\config\systemprofile>`，是 SYSTEM 的配置目录）、三个终端之间 Ctrl+1~9、Alt+←→、Ctrl+Shift+T/W（只验了按钮和菜单）。
+
+**通过**
+
+| 项 | 结果 |
+|---|---|
+| 设备菜单入口 | 通过：远程桌面、文件传输、终端、终端（管理员）、摄像头、用作出口。已有远程桌面/终端/摄像头的 B 上再开别的视图不问密码（B 的 CM 显示"3 个会话进行中"） |
+| 视图切换 | 通过：摄像头工具栏的视图切换四行（远程桌面、文件传输、终端、摄像头），未打开的写"未打开"，已开的写"直连"带点 |
+| 二选一 | 通过：开着终端时"终端（管理员）"灰显且有"已打开终端"提示；开着管理员终端时菜单"终端"切到管理员终端标签。`--terminal-admin` 命令行那条见必须改 2；之后新开的终端是否变管理员未测 |
+| 管理员终端 | 通过：面板三个框（密码、系统用户名、系统密码）；用户名框按 Enter 跳到系统密码框、不登录；错账户文案"用户名或密码错误，或该账户不是管理员。"；连错几次后"尝试次数过多，请 40 秒后重试。"（第 5 次起）；安装版（测试虚拟机上建了本地管理员）登录后得到 SYSTEM 配置目录下的提示符；便携版对端的"仅支持安装版"没测。系统密码带尾空格：用带尾空格的密码登录失败，改成不带空格就登上，怀疑被去掉首尾空格（输入方式没完全排除） |
+| 断开和确认 | 通过：两个终端、保持会话关着时"断开"和标签 × 都问"断开终端？2 个终端将关闭。"，焦点在"断开"；开着保持会话时标签 × 不问，直接关；"更多"菜单里"断开连接后保持终端会话"有对勾 |
+| 断线 | 部分：停对端服务后终端标签照样列出，× 和 + 变灰（截图）；悬停"关闭终端（Ctrl+Shift+W）"的提示 PrintWindow 没截到，未验证；重连后两个终端回来（管理员终端要重新登录） |
+| 摄像头（B） | 通过：画面到、工具栏只有摄像头/画面/操作/聊天/录制/连接方式/断开（没有"输入""会话"）、收起/展开；没出"对方已关闭键盘和鼠标控制权限"。缩放、画质、编码、截图、录制、聊天和语音、全屏、会话快捷键没逐项做；镜头被盖住画面是暗的 |
+| 摄像头（测试虚拟机） | 通过：报"远程设备上未找到可用的摄像头。" |
+| 同标签远程桌面加摄像头 | 部分：同一标签里终端、摄像头、远程桌面三个视图并存，B 的 CM 数为 3；没测不在前台不推帧（V1 日志）、两边各录一份、未读求和 |
+| 读屏 | 通过：`leapgate-uia.ps1 -Op Dump` 在终端视图（27 个节点）和摄像头工具栏（工具栏 Group 和各按钮）都读得到，整棵树不空；终端内容没有逐行语义（预期） |
+| 4K 上屏 | 未验证：A 现在两块 2560×1440，没有 4K |
+| 旧界面 | 部分：旧界面（`app-ui-m9b-upstream-5ca858868`）连接、文件传输窗口、终端窗口（出现提示符）、摄像头窗口（有画面）各开一次正常；终端里同样打不进字（见必须改 1）；端口转发、出口、`--relay`、ID 加盐没做 |
+| 对端是 Mac | 未验证，等维护者在 Mac 点"接受"（见汇报） |
+| 两个摄像头 | 未验证，留给维护者试用（没有第二个摄像头） |
+
+**M9a 挪过来的两件**
+
+- 悬停：选便携版自己所在的文件夹，"无法安装到 Leapgate 当前所在的文件夹。请选择其他位置。"红字下方悬停出现完整路径（`C:\leapgate-e2e\app-ui-m9b-5ca858868`），"安装"灰掉带盾牌。通过。
+- UIA 读安装页：路径行、红字（语义名里带完整路径）、三个勾选框（`CheckBox … [Toggle]`）都读得到；`leapgate-uia.ps1` 不输出勾选状态，所以读不到 checked（脚本限制）；灰掉的"安装"在语义树里**没有** `disabled`（`Button "安装" [Invoke]`，脚本会对 IsEnabled 为 false 的元素标 `disabled`），设备菜单里灰显的"终端（管理员）"也一样：灰掉的控件对读屏仍报可用，小问题，记待调。证据 `20-install-page-uia.txt`。
+
+**最新 stable 检查（3.47.9，2026-11-11 查仍是最新 stable）**：1. `bridge,build -ForceBridge` 通过。2. analyze：core 91 info + 5 warning（复制件 `file_model.dart`，同基线），app 无问题；core 366、app 1338（跳过 2）个测试通过；画廊 3300 张，对 3.44.9 的 3168 张逐像素相同，132 张差异像素极少（`94-gallery-3449-vs-3479.txt`）。3. 终端区 Impeller 下绘制：开终端截图，和 3.44.9 一致（提示符、光标、深色底色正常）；xterm 在 release 下编译通过；上述 view ID 错误同样出现。4K 因没有 4K 显示器未做。4. 用 3.44.9 编回，`flutter_windows.dll` = `8667024A…`。3.47.9 那份在 `app-ui-m9b-stable3479-5ca858868`。
+
+**最终外观检查**：因有必须改项，未做。
+
+**顺带看到（不挡）**：B 的 oh-my-posh 提示符用到的 Nerd Font 图标在终端里是缺字方框（终端字体没有这些字形）；摄像头视图"打开远程桌面"后 A 上多出对端桌面截图，已删。
+
 #### M9a 安装页（测试虚拟机，2026-11-09 11:28~13:30，被测 `0c6b156d8`，几项在 `1c3d3f44a` 上复测）
 
 按 14 §5.3。构建（`-Ui leapgate -ForceBridge -PrinterDriver`）：`0c6b156d8` 的 `leapgate.exe` `304FB91C…`、`libleapgate.dll` `5F14E611…`、`data/app.so` `4BAC2CEF…`、便携单文件 `9B078767…`、zip `7EC0B2BF…`；`1c3d3f44a` 的 `libleapgate.dll` `19458F7A…`、`data/app.so` `4CED07A1…`、便携单文件 `A19B4D56…`、zip `EE0662A4…`（`leapgate.exe`、`flutter_windows.dll` `8667024A…` 两版相同）。打印机驱动经维护者同意下载，脚本打印的 sha256：`rustdesk_printer_driver_v4-1.4.zip` `c4cf4d3b48c4d9079b243edc43bb1db03b076282bc259c9f49883e9db20fa8b5`、`printer_driver_adapter.zip` `e90e5d52c8807b4c6293c78a52479338715e0bf396b1b34802777b8c452e6781`（两个都是"还没钉住，按 sha256sums 核对通过"）；发布目录里有 `drivers\RustDeskPrinterDriver\`（6 个文件）和 `printer_driver_adapter.dll`。端点：测试虚拟机用便携单文件（解到 `%LOCALAPPDATA%\leapgate`）当被测，A 的便携版当控制端（有会话那条）。开测前测试虚拟机上装着 `d3073a33d` 的安装版（服务在跑），先 `--uninstall` 卸掉再测；没有回滚，用它当时的状态。
