@@ -3098,5 +3098,6 @@ M9 分三段，各自审查、验收、外观检查、合 main（M9-1）。和�
 7. `cmdkey /generic:localhost` 全机一个名字（13 §1.7 第 6 条）。
 8. 旧界面（`flutter/` 用的还是 pub 上的 xterm 4.0.0）的终端窗口在路线 C 引擎下同样打不进可打印字符（M9b 验收看到），原因同上面"依赖"那条，旧界面不修。
 9. 管理员终端的系统用户名和系统密码都去掉首尾空格再发，末尾带空格的系统密码登不上（M9b 验收看到）。上游登录对话框也是这样（`common/widgets/dialog.dart` `_connectDialog` 的 `submit`：`osUsernameController`、`osPasswordController`、`passwordController` 都 `trim()`），新界面 `ConnectionModel.login`（`core/lib/leapgate/connection.dart`）照它，不改。
+10. 对端是 Windows 时看不到 R3-Q11 那一行（"已重新连接。原终端会话已结束，当前为新的终端会话。"）：这一行照常写进终端，但上游 `portable-pty` 建 ConPTY 不带 `PSEUDOCONSOLE_INHERIT_CURSOR`，新 shell 的第一帧先清屏，把它擦掉。这时用户看到的是一个清空的新 shell，不会误以为原来的程序还在，和 R3-Q11 要的效果一样。对端是 Linux、macOS 时照常显示。试过在清屏之后补写一次（`de691c4ea`），pwsh 加 oh-my-posh 重画提示符时照样擦掉，已撤回（2026-11-19 维护者定）。
 
 **测试**：14 §5.2 列的各条。合入前：`git diff main -- flutter/` 为空；core analyze 不超出 91 条 info 的基线，app 0 条；复制件不跑格式化，改已有文件不对整个文件跑 `dart format`；新旧界面都要能编（Rust 改了上游 `ui_session_interface.rs` 和出口监听），旧界面的五项冒烟和出口 B15 冒烟照跑。
