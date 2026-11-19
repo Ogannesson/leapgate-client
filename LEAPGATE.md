@@ -18,13 +18,13 @@
 
 ## 3. 局域网直连：多候选地址（第三期第一项）
 
-依据：总仓库 `docs/research/第三期/04-TUN下的局域网直连.md`（读码结论、mihomo/sing-tun 的路由行为、选网卡规则都在里面，动手前先读）。维护者 2026-10-23 定：先单独做这一项；一步到位做多候选地址（改 proto 和服务端转发）。
+依据：总仓库 `docs/research/第三期/04-TUN下的局域网直连.md`（读码结论、mihomo/sing-tun 的路由行为、选网卡规则都在里面，动手前先读）。做法是多候选地址，改 proto 和服务端转发。
 
 ### 3.1 问题
 
 局域网路径（服务端发现两端公网出口相同 → `FetchLocalAddr` → 被控端回 `LocalAddr` → 服务端转成 `PunchHoleResponse{is_local}` 给控制端）里，被控端报的 `local_addr` 是它连 hbbs 那条 socket 的本地地址，控制端连的时候也把源地址绑在自己连 hbbs 那条 socket 的本地地址上。开 TUN 代理（Clash Verge / mihomo 等）的机器上，这两个地址都是虚拟网卡的（例如 `198.18.0.1`），直连必然失败、1 秒后退回中继。
 
-### 3.2 协议（已改，leapgate-cardo `375e2a3` / `a3d96d4`）
+### 3.2 协议（在 leapgate-cardo）
 
 - `LocalAddr.leapgate_local_addrs = 1000`（`repeated bytes`）：被控端的局域网候选地址，`AddrMangle::encode` 编码（和 `local_addr` 同一种编码），最好的在前，端口都等于 `local_addr` 的端口。
 - `PunchHoleResponse.leapgate_local_addrs = 1000`：服务端在 `is_local` 的响应里原样带给控制端。
@@ -36,14 +36,14 @@
   - 只取 IPv4。候选来自物理网卡：排除虚拟/隧道网卡（Windows `IfType` 53/131/23/24，Wintun 是 53；接口名 `utun*`、`tun*`、`Mihomo`、`wintun` 一类）、`198.18.0.0/15`、`100.64.0.0/10`、回环、`169.254.0.0/16`；要求网卡有默认网关（顺带排除 WSL/Hyper-V 的 vEthernet）。
   - 排序：有线在前，再按链路速度；去重；最多 8 个。端口都用 `sock_local` 的端口。
   - `sock_local` 本身不是虚拟地址时，它排第一（和上游行为一致），后面再跟其他物理网卡地址。
-  - 网卡枚举用 `GetAdaptersAddresses`（`windows` crate，和主 crate 同版本）。实测（2026-10-23，维护者台式机）：`default-net 0.14.1` 的 `get_interfaces()` 每次 4.2~5.3 秒，原因是它对一块断开但配了静态网关的网卡发 `SendARP` 等到超时，而且整个跳过 IfType 53 的网卡；`GetAdaptersAddresses` 每次 5~10 ms，还能读到在线状态、借此排除断开的网卡。不能用 `default_net::get_default_interface()`：开 TUN 时它选中的正是 TUN。
+  - 网卡枚举用 `GetAdaptersAddresses`（`windows` crate，和主 crate 同版本）。在 Windows 上实测：`default-net 0.14.1` 的 `get_interfaces()` 每次 4.2~5.3 秒，原因是它对一块断开但配了静态网关的网卡发 `SendARP` 等到超时，而且整个跳过 IfType 53 的网卡；`GetAdaptersAddresses` 每次 5~10 ms，还能读到在线状态、借此排除断开的网卡。不能用 `default_net::get_default_interface()`：开 TUN 时它选中的正是 TUN。
 - 挂钩：组 `LocalAddr` 时，`local_addr` 改成候选的第一个（`sock_local` 是物理地址时就是它自己，不变），`leapgate_local_addrs` 填全部候选。
-- 监听：被控端随后在 `local_addr` 的 IP:端口上开 18 秒、只收一条的监听（上游 `src/server.rs` `accept_connection_`）。候选里有和 `sock_local` 不同的 IP 时，改为监听 `0.0.0.0:同一端口`，否则照上游（Windows 上实测能在同一端口上绑 `0.0.0.0`）。监听地址由纯函数 `leapgate::lan::listen_addr(candidates, sock_local)` 算出，候选列表在 `handle_intranet_` 里算一次，作为新参数经 `accept_connection` 传到 `accept_connection_`（维护者 2026-10-23 同意这处签名改动：`pub(crate)`、只有一个调用方）。不在发出 `LocalAddr` 之后再枚举网卡：那会把"发出地址到开始监听"的空档从微秒拉长到 5~10 ms。
+- 监听：被控端随后在 `local_addr` 的 IP:端口上开 18 秒、只收一条的监听（上游 `src/server.rs` `accept_connection_`）。候选里有和 `sock_local` 不同的 IP 时，改为监听 `0.0.0.0:同一端口`，否则照上游（Windows 上实测能在同一端口上绑 `0.0.0.0`）。监听地址由纯函数 `leapgate::lan::listen_addr(candidates, sock_local)` 算出，候选列表在 `handle_intranet_` 里算一次，作为新参数经 `accept_connection` 传到 `accept_connection_`（这处签名改动可以接受：`pub(crate)`、只有一个调用方）。不在发出 `LocalAddr` 之后再枚举网卡：那会把"发出地址到开始监听"的空档从微秒拉长到 5~10 ms。
 - 没有任何物理候选时，一切照上游。
 
 ### 3.4 控制端（收到 `is_local` 的 `PunchHoleResponse`）
 
-- `leapgate_local_addrs` 非空时：对全部候选并发发起 TCP 连接，不绑定源地址（局域网网段的路由比 TUN 的更具体，自然从物理网卡出去；依据见笔记 04），TCP 连接的等待和上游局域网的 1 秒一致；第一个完成 TCP 连接**并且**完成安全握手的胜出，其余丢弃。握手另有 3 秒上限（维护者 2026-10-23 同意）：被控端的监听只收一条连接，其余连上的候选会排在队列里永远等不到握手回应，没有上限就要等上游的 `READ_TIMEOUT` 才回落中继。
+- `leapgate_local_addrs` 非空时：对全部候选并发发起 TCP 连接，不绑定源地址（局域网网段的路由比 TUN 的更具体，自然从物理网卡出去；依据见笔记 04），TCP 连接的等待和上游局域网的 1 秒一致；第一个完成 TCP 连接**并且**完成安全握手的胜出，其余丢弃。握手另有 3 秒上限：被控端的监听只收一条连接，其余连上的候选会排在队列里永远等不到握手回应，没有上限就要等上游的 `READ_TIMEOUT` 才回落中继。
 - 全部失败（包括 TCP 连上了但握手失败）时，必须和上游超时一样回落中继，不能直接报错。笔记 04 指出上游"连上了但握手失败"会直接报错、不回落：在 Leapgate 路径里要兜住。
 - 以下情况不试候选，完全照上游走：强制中继（`interface.is_force_relay()`：始终走中继、`ID/r`、配了代理）、没有可信的服务端签名（`signed_id_pk` 为空，或者按上游 `secure_connection` 的方式验签、核对 id 失败：这时握手不验证对端，没被接受的候选也会"握手成功"）、关了 TCP 打洞。
 - 上游那次直连尝试只在它要连的 `peer_addr` 已经在候选里试过时才跳过；`peer_addr` 被过滤掉了（例如是公网地址），就照上游放行。
@@ -68,7 +68,7 @@
 - `libs/leapgate` 单元测试：候选选择（用可注入的网卡列表模拟：TUN 加有线、TUN 加无线、有线加无线、只有虚拟网卡、WSL vEthernet）、编码往返。
 - 控制端并发连候选、握手失败回落中继的逻辑要能在不起真实 Leapgate 的情况下单测（把"连接 + 握手"抽成可注入的函数）。
 - Windows 构建通过（`scripts/windows/build-client.ps1`）。
-- 端到端由维护者测：两台 Windows（都开 Clash Verge TUN、都装 Leapgate），连同一个 leapgate-server；期望服务端 `conn_attempt.outcome = direct_lan`，控制端日志里连的是物理网卡地址。
+- 端到端：两台 Windows（都开 Clash Verge TUN、都装 Leapgate），连同一个 leapgate-server；期望服务端 `conn_attempt.outcome = direct_lan`，控制端日志里连的是物理网卡地址。
 
 ### 3.7 不做
 
@@ -119,7 +119,7 @@
 
 - `src/rendezvous_mediator.rs` `get_relay_server` 开头：`leapgate::route::relay_preference(&provided)` 返回 `Some` 就直接用它。条件是服务端给了中继并且 `report::server_is_leapgate()` 为真（按持久化的能力记录现算，进程重启后、心跳被限速时都成立）；连原版 hbbs 时它给的是轮询结果，本地 `relay-server` 照上游优先。`get_relay_server` 只有 `handle_intranet`、`handle_punch_hole` 两个调用点，被控端主动发起中继也用它们的结果。
 - `src/client.rs` `_start_inner` 的 `PunchHoleRequest` 字面量：`leapgate_from_id: leapgate::route::self_id()`。`self_id()` 用 `Config::get_id_or(String::new())`，不用 `Config::get_id()`（本进程没有 id 时它会就地生成并落盘，界面进程会造出和服务进程不一致的 id）；拿不到就发空串，服务端按估计值算。`PunchHoleRequest` 全仓库只在这里构造。
-- proto：`PunchHoleRequest.leapgate_from_id = 1000`（string，leapgate-cardo 客户端线 `9c6e152`），`rendezvous.proto` 文件头注明 Leapgate 字段占 1000~1999。
+- proto：`PunchHoleRequest.leapgate_from_id = 1000`（string，在 leapgate-cardo 客户端线），`rendezvous.proto` 文件头注明 Leapgate 字段占 1000~1999。
 
 ### 5.2 心跳里的字段
 
@@ -132,7 +132,7 @@
 - 进程内一个专用 `std::thread`（`Once`），阻塞的 `std::net`，不用 tokio：心跳跑在 `sync.rs` 的单线程运行时上，那里每个 tick 还会同步调阻塞函数，计时会被拉长。
 - 测的条件：有非空列表、15 分钟内有成功的心跳。新列表（rev 变了）先等 10~30 秒随机时间再测第一轮，之后每轮间隔 `interval × (0.9~1.1)`；状态变了用 `Condvar` 唤醒重算。
 - 每轮开头：开了代理（`Config::is_proxy()`）、开了 WebSocket（`use_ws()`）或没配 Key 时不测，并清掉旧结果。
-- 测速和真实中继连接走同一条路（2026-10-25 改，契约 02a）：不绑本地地址，系统解析、系统路由，开着 TUN 就进 TUN、由代理按它的规则转发。代理会在本地或路由器上先完成握手、之后才去连中继，所以不计握手时间，计的是中继关连接：hbbr 的 `make_pair_` 收到不是 `RequestRelay` 的首帧就直接返回，不打日志。
+- 测速和真实中继连接走同一条路（契约 02a）：不绑本地地址，系统解析、系统路由，开着 TUN 就进 TUN、由代理按它的规则转发。代理会在本地或路由器上先完成握手、之后才去连中继，所以不计握手时间，计的是中继关连接：hbbr 的 `make_pair_` 收到不是 `RequestRelay` 的首帧就直接返回，不打日志。
 - 各中继并发（每台一个线程，测完即退）：`check_port(host, 21117)` 后系统解析一次（不计时，fake-ip 下得到 `198.18.x` 照用），按返回顺序取第一个连上的（`connect_timeout` 3 秒）。连上后等 `SETTLE`（1.5 秒），让代理把上游连好；等完非阻塞地 `peek` 一次，连接已关、出错或已收到数据就判这次失败（hbbr 收到首帧前既不发数据也不关；代理连不上中继、规则拒绝时会在这段时间里关掉）。然后发 1 字节 `0x00`（长度为 0 的帧）开始计时，读到干净的 EOF 停表；3 秒内没读到、读到数据或出错都判失败。每台测 3 次、间隔 200 毫秒，成功的取最小值，毫秒向上取整、至少 1；3 次都失败进 `down`。
 - 作废规则只有一条（纯函数 `summarize`）：对端是公网地址的中继任一次在 2 毫秒内关，整轮作废、不上报、清掉旧结果。真实路径至少一个往返，比这还快说明关连接的不是中继（代理规则拒绝、安全软件见数据就断）。"公网"指不是私网、回环、链路本地、`100.64.0.0/10`、IPv6 ULA；fake-ip 段 `198.18.0.0/15` 和 `fdfe:dcba:9876::/48`（mihomo 的 IPv6 TUN 和 fake-ip 段）算公网。
 - 起不了测速子线程时这一轮作废，打一条 warn（`leapgate route: probe round dropped, cannot start a probe thread: …`）。
@@ -145,7 +145,7 @@
 - 局域网候选（§3）的行为不变：被控端候选、控制端收候选、`handshake_timeout`、`controller_bind_addr` 都还只看 IPv4。
 - 网卡描述关键字、`has_gateway_v4/v6`、IPv6 地址属性、地址分类、网络代价由 05 做（§7.2）；契约 03 的 IPv6 局域网候选、`listen_dual` 不做（03 收缩）。
 - 05 让 `is_virtual` 变严（加了描述和名字的关键字，§7.2）：它也作用于 `is_physical`，所以原来只靠"有没有 IPv4 网关"漏进来的 ZeroTier、VMware 之类，现在在局域网多候选里也判成虚拟，提前去掉一个连不通的候选。是有意的，`lan.rs` 有回归测试钉住。`Nic.ipv6` 换成带属性的结构，`is_physical` 对每个地址照旧都认。
-- 测速从 2026-10-25 起不再看网卡（§5.3），原来给它用的 `physical_snapshot` 已删。`is_physical` 的 IPv6 分支因此暂时只有测试在用，留着不动。
+- 测速不看网卡（§5.3），原来给它用的 `physical_snapshot` 已删。`is_physical` 的 IPv6 分支因此暂时只有测试在用，留着不动。
 
 ### 5.5 固定日志
 
@@ -189,10 +189,10 @@
 依据：总仓库 `docs/第三期实施契约/03-局域网判定与候选.md` §4.4。
 
 - 问题：上游第一次生成 ID 时取第一块有 MAC 的网卡，把 MAC 后 4 字节截成 29 位当 ID（`Config::get_auto_id`）。同一台机器上的原版 RustDesk 和 Leapgate 算出的是同一个数，指向同一台服务器时两边互抢这个 ID，从别处连它时时而连到原版、时而连到 Leapgate。
-- 位置：leapgate-cardo 客户端线（`leapgate/client`，`8a5cf22`）。新文件 `src/leapgate_id.rs` 的 `salt`：`sha256("leapgate-auto-id\0" ‖ 上游 ID 的 4 字节小端)` 取前 4 字节按小端转 `u32`，再 `(h & 0x0FFF_FFFF) | 0x1000_0000`，结果固定 9 位（268435456~536870911）。`src/config.rs` 的 `get_auto_id` 在 `id &= 0x1FFFFFFF;` 后加 2 行挂钩；`src/lib.rs` 加模块声明，安卓和 iOS 不编（那里上游本来就用随机 ID）。不放 `libs/leapgate`，因为 `get_auto_id` 在 hbb_common 里，而 `libs/leapgate` 依赖 hbb_common。服务端不生成 ID，服务端线不放。
+- 位置：leapgate-cardo 客户端线（`leapgate/client`）。新文件 `src/leapgate_id.rs` 的 `salt`：`sha256("leapgate-auto-id\0" ‖ 上游 ID 的 4 字节小端)` 取前 4 字节按小端转 `u32`，再 `(h & 0x0FFF_FFFF) | 0x1000_0000`，结果固定 9 位（268435456~536870911）。`src/config.rs` 的 `get_auto_id` 在 `id &= 0x1FFFFFFF;` 后加 2 行挂钩；`src/lib.rs` 加模块声明，安卓和 iOS 不编（那里上游本来就用随机 ID）。不放 `libs/leapgate`，因为 `get_auto_id` 在 hbb_common 里，而 `libs/leapgate` 依赖 hbb_common。服务端不生成 ID，服务端线不放。
 - 影响：只有第一次生成 ID 的设备（配置里 `id` 为空）拿到加盐后的 ID，已有 ID 的设备不变。`allow-hostname-as-id` 打开时用主机名，上游收到 `UUID_MISMATCH` 时换的随机 10 位 ID，都不经过这里。日志 `Generated id` 打的是加盐后的值。
 - 已装 Leapgate、又要和原版指向同一服务器的机器：停掉 Leapgate，删掉配置文件 `Leapgate.toml`（安装版是服务进程那份）里的 `id` 和 `enc_id` 两项，再启动，Leapgate 按加盐后的规则重新生成 ID。界面上的"修改 ID"在 leapgate-server 上不可用（回 `NOT_SUPPORT`）。
-- 测试：`leapgate_id::tests` 一条，三组固定输入的输出和另一种实现（Python）算出的值逐字一致，都是 9 位、和输入不同。端到端（契约 03 §6 第 4 项）留到统一验收。
+- 测试：`leapgate_id::tests` 一条，三组固定输入的输出和另一种实现（Python）算出的值逐字一致，都是 9 位、和输入不同。端到端的测法见契约 03 §6 第 4 项。
 
 ## 7. 自研 ICE（第三期 05）
 
@@ -221,7 +221,7 @@
 
 ### 7.4 控制端（`race_ice`）
 
-- 启用条件，全部满足才出 ICE：不是只允许入站；对端不是直连 IP 或 `域名:端口`；不是 `id@server?key=`（`other_server` 为空）；不强制中继（含 `/r`、代理、WebSocket）；没开 `disable-udp`；`enable-udp-punch` 和 `enable-ipv6-punch` 至少开一个（上游 `get_udp_punch_enabled`、`get_ipv6_punch_enabled`，控制端本地选项；两个都关说明用户不要 UDP 直连，维护者 2026-10-25 定）；有可信 Key（`get_rs_pk` 能解出）；能力缓存含 `ice`。连接类型不特判。
+- 启用条件，全部满足才出 ICE：不是只允许入站；对端不是直连 IP 或 `域名:端口`；不是 `id@server?key=`（`other_server` 为空）；不强制中继（含 `/r`、代理、WebSocket）；没开 `disable-udp`；`enable-udp-punch` 和 `enable-ipv6-punch` 至少开一个（上游 `get_udp_punch_enabled`、`get_ipv6_punch_enabled`，控制端本地选项；两个都关说明用户不要 UDP 直连）；有可信 Key（`get_rs_pk` 能解出）；能力缓存含 `ice`。连接类型不特判。
 - ICE 腿是一条 future，不 spawn：取会合服务器、枚举网卡（为空就静默结束，竞速只等上游）；并行收集和建信令连接（`connect_tcp` 加 `secure_tcp_required`，整段 3 秒）；发 OFFER，1.5 秒没回应原样重发一次，从第一次起最多等 4 秒；收到 ANSWER 先比 session、验 S 签过的被控端 IdPk（`peer_key_verifies`）、检查参数，过了才开始读 ICE socket 跑检查（之前到的对端检查留在接收缓冲里）；选中后 `socket.connect(远端)`，`KcpStream::connect` 和 `secure_connection` 各限 3 秒，流必须已加密。
 - 竞速（`race_legs`）：ICE 先成功立即胜出；上游先给直连立即胜出；上游先给中继时最多再等 `relay-fallback-delay`（和上游 WebRTC 竞速同一个选项，默认 2.5 秒），等到 ICE 成功就用 ICE，否则用中继（窗口到时 ICE 还在跑就打 `lost the relay window` 那一行）；窗口从上游交回中继时算起，这时上游已经在中继上做完 `secure_connection`、收到了被控端经 hbbr 发来的身份消息，中继是真正可用的，本机 fake-ip TUN 提前完成的只是 TCP 握手；上游先失败就等 ICE，ICE 也失败时返回上游的错误原文。
 - ICE 胜出时返回 `((KCP 流, true, pk, Some(kcp), "UDP" 或 "IPv6"), (0, 会合服务器), false)`：连接类型沿用上游 UDP/IPv6 打洞的标签；第三项 `false`，ICE 的成败不改 `direct_failures`。
@@ -283,8 +283,8 @@
 - 路由器自己做 fake-ip（例如 OpenClash 的 fake-ip 模式）时，物理网卡 DNS 的答案也是假地址：两边都被丢弃，没有 srflx，只剩 host 和 prflx，干净回落到上游路径和中继。
 - 会合服务器 21116/UDP 的回包源地址必须是客户端发往的那个；多地址主机上发往次地址的 Binding 请求从主地址回包，端口受限和对称 NAT 后面的客户端拿不到 srflx 和证明。
 - 选中后不换路径：选中的地址失效（ULA、临时地址过期、换网）时，远程桌面这类走 `io_loop` 的会话在 KCP 静默 8 秒后整次重连；端口转发和出口隧道不自动重连，隧道断开后等下一个本地连接进来才重新登录。
-- 被控端的静默判断是 20 秒、没有 consent 保活（维护者 2026-10-28 定，最初合入的是和控制端相同的 8 秒）：控制端还在、但链路断了约 20 秒以上（换 Wi-Fi、睡眠唤醒）时，被控端照样关会话，上游给控制端的关闭原因发不出去。不用 8 秒，是因为下面两条（数值是读码估算，假设控制端本机网络正常、被控端地址没变、用密码登录，没有实测；点击确认的会话重连时要被控端再点一次确认，效果等于锁屏）：
-  - 远程桌面这类走 `io_loop` 的会话：控制端静默满 8 秒就自动重连，重连那一轮的打洞请求在 3 秒、9 秒各重发一次，18 秒放弃（报不能自动重试的错误）。对方要求了"会话结束后锁屏"时，上游靠"旧连接关闭时，同一会话的新连接已经登录"来避免误锁（#16124 的 `session_reconnected`）。被控端 8 秒就关的话，重连还没登录，断链只要长到触发重连就几乎都会锁屏。20 秒时，会合服务器在近处，断链约 17 秒以内基本不锁；在远处（往返约 200 毫秒，像 2026-10-25 跨网验收那样），约 11 秒以内不锁、11~19 秒有时会锁（看 9 秒那次重发送到后，上游路径多快接上），约 19 秒以上会锁。以前的 30 秒档也只扛到 9 秒那次重发（重连那一轮最后一次发送）的时刻：远处约 18~19 秒，近处约 17 秒，所以近处和 20 秒时一样；再长，重连那一轮在约 27 秒失败、会话结束。要在远处服务器下也完全追平以前，阈值要约 23 秒。断的是控制端本机网络时，重连常当场报不能自动重试的错误，阈值多少都一样。被控端关旧连接时如果正好卡在发送上（走发送失败那条路，上游不锁），就不锁，所以准确说是"通常会锁"。挂钩读不到 `lock_after_session_end`，不改上游文件没法只对开了锁屏的会话放宽。
+- 被控端的静默判断是 20 秒、没有 consent 保活：控制端还在、但链路断了约 20 秒以上（换 Wi-Fi、睡眠唤醒）时，被控端照样关会话，上游给控制端的关闭原因发不出去。不用 8 秒，是因为下面两条（数值是读码估算，假设控制端本机网络正常、被控端地址没变、用密码登录，没有实测；点击确认的会话重连时要被控端再点一次确认，效果等于锁屏）：
+  - 远程桌面这类走 `io_loop` 的会话：控制端静默满 8 秒就自动重连，重连那一轮的打洞请求在 3 秒、9 秒各重发一次，18 秒放弃（报不能自动重试的错误）。对方要求了"会话结束后锁屏"时，上游靠"旧连接关闭时，同一会话的新连接已经登录"来避免误锁（#16124 的 `session_reconnected`）。被控端 8 秒就关的话，重连还没登录，断链只要长到触发重连就几乎都会锁屏。20 秒时，会合服务器在近处，断链约 17 秒以内基本不锁；在远处（往返约 200 毫秒），约 11 秒以内不锁、11~19 秒有时会锁（看 9 秒那次重发送到后，上游路径多快接上），约 19 秒以上会锁。以前的 30 秒档也只扛到 9 秒那次重发（重连那一轮最后一次发送）的时刻：远处约 18~19 秒，近处约 17 秒，所以近处和 20 秒时一样；再长，重连那一轮在约 27 秒失败、会话结束。要在远处服务器下也完全追平以前，阈值要约 23 秒。断的是控制端本机网络时，重连常当场报不能自动重试的错误，阈值多少都一样。被控端关旧连接时如果正好卡在发送上（走发送失败那条路，上游不锁），就不锁，所以准确说是"通常会锁"。挂钩读不到 `lock_after_session_end`，不改上游文件没法只对开了锁屏的会话放宽。
   - 端口转发（mux）和出口隧道：控制端不看 KCP 静默，空闲时靠 `tunnel_loop` 的 18 秒读超时发现断链，实际能扛约 11~18 秒的断链（受 KCP 重传退避影响）。被控端 20 秒才关，不比这个早，所以和以前一样；8 秒时约 5~9 秒的断链就会断，而且被控端先关、控制端要到 17~18 秒才发现。断链期间一直有本地流量时，以前能扛约 20~29 秒，20 秒时约 18~21 秒，略短。断链超过这个时长后，控制端要到"最后一次本地事件 + 18 秒"和 kcp-sys 约 60~70 秒的回收里较早的那个才发现，期间本地连接挂着，这一点以前也一样。
   - 非复用的端口转发（旧式映射、旧版 RDP）走不到这里：ICE 只在两端都是 Leapgate 时出现，Leapgate 被控端对非复用的端口转发回 `MSG_NEED_MUX`（§9.1）。
 - UDP 被封的网络，以及两端都是对称 NAT、端口受限对对称 NAT 又没有 IPv6 时打不通，走上游路径和中继。
@@ -294,14 +294,14 @@
 - 被控端系统时钟往回跳、心跳还没改回偏移时，链路上截获过的旧 FORWARD 可能被重放一次，后果只是起一个空 agent、占一个名额到 `AGENT_TTL`。
 - 上游先报错而 ICE 还在跑时要等 ICE，最长约 16 秒（信令 3 秒和收集并行、等 ANSWER 4 秒、检查 3 秒、KCP 和身份握手各 3 秒）；对端离线、Key 不对这类常见错误 ICE 一两个往返就失败。
 - 非 Windows 平台枚举不到物理网卡，不出 ICE（第一阶段只做 Windows）。
-- 会合服务器离两端很远时 ICE 可能输给中继窗口：ICE 比上游中继多几个经过会合服务器的往返（两端各建一条信令连接并做密钥交换、OFFER/FORWARD/ANSWER）。2026-10-25 跨网验收里会合服务器在美国、到两端往返约 200 毫秒，ICE 选中要 2.2~3.7 秒，上游中继约 1.3 秒给出、再等 2.5 秒，200 次里 6 次（3%）输给窗口，走中继、控制端打 `lost the relay window`。会合服务器离得近时快得多。
-- 被控端会话期间句柄缓慢增长，和 ICE 无关：2026-10-25 跨网验收里被控端主进程在会话开着时每秒约多 0.5 个内核句柄（Mutant、Section 成对），关掉会话、空闲后不回落，线程数和专用字节平稳；每次约 25 秒的连接净增约 9 个，控制端开、关 ICE 各 200 次斜率相同（都是每次 9.0 个）。来源没查明，本仓库的代码里搜不到按事件创建互斥量或共享内存的地方，没和原版 RustDesk 对照测过。
+- 会合服务器离两端很远时 ICE 可能输给中继窗口：ICE 比上游中继多几个经过会合服务器的往返（两端各建一条信令连接并做密钥交换、OFFER/FORWARD/ANSWER）。实测会合服务器到两端往返约 200 毫秒时，ICE 选中要 2.2~3.7 秒，上游中继约 1.3 秒给出、再等 2.5 秒，200 次里 6 次（3%）输给窗口，走中继、控制端打 `lost the relay window`。会合服务器离得近时快得多。
+- 被控端会话期间句柄缓慢增长，和 ICE 无关：实测被控端主进程在会话开着时每秒约多 0.5 个内核句柄（Mutant、Section 成对），关掉会话、空闲后不回落，线程数和专用字节平稳；每次约 25 秒的连接净增约 9 个，控制端开、关 ICE 各 200 次斜率相同（都是每次 9.0 个）。来源后来查明在显卡驱动：NVIDIA 的 `nvspcap64.dll` 每次 `DuplicateOutput` 漏一对 Mutant 和 Section；被控端的 DXGI 采集遇到 ACCESS_LOST 时会整条重建采集和编码（上游 1.5.0 起的恢复逻辑），失效越频繁漏得越多。本仓库的代码里没有按事件创建互斥量或共享内存的地方。
 
 ## 8. 不配也能用：自动降级与可选优化
 
 Leapgate 不要求用户配置任何代理规则。
 
-- 路由第二级（§5）：测速和真实中继连接走同一条路，量到中继关连接为止，本机 TUN、路由器透明代理、全隧道 VPN 下量到的都是真实中继路径的往返，不需要任何配置（2026-10-25 起，此前要把中继排除在代理之外才有实测）。
+- 路由第二级（§5）：测速和真实中继连接走同一条路，量到中继关连接为止，本机 TUN、路由器透明代理、全隧道 VPN 下量到的都是真实中继路径的往返，不需要任何配置。
 - 自研 ICE（§7）：不配任何代理规则时，ICE 靠两端对物理网卡候选逐对实测直连，在"路由器只代理 TCP""本机开 TUN""两端 UDP 出口不同"的网络里也能连上。
 - 条件不满足时（没有物理网卡候选、UDP 不通、服务端或对端不支持）自动回落上游路径和中继，不要求用户配规则。
 - 应用出口（§9）：被控端开着 TUN 代理或全隧道 VPN 时，出口的连接和向物理网卡 DNS 的查询绑物理网卡地址、从物理网卡出去，不经本机代理和 VPN，不用配规则（契约 B9）；同时发起的系统解析仍会经过本机，见 §9.4。
@@ -349,7 +349,7 @@ Leapgate 不要求用户配置任何代理规则。
 
 Leapgate 自己的文件里和挂钩配套的：`report/heartbeat.rs` 在开关打开时带 `"exit": true`（关着不带键，放行网段不上报）；`lan.rs` 的 `Nic` 多两个字段 `ipv4_prefixes`（每个 IPv4 的在链前缀长度）、`all_ipv6`（全部 IPv6 单播地址，含已弃用的临时地址），供地址策略认本机地址和链路网段，原有的 `ipv6` 和 ICE 的候选选择不变；`ice/mod.rs` 加 `public_v4`（B11：用 ICE 的 Binding 探测问会合服务器本机的公网 IPv4，不建 ICE 会话）；proto 只改 `libs/base` 的 `message.proto`（见上表），cardo 不动。
 
-上游 Dart（F7 写死的例外，超出要维护者同意；新 Dart 文件都在 `flutter/lib/leapgate/`：`exit_tunnel.dart` 放哨兵常量和出口行控件，`exit_nodes.dart` 是目录对话框，`exit_settings.dart` 是设置页的 part 文件）：
+上游 Dart（F7 写死的例外，不在下表的上游 Dart 文件不改；新 Dart 文件都在 `flutter/lib/leapgate/`：`exit_tunnel.dart` 放哨兵常量和出口行控件，`exit_nodes.dart` 是目录对话框，`exit_settings.dart` 是设置页的 part 文件）：
 
 | 文件 | 改动 | 归属 |
 |---|---|---|
@@ -424,26 +424,26 @@ Leapgate 自己的文件里和挂钩配套的：`report/heartbeat.rs` 在开关�
 
 ## 10. 新界面
 
-依据：总仓库 `docs/新界面/03-实施方案.md`（下称"03"），界面行为以 `01-内容与逻辑说明.md`、`02-第二轮内容与逻辑说明.md` 为准，令牌和图标以 `docs/新界面/样稿/A-基础.html` 为准。新界面放在 `leapgate_ui/`（`core` 包沿用上游包名 `flutter_hbb`，放桥、models、会话和状态；`app` 包 `leapgate_ui` 放页面、组件、令牌、Windows 启动代码），和上游 `flutter/` 互不引用。维护者 2026-10-30 定（03 §12 IQ13）：除分段延迟（Q13）单独写契约外，03 §6.1 的表加本节就是新界面各 Rust 项的实施契约；每项动手前把挂钩位置写进本节，合入时补上取值。
+依据：总仓库 `docs/新界面/03-实施方案.md`（下称"03"），界面行为以 `01-内容与逻辑说明.md`、`02-第二轮内容与逻辑说明.md` 为准，令牌和图标以 `docs/新界面/样稿/A-基础.html` 为准。新界面放在 `leapgate_ui/`（`core` 包沿用上游包名 `flutter_hbb`，放桥、models、会话和状态；`app` 包 `leapgate_ui` 放页面、组件、令牌、Windows 启动代码），和上游 `flutter/` 互不引用。除分段延迟（Q13）单独写契约外，03 §6.1 的表加本节就是新界面各 Rust 项的实施契约；每项动手前把挂钩位置写进本节，合入时补上取值。
 
 ### 10.1 规则
 
 - **上游 `flutter/` 一行不改**（architecture §3.3）。评审规则：新界面的分支合入 main 之前，`git diff main -- flutter/` 必须为空（切换之后那次还原除外，03 §7.3）。构建会打补丁、改写 `flutter/` 下被跟踪的文件，所以在构建过的 worktree 里只 `git add <具体路径>`，不用 `git add -A`、`git commit -a`。编旧界面还会在 `flutter/` 下留下块 2 的三个未跟踪文件（`flutter/lib/generated_bridge_leapgate.dart`、`flutter/macos/Runner/bridge_generated_leapgate.h`、`flutter/ios/Runner/bridge_generated_leapgate.h`），构建 worktree 把它们加进 `.git/info/exclude`（不改上游的 `.gitignore`）。
-- **复制件头上写来源**：从上游复制的每个文件第一行写来源，例如 `// 上游：flutter/lib/models/input_model.dart@bd9262397（只删界面调用，不格式化）`。分三档：原样复制、只删界面调用、改写（03 §3.2）。合并上游 tag 之后，总仓库的 `scripts/windows/sync-ui-upstream.ps1`（还没写，最晚在有复制件以后的第一次合并上游之前写好）对前两档做三方合并（base = 头上记的提交里的上游原件，ours = 副本，theirs = 新 tag 的上游原件，`git merge-file`），冲突留给人，成功后改头上的提交号；改写档列出 `git log <旧>..<新> -- <上游文件>` 逐个人工判断。来源只记在文件头上，不另建对照表。来源行通常是第一行；有格式要求的文件放在允许的第一个位置（`Runner.rc` 在 `#pragma code_page(65001)` 之后，`runner.exe.manifest` 在 XML 声明之后），同步脚本按内容（`上游：` 开头的注释）找来源行，不按行号。
+- **复制件头上写来源**：从上游复制的每个文件第一行写来源，例如 `// 上游：flutter/lib/models/input_model.dart@bd9262397（只删界面调用，不格式化）`。分三档：原样复制、只删界面调用、改写（03 §3.2）。合并上游 tag 之后，总仓库的 `scripts/windows/sync-ui-upstream.ps1`（计划中）对前两档做三方合并（base = 头上记的提交里的上游原件，ours = 副本，theirs = 新 tag 的上游原件，`git merge-file`），冲突留给人，成功后改头上的提交号；改写档列出 `git log <旧>..<新> -- <上游文件>` 逐个人工判断。来源只记在文件头上，不另建对照表。来源行通常是第一行；有格式要求的文件放在允许的第一个位置（`Runner.rc` 在 `#pragma code_page(65001)` 之后，`runner.exe.manifest` 在 XML 声明之后），同步脚本按内容（`上游：` 开头的注释）找来源行，不按行号。
 - **一个上游文件混了两档时**（`models/model.dart`：`ImageModel`、`CanvasModel`、`CursorModel`、`QualityMonitorModel`、`RecordingModel`、`PeerInfo` 等属于只删界面调用，`FfiModel`、`FFI` 属于改写）：整份复制到 `core/lib/models/model.dart`，保留的类按只删界面调用处理，改写的两个类整段删掉（`FFI` 前面的 `ConnType` 跟着 `FFI` 走），改写版放进 `lib/leapgate/` 下的新文件，沿用原类名和复制件用到的成员名。来源行写"只删界面调用；`FfiModel`、`FFI` 改写到 `lib/leapgate/<文件名>`"（`FFI` 在 `lib/leapgate/session.dart`）。同步脚本照常对它做三方合并；上游改了那两个类，会以冲突的形式冒出来，由人工移植到改写文件。
 - **复制件和上游原件的差异保持最小**：`core` 原样使用上游的 `flutter/analysis_options.yaml`；"原样复制""只删界面调用"两档不跑 `dart format`、`dart fix`，不顺手修 lint；`flutter analyze` 的"新告警"以上游原件为基准算。评审时看 `git diff --no-index <上游原件> <副本>`，"只删界面调用"那一档的差异应该只有界面调用和导入。
-- **废弃 API**（03 §8.8）：新写的代码和"改写"档的文件不用最新 stable 已标记废弃的 API，最新 stable 检查报出的这类提示当场处理。"原样复制""只删界面调用"两档按上一条不改：上游原件在同一版 SDK 下也报的提示在验收记录里单列，等上游改了随三方合并带过来，到升 Flutter（M10）还没改的在升级时处理；某个 API 在最新 stable 里已经删掉、复制件编不过时，照最小差异改，并在文件头的来源行后注明。
+- **废弃 API**（03 §8.8）：新写的代码和"改写"档的文件不用最新 stable 已标记废弃的 API，最新 stable 检查报出的这类提示当场处理。"原样复制""只删界面调用"两档按上一条不改：上游原件在同一版 SDK 下也报的提示单独记下，等上游改了随三方合并带过来，到升级 Flutter 时还没改的在升级时处理；某个 API 在最新 stable 里已经删掉、复制件编不过时，照最小差异改，并在文件头的来源行后注明。
 - 新的 FFI 函数只放 `src/leapgate_ffi.rs`（frb 的第二个块），逻辑在 `libs/leapgate`，按领域分段追加；Leapgate 自己的事件用块 2 的 `StreamSink`，不往上游的 `InvokeUiSession` 加方法。上游文件里的挂钩照 §1 的纪律写。
 - 公开仓库里不写真实 IP、域名、设备 ID（测试夹具和文档用文档地址段）。
 
 ### 10.2 验收记录的写法
 
-每个里程碑验收完在 10.5 加一小节：日期、验收的提交、03 §5.2 该里程碑的每一条验收结果（通过、不通过、未验证，后两种写原因），以及 03 §8.8 的最新 stable 检查（SDK 版本，四步各自的结果，发现的问题；不适用的步骤写"不适用"和原因）。只写结论和问题，不写机器名、IP、设备 ID；机器相关的细节记在维护者的私有运行手册里。
+验收记录不在公开仓库（§10.5）。
 
 ### 10.3 frb 第二个块（F0）
 
 - 块 1 是 `src/flutter_ffi.rs`（上游，类名 `Rustdesk`），块 2 是 `src/leapgate_ffi.rs`（类名 `Leapgate`）。块 2 的 Rust 输出在 `src/leapgate_bridge/`（目录自带 `.gitignore`），由 `leapgate_ffi.rs` 用 `#[path]` 声明，不改 `src/lib.rs`。生成参数见总仓库 `scripts/windows/build-client.ps1` 的 bridge 步。Rust 侧两个界面共用，所以编哪个界面都生成两块：旧界面的 Dart 和 C 头落在 `flutter/`（块 2 的 Dart 旧界面不用，也不提交），新界面的落在 `leapgate_ui/core/`。
-- 2026-10-30 试验（基线 `c0858dd2d`）：
+- 试验结论：
   1. 块 1 生成的 `bridge_generated.rs`、`bridge_generated.io.rs`、`generated_bridge.dart`、`generated_bridge.freezed.dart` 和单块时逐字节一致；C 头只有末尾的 dummy 函数一段不同（多块时按块分名，并 `#include` 块 2 的头）。上游界面用两块生成的桥照常编出产物，锁文件没有漂移。
   2. 符号：`wire_<函数名>` 两块不能重名（codegen 生成前就检查）；按类型生成的 `new_*` 带块号后缀（`new_uint_8_list_0`、`new_uint_8_list_1`）；`free_WireSyncReturn`、`store_dart_post_cobject` 等公共符号只在块 1 里生成一份。dll 导出没有冲突。
   3. 共用类型：块 2 的签名里可以用基本类型、`String`、`Vec`、`uuid::Uuid`（`SessionID` 直接从 `flutter_ffi.rs` 引用）和块 2 自己声明的类型；块 1 已经暴露的自定义结构体和枚举（例如 `EventToUI`）不能再出现，两个生成模块会各实现一次 `IntoDart`，编译报 E0119。Dart 侧两份生成文件各自声明同名的类和常量（`EventToUI`、`wire_uint_8_list` 等），一个文件里用到同名的类型才报 `ambiguous_import`，所以块 2 的 Dart 一律带前缀导入（例如 `as lg`）。
@@ -467,7 +467,7 @@ Leapgate 自己的文件里和挂钩配套的：`report/heartbeat.rs` 在开关�
 
 - 新界面 runner 的窗口类：主窗口 `LEAPGATE_UI_MAIN`，CM（`--cm`）`LEAPGATE_UI_CM`，安装页（`--install`）`LEAPGATE_UI_INSTALL`。三者分开，按主窗口类名找时不会找到另外两个。主窗口的类名（`leapgate_ui/app/windows/runner/main.cpp` 的 `kMainWindowClass`）和 `libs/leapgate/src/ui.rs` 的 `MAIN_WINDOW_CLASS` 要一致；另外两个 Rust 不找，只在 runner 里。
 - 合并上游时核对：`core_main_invoke_new_connection` 的 Windows 分支仍按 `send_message_to_hnwd` 加 `WM_USER + 2` 把链接交给已有窗口（`uni_links_desktop` 认这个消息号）；上游有没有新增按 `FLUTTER_RUNNER_WIN32_WINDOW_CLASS` 或窗口标题找窗口的地方（`git grep -n "FLUTTER_RUNNER_WIN32_WINDOW\|FindWindow"`）。
-- 已知限制：新界面还没有安装页（第三轮）。exe 名以 `install.exe` 结尾时，core_main 会注入 `--install`、不起服务，runner 按安装页处理，新界面写一行日志后退出。M8 起构建脚本出的便携单文件叫 `leapgate-‹版本›-x86_64.exe`，不带 `install`（M8-2），只有用户自己把 exe 或便携包改名成以 `install.exe` 结尾、或者手动带 `--install` 才会碰到；安装改由主页的"安装"提示卡发起（§10.16）。M9a 起这是长期行为（R3-Q22）：`--install` 写日志后退出，安装从便携版主页的安装页发起（§10.18）。
+- 已知限制：exe 名以 `install.exe` 结尾时，core_main 会注入 `--install`、不起服务，runner 按安装页处理，新界面写一行日志后退出。构建脚本出的便携单文件叫 `leapgate-‹版本›-x86_64.exe`，不带 `install`，只有用户自己把 exe 或便携包改名成以 `install.exe` 结尾、或者手动带 `--install` 才会碰到。安装从便携版主页的"安装"卡和安装页发起（§10.16、§10.18）。
 - `Msg`（`libs/leapgate/src/ipc.rs`）按 `name` 字段区分，`snake_case`；CM 的事件就是 `Msg` 本身的 JSON，所以改名等于同时改进程间消息和界面事件。以后 Leapgate 的进程间消息都追加在 `Msg` 里，不改已有变体的顺序和含义。
 - C1、C2、S7 的已知限制：新旧版本的进程短暂同时在跑时，旧进程收到 `Data::Leapgate` 解码失败（上游 `next()` 返回 `Ok(None)`，两头都静默忽略），C1 返回 `{}`、C2 和 S7 没有效果。新界面便携版和旧界面不同时运行（03 §7.1），日常碰不到。`ShowCm` 在 CM 页面订阅之前到达时丢掉，不补发。
 - C1、C2、S7 合并上游时核对：`Data` 枚举末尾有没有新变体（`Leapgate` 要留在最后，冲突固定在这一处）；`ipc.rs` 的 `handle`、`ui_cm_interface.rs` 的 `IpcTaskRunner::run` 两处消息循环仍以兜底的 `_ => {}` 结尾、分发仍在里面；`AUTHED_CONNS`、`AuthConnType`（新增类型要在 `src/leapgate_hooks/ipc.rs` 的映射和 `Counts` 里加）、`Connection::alive_conns()`、`send_to_cm` 有没有变；`connect_port_forward_if_needed` 的复用分支是否仍是出口登录唯一建 mux 的地方。
@@ -516,7 +516,7 @@ Leapgate 自己的文件里和挂钩配套的：`report/heartbeat.rs` 在开关�
 - `feature` 取 `file_transfer`、`camera`、`terminal`、`port_forward`；`port` 是数字。
 - 01 §4.3 里写"不会出现"的两行（Incoming only mode、MSG_NEED_MUX）不给码，真出现时归 `other`。
 - 已知限制：服务器自定义的拒绝原因（`PunchHoleResponse.other_failure`、`RelayResponse.refuse_reason`）在 msgbox 里只是任意正文，和系统错误原文分不开，C3 归 `other`、显示原文。01 §4.3 要的"服务器拒绝了此连接："前缀由 Q3 的导出给：界面收到连接阶段的 msgbox 后调 `leapgate_session_connection`，有 `refused` 就显示"服务器拒绝了此连接：<原文>"（见下面 Q3 第 4 节）。
-- 不在 01 §4.3 里的错误不给码，归 `other`：摄像头、终端的（`No cameras`、`view_camera_unsupported_tip`、`Remote terminal is not supported by the remote side`）第三轮随说明一起补；`No active console user logged on…` 01 没有文案。
+- 不在 01 §4.3 里的错误不给码，归 `other`：摄像头、终端的（`No cameras`、`view_camera_unsupported_tip`、`Remote terminal is not supported by the remote side`）尚未给码；`No active console user logged on…` 01 没有文案。
 - Linux 对端的另几种登录错误（`x11 expected`、`ubuntu-21-04-required`、portal 不可用）归 `other`、显示原文；01 §4.3 只给了 Wayland 登录界面那一条。
 - `Failed to listen on` 一律归 `local_port_in_use`。Windows 上端口落在系统保留段时报的是 10013（访问被拒），文案"被占用"不准，但"改用其他端口"的建议仍然对。
 - 没认出的正文入表和写日志前截到 200 个字符（按字符边界），因为有的正文来自对端。
@@ -524,7 +524,7 @@ Leapgate 自己的文件里和挂钩配套的：`report/heartbeat.rs` 在开关�
 
 #### Q3 连接路径和中继名
 
-2026-10-30 读码定的方案（基线 `7bc0abd92`，下文行号以它为准），2026-10-31 维护者把末尾三条全部按推荐定了（见"维护者的决定"），同日实现。按 03 §6.1 Q3、§12 IQ14。界面要什么见 01 §4.2（第二级的"路径""中继服务器""传输"三项）。
+下文的行号以 `7bc0abd92` 为准，取舍见末尾"取舍"。按 03 §6.1 Q3、§12 IQ14。界面要什么见 01 §4.2（第二级的"路径""中继服务器""传输"三项）。
 
 **思路**：`race_ice`（§7.1 的 H-1，`src/client.rs:393`）包着整个 `Client::_start`，上游的结果、上游的错误、ICE 的结果都从它这里出去，所以路径在它里面判、在它里面写表。`_start` 里面有四样东西 `race_ice` 看不到：服务端回没回 `is_local`、局域网多候选赢没赢、连的是哪台中继、服务器有没有拒绝。这几处的挂钩拿不到会话，用 tokio 的 task-local 记录器传：`race_ice` 用 `leapgate::session::record` 把整场竞速包在记录器的 `scope` 里（ICE 那条腿不写记录器）；已有的 `lan_connect`、`lan_fallback` 在函数里调 `note_lan`，`src/client.rs` 新加的三处调 `note_relay`、`note_refusal`，不在 scope 里（单测、别的调用方）时什么也不做。已有挂钩的调用行和参数都没改。能这样做是因为 `_start` 的整棵调用树（两轮 `_start_inner` 的 `select_ok`、`connect`、`request_relay`、中继和 IPv6、WebRTC 的竞速）都在同一个 future 里被 poll；被 `tokio::spawn` 的只有 UDP NAT 测试和 WebRTC 的候选桥，Q3 用不到它们。
 
@@ -542,7 +542,7 @@ Leapgate 自己的文件里和挂钩配套的：`report/heartbeat.rs` 在开关�
 | 6 | 都不是 | 不给（`{}`） | 读码看不会出现；界面只显示第一级 | |
 
 - 传输（01 §4.2"传输：TCP / UDP"）顺带给：ICE 和标签是 `"UDP"`、`"IPv6"`（这两种带 KCP）、`"WebRTC"` 时 `udp`，其余 `tcp`。
-- 01 §4.2 要求不区分 ICE 和上游打洞，这里只按"实际走的是不是局域网地址"分 `lan` 和打洞（维护者 2026-10-31 定）。全局 IPv6 即使两端在同一 /64 也算打洞直连（IPv6），和上游 IPv6 打洞一致。srflx 的对端地址都是公网地址，归打洞。
+- 01 §4.2 要求不区分 ICE 和上游打洞，这里只按"实际走的是不是局域网地址"分 `lan` 和打洞。全局 IPv6 即使两端在同一 /64 也算打洞直连（IPv6），和上游 IPv6 打洞一致。srflx 的对端地址都是公网地址，归打洞。
 - 上游 UDP 打洞不会出现在 `is_local` 那一轮：服务端的局域网响应不带 `is_udp`（leapgate-server `rendezvous_server.rs` 的 `handle_local_addr`），`_start_inner` 不会把 NAT socket 连上去。`is_local` 那一轮 IPv6 打洞赢了算打洞直连（IPv6）。
 - WebRTC：自建服务器时默认关（`get_local_option` 给 "N"），用户打开时按上表第 3、5 行处理，走 TURN 时不给中继名。
 
@@ -590,7 +590,7 @@ Leapgate 自己的文件里和挂钩配套的：`report/heartbeat.rs` 在开关�
 - 返回元组的连接类型标签（`"TCP"`、`"UDP"`、`"IPv6"`、`"Relay"`、`"WebSocket"`、`"WebRTC"`）有没有增减或改名，`direct` 的含义变没变：`classify` 按它们判。
 - 上游登录时的 `display_name` 算法（`src/client.rs` 里 `LoginConfigHandler` 组 `LoginRequest` 那段）变没变，变了就改 `libs/leapgate/src/ui.rs` 的 `display_name` 和单测。
 
-##### 维护者的决定（2026-10-31，全部按推荐）
+##### 取舍
 
 1. Q3 的挂钩放 `create_relay`，不放 03 写的 `request_relay`（理由见第 2 节）。
 2. C3 的"服务器拒绝了此连接："前缀要做（`src/client.rs` 再加 2 处，共 3 处）：拒绝原因写进本表、由 `leapgate_session_connection` 返回，错误原文不动、旧界面不受影响。没选的备选：在 `race_ice` 里把错误正文改写成 `Server refused the connection: <原因>`，代价是旧界面也显示这句英文。
@@ -598,1071 +598,7 @@ Leapgate 自己的文件里和挂钩配套的：`report/heartbeat.rs` 在开关�
 
 ### 10.5 验收记录
 
-#### M0 工程骨架（2026-10-30，`f426ef520`）
-
-03 §5.2 M0 的验收：
-
-| 项 | 结果 |
-|---|---|
-| `-Ui leapgate` 从干净的构建 worktree 编出便携目录 | 通过。detached worktree、全量 cargo；产物齐（`leapgate.exe`、`libleapgate.dll`、两个纹理插件、`data\app.so`、`dylib_virtual_display.dll`），`flutter_windows.dll` 是自编引擎（哈希和清单一致），两个 `pubspec.lock` 没有漂移。产物里另有 `dartjni.dll`：core 解析到的 path_provider 2.1.6 带了 jni，上游锁的 2.1.5 没有，不影响运行 |
-| `-Ui upstream` 照常编出旧界面，五项冒烟 | 通过。同一 worktree 全量编出（`6de7a1349`，Rust 和 `f426ef520` 相同），两端都用这份构建：连接（ICE 胜出，登录成功）、强制中继（`--relay`）、文件传输两个方向（哈希一致）、TCP 端口转发（HTTP 200）、出口（socks5h 和 CONNECT 都 200，直连和经中继各一次） |
-| 启动后显示本机 ID 和服务状态 | 通过。日志有版本和本机 ID 两行；窗口左栏显示三位一组的 ID 和"已就绪" |
-| W1：再次启动把已有窗口提到前面；`--connect` 交给运行中的主窗口；标题改掉以后照样成立；两个界面同时运行时互不交给对方 | 通过。再次启动的进程约 0.2 秒退出，原窗口（含先最小化的情形）恢复并到前台；`--connect` 后原进程日志有 `link received`；用 `SetWindowText` 把标题改成"测试设备 - Leapgate"后两条照样成立；新旧界面同时运行时各自的 `--connect` 只到自己的主窗口，只开一个界面时也不交给对方、各自起自己的实例 |
-| 窗口尺寸 | 部分通过。3840×2160、150% 上默认客户区 1280×800、最小 960×600（逻辑像素），整窗在工作区内居中。1920×1080 开 150%、1366×768 开 100% 两种组合未验证（没有这种显示器，也没改系统显示设置），按代码核对：首次客户区取 max(min(1280×800, 0.9×工作区), min(960×600, 工作区))，非客户区按实际量 |
-| 拖动、双击最大化、四边改大小、窗口按钮；125%、150%、200% 下清楚 | 部分通过。左、右、下三边的原生改大小（命中测试）、最小化 / 最大化 / 还原 / 关闭按钮、双击空白最大化和还原，用窗口消息驱动验过；150% 下清楚。拖动空白移动窗口、拖上沿改大小、悬停效果（关闭按钮变红、提示气泡）、125% 和 200% 未验证：会话里注入不了真实鼠标，台式机上维护者可能正在用，没有接管 |
-| 画廊输入框用中文输入法，候选框位置正确 | 未验证：要真实键盘和输入法 |
-| 画廊 M0 组件浅色 / 深色 × 简洁 / 详细，和 `A-基础.html` 对照 | 通过。88 个组件状态 × 4 导出 352 张；顶栏、菜单和样稿并排对照过；两轮审查（基建一轮、界面一轮）后必修项清零，其余小差异记进总仓库 `docs/新界面/待调.md` |
-
-单测：core 8 个、app 33 个，3.44.9 和 3.47.9 下都通过；`flutter analyze` 两个包都没有问题。
-
-最新 stable 检查（03 §8.8）：Flutter 3.47.9（2026-10-29，Dart 3.13.7），官方 SDK、官方引擎、Impeller 默认开。
-1. 按 `-Ui leapgate` 编一次：通过。`pub get` 改了两个锁文件里 18 个包的版本（检查完已还原，不提交）；frb 1.80.1 照常生成两块桥；构建只报预期的"不是自编引擎"警告。
-2. 组件画廊：通过。352 张全部导出，和同一提交在 3.44.9 下的导出逐张比较，版面一致，差异在抗锯齿级别；两处可见差异：菜单面板的 Material elevation 阴影在 Impeller 下略深、略往下（引擎层，记录不处理）；标签溢出那张的滚动位置不同，是截图时滚动动画还没走完。
-3. 4K 上屏：不适用，M2a 起才有会话页。
-4. `flutter analyze`：core、app 都没有问题，没有废弃提示（复制件也没有）。
-
-发现的问题：
-- **新旧界面同时运行时 IPC 互相拒绝**：上游 2026-05 起，主 IPC 管道（`\\.\pipe\Leapgate\query`）只接受和本进程同一路径的 exe（`src/ipc/auth.rs` 的 `authorize_windows_main_ipc_connection`）。新旧界面的 exe 在不同目录，先启动的占住管道，后启动的连上去被拒、不停重试：日志每秒约 3 行，后启动的界面显示"未就绪"、一次性密码一直"正在生成"。两个界面都是便携版时就会这样；装着的旧界面（服务进程在安装目录）加新界面便携版，按读码应当一样。03 §7.1 的"共用配置、ID、IPC 管道"因此不成立。维护者 2026-10-30 定：新界面便携版只在旧界面不运行时用（装着的旧界面连托盘和服务一起停掉），不放宽上游校验、不分开命名，03 §7.1 已改。
-- 新界面首次启动时不处理自己命令行里的链接（只开旧界面时跑新界面的 `--connect`，新界面起来了，但没有接这个链接）；`--connect` 交给已有主窗口后窗口不到前台。都随 M2a 的连接入口做。
-- 每启动一次辅助进程（第二个实例、`--connect`），日志文件 `leapgate_rCURRENT.log` 都会被改名换新，常驻进程接着写改名后的文件（上游行为），读日志要扫全部文件。
-
-#### M1 core 第一批（2026-10-31，`951605d69`）
-
-范围是 03 §3.5 第 2~5 步（第 1 步随 M0 做了），分四块：A 结构、D 选项 model、B 复制上游 models、C 连接状态，结构和取舍见 10.6、10.7。同期合入的 Rust 导出：C3 原因码、V1 标签可见性（10.4）。审查做了三路：B 单独一轮；C 的连接状态一轮；M1 整体衔接加 C3、V1 一轮。必须改的都改了，可以不改的按 10.6 记成已知限制或留给后面的块。
-
-03 §5.2 M1 的验收：
-
-| 项 | 结果 |
-|---|---|
-| §3.4 每一条都有回放测试并通过 | 通过。对照表在 10.6；core 66 个测试全过。连接状态几处关键的复位和判断，逐个去掉后都有测试失败 |
-| `core` 不引用 `app` | 通过。core 的 pubspec 不依赖 `leapgate_ui`，`lib/` 里没有 `package:leapgate_ui` |
-| `flutter analyze` 相对上游原件没有新告警 | 通过。3.44.9 下 core 是 92 条 info，全在复制件里（`input_model` 71、`model` 9、`relative_mouse_model` 6、`local_flutter_shortcuts` 5、`file_model` 1），抽查过和上游原件同一位置的提示一致；改写和新写的文件 0 条。app 0 条 |
-| "只删界面调用"那一档和上游原件的差异只有界面调用和导入 | 通过。B 的审查逐个复制件比过，整体审查又抽查了 4 个；允许的偏离（快捷键暂删、`kWindowId` 判断、按会话记的状态、`desktop_render_texture` 一行）都写在文件头的来源行和 10.6 里 |
-
-Rust：`cargo test -p leapgate` 135 个通过；主 crate 用 `--features hwcodec,vram,flutter` 做 `cargo check` 通过（C3、V1 合入时）。`git diff main HEAD -- flutter/` 为空。
-
-最新 stable 检查（03 §8.8）：Flutter 3.47.9（2026-10-29，仍是当时最新的 stable），官方 SDK、官方引擎、Impeller 默认开。检查做在 `b3f94489a` 上；之后的 `951605d69` 只改了 core 的 Dart 和 `reason.rs`，在 3.44.9 下重跑过测试和 analyze。
-1. 按 `-Ui leapgate` 编一次：通过。`pub get` 改了锁文件里的几个基础包（app 5 个：intl、matcher、meta、test_api、vector_math；core 4 个，没有 intl），检查完已还原，不提交。
-2. 组件画廊：通过。两版各导出 352 张，逐张比较，差异在抗锯齿级别；能看出来的两处和 M0 相同：菜单面板的 elevation 阴影在 Impeller 下略深，标签溢出那几张截图时滚动动画还没走完。
-3. 4K 上屏：不适用，M2a 起才有会话页。
-4. `flutter analyze`：app 没有问题；core 是 97 条，比 3.44.9 多出 5 条 warning `unawaited_return_in_try_block`，在复制件 `models/file_model.dart` 的 :1466、:1486、:1492、:1501、:1518。这 5 行和上游原件逐字相同，属于上游带来的提示，按 10.1 不改，等上游改了随三方合并带过来。因为是 warning，3.47.9 下 core 的 `flutter analyze --no-fatal-infos` 退出码不是 0；拿退出码当关卡时要知道这一点。新写和改写的文件没有新提示，也没有废弃提示。core 61 个、app 33 个测试（另跳过 1 个）在 3.47.9 下都通过。
-
-留给后面的块的，都写在 10.6：截图、打印、`switch_back`、聊天和语音事件随 M2b；`cm_file_model` 和 CM 的全局事件随 M3；`shortcut_model` 改写时补回暂删的几行；V1 接入时要处理 1.5 秒唤醒；01 §4.1 的"查找设备""建立连接"合成一步。
-
-#### M2a 最小控制端（2026-10-31，`0810e2b43`）
-
-黑盒验收，两台便携端点无人值守跑：新界面（`0810e2b43`，3.44.9 自编引擎）当控制端，旧界面（`8fcdabb1e`，Rust 和 `0810e2b43` 相同）当被控端；被控端是 4K、DXGI 每约 5 秒失效一次的机器。面板上的输入和点击用 `scripts/e2e/leapgate-post-input.ps1` 向窗口投递消息，按 PrintWindow 截图的坐标操作（UI Automation 用不了，见问题 3）。要点按键的一项用了真实按键注入。依据 04 §6，冒烟清单第一版在总仓库 `docs/新界面/冒烟清单.md`。
-
-**04 §6.3 真实连接**
-
-| 项 | 结果 |
-|---|---|
-| 直连 | 通过。上游 IPv6 直连胜出，标签和工具栏"直连"，轻提示"已建立直连" |
-| 经中继 | 通过。`--relay`，没有 ICE 行，标签"经中继"。`--relay` 照上游写进对端的 `force-always-relay`，测完复原 |
-| 自研 ICE 胜出 | 通过。`leapgate ice: selected host/v6/ethernet <-> host/v6 in 2266 ms`，服务端 `ice_result` 同一行逐项一致，随后登录 |
-| 存过密码直接进 | 通过。面板勾"记住密码"登录一次后，不带密码再连直接登录 |
-| 输密码 | 通过。两步进度"建立连接 ✓ → 验证身份"，密码框自动获得焦点，空时"连接"不可点；回车提交，短暂显示"已连接，正在等待画面…"后出画面 |
-| 密码错误 | 通过。红字"密码错误"（输入被清空，见待调） |
-| 2FA | 未验证：被控端开二次验证要在旧界面设置里扫码绑定，旧界面的语义树也用不了，没有无界面的开法 |
-| 等对方接受 | 通过。面板"正在等待对方接受…"、"已等待 ‹n› 秒"、"取消"；被控端 CM 点"接受"后连上。被控端 3 分钟没处理时它关掉连接，控制端自动重连、回到等待。缺"显示给对方的名称"（已在待调） |
-| 不安全连接确认 | 未验证：控制端清空 Key 后服务端回 Key mismatch，面板"本机与服务器的密钥（Key）不一致，无法连接服务器。"、只有"关闭标签"；没有不配 Key 的会合服务 |
-| 断线后自动重试 | 部分通过。经中继的会话里停掉被控端：面板"连接已被远程设备断开。"、"1 秒后重试（第 1 次）"、"重试"，随后重连。第二次失败是"Failed to connect via rendezvous server: Please try later"，按表归成"无法连接服务器。请检查网络连接。"、不自动重试，所以翻倍没看到（问题 4）。经 KCP（上游 IPv6 打洞）的会话里被控端消失时是上游的 `Peer stopped answering, reconnecting`，面板直接回到"正在连接" |
-| 对方重启后静默重连 | 未验证：要被控端真的重启，两台端点都不能重启，同网测试虚拟机这次没开机（它重启后也不会自动起便携版） |
-| 1.5 秒唤醒锁屏 | 未验证：两台被控端连上后都在 1.5 秒内出画面，没有锁屏又能安全解锁的被控端 |
-| "改用中继" | 未验证：造不出直连被重置的错误 |
-| 对方断开 | 通过。被控端 CM 点"断开连接"：面板"对方已断开连接。"、"关闭标签""重新连接"，标签"已断开"；"重新连接"能连上 |
-| 出错文案（附带） | ID 不存在："未找到 ID 为 ‹ID› 的设备。…"、"关闭标签""修改 ID"，标签"连接失败" |
-
-**04 §4 会话标签和输入**
-
-| 项 | 结果 |
-|---|---|
-| 只有当前标签收键盘、切走时远程设备收到抬起 | 不通过，见问题 1：新界面的会话没有把键盘发给远程设备 |
-| 标签"×" | 通过。断开（`Exit io_loop`）并关掉标签 |
-| "+"回主页 | 通过。切到主页，光标在连接框里，直接打字出现"搜索结果"、"连接到 ‹输入›"、"未找到匹配的设备" |
-| 系统窗口标题跟着标签 | 通过。主页"Leapgate"，会话"‹设备名› - Leapgate"，还没拿到名称时"‹格式化 ID› - Leapgate" |
-| 关窗流程 | 部分通过。`CloseSessions` 路径（两个选项预设）通过：会话断开、窗口隐藏、进程留着。没有会话时问"关闭窗口？"（退出 / 在后台运行、记住此选择）；有会话且 `enable-confirm-closing-tabs = 'Y'` 时是"断开全部 1 个会话并关闭窗口？"加"不再提示"，选"在后台运行"后会话断开、窗口隐藏。没写这个选项时（新配置）有会话也只问"关闭窗口？"，见问题 2 |
-| `--connect` 交给运行中的主窗口后到前台 | 通过。窗口隐藏、最小化、被别的窗口挡住三种情况下都显示出来并到前台，开新标签 |
-
-**04 §6.4 引擎**
-
-- 4K、频繁重建采集的被控端：通过。新界面在这台被控端上开过十几个会话（单个最长约 7 分钟），画面持续更新，Windows 应用程序日志里没有 `leapgate.exe` 的崩溃事件。解码器两个界面一样，都是 `hevc … D3D11VA ram decoder`。
-- 开着 UI Automation 客户端（每秒遍历一次整棵树，持续 7 分钟）开、关会话标签和两种关窗确认：通过，不崩溃。讲述人没开（控制端那台机器有人在用，讲述人会出声）。但树始终只有窗口和 `FLUTTERVIEW` 两个元素，见问题 3。
-
-**V1 占用对比**（只有一台被控端有画面，用一个会话；被控端开一个不停刷新的控制台窗口让画面一直在变；会话标签切到后台的办法是再开一个 ID 不存在的标签，效果和停在主页相同；控制端进程的 CPU 按单核百分比、GPU 是各引擎利用率，各 30 秒平均）
-
-| 提交 | 会话标签在前 | 会话标签在后台 |
-|---|---|---|
-| `0e3db691d`（接 V1 之前，Flutter 部分单独编，Rust 产物和最终构建同一份） | CPU 25.1%、3D 2.4%、视频解码 2.5% | CPU 18.9%、3D 0.9%、视频解码 2.5% |
-| `0810e2b43` | CPU 25.7%、3D 2.4%、视频解码 2.5% | CPU 16.8%、3D 0.9%、视频解码 2.5% |
-
-后台时照常收流、解码（视频解码不变，符合设计）；V1 比接入前在后台再少约 2 个百分点的单核 CPU，3D 两者一样（接入前后台标签本来就不重绘）。
-
-**04 §6.6 和样稿对照**：浅色对照了 P1 本机区、最近列表、连接框搜索，P2 会话标签、面板（要密码、密码错误、等对方接受、等画面、出错和倒计时、对方断开、Key 不一致）、工具栏默认态和收起态、轻提示、两种关窗确认。必修项见问题 2；版面层级、令牌没看到用错的；小差异 3 条记进总仓库 `docs/新界面/待调.md`（ID 的"复制"是实心按钮、密码错误后输入被清空且没有"输入密码"标签、还没拿到对端信息时标题和副标题都是 ID）。深色未验证：M2a 没有切换主题的入口，本地选项 `theme = 'dark'` 不起作用；画廊的深色导出看过几张，没有发现问题。
-
-**04 §6.8 旧界面五项**：通过。两端都用 `8fcdabb1e` 旧界面：连接（ICE 胜出，登录成功）、`--relay`、文件传输两个方向（两边 SHA-256 一致）、TCP 端口转发（HTTP 200）、出口（socks5h 和 HTTP CONNECT 都 200，`tunnel up (direct)`）。ID 加盐：空配置目录起一次，`Generated id` 是 9 位、≥ 268435456，测完放回原配置。
-
-最新 stable 检查（03 §8.8）：Flutter 3.47.9（2026-10-29，验收时仍是最新 stable），官方 SDK、官方引擎、Impeller 默认开。
-1. 按 `-Ui leapgate` 编一次：通过。`pub get` 改了两个锁文件，检查完已还原，不提交。
-2. 组件画廊：通过。两版各导出 824 张，584 张逐像素相同，其余每张差异像素不到 0.02%（抗锯齿级别）。
-3. 4K 上屏：通过。只用 `--connect --password`，没开任何 UI Automation 客户端；被控端每约 5 秒重建一次采集，会话约 7 分钟，画面正常，没有崩溃；stderr 只有 "Using the Impeller rendering backend (OpenGLESSDF)"。
-4. `flutter analyze`：app 没有问题；core 97 条，和 M1 相同（92 条 info 全在复制件，5 条 warning 在复制件 `models/file_model.dart`），新写和改写的文件没有提示，也没有废弃提示。core 117 个、app 197 个测试（跳过 2 个）在 3.47.9 下都通过。
-
-发现的问题：
-1. **会话里的键盘没有发到远程设备**（必须在交付试用前查清）。新界面会话标签在前、真实光标在画面上并真实点过画面后，用 `keybd_event` 注入左 Shift、F12，被控端 `GetAsyncKeyState` 一次按下都没看到；同一台机器、同样做法换旧界面当控制端，被控端看到了按下和抬起。投递 `WM_KEYDOWN` 也没有发过去。鼠标是通的（投递的点击在远程设备上生效）。还没用真实键盘确认，注入的按键带 `LLKHF_INJECTED`，如果新界面有意过滤注入事件，就要换真实键盘再测一次。
-2. **没写过 `enable-confirm-closing-tabs` 时，有会话关窗不确认断开**（必须改）。上游这个选项缺省是开（`enable-` 开头的选项空值算开），新配置里没有这个键；新界面在缺省时只问"关闭窗口？"，不提断开会话、也没有"不再提示"，写成 `'Y'` 才出现 01 §2.1 要的确认。
-3. **语义树始终为空**（不挡试用，要单独查）。自编引擎上，UI Automation 只看到窗口和 `FLUTTERVIEW`，从第一次查询起就是这样；stderr 每次语义更新都是 "Accessibility bridge rebuilt after failed update: 0 will not be in the tree and is not the new root"（也有 45、64、74 号节点）。根节点 0 被判成不在树里，补丁 0001 随后重建，树一直是空的：讲述人读不到任何控件，04 §6.3 原定的 UI Automation 脚本也用不了。官方引擎上是否也这样没测（不能在官方引擎上开 UI Automation 客户端）。
-4. 对方掉线后重连失败的文案不对（可以记待调）：会话里被控端退出约 20 秒后，Rust 报 "Failed to connect via rendezvous server: Please try later"，按 01 §4.3 的表显示"无法连接服务器。请检查网络连接。"，实际服务器是通的、是对方不在线；这一条不自动重试，所以对方很快回来也不会自己连上。
-
-复验（2026-10-31，`3ca7230f8`，同样的两台端点和做法）：
-- 问题 1（键盘）：通过。会话页创建时补调 `bind.mainInitInputSource()` 后，真实注入的左 Shift、F12 在被控端都收到了按下和抬起；在会话标签按住 Shift 再点另一个标签，被控端在切走的那一刻收到抬起，比真正松开早约 2 秒。另一个标签是 ID 不存在的标签（只有一台被控端有画面），"新标签那台没收到按下"这一半没法用真设备验。
-- 问题 2（关窗确认）：复现不出，判通过。程序停着时 `Leapgate_local.toml` 里没有 `enable-confirm-closing-tabs`，也没有 `leapgate-close-action`；有一个会话时发 WM_CLOSE，出现"断开全部 1 个会话并关闭窗口？"和"不再提示"。照上一轮的顺序（先在没有会话时关窗、取消，再连上、再关窗）也一样。上一轮那次为什么只问"关闭窗口？"没查清：那次两个键是用 `Configure` 写空串删掉的，删掉后才启动程序。
-- 小改：本机区 ID 下面的"复制"是文字按钮，和 ID 左对齐；连接"最近"里有记录的设备时，连接中和要密码时面板标题、会话标签、窗口标题都先显示设备名，副标题是 ID。
-
-#### M2b 控制端完整会话页和主页（2026-11-01，`9799bb9ec`）
-
-黑盒验收，无人值守。控制端 A（新界面，3.44.9 自编引擎，补丁 0003）连被控端 B（4K，旧界面 `8fcdabb1e`；Q3 的挂钩只在控制端，所以 B 没有重编）。依据 05 §6。面板操作用 `scripts/e2e/leapgate-uia.ps1`（原生 COM 的 IUIAutomation，按语义名），工具栏菜单项没有 Invoke 模式、用它的 `Click`（真实鼠标）；点击窗口里没有名字的位置用 `leapgate-post-input.ps1`。含被控端画面的截图读完即删，不留证据。
-
-**05 §6.1 自动测试**：通过。core `flutter analyze` 92 条 info（基线不变，全在复制件里），测试 170 个通过；app analyze 0 条，测试 405 个通过、2 个跳过。Rust：`leapgate` crate 139 个通过，其中有 `session::tests::connection_paths`（Q3 分类，逐种路径）和 `ui::tests::display_name_as_upstream_computes_it`（本机名对上游算法）；根 crate `cargo test --lib leapgate` 11 个通过（`leapgate_hooks`）。
-
-**05 §6.3 真实连接**
-
-| 项 | 结果 |
-|---|---|
-| 连接方式详情，自研 ICE 胜出 | 通过。日志 `leapgate ice: selected host/v6/ethernet <-> host/v6`；详情"路径 打洞直连（IPv6）、传输 UDP、加密 已加密"，指纹带复制按钮；画面数据（编码 H265、帧率、目标码率、色度 4:2:0、速度）；延迟只有"端到端"一行，带当前、最低、平均、最高和近 60 秒折线；"在画面上显示质量数据"开关 |
-| 经中继 | 通过。`--relay`；详情"路径 经中继、中继服务器 ‹地址›、传输 TCP"，地址和日志 `relay_server` 一致；标签语义名里带"经中继" |
-| 上游直连、局域网直连 | 未验证：两端都在 ICE 抢先，造不出上游直连；局域网直连要同局域网的第二台端点（测试虚拟机宿主内存紧，没开机） |
-| 工具栏菜单 | 通过。远程桌面、画面、输入、操作、会话、聊天六个菜单各打开一次，条目和 01 的分组一致；"添加备注"灰显并有"登录后可添加备注"说明 |
-| 画质、缩放 | 通过。选"速度优先"后对端配置 `image_quality = 'low'`；选"适应窗口"后 `view_style = 'adaptive'` |
-| 截图并另存 | 通过。操作 › 截图后出"截图已完成"和"另存为""复制到剪贴板"；另存为弹出系统对话框，保存的 PNG 有效（约 500 KB，已删） |
-| 隐私模式 | 未验证：便携构建没带 `WindowInjection.dll`，被控端开不起来。点开关后出一条只有"失败"二字的通知，没有原因（见问题 1） |
-| 阻止、取消阻止本地输入 | 未验证：被控端非提权，`BlockInput` 超时，通知"无法阻止远程设备的本地输入（Error: … os error 1460）"，文案和提示框都正常出现 |
-| 锁定远程设备 | 未做：被控端是别人的笔记本，锁屏后没有办法解锁 |
-| 切显示器、"全部显示器" | 未验证：被控端只有一块屏 |
-| 聊天 | 部分通过。控制端发一条，被控端 CM 的聊天里出现；被控端回复、未读数、"更多"里的未读数未验证（往被控端 CM 输入框里没法发进按键），列入试用清单 |
-| 主页：收藏 | 通过。多选 › 加入收藏，轻提示"已加入收藏"，卡片带"已收藏"，"收藏"分类里有它，配置里 `fav` 写入 |
-| 主页：分类、视图、详细模式 | 通过。最近 / 收藏 / 局域网切换；卡片和列表两种视图（列表有状态、名称、ID、用户@主机、标签列）；视图菜单里"简洁 / 详细"切换立即生效；排序菜单（名称、ID、用户名、在线状态）能打开，条目太少，排序结果没验 |
-| 主页：多选删除、重命名 | 通过。用测试时造的记录：多选 › 删除弹"删除 1 台设备？"（取消 / 删除），确认后对应的对端配置文件被删；设备菜单 › 重命名，输入框正常（中文输入法组字可用），确定后卡片名改变。设备菜单分组"连接方式 / 设备 / 管理 / 危险操作"，条目和 05 §1.1 一致 |
-| 局域网分类 | 未验证：没有同一局域网里的 Leapgate 端点。空状态"未在局域网中发现设备"正常 |
-| 断线重连、错误文案 | 部分通过。经中继的会话里停掉被控端：面板"连接已被远程设备断开。"、"1 秒后重试（第 1 次）"，随后"正在连接 ‹设备名›…"；第二次失败是"无法连接服务器。请检查网络连接。"加"重试"，不再自动重试，所以"2 秒后重试（第 2 次）"造不出来（`待调.md` 第 31 条，Rust 的规则，M2b 不动）。另验：ID 不存在（"未找到 ID 为 ‹ID› 的设备。…"）、密码错误（红字"密码错误"，输入被清空，见待调） |
-| 打印、语音通话、提权、Android / Wayland 对端、虚拟显示器驱动 | 未验证：没有对应环境，列入试用清单 |
-
-**05 §4.5 V1 占用复测**。同一个被控端、同一个不停刷屏的控制台（比 M2a 时刷得快，所以绝对值不能直接和 M2a 的数字比），先后用 `3ca7230f8`（M2a）和 `9799bb9ec` 各量一遍，会话标签在前 30 秒、退到后台 30 秒（再开一个 ID 不存在的标签），控制端进程 CPU 按单核算：
-
-| 提交 | 会话标签在前 | 会话标签在后台 |
-|---|---|---|
-| `3ca7230f8`（M2a） | CPU 32.7%、3D 7.1%、视频解码 6.8% | CPU 24.0%、3D 4.2%、视频解码 8.9% |
-| `9799bb9ec`（M2b） | CPU 30.0%、3D 7.6%、视频解码 6.8% | CPU 22.4%、3D 3.4%、视频解码 7.9% |
-
-工具栏、通知、聊天多了以后后台标签没有回退（后台比前台约低 8 个百分点，和 M2a 一致）。M2a 当时的数字（前台 25.7%、后台 16.8%）见上一节。
-
-**05 §6.4 和样稿对照**：抽样，没有逐区块对。浅色真机对了 P1 设备页（本机区、导航、卡片、设备菜单分组）、P2 的连接面板（要密码、密码错误、连接失败）、工具栏和六个菜单、连接方式详情、聊天面板、通知；深色看了画廊导出的设备页、连接方式详情、聊天面板、通知（新界面主题跟随系统，没动控制端的系统主题）。没有发现必修项（版面层级、缺状态、文案、令牌用错）。没有对的：P2 的拖动和停靠、八种标签状态逐个、详细模式下工具栏、P1 的最小窗口和各主页对话框，留给试用。记进 `待调.md` 的小差异见该文件（来源"对照样稿"和"验收"）。
-
-**05 §6.5 最新 stable 检查**：Flutter 官方 releases 页面（`storage.googleapis.com/flutter_infra_release/releases/releases_windows.json`，2026-11-01 查）最新 stable 仍是 3.47.9（2026-10-29 发布）。
-1. 按 `-Ui leapgate` 编：通过。`pub get` 改了两个锁文件，检查完已还原。
-2. 组件画廊：通过。两版各导出 1424 张，1022 张逐像素相同，其余每张差异像素不超过 0.02%（抗锯齿级别）。
-3. 4K 上屏：通过。只用 `--connect`，没开 UI Automation 客户端；会话约 3 分钟（M2a 是 7 分钟），画面持续更新，没有崩溃事件，stderr 只有 "Using the Impeller rendering backend (OpenGLESSDF)"。
-4. analyze 和测试：app 没有问题；core 97 条（92 条 info 加复制件 `file_model.dart` 的 5 条 warning，和 M2a 相同）；core 170 个、app 405 个测试通过（画廊导出那个多跑一次）。
-构建 worktree 已用 3.44.9 和自编引擎编回（`app.so` 和之前逐字节相同，`libleapgate.dll` 因为重新链接哈希变了）。
-
-**旧界面五项冒烟（`9799bb9ec` 的 Rust，旧界面）**：连接（ICE 胜出，登录成功）、`--relay`（有 `relay_server` 日志，没有 ICE 行）、TCP 端口转发（HTTP 200）、出口（socks5h 和 HTTP CONNECT 都 200，`tunnel up (direct)`）通过；文件传输未验证（没做旧界面文件传输窗口的坐标点击；这条路径 M2b 没碰，Q3 挂钩只记录连接路径）。ID 加盐：空配置目录起一次，`Generated id` 是 9 位、≥ 268435456，测完放回原配置。
-
-**发现的问题**（都不挡试用）：
-1. 隐私模式点开后的失败通知只有"失败"两个字，没有原因（01 P2 区块 E 要求写原因）。被控端有 `WindowInjection.dll` 时是否仍这样没查。已修（`0ab9b3ef0`）：缺这个 dll 时被控端回 `PrvOnFailed` 不带原因，Rust 的通知正文是 "Failed"；现在显示"无法开启隐私模式"，"Failed to turn off" 显示"无法退出隐私模式"，被控端给了原因时显示"无法切换隐私模式（原因）"（原因里看不出是开还是关）。
-2. 工具栏菜单打开后，按 Esc 不关闭（投递的 Esc 和真实的 `SendKeys` 都试过；真实按键可能被会话抓去发给远程设备，没分清）；点菜单外面能关。试用时用真实键盘确认。已修（`b84f68d36`、`873d088aa`）：菜单打开时键盘焦点还在画面上，Rust 的键盘钩子照样把按键截走发给远程设备，投递的 Esc 也被画面的按键处理吃掉；现在工具栏菜单按钮打开菜单时拿走焦点（同上游 SubmenuButton），画面随之 `enterOrLeave(false)` 关掉钩子，Esc 由菜单处理；菜单开着时鼠标经过画面、窗口切出再切回都不再把焦点拿回去，点画面才拿；菜单关闭时（Esc、选了一项）鼠标如果在画面上，画面当场拿回焦点（这时不会再有"鼠标进入画面"）。
-3. 语义树：菜单行只是 `Text`，没有 Invoke 模式，辅助技术不能激活；会话处在连接失败、要密码等整页面板时，顶部的标签栏不在语义树里（这时 stderr 有 "dropped semantics nodes unreachable from root 0"）。0003 的收尾项，不挡试用。更正（2026-11-02 排查，文档 §10）：菜单行只是 `Text` 和 0003 无关，是上游 `MenuItemButton` 只在 web 上给 `button` 标志；已在组件里补上，随 M4 合入（`ui/menu-semantics` `1a434c56d`），M4 验收时真机核 Invoke。
-4. 删除最近记录时没有同时清掉收藏里的这个 ID（配置里 `fav` 留着已不存在的 ID）。上游行为，不改：上游单台删除（`peer_card.dart` `_removeAction`）和多选删除（`peer_tab_page.dart` `deleteSelection`）在"最近"里都只调 `mainRemovePeer`（删对端配置文件），不动收藏；"收藏"分类按对端配置列出，所以这台设备从"收藏"里也看不到了，以后再连接它、配置重建后又会出现在"收藏"里。
-5. 验收过程中窗口在两次操作之间多次被最小化或换位置（同时控制端前台是别的程序），没查清是不是应用自己做的，试用时留意。
-
-**试用清单**：拖工具栏、停靠四边、窗口窄时的"更多"和未读数；聊天的收发、未读数和语音通话（要真实麦克风）；快捷键（切标签、截图、全屏、切显示器）；被控时的遮罩（在别的机器上连进来、鼠标进主页）；多显示器和"全部显示器"；隐私模式、阻止输入（被控端提权）、锁定远程设备；局域网分类和局域网直连；打印、提权、虚拟显示器驱动；Esc 关菜单；`待调.md` 第 25、29、30、33 条是否满意。
-
-#### M3 被控端连接管理小窗（2026-11-01，`ef182b887`）
-
-黑盒验收，无人值守。被控端 B（4K，系统缩放 150%，新界面便携版，小窗和主窗口都在它上面）、控制端 A（新界面做聊天、权限和远程点击，旧界面做审批、文件传输、端口转发和出口，同一台机器上新旧界面不同时运行）。依据 06 §5。B 上用 `leapgate-uia.ps1` 按语义名操作小窗（窗口类 `LEAPGATE_UI_CM`；按钮、标签、对话框按钮用 `Invoke`，菜单行和旧界面小窗的按钮要真实鼠标）。含被控端画面的截图读完即删，不留证据。被控端审批方式用 `approve-mode`（`both`、`click`、`password`）逐个改。
-
-**06 §5.1 自动测试**：通过。core `flutter analyze` 92 条 info（基线不变，全在复制件里），测试 181 个通过；app analyze 0 条，测试 503 个通过、2 个跳过。Rust：`leapgate` crate 141 个通过（含 `ipc::tests::counts_by_type_with_exits_apart`、`ipc::tests::msg_round_trips_and_cm_events_read_as_documented`）；根 crate `cargo test --lib leapgate` 11 个通过。根 crate 里 `Data::Leapgate` 两头的分发没有单独的测试，由下面的真实连接覆盖。
-
-**06 §5.2 真实连接**
-
-| 项 | 结果 |
-|---|---|
-| 审批方式"输入密码或在本机接受"（两者都可） | 通过。不带密码连入：小窗"正在请求连接本机…"，按钮"接受""接受并提升权限""拒绝"；点"接受"当场收成贴边小条。带密码连入（在被控端用新界面时）：直接连入，约 3 秒后收成小条 |
-| 审批方式"在本机接受" | 通过。请求中同样三个按钮；点"拒绝"，控制端报"连接错误"，小窗隐藏（约 1.4 秒），进程约 6 秒后退出；点"接受并提升权限"当场连入 |
-| 审批方式"输入密码" | 通过。不带密码连入：小窗"对方正在输入密码…"加"拒绝"，没有"接受"；控制端输入正确密码后连入，收成小条 |
-| 出口会话 | 通过。出口代理 socks5h 和 HTTP CONNECT 都经出口访问成功；小窗标签"作为出口"，说明"对方正在通过本机访问网络（仅 TCP），无法查看本机屏幕。"，没有权限区和聊天；只剩这一个连接时小条写"‹名字› 正在将本机用作出口"。普通端口转发的标签写"端口转发：example.com:80" |
-| 断开全部会话 | 通过。两个连接时点标题栏的关闭，弹"断开全部会话？"，"取消"后连接仍在，"断开"后全部断开、小窗进程不到 1 秒退出 |
-| 权限开关 | 通过。会话中关掉"键盘和鼠标"，控制端工具栏的"输入"变成"输入. 未获得键盘和鼠标控制权限"（灰显）；再打开恢复 |
-| 文件传输 | 通过。控制端（旧界面）上传一个 395.77 KB 文件、下载一个 195.31 KB 文件，小窗文件记录里是"上传到本机，已完成"和"从本机下载，已完成"，文件名、大小对，最新的在上面，被控端磁盘上文件大小一致（测完删除） |
-| 聊天 | 通过。控制端发一条，被控端小窗自动展开成 700 宽的聊天侧栏，显示消息、对方名字和时间；被控端在侧栏回一条，控制端收到，读屏名是"对方，时间：内容" |
-| 远程点击保护 | 通过。控制端在远程画面里（适应窗口）点被控端小窗的"断开"，连接不断开，按钮上方出现"无法远程执行此操作"（两次，截图在 `shots/remoteclick-light.png`） |
-| 主窗口本机区 | 通过。远程桌面加文件传输（或出口）时"正在被远程控制（2 个会话）"；只有端口转发加出口时"2 个传入会话进行中"；"查看"在小条状态下把小窗展开提到前面 |
-| 系统切深色再切回 | 通过。B 的系统应用主题改深色，主窗口和小窗背景一起变（取样 `#FFFFFF`→`#203033`，`#EAF1F1`→`#142529`），切回后复原 |
-| 主窗口切详细模式 | 部分通过。小窗的间距、字号收紧（权限标签不再折行），窗口尺寸不变（700×500），06 §5.2 的"换尺寸"实际是令牌，不是窗口大小 |
-| 没有来访后进程退出 | 通过。最后一个连接结束后小窗隐藏，约 6 秒后进程退出（控制端关窗：隐藏约 2 秒后再 6 秒；控制端被强杀：约 21 秒后隐藏再 6 秒） |
-| 贴边小条 | 通过。一个连接（按类型的文案）和几个连接（"N 个会话进行中"加"展开"，没有"断开"）的样子对；沿屏幕上边拖动（真实鼠标）从 x=3360 移到 2707，展开再收起仍在 2707，进程退出重来回到 3360 |
-| 已断开的标签 | 未验证。所有断开的路径（本地点"断开"、控制端关窗、被强杀）里，断开的标签都当场被移除，没有看到"已断开"加"关闭"的状态；01 §3.3 的"已断开"状态在实际使用里看不到 |
-
-**06 §5.2 旧界面五项冒烟**（构建 `ef182b887` 的 Rust，A、B 都是旧界面）：连接（ICE 胜出，登录成功）、`--relay`（日志 `Relay connection`，没有 ICE 行）、文件传输（会话建起，小窗显示"传输文件"；没有再做上传下载，这条路径 M3 没碰）、TCP 端口转发（HTTP 200）、出口（socks5h 和 HTTP CONNECT 都 200）通过。旧界面小窗：在"在本机接受"下请求中点"接受"（真实鼠标）连入，通过；权限开关、聊天未验证（旧界面小窗的权限图标没有语义名，窗口最小化，聊天要按坐标输入）。ID 加盐：空配置目录起一次，`Generated id` 是 471945469（9 位、≥ 268435456），测完放回原配置。
-
-**06 §5.3 和样稿对照**：`A-P3.html` 抽样，浅色、深色各对了请求中（输入密码）、已连接远程控制（权限区）、出口会话、聊天侧栏、文件记录、贴边小条（一个、几个）。版面层级、状态、文案、令牌颜色都对得上，唯一的差异见下面"必修"。深色看了已连接远程控制、出口、几个连接的小条，浅色看了全部（B 上切系统主题后截小窗，没有留一次性密码）。没有逐画框对的：语音来电、通话中、没有麦克风（要真实麦克风）、终端、摄像头、互换（造不出）、多个来访标签的深色。
-
-**必修（样稿对照）**：紧凑模式（320×500）下权限开关的标签折行：B 在 150% 缩放，"文件复制粘贴"变成"文件复制粘 / 贴"、"阻止本地输入"变成"阻止本地输 / 入"，样稿里都是单行；"阻止本地输入"这一行折成两行以后，第二行的"入"贴着下面的按钮，请求中（输入密码）状态下和"对方正在输入密码…"那块几乎相碰。详细模式下不折行。出口说明那段话的断行也和样稿不同（字体宽度差异，不影响）。复现：被控端 150% 缩放，对方连入后看权限区。已修（`566da0b1e`）：窗口外框 320 含 Windows 的不可见缩放边框，150% 下客户区实测约 309，样稿的 14 号字加 8 间距放不下 6 个汉字；权限标签字号固定 13、开关和文字间距改 6，按最窄客户区 304（`kLgCmNarrowestClient`）设计，画廊和测试按 304 宽核对单行，真机待试用时再看。
-
-**06 §5.3 最新 stable 检查**：Flutter 官方 releases（`storage.googleapis.com/flutter_infra_release/releases/releases_windows.json`，2026-11-01 查）最新 stable 仍是 3.47.9（2026-10-29 发布）。
-1. 按 `-Ui leapgate` 编：在 `ef182b887` 上不通过，修好后（`6ea135d92`）通过。验收时 `bridge` 步里 build_runner 的 freezed 在 core 报 `Exception: Missing implementation of visitDotShorthandPropertyAccess`，随后卡在 `freezed on lib/leapgate/local_status.dart` 不结束（证据 `80-stable-run.txt`）。
-   - 根因：core 的 build_runner 用的是 `analyzer` 7.7.1（`freezed` 2.5.8 要求 analyzer 低于 8，7.7.1 是 7.x 最后一版，不是解析漂移，3.44.9 下也是它）。3.47.9 的 `package:flutter/src/services/platform_views.dart` 里 `initUiKitView` 有一个参数默认值用了点号简写（`= .fallbackToPluginDefault`），analyzer 7.7.1 链接这个库、写 summary 时没实现这种节点，分析调度器抛异常后不再处理请求，后面的 build 步骤就一直等。source_gen 只解析带顶层注解的文件：M2b 里带顶层注解的只有 `leapgate/bridge.dart`（只引 `flutter/foundation.dart`，碰不到 services）；M3 给 `local_status.dart` 的 `IncomingSessions` 加了 `@immutable`，这个文件经 `models/platform_model.dart` 引到 `flutter/services.dart`，于是被解析、触发。去掉这一行在 3.47.9 下就通过（只用于验证，没提交）。
-   - M2b 那次没撞上，是因为它的 stable 检查里 `bridge` 步判断桥接代码是新的、跳过了生成，build_runner 根本没在 3.47.9 下跑；强制生成（`-ForceBridge`）时 `61225d783` 在 3.47.9 下通过。
-   - 修法：core 加 `build.yaml`，freezed 只对 `lib/generated_bridge.dart` 生成（core 里只有它用 freezed，它的依赖链不碰 `package:flutter`），以后哪个文件加了顶层注解也不会被 freezed 解析。没有改依赖版本：升 freezed 3 要改桥接生成的代码。3.44.9 下生成的 `generated_bridge.freezed.dart`、`generated_bridge.dart` 和加之前逐字节相同，3.47.9 生成的也相同；build_runner 的动作从 175 个降到 17 个。
-   - 复跑（`6ea135d92`，3.47.9 强制生成桥接代码）：编出来（`leapgate.exe` `BE58E4F4…`、`app.so` `B22208B7…`，官方引擎 `30494FB0…`）。
-2. 组件画廊：通过。在 `6ea135d92` 上 3.44.9 和 3.47.9 各导出 1580 张，1070 张逐像素相同，没有一张差异像素超过 1%（最大差异像素比例 0.02%，抗锯齿级别），和验收时那次一致。
-3. 4K 上屏：通过。被控端 B（4K）用 `ef182b887` 的旧界面构建，控制端只用 `--connect`，没开 UI Automation 客户端；会话约 5 分钟，直连，画面持续更新（每分钟截一次，内容都不同），进程一直在（句柄稳定在约 1500），没有崩溃事件，stderr 只有 "Using the Impeller rendering backend (OpenGLESSDF)"。
-4. analyze 和测试：app 没有问题；core 97 条（92 条 info 加复制件 `file_model.dart` 的 5 条 warning，和 M2a、M2b 相同）；core 181 个、app 503 个测试通过（跳过 2 个），这次用的是 3.47.9 自己生成的桥接代码。
-构建 worktree 已用 3.44.9 和自编引擎编回 `6ea135d92`（强制生成桥接代码）：`app.so` 和验收构建逐字节相同，`flutter_windows.dll` 是带 0003 的 `8667024A…`；`leapgate.exe` 重新链接后和验收构建只差 PE 头和调试目录里的两处链接时间戳（6 个字节），所以哈希不同；`libleapgate.dll` 因为重新链接哈希变了。
-
-**发现的问题**：
-1. 上面"必修"的权限标签折行：已修（`566da0b1e`，见上）。
-2. 最新 stable 检查第 1 步不通过：已查清并修好（`6ea135d92`，见上），四步复跑通过。
-3. 被控端点"接受并提升权限"后，系统弹 UAC 确认框（secure desktop），无人在场时一直挡着被控端的真实鼠标键盘输入（`SetCursorPos` 失败），要远程结束 `consent.exe` 才恢复；UI Automation 的 `Invoke` 不受影响。不是产品问题，试用时在场的人点掉即可，写进试用说明。
-4. 01 §3.3 的"已断开 + 关闭"状态实际看不到（见上表）。
-5. 被控端的聊天输入框用 UI Automation 的 `Type`（`SendKeys`）能输入；控制端那边台式机的中文输入法会吃掉空格，聊天里的空格丢失，是环境问题。
-
-**试用清单**：真实麦克风的语音通话（接听、选麦克风、挂断、没有麦克风的提示）；多显示器时小条在主显示器；拖动小条的手感；在完整小窗里移动鼠标取消自动收起；小条上"断开"的远程点击保护；权限开关全部八项和只读态（内置选项禁止改权限）；摄像头、终端会话的小窗（造不出）；互换后的"撤销交换"；多个来访标签和未读数；语音来电；旧界面小窗的权限开关和聊天；"接受并提升权限"的系统确认框；`待调.md` 里 CM 相关几条是否满意。
-
-#### M4 账号、地址簿、同组设备（2026-11-03，`2537c849b`）
-
-黑盒验收，无人值守。控制端 A（新界面，登录和地址簿都在它上面；旧界面做五项冒烟），被控端 B（旧界面，带固定密码，被控端有出口开关）。依据 07 §5。两个界面都按 `2537c849b` 编（新界面 `bridge,build -ForceBridge`，旧界面 `patch,bridge,build`），引擎是带补丁 0003 的 `flutter_windows.dll`（`8667024A…`）。A 上有人在用（空闲时间一直是 0），所以没有注入真实键盘鼠标：输入用投递的窗口消息（右键用 `WM_RBUTTONDOWN/UP`），按钮和菜单用 UI Automation 的 `Invoke`；测试服务上的账号密码从服务器直接进环境变量再投递，没有进过输出和文件。
-
-**07 §5.1 自动测试**：本轮没有重跑（开发期的结果在 §10.11 "H1 的实现结论"和各块汇报里：Rust 单测 160 个，core 184 个，app 661 个；这次最新 stable 检查里在 3.47.9 下跑了 core 219 个、app 664 个，全部通过，见下）。07 §5.4 只能用假服务的项（旧版服务端 `personal` 回 404、推送失败的横幅）：自动测试覆盖，没有在真机上验。
-
-**07 §5.2 对 Leapgate 服务端的测试服务**（验收服务，账号、三本共享簿、共享组由 H1 建好，`h1it-a` 是读者，`h1it-b` 是三本簿的主人）
-
-| 项 | 结果 |
-|---|---|
-| 登录：用户名为空 / 密码为空 / 密码错 | 通过。"请输入用户名""请输入密码"；密码错显示"用户名或密码错误"（红框，错误在密码框下，对话框不关）；用户名预填上次登录的名字 |
-| 登录限流 | 通过。同一用户名连续 4 次密码错之后，第 5 次起显示"无法登录。服务器返回：Too many failed attempts, try again later。"（服务器原文，是英文），之后（15 分钟内）连正确密码也被拒；过了窗口后用正确密码登录成功 |
-| 登录成功、重启后仍是登录状态 | 通过。账号区显示头像、显示名和 `@用户名`；退出程序再启动仍是已登录（令牌由 Rust 保存） |
-| 账号菜单 | 通过。"账号信息 @用户名"（文字）和"退出登录"（`Button`，能 `Invoke`） |
-| 退出 | 通过。"退出登录"先出页内确认（"退出登录？"，"退出后，地址簿、同组设备和出口目录将不可用。"，"取消""退出登录"）；取消后仍登录；确认后账号区回到"登录"，地址簿页显示"登录后可查看地址簿"；服务端 `token` 表里该账号的行 1 → 0 |
-| 个人簿：添加设备 | 通过。ID 输入时自动每 3 位空一格（输入 9 位显示 `555 666 777`）；别名、备注（计数 `n / 300`）；添加后卡片出现，服务端读回 id、别名、备注一致 |
-| 个人簿：编辑备注、重命名、编辑标签 | 通过。卡片上的备注、名字、标签随即更新，服务端读回一致 |
-| 个人簿：标签添加、改名、改颜色、删除 | 通过。"添加标签"支持空格分隔多个；右键标签出"重命名""修改颜色""删除"（`Button`，能 `Invoke`）；改名后设备上的标签跟着变；颜色对话框有 8 个预设加"自定义"，选"紫"保存后服务端读回颜色值变了；删除后标签条里消失，服务端读回空 |
-| 个人簿：删除设备 | 通过（个人簿全部清空后服务端读回空）。共享读写簿里删除设备要页内确认（"从地址簿中删除“…”？"），确认后提示"已从地址簿中删除" |
-| 共享簿：只读 | 通过。簿名旁写"只读 · 所有者：‹主人›"；"更多"菜单里只剩"取消选择所有标签""匹配全部所选标签"（写操作整个隐藏，包括"添加设备""添加标签""与最近会话同步"）；设备菜单里"重命名""编辑标签""编辑备注""设置共享密码""从地址簿中删除"灰显，分组标题旁有"此地址簿为只读"；多选条里只有"加入地址簿"，没有"编辑标签""从地址簿中删除" |
-| 共享簿：可编辑（读写） | 通过。写作"可编辑 · 所有者：‹主人›"；"更多"菜单四项都在；添加设备对话框多出"密码"，下方"这些内容对此地址簿的其他成员可见"；添加、删除都成功 |
-| 共享簿：完全控制 | 部分通过。簿切换里写"完全控制 · 所有者：‹主人›"；没有再单独做添加、改标签、删除（界面上权限判断和"可编辑"同一路，H1 实测里服务端对完全控制放行） |
-| 簿切换下拉 | 通过。"我的地址簿"排第一，共享簿按名字排；每项两行（名字、权限和所有者）；顶部"搜索地址簿"；底部"共享地址簿的成员和权限由管理员设置" |
-| 同组设备 | 通过。人员列表自己排第一带"（我）"；搜索人员；点另一个人只显示他的设备，没有设备时"未找到匹配的设备"，选中行的 × 取消筛选后恢复；A 自己登录后的设备出现在自己名下（在线） |
-| 从地址簿连接（共享密码） | 通过。读写共享簿里存了 B 的密码的卡片（读屏名带"此地址簿中保存了密码"），点"连接"直接连上（直连），没有出密码框 |
-| 个人簿自动填密码（07 §4.2） | 通过。把 B 加进个人簿（不带密码）→ 点连接出现密码框，勾"记住密码"输入并连上 → 服务端个人簿里该设备带上 `hash` → 清掉本机保存的密码（还原那台设备的本机记录）、重启 → 再从个人簿连接，没有出密码框，直接连上 |
-| 令牌中途失效 | 通过。服务端命令行 `user passwd`（同一密码，登出 1 个）后，在地址簿页点"刷新"，账号区立即回到"登录"，页面回到"登录后可查看地址簿" |
-| 连接框搜索结果里别的簿的设备 | 通过。别的共享簿的设备先要那本簿加载过（先切到那本簿看一眼）才进搜索结果（结果里标"地址簿"分类）；它的设备菜单只有连接方式、"始终经中继连接""创建桌面快捷方式"、"重命名""加入收藏""加入地址簿"，没有编辑标签、备注、删除 |
-| 簿满 | 未验证。服务端上限 5000 台，没有现成办法触发 |
-
-**07 §5.3 对 rustdesk-api 测试实例**（测试服务器上拉 `lejianwen/rustdesk-api:v2.7` 镜像，容器只绑本机回环，经 SSH 端口转发，A 的 `api-server` 选项临时指过去；一个账号、三本各一种权限的共享簿、一个设备组；验完删了容器、数据卷和镜像）
-
-| 项 | 结果 |
-|---|---|
-| 登录、簿列表、共享簿权限 | 通过。簿列表三本共享簿权限和所有者对（"完全控制 / 只读 / 可编辑 · 所有者：‹主人›"）；个人簿加设备成功 |
-| 共享簿：可编辑 | 通过。添加设备成功；删除设备被服务器拒绝，页内横幅"无法保存地址簿的更改。服务器返回：无权限。。"（rustdesk-api 读写簿不能删设备，同 H1 的表） |
-| 共享簿：只读 | 通过。"更多"菜单里只剩两项 |
-| 同组设备，服务器上有设备组数据时 | 通过。新界面只显示人员（自己带"（我）"）和他们的设备，不显示设备组 |
-| 密码错 | 小问题。rustdesk-api 回的是本地化文字"用户名或密码错误。"，界面显示"无法登录。服务器返回：用户名或密码错误。。"（两个句号，见下） |
-| 其余端点行为 | 引用 §10.11 的 H1 表，没有重测 |
-
-**07 §5.5 和样稿对照**（`A-P1.html`，浅色）：账号区（没登录、已登录、菜单）、登录对话框（默认、密码错）、簿切换下拉、地址簿"更多"菜单、添加设备对话框、标签颜色对话框、标签条、同组设备列表、只读簿的设备菜单，版面层级、文案、状态都对得上。差异（小项，没有必修）：①账号菜单里的图标样稿是主色，实际是灰色；②已登录头像样稿是白底圆里一个字，实际是灰底圆；③地址簿工具行实际多一个"标签"开关按钮（样稿的行里没有）；④样稿的添加设备对话框画了"标签"一行，实际只有该簿里已有标签时才出现。深色：未验证。A 上一直有人在用（空闲时间为 0），没有切系统主题；B 上没做登录。
-
-**07 §5.5 最新 stable 检查**：Flutter 官方 releases（`storage.googleapis.com/flutter_infra_release/releases/releases_windows.json`，2026-11-03 查）最新 stable 仍是 3.47.9（2026-10-29 发布）。
-1. 编：通过。`-ForceBridge`，`leapgate.exe` `C96985E8…`、`libleapgate.dll` `E3CE3A0F…`、`app.so` `1EA79D65…`、官方引擎 `30494FB0…`；`bridge` 步的 build_runner 没有卡住（`6ea135d92` 的 `build.yaml` 修法生效）。
-2. 组件画廊：通过。3.44.9 和 3.47.9 各导出 1956 张，1288 张逐像素相同，没有一张差异像素超过 1%（最大 0.02%，抗锯齿级别）。
-3. 4K 上屏：通过。B（4K）旧界面当被控端，A 用 3.47.9 构建只用 `--connect`，约 5 分钟，画面每分钟截一次、内容都不同，句柄稳定在约 1500，没有崩溃事件，stderr 只有 "Using the Impeller rendering backend (OpenGLESSDF)"。
-4. analyze 和测试：app 没有问题；core 97 条（92 条 info 加复制件的 5 条 warning，基线不变）；core 219 个、app 664 个通过（跳过 2 个）。
-构建 worktree 已用 3.44.9 和自编引擎编回 `2537c849b`：`app.so` 和验收构建逐字节相同（`01ADFF50…`），`leapgate.exe` 重新链接（先删 `leapgate.exe` 和 `main.obj` 再编，不然 §10.5 M3 记的"没重新链接"会重现）后哈希是 `67F726CD…`（和验收构建只差链接时间戳），`libleapgate.dll` 重新链接哈希变了。
-
-**读屏结构**（`leapgate-uia.ps1`，原生 COM UIA）
-- 账号菜单、地址簿"更多"菜单、标签右键菜单、颜色对话框的预设色：菜单行都是 `Button`，`Invoke` 有效（菜单语义修复生效）；账号菜单里"账号信息"是 `Text`。
-- 连接框现在是三个节点：`Edit` "输入 ID 或搜索设备"、`Button` "清除"（有内容时出现）、`Button` "帮助"，符合预期。**输入框 `SetValue` 仍然失败**（`COMException: SetValue failed`），连接框、登录对话框的用户名和密码框、添加设备的 ID、备注等所有 `Edit` 都一样，和 M2b 起一直是这样；要往输入框里写东西，要先在输入框上投递一次点击（光标进框），再投递文字；只用 `Focus`（`SetFocus`）有时文字落不进去。
-- 登录对话框：用户名框读屏名"用户名"，密码框"密码"，"显示密码"是单独的 `Button`（点后名字变"隐藏密码"）；输入框的错误文字并进名字（"密码 / 用户名或密码错误"）。密码框的 `ValuePattern` 是掩码，读出长度对、内容不是明文。
-- 按钮名字里有叠加的重复（"显示密码. 显示密码""清除. 清除""新建连接. 新建连接""其他连接方式. 其他连接方式"），读屏会念两遍，和 M2b 起一样，没改。
-
-**07 §5.6 旧界面五项冒烟**（`2537c849b` 的旧界面，A、B 都是）：连接（ICE 胜出，登录成功）、`--relay`（日志 `Relay connection`，没有 ICE 行）、TCP 端口转发（HTTP 200）、出口（socks5h 和 HTTP CONNECT 都 200，`tunnel up (relayed)`，这一步是在 `--relay` 之后做的）通过；文件传输未验证（这条路径 M4 没碰）。ID 加盐：空配置目录起一次，`Generated id` 是 9 位、≥ 268435456，测完放回原配置。
-
-**发现的问题**（只记录，没有改代码）
-1. 服务器错误文字自带句号时界面显示两个句号（"…服务器返回：用户名或密码错误。。""…服务器返回：无权限。。"）：两句式文案的"服务器返回：‹原因›。"在原因末尾再加了句号，rustdesk-api 回本地化中文时就会重复；Leapgate 服务端的英文原文没有句号，不受影响。小项。
-2. 输入框 `SetValue` 失败（见上，07 §5 的读屏要求"输入框能 SetValue"不满足）；`LgTextField` 的语义改过以后仍然如此，和 M2b 起一样，不是新退化。
-3. 用 `Invoke` 打开账号菜单后，再点地址簿页上的别的控件或打开对话框，菜单不跟着关（截图里菜单盖在对话框的遮罩上面）；`Invoke` 不走"点外面关闭"的路径，真实鼠标是不是一样没测。
-4. 第一次连接 B 时左栏状态一度从"已就绪"变成"正在连接服务器…"（一次，之后没复现），没查原因。
-5. 搜索结果里别的簿的设备要那本簿加载过才搜得到（已知：启动后各簿按需拉取）；没切过的簿里的设备搜不到，用户看不出缘由。小项。
-
-**试用清单**（会话里没有真实键盘和不同主题的环境）：登录对话框里用中文输入法输入用户名；真实右键标签和设备菜单的手感；深色主题下账号区、登录对话框、簿切换下拉、标签条、颜色对话框；簿满（已达到上限）的提示；"完全控制"簿的写操作；账号菜单打开时点别处是否关闭。
-
-#### 最终外观检查（`af398fed7`，2026-11-03）
-
-合入 main 前对这个提交做的外观检查（流程：功能验收和验收后修复做完以后再看外观，浅色深色都看，重点是对齐、间距、竖直居中、字重、颜色）。做法：新界面重新编（`-ForceBridge`，`leapgate.exe` `67F726CD…`、`app.so` `9671BE24…`），画廊导出 1956 张（浅色、深色 × 简洁、详细）；样稿用 Playwright 逐画框渲染后和画廊对应画框并排比；真机在 B（未登录的主页、登录对话框、各页签、菜单，浅色和深色）和 A（登录 `h1it-a` 后的主页、账号菜单、地址簿的各状态、同组设备、对话框，只看浅色）上用 PrintWindow 截图。
-
-**必须改**（1 条）
-1. 本机 ID 是 10 位时，左栏"本机"卡片里的 ID 折成两行，第 4 组孤零零一个数字"5"带一根下划线，下面的"复制"按钮被推下去（B 的 ID 1078877965，约 1290×806 逻辑像素的窗口，左栏 224 宽；9 位 ID 三组刚好一行，所以画廊、样稿和 A 上都看不出来）。证据：`b-home-light-0.png`、`b-login-dark-0.png`（`evidence\m4-visual-1103\b\`）。10 位 ID 是真实存在的，要么按 10 位排版（四组缩小字号或改成两行均分），要么不拆组下划线。
-
-**小项**
-1. 画廊 `toolbar-m2b_english-narrow`（浅色、深色，简洁）：英文工具栏出现两个"Display"（"Remote desktop, Display, Display, Input, Actions"），第一个应是显示器选择（`session-toolbar_english-minimum-window` 里叫"Monitor"），英文名不一致。
-2. 画廊 `menu-rows_input-menu`（浅色、深色）：没有样稿 `A-P2` m-input 里的"交换鼠标左右键"一行，"相对鼠标模式"的开关态也和样稿不同；如果那一项是故意没做，这条可以忽略。
-3. 真机"修改标签颜色"对话框：当地址簿里没有设备带这个标签时，预览行左边是空白（`a-tag-color-light-0.png`；样稿预览行左边是设备名"书房台式机"）。
-4. 真机"编辑标签"对话框：标题行和下面标签芯片之间的间距比别的对话框小很多，芯片几乎贴着标题（`a-edit-tags-picked-light-0.png`；对比"添加设备""修改标签颜色"的标题到首个控件）。
-5. 深色画廊里不可用的菜单行（`address-book-menu_device-read-only_dark-compact`："重命名""编辑标签"等）的灰字对比度偏低，目测约 3:1；不可用项不受 WCAG 对比度限制，只作提示。
-6. 真机窗口的 PrintWindow 截图右、下边缘各有约 8 像素黑边，是 DWM 边框的截图伪影，窗口本身没有，不算问题。
-
-**对照范围的结论**
-- 会话工具栏（画廊 `session-toolbar_*` 和 `toolbar-m2b_*`，浅色深色 × 简洁详细）：横排默认、带分组把手、显示器扁平、窄窗口折进"···"带未读角标、全屏、连接方式展开、未加密、通话中、等待接听、收起态：菜单按钮的文字竖直居中（逐像素量：文字墨迹中心 38.0，工具栏胶囊中心 37.5，同一行所有按钮同一基线，"经中继"标签低 0.5 像素），`d048b6ff3` 的修复在浅色和深色都生效；没有发现错位、颜色错、文字被截。贴边竖排（`dock-left` 等）只看了画廊的缩略，没逐项比。
-- 菜单（画廊 `menu-rows_*`、`account-area_menu-open`，和样稿 m-action、m-input 比）：行高、分组标题、勾选列、开关、滑块、分隔线、快捷键文字对齐一致；账号菜单图标已是主色，和 A-P1 的 `p1-acct-menu` 一致。
-- 输入框和密码框、登录对话框、添加设备对话框（共享簿）、标签颜色对话框：和样稿 `p1-dlg-login`、`p1-dlg-add`、`p1-tagcolor-init` 并排比，间距、字重、颜色一致；浅色深色都没发现差异（登录对话框在画廊里密码框带焦点，样稿没有，不算）。
-- 账号区、地址簿页、标签条、簿切换下拉、人员列表：浅色深色一致；标签条的选中项加粗带对勾和样稿一致。
-- 真机 B（未登录，浅色和深色）：主页、登录对话框、地址簿和同组设备的"登录后可…"空态、连接方式下拉、视图菜单：对齐、字重、颜色和画廊一致；设置、出口页还是占位标题（M5、M6，不在 M4 范围）。
-- 真机 A（登录后，只有浅色）：主页卡片、账号菜单打开、地址簿（空簿、有设备、标签条、"更多"菜单、设备菜单、簿切换下拉、添加设备和编辑标签和修改标签颜色和删除确认对话框）、同组设备（选人）：没有对齐、间距、字重、颜色问题（上面小项 3、4 除外）。
-- 没做的：①**会话窗口真机截图没做**：A 上的 `GetLastInputInfo` 空闲时间在整个检查期间（至少 100 秒的连续采样）一直是 0，维护者在用，不满足"超过 2 分钟"的条件；B 没有别的被控端可连（vm110 没开），所以会话工具栏只有画廊的对照，没有真机截图。②**真机深色只做了 B 的未登录页面**：B 上没有测试服务器的 SSH 凭据，`h1it-a` 的密码送不进 B，登录后的页面（地址簿、同组设备、账号菜单、各对话框）的深色只看了画廊；A 在用，不能切系统主题。③没有逐张比 1956 张画廊，挑了上面范围里的画框；其余画框和 M4 功能验收时的 3.44.9 画廊（`2537c849b`）没有再做像素差对比。
-
-**复查（`2cccf61ae`，2026-11-03）**：只看三处改动，重新编新界面（`app.so` `6A7570DD…`），画廊重新导出 1956 张。
-1. 左栏本机 ID：通过。B 的 10 位 ID 浅色、深色都显示成"1 078 877 965"一行，每组下划线完整，"复制"紧跟在下面（`recheck-b-rail.png`）；A 的 9 位 ID 照常一行（`02-a-rail-9digit.png`）。10 位时字号略缩小，ID 到"复制"的间距比 9 位时少约 4 逻辑像素，目测一致，不算问题。
-2. "编辑标签"对话框：通过。多了"标签"字段标题，字段标题到标签芯片的间距和添加设备对话框（有标签的簿）一致（都约 18~19 像素）（`03-edit-vs-add.png`，原图 `a-edit-tags-0.png`、`a-add-dlg-tags-typed-0.png`）。
-3. 英文工具栏：通过。`toolbar-m2b_english-narrow` 浅色、深色都是"Remote desktop、Monitor、Display、Input、Actions"，只有一个 Display（`04-english-narrow.png`）。
-证据在 `evidence\m4-visual-1103echeck\`；A 上加的设备和标签已删，个人簿回到空。
-
-#### M5 出口页（2026-11-04，`90a5dd0a7`）
-
-黑盒功能验收，无人值守（外观检查不在这次范围，修复后另起一轮）。控制端 A（新界面，出口页在它上面），被控端 B（新界面，开"允许作为出口"；2FA 那段 B 用旧界面设置）。依据 08 §5.2。两个界面都按 `90a5dd0a7` 编（新界面 `bridge,build -ForceBridge`，旧界面 `patch,bridge,build`），引擎是带补丁 0003 的 `flutter_windows.dll`（`8667024A…`）。除特别说明，被控端 B 用固定密码、审批方式"只用密码"，A 没登录账号。时间在 A 上读，B 的钟和 A 相差不超过约 2 秒（没有单独校准）。
-
-| 项 | 结果 |
-|---|---|
-| 1 没登录按 ID 指定、当场输密码 | 通过。"按 ID 指定出口"输 B 的 ID、"使用"，卡片进"输入密码"（主页标签读屏名同时变成"主页，1 个出口正在使用，需要处理"），密码经程序直接送入后进"可用 · 直连"，日志 `card tunnel up (direct)`。`curl --socks5-hostname 127.0.0.1:21180 https://…` 和 `-x http://127.0.0.1:21180 https://…` 都是 200；点"复制 SOCKS5 地址"、"复制 HTTP 地址"后读剪贴板是 `socks5h://127.0.0.1:21180`、`http://127.0.0.1:21180` |
-| 2 登录后从目录"使用" | 通过。测试服务上把 B 的主人设成 `h1it-a`，A 登录 `h1it-a` 后目录出现"‹B 的设备名› … 我的"，点"使用 ‹设备名›"进"输入密码"，输入后进"可用 · 直连"，curl 200。测完主人设回无主人 |
-| 3 等对方接受 | 通过。B 审批方式改成"在本机接受"重起后，卡片先"正在连接"，再"正在等待对方接受…"加"（已等待 0:25）"，B 的小窗（`LEAPGATE_UI_CM`）出现"…作为出口 / 正在请求连接本机…"，UIA 点"接受"后卡片进"可用 · 直连"，主页标签上的"需要处理"随之消失 |
-| 4 二次验证 | 通过，有两处偏离。B 的旧界面设置里开"启用双重认证"，QR 解码、算验证码都在一个只在内存里持有密钥的脚本（`tools\totp-daemon.py`）里做：密钥和验证码没有打印过，截图读完由脚本删掉（B 上的截图目录也删了）。A 的卡片输入密码后进"输入验证码"，当前验证码经投递消息送进验证码框（输满六位自动提交）后进"可用 · 直连"，curl 200。偏离：①B 上开 2FA 时要在 B 的对话框里输一次验证码，我把一个 30 秒有效的验证码写进 A 的临时文件、上传到 B、输入后两边立即删（跨机器没有别的通道）；②对话框把密钥以文字显示在二维码下面（上游设计），我读过一次那张截图，所以这份测试用 2FA 密钥出现在我的上下文里（没有写进任何输出或文件；测完 B 的配置已从备份盖回，2FA 已不存在） |
-| 5 直连和经中继 | 通过。直连见 1~4（日志 `leapgate ice: selected host/v6/ethernet <-> host/v6`，`card tunnel up (direct)`）。经中继：测试服务控制台 `aur Y` 后再"使用"，卡片"可用 · 经中继"加"流量由中继服务器转发，速度可能较慢"，日志 `Relay connection`、`card tunnel up (relayed)`，没有 ICE 行，curl 200；测完 `aur N`，再发 `aur` 核对是 false |
-| 6 本地端口被占 | 通过。A 上先占住 21180 再"使用"，卡片"本机端口 21180 已被其他应用占用"，按钮"修改端口""移除 ‹设备名›"；放掉占用进程后点"修改端口"、框里是 21180，"确定"（同一个端口）：卡片恢复登录并进"可用"（日志 `cannot listen on 21180` 之后 `listening on 127.0.0.1:21180`，这是刚修的那条）。在用时改成 21182：框下"代理地址将改为新端口，需同步修改应用中的代理设置。"，确定后两个地址变成 21182，21182 的 curl 是 200，21180 拒绝连接，没有再登录（日志没有第二条 `tunnel up`）。端口表按设备记，之后这台设备的卡片一直用 21182 |
-| 7 对方没开出口 | 通过。B 去掉"允许作为出口"重起后，"使用"卡片直接"已停止：远程设备未开启“允许作为出口”"，按钮"重试 ‹设备名›""移除 ‹设备名›"，A 的监听关闭（curl 拒绝连接，日志 `tunnel refused, listener closed`）。B 的小窗：每 0.5 秒查一次 B 的 leapgate 进程数，整个过程里一直只有主进程，小窗进程根本没有出现（登录在审批之前就被拒了），所以"当场消失"是没有出现过的意思 |
-| 8 目标被拦的通知 | 通过。经代理访问 B 所在局域网的网关：卡片出现"远程设备已阻止一次访问：目标位于其局域网内、是该设备本身，或其网络的 DNS 返回了虚拟地址。若要访问该设备的局域网，需由其所有者在出口设置中放行相应网段。"（不带目标）；点"关闭通知"后再访问两次（第二次间隔 12 秒）都不再出现；访问 `198.18.5.5` 出现另一条"目标是本机代理应用分配的虚拟地址。请在应用的代理设置中改用远程 DNS 解析（socks5h）。" |
-| 9 暂时断开和重新连接 | 通过。勾"记住密码"进"可用"后 B 停 58 秒：约 15~18 秒后卡片进"暂时断开"（"连接已中断，下次有应用使用此代理时将自动重新连接"，两行地址和"重新连接 ‹设备名›""停止 ‹设备名›"都在）；B 起来后点"重新连接"，6 秒内回到"可用 · 直连"，curl 200 |
-| 10 重连要密码的提醒 | 通过，有一处说明。不勾"记住密码"进"可用"后 B 重启，下一条本地连接触发重连**没有**要密码（会话进程里还留着刚输入的密码，自动登录成功）。要密码要靠对方密码变了：B 换一个随机固定密码（临时文件，用后删）重起后触发本地连接，主页标签读屏名变成"主页，1 个出口正在使用，需要处理"，导航读屏名变成"出口，1 个正在使用，需要处理"；切到出口页时导航上的提醒消失、主页标签上的仍在（与 01 一致）；卡片是"输入密码"，输入密码后提醒消失。B 的密码换回后，那次登录已被 B 的重启打断，卡片进"暂时断开"，再点"重新连接"回到"输入密码" |
-| 11 取消 | 通过。三处都点"取消"：①"输入密码"：卡片消失，21180 当场能被别的程序监听；②"正在连接"（用 `123456789@192.0.2.1` 这个不可达的会合服务器拖住连接约 5 秒；地址在文档地址段）：取消前 21181 是占用、取消后空闲，卡片消失；③"正在等待对方接受…"：卡片消失、21180 空闲。③ 里 B 上请求连接的小窗进程在取消后约 27 秒才退出（见第 12 项的原因） |
-| 12 停止走 KCP 时被控端多久关 | **实测约 20 秒**。ICE 胜出（`selected host/v6/ethernet`）后"停止"：A 上 00:43:15 点，B 日志 00:43:35.29 `leapgate ice: peer silent for 20.8968612s, closing the session` 和 `Connection closed`（B 的小窗那条出口连接随之消失，小窗进程 00:43:42 退出）。和已知限制写的约 20 秒一致。第 11 项③（等对方接受时取消，也是 KCP）B 小窗进程在约 27 秒后消失，是同一个机制加小窗退出的几秒 |
-| 13 关窗后台运行 | 通过。关窗确认里选"在后台运行"后，对话框多出"1 个出口将在后台继续运行。"；确认后窗口隐藏、进程还在、curl 200；再运行一次程序，窗口回来（同一个进程），卡片仍是"可用 · 直连"。便携版：选"退出 Leapgate"并勾"记住此选择"后退出；再起、建一张出口卡片，点关闭：弹"退出 Leapgate？""1 个出口将停止。""取消""退出"（没有直接退出） |
-| 14 "用作出口"入口 | 通过。最近列表里 B 的设备菜单（右键）有"用作出口"；点后切到出口页、新卡片当场登录，进"输入密码"。连接按钮下拉（输入框里是 B 的 ID）里也有"用作出口"，点后同样 |
-| 15 第四期挪来的 | 通过。第 3 项（卡片"可用 · 直连 / 经中继"和两个地址）见第 1、5 项；第 4 项（目录"登录后可查看出口目录"加登录按钮；登录后目录；"使用"）见第 2 项；第 5 项：测试机上另起一份第三期服务端（`d564e30`，端口 22116，新数据库），A 的 `api-server` 指向它，登录新建的账号后出口页写"当前服务器不提供出口目录。仍可按 ID 指定出口。"；测完停掉、目录删掉，A 的配置从备份盖回 |
-| 16 旧界面 | 通过（文件传输只验到窗口）。A 旧界面、B 新界面：出口（懒登录路径：`peers\<B>.toml` 里 `port_forwards` 写出口占位和一条 `example.com:80` 普通映射，`--port-forward` 开 TCP 隧道窗口）socks5h 和 HTTP CONNECT 都是 200，日志 `tunnel up (direct)`，普通映射 200，访问 B 的网关被拒（curl 52）；`--relay` 日志 `Relay connection`、没有 ICE 行；`--file-transfer` 的 "File Transfer" 窗口起来（没做传输）；连接 ICE 胜出。ID 加盐：空配置目录起一次，日志 `Generated id` 是 9 位且 ≥ 268435456，测完把原配置放回 |
-| 17 最新 stable 检查 | **通过（编译和 4K 上屏已在最终外观检查那一轮补做，见下方"最终外观检查"）**。以下是第一轮的记录：**部分通过，编译和 4K 上屏未验证**。3.47.9 仍是最新 stable（2026-10-29，`releases_windows.json` 2026-11-04 查）。第 1 步 `bridge` 带 `-ForceBridge`：通过（代码生成没有卡住）。analyze：core 97 条（和 M4 一样，其中 5 条 warning 是复制自上游的文件），app 0 条；两包测试通过（core 236、app 718 个通过 2 个跳过）；画廊导出 2268 张，和 3.44.9 逐张对比：1465 张完全相同，没有一张超过 1% 的像素差异超过 32（`94-gallery-diff.txt`）。没做到的：3.47.9 的 `flutter build windows` 和 4K 上屏。Rust 部分的 cargo 编译失败两次：第一次系统虚拟内存耗尽（`cl.exe`、`link.exe` 报内存不足），当时 A 上维护者在运行占 14~17 GB 的游戏，空闲提交内存只剩约 1~4 GB；第二次是上次被打断留下的损坏中间产物，`cargo clean --release` 清掉之后我没有再重编，免得挤掉维护者的游戏。3.44.9 的验收构建（A、B 上的 `app-ui-m5-*`）没受影响；`.wt\ui-m0-build` 的被跟踪文件已还原，`target\release` 被清掉了，下次编要从头来 |
-
-**没有定性、记下来的**
-1. 密码框里的文字有时输不进去：卡片刚进"输入密码"或窗口刚换过状态时，投递的字符落进了框外（框值长度为 0），"连接"也没有变化，没有"密码错误"提示；先点一下框再输入就稳定。更像是投递消息和框的焦点之间的先后问题，不当成问题；空密码点"连接"静默无反应倒值得看一眼。
-2. A 日志在一次 `card tunnel up (direct)` 的同一毫秒有一行 `leapgate exit: local handshake refused (Io)`，没有影响功能，大概是第一次登录的占位连接被丢掉时的记录，没追。
-3. 第 10 项：重连用的是会话里已有的密码，所以"不勾记住密码、B 重启"并不会触发要密码；要这个场景只能改对方的密码（上面的做法）。
-4. 便携版没记住选择的关窗确认里，选"在后台运行"时出现"1 个出口将在后台继续运行。"，选项说明里已有"正在使用的出口将继续运行"，两处并存。
-
-**收尾**：A、B 测试 Leapgate 全停；A 8 个配置文件、B 4 个配置文件从测前备份（`pre-m5-20261104`）盖回后逐个哈希一致（`95-A-config-after.txt` 对 `00-A-config-before.txt` 无差异，运行新建的 `Leapgate_ab`、`Leapgate_group` 已删）；没有残留计划任务，A 的 `task\` 空，没有 MSIX 包内副本，原版 RustDesk 没碰；测试服务上 B 的主人改回无主人，`aur` 是 false，第三期对照服务和它的目录已删；证据在 A 的 `C:\leapgate-e2e\evidence\m5-1104\`。验收中用过 A 的剪贴板（读"复制"按钮的内容，随后清空）。
-
-**M5 最终外观检查**（2026-11-04，`e5f9d7c33`，和功能验收的 `90a5dd0a7` 代码相同，之间只加了本文件）
-
-对象是准备合入 main 的最终提交。做法：画廊图（3.44.9 导出，2268 张，因代码相同沿用功能验收那次的导出）和样稿对应画框（`A-P1.html` 的 `p1-exit-*`、`p1-ex-*`、`p1-xc-*`、`p1-ex-remind`、`p1-close-exit`、`p1-cb-menu`，Playwright 渲染，浅色和深色各一份）逐个并排比；真机（B）上看新界面主页、出口页、连接按钮下拉，浅色深色各一次；共享组件的回看用"和 M4 外观检查时的画廊逐像素比"。
-
-**必须改项：无。**
-
-**小项**（不挡合入，实现时顺手）：
-1. 卡片里"密码错误"那一行（`exit-card_password-wrong`，浅色深色、简洁详细都一样）：错误文字比样稿 `p1-xc-pw-wrong` 离输入框近约 8 像素，整张卡片因此矮约 11 像素（样稿错误行中心离输入框下沿 25 像素，画廊 17 像素）。反过来"按 ID 指定出口"那行的"ID 格式不正确"（`exit-by-id_error`，真机也一样）比样稿 `p1-ex-id-err` 离输入框远约 4 像素。两处都是输入框下面的错误行间距和样稿不一致，方向相反，说明这行的间距在两个位置用的不是同一个值；样稿里两处也不相同，所以只记录，由 designer 决定统一成哪个。
-2. 画廊里 `exit-card_*` 按头像颜色取的色和样稿不同（画廊的"李四的台式机"是黄褐色，样稿是粉褐色）：设备头像颜色按设备名取，夹具数据不同造成，不是问题，记下来免得下次再查。
-3. 英文窄工具栏（`toolbar-m2b_english-narrow`）里"显示器"菜单按钮的标签从 `Display` 变成 `Monitor`（和旁边的画面菜单 `Display` 不再重名），是文案改动，不是这次出口页引入的版面问题；顺带记录。
-
-**对照结论**
-
-| 对照范围 | 结果 |
-|---|---|
-| 出口卡片全部状态（正在连接、输入密码、密码错误、输入验证码含不勾信任和验证码错误、等待接受、验证中、可用直连 / 经中继、暂时断开、已停止四种、端口被占用、改端口含占用和错误、两条通知、说明展开、长名字、macOS 头像、闪一下、悬停 / 焦点） | 通过：对应样稿画框逐个并排，布局、间距、字重、颜色、按钮文字竖直位置一致（按钮墨迹中心和按钮中心偏差不超过 1 像素，量法见手册），截断只出现在长名字（有省略）。01 区块 I 写明的三处差异（`p1-xc-port` 提示句、`p1-xc-busy` 有"移除"、`p1-xc-drop` 有地址行）按 01 为准、不算 |
-| 卡片网格（一列、两列、三列、三张两列、一张） | 通过：卡片等高拉伸，间距和对齐正常 |
-| 目录各态（加载、不支持、没登录、空、错误、有行、有行含使用中、长名字、行悬停 / 焦点）、按 ID 一行（空、输入、焦点、错误）、进度条、区块标题、空占位 | 通过 |
-| 导航项和主页标签的数字、提醒标记（1、2、12、99、提醒三角） | 通过：深色里数字块用浅色底深色字，提醒三角为琥珀色，都看得清 |
-| 关窗确认（带出口那一句） | 通过：真机里造不出出口在跑，看画廊和 `p1-close-exit`，文案位置一致 |
-| 详细模式（出口页、通知卡片、改端口、验证码、目录、按 ID 错误、提醒、关窗确认） | 通过：路径标记图标出现，其余和简洁一致，无错位 |
-| 真机 B（新界面，浅色深色）：主页、出口页没卡片（没登录：目录"登录后可查看出口目录"加登录按钮、刷新按钮置灰）、按 ID 行输入"12345"点"使用"出现"ID 格式不正确"、连接按钮下拉（含"用作出口"）、导航选中态 | 通过：真机渲染和画廊一致，文字竖直居中，没有被截的文字 |
-| 共享组件回看（`LgButton`、`LgTextField`、`LgTitleBar`、导航项） | 通过：同一份画廊和 M4 外观检查时的 1956 张比，1952 张逐像素相同，只有上面小项第 3 条的 4 张英文窄工具栏不同；B 上主页、设备列表、连接框、连接按钮下拉没有变样。登录对话框、地址簿、会话工具栏没在真机上开（B 没有账号凭据），靠上面的画廊比对 |
-
-**第 17 项补做**：3.47.9（Flutter 官方 SDK、官方引擎、Impeller）`flutter build windows` 通过（`bridge,build -ForceBridge`，`e5f9d7c33`），4K 上屏通过：A 控制端用 3.47.9 构建连 B（4K）约 5 分钟（317 秒），进程没有退出，句柄稳定在约 1500，内存约 450 MB，Windows 应用日志没有崩溃事件，stderr 只有 Impeller 后端一行；会话里看到的是对方的实时内容。之后 3.44.9 加路线 C 引擎编回（`flutter_windows.dll` 是带补丁 0003 的那个哈希，先删了 `leapgate.exe` 和 `main.obj` 再链接）。整个 17 项因此全部通过。
-
-#### M6a 设置页第一段（2026-11-04，`a5ce333aa`）
-
-黑盒功能验收，无人值守，不含外观检查。依据 09 §5.3 和 02 §1.2~§1.6。控制端 A（便携版新界面，设置页在它上面），被控端 B（便携版新界面，出口、小窗、登录），安装版在测试虚拟机上（新界面便携版 `--silent-install` 装一份）。两个界面都按 `a5ce333aa` 编（新界面 `bridge,build -ForceBridge`，旧界面 `patch,bridge,build`），引擎是带补丁 0003 的 `flutter_windows.dll`（`8667024A…`）；构建哈希在 A 的证据目录 `00-builds.txt`。A 上全程只用 UI Automation 的 `Invoke`/`Focus` 和投递窗口消息，没有注入真实键鼠。便携版没有"解锁"，下表"各小节写进配置"按便携版的八个小节核对（访问与密码、权限、出口、服务与 ID、连接方式、外观、网络和服务器、账号）。
-
-| 项 | 结果 |
-|---|---|
-| 各小节写进配置 | 通过。A 上逐项改、读配置文件核对键和值、改回。访问与密码：审批方式三选一写 `approve-mode`（默认不写）；密码方式写 `verification-method`；一次性密码长度 6/8/10 和"仅使用数字"各写对应键；经界面设固定密码（强度四条逐条变"已满足"）后行内变"已设置 / 修改固定密码"，选"仅固定密码"时出现"密码方式为“仅固定密码”时不使用一次性密码"。权限：12 项和"允许对方操作本机 Leapgate 的主页和设置"逐个关、开，键都对（`enable-*`、`allow-remote-config-modification`）；访问模式三选一写 `access-mode`，"完全访问""仅共享屏幕"时列表上方出现"由访问模式“…”决定"。服务与 ID：便携版"停止服务"先弹"停止服务？"，确认后写 `stop-service = Y`、主页写"服务已停止，本机无法接受远程连接"，"启动服务"后键被删、回"已就绪"。连接方式：关"打洞直连"只把 `enable-udp-punch` 改 N（`enable-ipv6-punch` 原本就是 N），再开只写 `enable-ipv6-punch = Y`、不写 UDP；"打洞直连"关时"局域网直连和 TCP 打洞"灰显、旁写"关闭“打洞直连”时始终启用"；等待直连的时间：100 报"须为 0.1~99.9 之间的数，最多一位小数"、不写；5.5 写 `relay-fallback-delay`；清空删键。外观：主题写 `theme`，界面模式写 `leapgate-ui-mode`，语言选 English 同时写 `lang` 和 `leapgate-ui-lang`、整个界面变英文，选回简体中文。账号：未登录文案和"登录"按钮正确。S9 保存：便携版走"只保存在本机"这一路，所有值都写进了配置、界面读回一致 |
-| 出口开关（第四期第 1 项） | 通过。B 上打开写 `leapgate-allow-exit = Y`、关闭写 `N`；访问模式在"完全访问""仅共享屏幕""自定义"之间切换三次，开关键一直是 Y，没有被改 |
-| 会话中关出口（第四期 B8） | **通过，两种路径都在 1 秒左右断开**。确认框先写"正在使用本机作为出口的 1 个会话将断开。"。A 用 B 当出口、每 0.15 秒 curl 一次。ICE 胜出（日志 `leapgate ice: selected host/v6/ethernet`）：B 配置写入 `N` 的时刻为 0，B 日志 `Connection closed: Exit node disabled` 在 +0.88 秒，A 日志 `port forward tunnel ended` 在约 +0.9 秒；竞争中新开的通道在 +0.8 秒左右收到拒绝，A 日志 `port forward channel refused: Exit node is not enabled on the remote device`（即 `MSG_NOT_ENABLED`），卡片进"已停止：远程设备未开启“允许作为出口”"，之后 curl 全是连接被拒。经中继（测试服务控制台 `aur Y`，日志 `Relay connection`、`card tunnel up (relayed)`）：B 关闭在 +0.44 秒，A 隧道结束在约 +0.75 秒，同样收到 `MSG_NOT_ENABLED`；测完 `aur N`，再发 `aur` 核对是 false。读码推断的"ICE 胜出时 KCP 的关闭包丢了、要等 18 秒读超时"这次没有出现。两台机器的钟差用两边日志里同一事件（同一个通道被对端关闭）的时刻对出来（A 比 B 快约 0.65 秒），已折算 |
-| 出口登录被拒（第四期第 9 项） | **不通过（发现，交回）**。B 审批方式"输入密码或在本机接受"，A 对 B"使用"：B 的小窗进程（每 0.5 秒查进程数）在连接打开后约 0.1 秒出现，A 输入错误密码点"连接"：A 卡片留在"输入密码"、框带"密码错误"（可重试，符合设计），**B 的小窗没有消失**，B 的 `#N Connection opened` 之后没有 `Connection closed`。再点 A 的"取消"（A 日志 `leapgate exit: card closed`），B 的小窗仍在，直到连接满 180 秒登录超时才 `Connection closed: Timeout`、进程退出（开连接 17:12:21.85、超时 17:15:21.85，A 取消在 17:15:07 左右，比超时早 14 秒）。也就是说密码错误不关连接是设计，但 A 取消卡片没有把这条连接关掉，B 小窗要等满 3 分钟。这次连接是上游 IPv6 打洞（`used to establish IPv6 connection`），不是 ICE，所以和 M5 第 12 项的"停止走 KCP 约 20 秒"不是同一条路径。复现：B 审批方式用默认；A 出口页"按 ID 指定出口"→ 输 B 的 ID →"使用"→ 输错误密码 →"连接" →"取消"；每 0.5 秒查 B 的 `leapgate` 进程数 |
-| 主人不被重新登录改掉（第四期第 7 项） | 通过。服务端 `device owner <B> h1it-b` 设主人（输出"is now owned by h1it-b"）；B 上用新界面登录 `h1it-a`（账号区读屏名"账号 h1it-a @h1it-a"），等两个心跳周期后查库，B 的主人仍是 `h1it-b`；B 退出登录（确认文案"退出后，地址簿、同组设备和出口目录将不可用。"）后仍是 `h1it-b`；最后 `device owner <B> none` 改回无主人。测试服务上 `h1it-a` 名下还有 3 个旧令牌（A 的设备 ID，11-03、11-04 早些时候的登录），A 的主人现在是 `h1it-a`，不是这轮造成的（这轮 A 没登录过账号），`h1it-*` 账号和令牌留到试用完一起删 |
-| 出口前提 | 通过。固定密码四种：未设置（"固定密码：未设置"加"设置固定密码"，在 A 用测前配置起时看到）、已设置（"已满足"）、已设置但密码方式为"仅一次性密码"（"需要注意"加"修改密码方式"）；审批方式"在本机接受"（B 上，"需要注意"加"修改审批方式"）、"输入密码"和"输入密码或在本机接受"（"已满足"）；TCP 隧道：已允许（"需要注意"加"修改 TCP 隧道"）、已禁止（"TCP 隧道：已禁止"）。三个"修改"都跳到对应小节，"修改 TCP 隧道"滚到该行并高亮（截图确认，约 2 秒后淡出），另两个只确认了跳转 |
-| 放行的网段 | 通过。对话框里写 `10.0.0.0/24`、`127.0.0.1`、`abc` 三行：框下"第 2 行属于始终禁止访问的地址，不会生效 / 第 3 行格式不正确"，点"确定"不关对话框、不写；删掉第 3 行后只剩警告，"确定"能保存，键 `leapgate-exit-allow-nets` 为逗号连接的两条，状态行"放行的网段：已放行 2 个网段"；"清除"先弹"清除全部放行的网段？"，确认后键被删。经出口访问 B 所在局域网的网关：放行前 curl 退出码 52（被拒）；B 上放行网关所在的 /24 网段后同一请求 200，另一网段的地址仍被拒 |
-| 服务器 | 部分通过。摘要：ID 服务器、API 服务器（由 ID 服务器推出时写"（由 ID 服务器推出）"并带 HTTP 明文警告）、Key（"已设置"）、服务器类型；本构建没有内置默认值，所以"（默认）"和"留空时使用默认值"一行**未验证**。对话框：ID 服务器一栏有值时框下写"留空时使用 http://‹ID 服务器主机›:21114"，随输入变；Key 填 `abc` 点"确定"得"Key 格式不正确"、不保存；API 填 `ftp://x` 得"API 服务器地址须以 http:// 或 https:// 开头"；"全部恢复默认"清四栏；改 ID 服务器后"确定"：轻提示"已保存"，主页服务状态一直是"已就绪"，**"正在连接服务器…"这个过渡没有抓到**（我的采样间隔约 1.5 秒，注册往返不到 1 秒；改用 WebSocket 时该文案能持续看到）。导出：轻提示"已复制服务器配置"、剪贴板里是编码串（测前后我保存并恢复了剪贴板）；导入：对话框预填、点"取消"不改配置；剪贴板是普通文字、是无意义的 base64、是空，轻提示分别是"服务器配置无效""服务器配置无效""剪贴板中没有服务器配置"。已登录时改 API 先退出：A 没登录，**未验证** |
-| 服务器类型 | 通过，有一处偏离和一处小发现。Leapgate：测试服务（心跳回 `ice,exit`）显示"Leapgate"；另起一份第三期服务端（只有 `ice`、没有出口目录）时也显示"Leapgate"，**不会显示"兼容服务器"**——兼容服务器的判据是 API 服务器不认 Leapgate 的心跳（回 404），不是"没有 exit"。所以"兼容"那一项改用一个对所有请求回 404 的小服务代替（测试机上临时起，验完删）：设成 A 的 API 服务器后，类型先"正在确认…"约 60 秒，落盘 `leapgate-api-nocaps` 后，**离开小节再回来**才变成"兼容服务器：出口目录和部分直连方式不可用"，连接方式小节顶部状态条写"当前服务器不支持部分直连方式"，带"网络和服务器"链接（小发现：停在小节里时这一行不会自己从"正在确认…"变过来，上一次从"正在确认…"变"Leapgate"是自己变的）。换回测试服务后 `nocaps` 键被删，类型回到"正在确认…"再变"Leapgate"。三态都看到了 |
-| 代理、WebSocket、禁用 UDP | 通过。WebSocket、禁用 UDP 开启前先弹确认（标题"使用 WebSocket？""禁用 UDP？"，正文是说明文字加句号，按钮"使用""禁用""取消"），关掉不确认；写 `allow-websocket`、`disable-udp`；主页服务状态下加一行警告并带"网络和服务器"链接：WebSocket"已使用 WebSocket，其他设备无法连接本机"、禁用 UDP"已禁用 UDP，其他设备无法连接本机"、代理"已设置代理，其他设备无法连接本机"，状态文字同时是"正在连接服务器…"；关掉后回"已就绪"。连接方式小节顶部状态条"已使用 WebSocket，传出连接将始终经中继"，点"网络和服务器"链接跳到该小节。代理对话框：写 `socks5://…`，框下和按钮上方的警告"使用代理时，本机无法被其他设备连接，传出连接将始终经中继。"，保存写 `[socks]` 三个键，"移除代理"删掉。"允许不安全的 TLS 回退"写 `allow-insecure-tls-fallback`，说明文字是 02 §1.5.2 改后那句 |
-| 外观 | 通过。A 上主题、界面模式、语言见第一行。B 上开一个来访（A 连 B，B 小窗收成"2 个会话进行中"）：B 设置里改语言 English、深色、详细模式，小窗读屏名当场变成"2 sessions in progress""Expand"，展开后截图（读完已删）是英文、深色、详细（紧凑）布局 |
-| 打开网络设置 | 通过。A 的 Key 改成格式正确但不是服务器的值，连 B：会话页写"本机与服务器的密钥（Key）不一致，无法连接服务器。"，点"打开网络设置"：切到主页、设置页打开"网络和服务器"；之后改回 Key |
-| 搜索 | 通过。中文："审批"得"传入连接 › 访问与密码，审批方式，仅对之后的连接生效"，"物理网卡"（说明里的词）得"出口"那一行，"外观"（小节标题）得"通用，外观"一行；英文："TCP"得三行（权限、出口、连接方式），"VPN"得出口一行；回车打开第一条、小节切过去并滚到那一项；Esc 清空、回到原小节；没有结果时"未找到匹配的设置"。（投递中文字符要一个一个发，一次发多个字符会丢，是投递工具的问题，不是界面） |
-| 安装版（测试虚拟机） | 通过，有三处说明。便携版新界面 `--silent-install` 装好（服务在跑），再用计划任务在用户会话里起界面。锁定条：传入连接各小节和"网络和服务器"在导航里带"已锁定"，小节顶部写"已锁定。修改这些设置需要管理员权限。"加"解锁"，锁着时点审批方式没有写配置；"连接方式""外观""账号"不锁。UAC 解锁（虚拟机里管理员提权提示设成直接通过）：点"解锁"后锁定条和导航标记都消失。离开设置页（切到设备）再回来重新上锁。PIN：用 `--set-unlock-pin` 设（界面里设 PIN 对话框两次输入投不进去，见说明 1），再点"解锁"出"输入解锁 PIN"对话框（带"改用管理员权限解锁"）；输错：框带"PIN 错误"；输对：解锁。主页密码行的"修改固定密码"在安装版先弹"输入解锁 PIN"，点"改用管理员权限解锁"后打开"设置固定密码"对话框。停止服务：确认写"本机将无法接受远程连接。Leapgate 将关闭并重新打开，所有会话和正在使用的出口都将断开。"，确认后 0.4 秒内服务进程全部结束、服务消失，约 3 秒后界面重新打开（一个新进程）、主页写"服务已停止，本机无法接受远程连接"；"启动服务"（没有会话、没有出口时不确认，直接 UAC）：约 2.5 秒后服务处于运行、界面进程重开。**"调用能返回就说明没成"的读码推断核实为：停止和启动都是 UAC 通过后服务和进程真的变了；取消的路径没验（见下）**。保存失败：解锁后在"权限"小节，用管理员把服务进程和服务端的 `--server` 进程杀掉，再点"允许同步剪贴板"：该项下出现红字"无法保存设置"，开关还是开（值还原），配置里没有写入；主页同时出现"无法连接服务器，正在自动重试。请检查网络连接。"。§4.1 的出口目录：虚拟机上经界面把 ID 服务器改成测试服务（服务进程在界面启动之后才确认出服务器类型），登录 `h1it-a` 后出口页写"暂无可用的出口。此处仅列出…"（目录能取到），不是"当前服务器不提供出口目录"——**只验了修后**，没有修前的构建，修前复现没做。没验：UAC 取消那条路（虚拟机里提权不弹框，按 09 §5.5 由假 model 的测试和维护者试用覆盖）；停止服务时有传出会话或出口在用的确认文案；启动服务带确认的那种 |
-| 旧界面 | 通过。五项：连接（ICE 胜出，`leapgate ice: selected …`，`handle_peer_info` 出画面前的登录成功）；中继（`--relay`：`used to establish Relay connection`，登录成功）；文件传输（`--file-transfer` 窗口起来、登录成功，B 上看到这条连接和空显示器列表；**没做实际传输**，和 M5 第 16 项一样只验到窗口）；端口转发（`peers\<B>.toml` 里 `[[21181,"example.com",80]]`，`--port-forward` 开 TCP 隧道窗口，约 20 秒后两个端口都在听，普通映射 200）；出口 B15 冒烟（同一个隧道里 `leapgate-exit.invalid` 那条映射，socks5h 访问 https 和 HTTP CONNECT 都是 200，访问 B 所在局域网的网关被拒、curl 退出码 52）。B15 里 mihomo 严格路由开关的几组没有重跑（和 M5 第 16 项一样，只做了端口转发加出口加局域网保护这几条），只读和 M5 之后 Rust 改动有关的路径 |
-| 最新 stable 检查 | 通过。3.47.9 仍是最新 stable（沿用 M5 的核对，今天没再查 releases）。第 1 步 `bridge,build -ForceBridge`：通过（第一次、第二次都因 Rust 编译 `Allocation failed` 失败，设 `CARGO_BUILD_JOBS=2` 重跑通过，代码生成没有卡住）；analyze：core 97 条（92 条 info 加 5 条 `file_model.dart` 复制件的 warning，和 M5 一样），app 0 条；两包测试全过（core 265 个，app 899 个通过 2 个跳过）；画廊导出 2608 张。4K 上屏：A 用 3.47.9 构建连 B（4K）约 318 秒，进程没有退出，句柄稳定在约 1490，内存 370~455 MB，Windows 应用日志没有崩溃事件，stderr 只有 Impeller 后端一行；每分钟的截图只记哈希、读完删除（第 3 到 5 分钟三张哈希相同，画面内容没变，没有当成问题）。之后 3.44.9 加路线 C 引擎编回，`flutter_windows.dll` 是 `8667024A…`（带补丁 0003） |
-
-**没有定性、记下来的**
-1. 投递文字的工具：同一个对话框里第二个输入框（设置固定密码、设置 PIN 的"确认 PIN"、登录的"密码"）在虚拟机上用点击或 `Focus` 之后投递常常只输进 0 或 1 个字符，在 A、B 上点击后投递没有问题；单个输入框和中文要一个字符一个字符地发（一次发多个会丢）。登录、设置 PIN 这类对话框里的 UIA `Invoke` 有时不触发按钮，改成点击坐标才可靠；这些都是投递方式的问题，没有当成界面问题，但哪一边出的问题没有定位。
-2. 第 4 项的 B 小窗：它是 B 在连接打开时（`Start cm`）起的，不是登录通过之后，所以任何没有走完登录的连接都会让它出现到登录超时（3 分钟）；密码错误只是其中一种。
-3. 编译：两次编 Rust 都在 `windows` crate 上报 `Allocation failed`（A 的可用提交内存 9~10 GB，不是满的），重跑一次就过了；第二次 3.47.9 的步骤 1 设 `CARGO_BUILD_JOBS=2` 才过。
-4. 安装版虚拟机：回滚到带内存的快照后 `qm shutdown` 两次都是超时（客户机不响应关机请求），要加 `--forceStop` 才变成 stopped。
-
-**收尾**：A 8 个配置文件、B 4 个配置文件和测前备份 `pre-m6a-20261104` 逐个哈希一致；A、B 上的 Leapgate 在最后一轮测完停止；没有残留计划任务，A 的 `task\` 空，没有 MSIX 包内副本，原版 RustDesk、mihomo 没碰。测试服务：B 的主人改回无主人，`aur` 是 false，测试机上临时起的第三期服务端和 404 小服务、目录都已删（端口不再监听）。虚拟机已按 09 §5.5 的说明回滚到 `m6-admin` 并关机。
-
-##### 验收后修复的复测（2026-11-04，`e78688154`）
-
-构建：新界面、旧界面都用 `e78688154` 重编（3.44.9 加路线 C 引擎，`flutter_windows.dll` `8667024A…`，带补丁 0003），A（台式机）和 B（笔记本）各部署一份；`CARGO_BUILD_JOBS=2`。测前备份 A 8 个、B 4 个配置文件。
-
-| 项 | 结果 |
-|---|---|
-| 出口登录被拒后取消（09 §5.3 第 9 项），三条路径 | **通过**。B 审批方式默认，A 出口页按 ID 指定 B，输错误密码，看到"密码错误"后点"取消"；每 0.2 秒记 B 的小窗可见性和进程数。①上游 IPv6 打洞（A 日志 `UDP punch confirmed`、`used to establish IPv6 connection`，就是上次出问题的那条）：B 日志 `Connection closed: stream closed` 在点"取消"后约 1 秒，小窗在同一时刻（0.1 秒内）隐藏。②自研 ICE 胜出（`leapgate ice: selected host/v6/ethernet <-> host/v6`，两次）：同样约 1 秒（A 点击 20:52:59.4，B 20:53:00.21 `Connection closed: stream closed`，小窗 20:53:00.31 隐藏）。③经中继（测试服务 `aur Y`，A 日志只有 `relay requested`、`used to establish Relay connection`，没有 `selected`）：约 1 秒，B 日志 `Connection closed: Reset by the peer`。之前 3 分钟的 `Timeout` 没有再出现。进程要再过约 6 秒才退出，这是小窗"没有来访后约 6 秒退出"的既有行为（M3），不是回归 |
-| 取消后马上重新添加同一台设备 | 通过。取消后约 5 秒（工具调用的间隔）重新添加，卡片正常进"输入密码"，没有报"本机端口 … 已被其他应用占用"。取消后 A 日志 `leapgate exit: card closed` 要再过约 7 秒（Rust 会话线程收尾），所以取消后一两秒内立即重添加的竞争窗口没有直接测到，约定里已写明（§10.12 已知限制） |
-| 卡片在"正在连接"时取消 | 通过。用 UIA 一收到"取消"按钮就 `Invoke`：取消发生在 A 日志 `Connection secured` 之后、打洞尝试之前；B 日志 `Connection opened` 之后 70 毫秒 `Connection closed: stream closed`，B 的小窗从没出现，进程数一直是 1。另用不可达的会合服务器（`123456789@192.0.2.1`，文档地址段）拖住连接再取消：卡片约 0.3 秒内消失 |
-| 不安全连接提示状态下取消（约 30 秒才关） | 未验证，造不出这个状态（已知限制，§10.12） |
-| 服务器类型"兼容服务器"当场更新 | **通过**。A 的 API 服务器指向本机一个对所有请求回 404、延迟 9 秒的小服务（`python -m http.server` 对 POST 回 501，不能用；延迟 20 秒时心跳请求超时、类型一直是"正在确认…"，是正常的"不可达"，不算失败）。停在"网络和服务器"小节：类型 `正在确认…` → 约 5 秒后变成 `兼容服务器：出口目录和部分直连方式不可用`，没有离开小节。重启后停在"连接方式"小节：顶部状态条在同一时刻出现 `当前服务器不支持部分直连方式`。测后删小服务，A 的配置盖回备份（哈希一致） |
-| 旧界面冒烟 | 通过。A 旧界面连 B（B 也是旧界面，`-TraceIce`）：`leapgate ice: selected`、`handle_peer_info` 出画面前登录成功，B 上 `Connection opened`；TCP 隧道窗口加多路复用端口映射（`[21181, example.com, 80]`）：`listening on port 127.0.0.1:21181`，curl 经 21181 取 example.com 返回 200，日志 `port forward channel 1 ended`，关窗后端口不再监听；A、B 干净退出。旧界面 stderr 里只有补丁 0003 的"Accessibility bridge dropped semantics nodes"提示。出口 B15 没重跑（旧界面出口 `serve` 路径没变） |
-
-说明：这轮有两次强制中继的尝试失败（B 到测试服务的中继连接被重置：`Failed to receive public key`、`os error 10054`，同时 B 的心跳也失败，是 B 经代理节点出去那段网络的瞬时问题，hbbr 日志里只看到 A 一端到达），后来的一次通过；失败那次 A 的卡片停在"连接已中断，下次有应用使用此代理时将自动重新连接"，下一次测试前要先点"停止"清掉。
-
-##### M6a 最终外观检查（2026-11-04，`e78688154`）
-
-**画廊（3.44.9 导出，2608 张）**：①和上一轮功能验收的画廊（`a5ce333aa`，2608 张）逐像素比（最大通道差超过 32 的像素数）：2608 张全部完全相同，这轮两处修复没有改变任何画廊图。②和 M5 最终外观检查的画廊（2268 张）逐像素比：2268 张共有的图全部完全相同（没有尺寸变化），其余 340 张（85 个状态 × 浅深 × 简洁详细）是 M6a 新增的设置、二维码、快捷键、受信设备组件。所以这次改到的共享组件（主页导航、密码行、会话错误面板、工具栏）出现的旧页面没有任何像素变化，不必逐张回看。
-
-**对照样稿**：样稿 P6 设置、P6 对话框渲染成 138 + 34 个画框，浅色、深色各一份，和画廊里对应的新增组件并排比（访问与密码整页、锁定、搜索结果、状态行、服务器摘要、解锁 PIN 对话框、开启二次验证对话框，各看了浅色或深色之一）：版式、间距、配色、锁标记、按钮层级一致。样稿里已作废的项（"修改 ID"按钮、语言多语言列表、TLS 回退说明文字）不算差异。
-
-**B 真机**（新界面，150% 缩放，窗口 1936×1209）：主页、设置页浅色和深色各一张，加设置页八个小节（访问与密码、权限、出口、服务与 ID、连接方式、外观、网络和服务器、账号）浅色深色各一张，共 20 张，一次性密码已用色块盖掉。看了其中访问与密码、出口（浅色）和网络和服务器（深色）：没有错位、文字截断或折行不对，深色的对比度和警告条（HTTP 明文）正常。
-
-**必须改**：无。
-
-**小项**（不挡合入）：
-1. 画廊的"锁定"整页（`settings-frame_locked`）和搜索结果图里导航列表带的是 M6b 之后的全部 20 个小节，真机上 M6a 只有八个小节，所以两处看起来不同；这是画廊用完整导航、不是缺陷。
-2. 搜索结果画廊图里选中的导航项（"访问与密码"）有高亮，样稿同一画框没有；搜索结果页里导航高亮是否应该保留，留给维护者试用时看。
-3. 没看的：画廊里其余约 70 个新增状态只按"所有共享组件旧图不变"和抽查看过，没有逐张对样稿；深色只看了画廊和真机各几张。
-
-证据：A 的 `C:\leapgate-e2e\evidence\m6a-fix-1104\`（`b\` 是 B 真机截图，`vis\` 是样稿和画廊并排图，`94-gallery-diff-vs-*.txt` 是逐像素比较结果，`gallery-3449-fix\` 是这轮画廊）。
-
-#### M6b 设置页第二段（2026-11-05，`5b42b000c`）
-
-黑盒功能验收，无人值守，不含外观检查。依据 09 §5.4 和 02 §1.3.3~§1.3.5、§1.3.7、§1.4.2~§1.4.7、§1.5.4、§1.5.5、§1.6.3~§1.6.5、§1.10、§3.3。控制端 A（便携版新界面），被控端 B（便携版新界面），安装版在测试虚拟机上。M6b 只改了 Dart，所以没有旧界面冒烟。新界面按 `5b42b000c` 编（`bridge,build -ForceBridge`，`CARGO_BUILD_JOBS=2`，引擎带补丁 0003，`flutter_windows.dll` `8667024A…`），构建哈希在 A 的证据目录 `m6b-1105\00-builds.txt`。A 上只用 UI Automation 的 `Invoke` 和投递窗口消息；B 上按键用 `keybd_event`。
-
-**这次验收中途断过一次**：前一个 tester 在 2026-11-05 凌晨跑到一半（约 02:55）会话中断，没留书面结论。接手的 tester 逐项核对它的完整操作记录：能在记录里找到明确的工具输出（界面读到的文字、配置键值、连上或断开的日志）的项直接认领，证据不完整的重做。下表"来源"一列写"认领"或"重做"。二次验证的密钥和验证码只在 B 的内存里算、投递，没有进任何输出、日志、文件、命令行参数，开启对话框没截图。
-
-| 项 | 来源 | 结果 |
-|---|---|---|
-| 二次验证 | 认领 | 通过。B 上开启：对话框里密钥由脚本从界面读进内存、算出一次性验证码、投递，"开启"后状态变"已开启"；A 连 B 进"2 / 验证身份"，输入验证码后连上；再连一次并勾"信任此设备"，第三次连不再要验证码；B 的受信设备列表出现 A（"‹用户名›, ‹ID›, 剩余 89 天"）；"删除所选受信设备"后再连，又出现验证码输入框；"关闭二次验证"弹确认框，确认后状态"未开启"、配置键 `2fa` 被删 |
-| Telegram | 认领 | 部分通过。Token 填 `123456:invalidtoken` 点"确定"：输入框带"Token 无效"；B 的代理设成不可达的本机端口后同样操作：框带"无法连接 Telegram。请检查网络连接。"（代理验完已移除，B 状态回"已就绪"，没有断任何机器的网）。"未找到对话"需要真机器人，**未验证** |
-| 白名单 | 认领 | 通过。IP 白名单对话框写两行（第二行格式不对）：框下"第 2 行格式不正确"、点"确定"不关框；改成一行 `192.0.2.10` 后保存，状态"已启用 · 1 条"，A 连 B 看到"远程设备仅允许指定的 IP 地址或 ID 连接，本机不在允许范围内。"；"清除"先弹"清除全部条目并停用 IP 白名单？"，确认后键变空、状态"未启用"。ID 白名单同理（写入不含 A 的 ID，A 连不上；清除后键变空）。两个白名单都清除后 A 又能连上 B（后面的自动断开用例就是这样连上的） |
-| 直接 IP 访问 | 认领 | 通过。B 打开后写 `direct-server = Y`，显示"端口"输入框和"本机地址：…"（B 的 IPv4 和两个 IPv6）；A 用 B 的 IPv6 地址直连成功（会话标签"未加密"、工具栏"直连，未加密"）。B 上先起一个独占 21118 的监听进程再打开：输入框读屏名变成"端口 21118 已被其他应用占用"并有同文的提示行，B 日志 `Failed to start direct server on port: 21118 … os error 10013`；只结束这个自己起的监听进程，之后关掉开关 |
-| 会话：自动断开 | 认领 | 通过。B 开"无操作时自动断开"，时长填 1，配置 `auto-disconnect-timeout = 1`；A 连 B 后空闲，B 日志 `Connection closed: auto disconnect`，A 的会话页写"长时间无操作，远程设备已自动断开连接。"并带"重新连接" |
-| 会话：壁纸预览、声音来源、录制位置 | 认领 | 通过。"预览移除壁纸"点后按钮依次是"正在预览…（4）（3）（2）"，然后恢复；声音来源下拉列出系统声音和本机麦克风，选麦克风写 `audio-input`，改回系统声音后键被删；"打开录制文件夹"在资源管理器开了默认的录制目录，"修改录制文件位置"弹出系统的"选择文件夹"对话框，取消后没改任何路径 |
-| 会话：RDP 会话共享、隐私模式实现（安装版） | 认领 | 通过。虚拟机安装版上先解锁（UAC 已设成直接通过）：点"允许 RDP 会话共享"，注册表卸载项里 `share_rdp` 从 false 变 true；隐私模式实现方式选"使用虚拟显示器"后，用户目录和服务账号目录的 `Leapgate2.toml` 都写入对应的 `privacy-mode-impl-key`（含虚拟显示器、不含放大镜排除项），改选"遮挡屏幕"后两处都变成不含虚拟显示器、含放大镜排除项 |
-| 远程打印 | 认领 | **部分通过，安装一步未验证**。B（便携版）显示"仅安装版支持远程打印"。虚拟机安装版：显示"未安装 Leapgate 打印机"和"安装打印机"；点安装后界面写"无法安装 Leapgate 打印机。"，按钮变"重试安装 Leapgate 打印机"并有"技术细节"，日志 `The driver inf file "drivers/RustDeskPrinterDriver/RustDeskPrinterDriver.inf" does not exists`。这次的构建没有打包打印机驱动文件（待办里"补上游 CI 打包的外部组件"），"安装 → 已安装"走不完；界面的失败路径是对的 |
-| 新设备的默认设置 | 认领一半、重做一半 | 通过。A 把默认设置改成"原始大小""均衡""显示远程光标"关、"静音"开后：认领的部分是已连过的设备配置不变（仍是 `adaptive`/`best`/光标开/不静音，重连后也不变）；重做的部分是删掉 A 上这台设备的 peer 配置后重新连 B：新生成的 peer 配置是 `view_style = original`、`image_quality = balanced`、`show_remote_cursor = false`、`disable_audio = false`（`98-defaults-redo.txt`） |
-| 工具栏与显示器、渲染 | 认领 | 通过。会话开着时，"允许工具栏停靠在窗口任意一边"关掉后，工具栏从悬浮的 1378 宽条当场变回窗口里的固定条；"使用纹理渲染"关、开，画面在会话里当场重建、窗口截图亮度检查有画面；显示器相关三项写对应的键（`show_monitors_toolbar`、`allow-monitor-switch-main-toolbar`、`allow-monitor-switch-min-toolbar`） |
-| 快捷键 | 认领 | 通过。打开总开关后写入默认绑定（九个动作，Ctrl+Alt+Shift 加各自的键）；"原始大小"改录 Ctrl+Alt+Shift+Q，只按 Q、缺 Ctrl 等不保存并提示"组合键须包含 Ctrl、Alt 或 Shift"；录到已被占用的组合时提示"已用于“显示远程光标”，替换后该操作将没有快捷键"，点"替换"后原动作变"未设置"；清除、"恢复默认快捷键"（先确认）都对。会话里 B 对 A 按 Ctrl+Alt+Shift+M，对端 peer 配置 `view_style` 当场从 `original` 变 `adaptive`；打开"将组合键发送到远程设备"后同样的键不再触发，整个列表灰显写"已暂停全部快捷键"，按钮点不了 |
-| 收到的打印任务 | 认领 | 通过。四种处理方式：使用默认打印机 → `allow-printer-auto-print = Y`；使用指定的打印机 → `printer-incomming-job-action = selected` 加 `printer-selected-name`；不打印 → `dismiss`；每次询问 → `allow-printer-auto-print = N`、动作键删除，和 02 §1.4.7 一致 |
-| 其他、关于 | 认领 | 通过。"关闭窗口前确认断开会话"关、开：会话开着点关闭时弹"断开全部 1 个会话并关闭窗口？"，关掉确认后弹"关闭窗口？"；关闭方式选"退出"写 `leapgate-close-action = exit` 且进程退出、选"在后台运行"进程留着、"每次询问"键被删；硬件编解码开关写 `enable-hwcodec`；关于页复制版本、指纹、本机 ID 都和读剪贴板一致（测完恢复剪贴板）；"源代码"在浏览器打开 GitHub 公开镜像的仓库页，核对页面标题后关掉了这个标签页 |
-| 会话期间（09 表外，小节验过） | 认领 | 通过。"会话间同步剪贴板""传出会话期间保持屏幕常亮""自动录制传出会话"和三选一的开关写对应的键；"传出会话期间保持屏幕常亮"开着时 `powercfg /requests` 的 DISPLAY 里有 B 的进程，关掉后无 |
-| 搜索 | 认领 | 通过。中文搜"纹理渲染"得"传出连接 › 渲染，使用纹理渲染…"，英文搜"GDI"得"传入连接 › 会话，使用 DirectX 采集屏幕…"；回车打开对应小节并滚到该项，该项被高亮框起来（`search-gdi-crop.png`） |
-| 锁 | 认领 | 通过（只能部分验）。便携版上这几节不带"已锁定"，全部能直接用；安装版的锁定条在虚拟机上显示"已锁定。修改这些设置需要管理员权限。" |
-| 旧界面 | — | 不跑（M6b 只改 Dart） |
-| 最新 stable 检查 | 认领，4K 上屏重做 | 通过，4K 一次崩溃见下。3.47.9 仍是最新 stable（沿用上一轮的核对）。步骤 1 `-ForceBridge` 构建通过；analyze：core 97 条（92 条 info 加 5 条 `file_model.dart` 复制件的 warning，和 M5、M6a 一样），app 0 条；两包测试 core 282 个、app 951 个通过（2 个跳过）；画廊 3.44.9 导出 2608 张，和 M6a 复测的画廊逐像素比 2608 张全部相同。4K 上屏用 3.47.9 构建连 B（4K），共四轮，第一轮崩溃，第二、三、四轮各 145~266 秒不等，没有再崩 |
-
-**4K 上屏的一次崩溃**（`92-4k-run1-crash.txt`、`95-4k-crash-events.txt`、`96-4k-run3.txt`、`97-4k-run4.txt`）：第一轮 A 用 3.47.9 构建连 B（4K），连上约 78 秒后在 02:51:38 进程崩溃（应用程序错误 1000，故障模块 `libleapgate.dll`，异常代码 `0xc0000409`，偏移 `0xfc6f61`；1001 的 P9 是 7，即 `FAST_FAIL_FATAL_APP_EXIT`，是 Rust 一侧主动终止，不是 `flutter_windows.dll`），而之前几轮崩的是 `flutter_windows.dll`，这次不是。崩的是 3.47.9 那份构建，但 `libleapgate.dll` 和 3.44.9 那份哈希相同（`3C1D89B0…`），故障点在 Rust，和 Flutter 版本、M6b 的 Dart 改动都没有关系。崩前 2 秒 A 的日志有 `[FFMPEG_RAM_ENC] av_frame_get_buffer, ret = Cannot allocate memory` 和 `Failed to handle video frame, fail counter: 1`，当时 A 在玩游戏、可用提交内存只有约 9 GB。同一份构建之后连跑三轮（第二轮 02:55~02:57，三次取样；第三轮 266 秒；第四轮 265 秒，其间可用提交内存在 10~26 GB 之间），没有崩，句柄稳定在约 1440~1460，工作集 450~500 MB，没有崩溃事件，stderr 只有 Impeller 一行。**结论：没有复现**，判断是 A 内存吃紧时硬解码分配帧缓冲失败后 Rust 一侧终止进程，一次性崩溃、三轮复跑正常；没有拿到崩溃转储里的调用栈，所以只能写成"和低内存同时发生"，不能写成确定的因果。留给后面：如果 4K 硬解码在内存紧时崩溃要修，属于上游 hwcodec 的分配失败处理，不在 M6b 范围
-
-**没有定性、记下来的**
-1. 投递文字：和 M6a 一样，一次发多个字符会丢，单个输入框和中文要逐字符发。
-2. 打印机驱动没有随构建打包，所以"安装 → 已安装"没法验，等外部组件补上以后在测试虚拟机上补一次。
-3. "未找到对话"（Telegram）需要真机器人，留给维护者。
-4. 测试虚拟机：用 `--silent-install` 装好后，`--silent-install` 命令本身在 2 分钟时被 telechir 超时截断，但服务和界面都已装好；回滚到 `m6-admin` 后 `qm shutdown` 照旧要加 `--forceStop`。
-
-**收尾**：A 8 个配置文件、B 4 个配置文件和测前备份 `pre-m6b-20261105` 逐个哈希一致（`99-A-restore-hashes.txt`；A 多出的默认设置文件和直连时生成的 peer 配置、B 多出的 peers 目录都已删）；B 的二次验证、白名单、直接 IP 访问、代理、快捷键和打印任务处理方式随配置盖回恢复原样；A 上、B 上的 Leapgate 都已结束（只结束了我们自己起的进程）；没有残留计划任务，A 的 `task\` 空，没有 MSIX 包内副本，原版 RustDesk、mihomo 没碰；测试机上前一个 tester 留下的一次性中继脚本和探测文件已删；测试虚拟机已回滚到 `m6-admin` 并关机。
-
-##### M6b Telegram 真机补测（2026-11-05，`a9717abec`）
-
-Telegram 机器人设置改成两步（`leapgate_bot_lookup` 只查、什么都不存，用户确认后 `leapgate_bot_save` 才保存）之后，对最终提交补测。新界面按 `a9717abec` 编（`bridge,build -ForceBridge`，`CARGO_BUILD_JOBS=2`）：`flutter_windows.dll` `8667024A…`、`leapgate.exe` `1A7716C8…`、`libleapgate.dll` `8D8C6F65…`、`data/app.so` `C83162D3…`。只用 A：UI Automation `Invoke` 加投递消息，不注入真实键鼠；二次验证的密钥只在内存里算验证码、投递，不进任何输出（开启二次验证是为了让"Telegram 机器人"这一项出现）。
-
-| 项 | 结果 |
-|---|---|
-| Token 无效 | **通过**。填一个格式像 Token 的编造值，点"确定"：输入框读屏名变成"Token / Token 无效"，框下红字"Token 无效"，对话框停在输入态，没有进确认态；点之前和之后配置里都没有 `bot` 相关的键。这个文案只有拿到 Telegram 的拒绝回应才会出现（网络不通是另一句），说明请求确实发出去并收到了回应。**没有直接看到请求网址**（没抓包，客户端也不记这次请求），`?offset=-100` 和 POST 方式靠读码之外没有第二证据，没验 |
-| 无法连接 Telegram | **通过**。A 的代理设成本机一个没人监听的端口（没断任何机器的网），同样操作：读屏名"Token / 无法连接 Telegram。请检查网络连接。"，8 次每 2 秒读取都不变。代理在界面里"移除代理"，`Leapgate2.toml` 的 `[socks]` 三个键随之删除，和测前一致 |
-| 日志里没有 Token | **通过**。拿填过的编造值（整串和冒号后面的部分）在本次运行的 `leapgate_rCURRENT.log`、`leapgate_r2026-11-05_04-11-59.log`、stderr、A 全部历史日志和 `config` 目录所有文件里搜：都搜不到。这次操作在日志里一行都没留（没有 `getUpdates`、没有 `telegram`） |
-| 确认态、"未找到对话" | **未验证，留给维护者试用**：需要真机器人。确认态的外观也没有看到：画廊里没有这个状态（见最终外观检查的建议） |
-
-截图 `shots\tg-invalid-0.png`、`shots\tg-noconn-0.png`（Token 和一次性密码都已盖色块）。
-
-##### M6b 最终外观检查（2026-11-05，`a9717abec`）
-
-对象是准备合入 main 的最终提交。做法：画廊 3.44.9 重新导出，和之前的画廊逐像素比；十二个小节和样稿 `A-P6-设置.html` 的 `p6-dk-*` 画框（Playwright 渲染，浅色深色各一份）并排比；三个对话框和 `A-P6-设置-对话框.html` 并排比；真机 A（浅色）、B（深色，测完系统主题改回浅色）把十二个小节各看一遍；共享组件回看靠画廊。样稿里已作废或 02 改过的项（"关闭主窗口时"三选一、录制位置的副标题、关于页只有"源代码"一个链接、"真彩色 4:4:4"、便携版隐藏的安装版项）以 02 为准，不算差异。
-
-**画廊（3.44.9 导出，2608 张）**：和 M6b 功能验收的画廊（`5b42b000c`）、M6a 最终外观检查的画廊（`e78688154`）各逐像素比：2608 张全部完全相同，没有任何一张变化、没有新增或减少。所以 `LgTrustedDevices`（按键选中、读屏名）、`SettingsSection` 的 `lede`、设置页框架的灰显这几处改动没有改变任何画廊图，M6a 的几个小节不会变样；锁定整页（`settings-frame_locked`）也相同。
-
-**必须改（1 条）**
-1. 对话框左边有一个"清除"或"移除代理"按钮时，"取消""确定"没有靠右对齐，离输入框右边缘差约 127 个逻辑像素（样稿里这一对贴着右边缘）。IP 白名单对话框（"清除"）和 M6a 的代理对话框（"移除代理"，Dump 里"确定"右端 2061、内容右边缘 2208，同一个偏差）都是这样；只有取消、确定两个按钮的对话框（Telegram）是靠右的，所以问题在带前置按钮的那种按钮行版式。ID 白名单、网段的"清除"对话框应当同样，没单独看。画廊里没有带前置按钮的对话框，所以之前的检查都没发现。截图 `shots\L-dlg-ip-empty-0.png`，并排图 `vis\22-dlg-ip-empty.png`。
-
-**小项（不挡合入）**
-1. 快捷键页的键帽，方向键写 `Right`、`Left`，样稿是箭头字符（→ ←）；02 没规定，看维护者要哪种（`shots\L09b-keys-on-0.png`，`vis\09b-keys-on.png`）。
-2. IP 白名单对话框出错时：真机是顶上一条红色提示条加输入框上方一行"IP 白名单"字，样稿是输入框下面一行红字加出错那一行的红下划线；对话框图标真机是盾牌、样稿是列表图标（`vis\21-dlg-ip-bad.png`）。02 §1.6.5 只写"逐行标出"，不算偏离，看要不要统一。
-3. 录制文件位置（便携版）的路径文字，真机是正文字体放在副标题下面，样稿是等宽字体放在按钮左边；副标题是 02 加的，路径字体要不要等宽看设计（`shots\L05-会话期间-0.png`）。
-4. 设置页左栏导航滚动以后（选"其他"、"关于"时），最上面一项被搜索框切掉半行，露出一半文字（`shots\L11-其他-0.png`、`shots\L12-关于-0.png`，深色同）。是列表滚动的正常表现，但切在搜索框下沿比较突兀，可以让搜索框下面留一点渐隐或者让滚动对齐整行。
-5. 样稿里 Telegram 对话框正文（`p6-dl-tg-init`）比同一份样稿里 IP 白名单对话框的正文大且深，样稿自己不一致；真机的 Telegram 对话框和 IP 白名单对话框的正文是一样的，不算问题，记下来免得再查。
-
-**对照结论**
-
-| 对照范围 | 结果 |
-|---|---|
-| 十二个小节的整页版式（A 浅色、B 深色）：二次验证、访问限制、会话、远程打印、会话期间、新设备的默认设置、工具栏与显示器、渲染、快捷键（关、开两态）、收到的打印任务、其他、关于 | 通过：标题、分组标题、行高、行分隔线、开关、分段控件、下拉、单选、按钮文字竖直居中、字重、颜色和样稿一致，深色的对比度和选中态正常；差异只有上面的小项和 02 改过的项。便携版没有 RDP 会话共享、隐私模式、"仅在 Leapgate 运行时允许连接"、局域网发现、安装打印机按钮，是预期 |
-| 对话框：开启二次验证（A 上看过，二维码和密钥不截图，版式靠读屏树和画廊）、Telegram 机器人（输入态、Token 无效、无法连接）、IP 白名单（空、有错） | Telegram 的输入态、错误态和样稿一致（标题图标、字段、按钮层级、错误红字）；IP 白名单见必须改第 1 条和小项第 2 条；开启二次验证没有逐像素对照。**Telegram 确认态没有看到** |
-| 共享组件回看 | 通过：见上面画廊结论，2608 张全部相同 |
-
-**没看的**：Telegram 确认态的外观（画廊没有这个状态，真机要真机器人）；开启二次验证对话框、ID 白名单、网段清除对话框、深色里的各对话框没有并排对照；安装版里的锁定条和 UAC 盾牌（沿用功能验收时在测试虚拟机上看过的）。**建议**：给 Telegram 确认态（和"保存失败"那一行）补一个画廊状态，下一轮就能逐像素管住它；带前置按钮的对话框也补一个，这类版式问题才查得出来。
-
-证据：A 的 `C:\leapgate-e2e\evidence\m6b-final-1105\`（`shots\` 是 A 真机截图，`b-dark\` 是 B 深色截图，`vis\` 是样稿和真机并排图，`94-gallery-diff-vs-*.txt` 是逐像素比较结果，`gallery-3449-fix\` 是这轮画廊，`00-builds.txt` 构建哈希，`99-A-restore-hashes.txt` 恢复哈希）。
-
-##### M6b 定向复查（`8efb531f0`，2026-11-05）
-
-对象是修了最终外观检查那条必须改的提交（只改 Dart，Rust 没动）。**判定：通过，没有必须改项，没有新问题要交回 coder**；一条极小的观感项记在后面，不挡合入。
-
-**构建**：新界面 `-Ui leapgate`，`bridge,build -ForceBridge`，约几分钟；`leapgate.exe` `1A7716C8…`（和 `a9717abec` 那次相同）、`libleapgate.dll` `AAC312FE…`（上次 `8D8C6F65…`，Rust 源码没改，差异来自重编，没有深究）、`flutter_windows.dll` `8667024A…`、`data/app.so` `66736630…`。
-
-**画廊（3.44.9 导出，2612 张）**：和上一轮 `a9717abec` 的画廊（2608 张）逐像素比：共有的 2608 张里 2604 张完全相同（连一个像素都不差，不只是差超过 32 的），4 张变了、4 张新增，没有尺寸变化。
-- 变化的 4 张都是 `settings-dialog_unlock-pin-link`（浅色深色各简洁、详细），超过 32 的像素数 4511、3757（浅色）、1421、1280（深色）。这是画廊里唯一带前置按钮（"改用管理员权限解锁"）的对话框。量法：取输入框右边缘和"解锁"按钮右边缘（浅色简洁，1 倍）：旧 384 对输入框 451，差 67；新 451 对 451，对齐。两个按钮竖直中心都是 223.5，前置链接的字高中心 225（差 1.5 像素，是链接文字和按钮框的量法差异，视觉上居中）。前置链接位置没变（x 68~187）。深色同样对齐。
-- 新增 4 张是 `settings-dialog_telegram-confirm-chat`（浅深色 × 简洁详细）。
-- 预期里的"`undo-button-at-start`"和带方向键的快捷键状态：**没有变化**。`undo-button-at-start` 的按钮不是前置按钮那种版式；画廊里的 `shortcut-list_*` 状态不含方向键，所以箭头改动在画廊里看不到，靠真机验。别处没有任何变化，M6a、M6b 的其他小节和共享组件不受影响。
-
-**Telegram 确认态（画廊新增，浅深色、简洁详细都看了）**：文字和 02 §1.6.4 一致（"验证码将发送给：@zhangsan"，下一行小字"如果这不是你的 Telegram 对话，请取消，再从你的账号向机器人发送一条消息。"，按钮"取消""确认"）。版式和同一份样稿里的 IP 白名单对话框一致：图标加标题一行，正文、小字、按钮行的间距相仿，取消、确认靠右边缘，确认是主色。深色的对比度正常，小字比正文淡一档，小字在 520 宽下折两行（简洁）或两行（详细，折点不同），不溢出。样稿里没有确认态，所以没有逐像素对照；"保存失败"那一行没有画廊状态。
-
-**真机（A，浅色，1936×1209，150%）**
-- IP 白名单对话框（输入一行后"清除"出现，没点"确定"）：输入框右边缘和"确定"右边缘都是 1255，"取消""确定"右端贴着；"清除"在左，三个按钮中心同高（约 871）。对照 `A-P6-设置-对话框.html` 的 `p6-dl-ip-ok`：样稿是"清除"左、"取消""确定"右、贴输入框右边缘，一致。
-- M6a 代理对话框（先存了一个不可达的本机代理，"移除代理"出现，没改别的）："移除代理"在左，"取消""确定"右端贴着输入框右边缘，三者同高。验完点了"移除代理"。
-- 快捷键页（打开"在远程会话中使用快捷键"）：「下一个显示器」是 `Ctrl Alt Shift →`，「上一个显示器」是 `Ctrl Alt Shift ←`，不再是 `Right`、`Left`。箭头在键帽里水平垂直居中，键帽高度和其他键一致；**箭头字形比 `Ctrl`、`Alt` 的字母小，约一半高，看着偏轻**（等宽字体里的箭头字符，3 倍放大图 `shots\kb-keycaps-zoom.png`），单字符键帽也比文字键帽窄。能读，不挡合入；要更醒目可以给箭头单独放大一档。
-
-证据在 A 的 `C:\leapgate-e2e\evidence\m6b-recheck-1105\`（`00-builds.txt`、`94-gallery-diff-vs-a9717abec.txt`、`94-anydiff.txt`、`gallery-3449-fix\`、`cmp\` 并排图、`shots\` 真机截图，一次性密码区已盖色块，`99-A-restore-hashes.txt`）。
-
-#### M7a 文件传输，功能验收第一段（2026-11-05 21:05 起，`b16f17cd1`）
-
-黑盒功能验收，无人值守，不含外观检查，也不含测试虚拟机那一段（安装版对端、上游 1.4.x 对端、FAT32、目标被占用时下载，02 §4.3 第 19 条，另起一轮）。依据 10 §5.4 和 02 §2.1.1、§2.2、§2.4、§2.5、§3.1、§3.2，一个标签多个视图以 01 §3.2 区块 A、G 为准；已知限制（本文件上面"M7a 的分工约定"末尾）按限制记录、不算不通过。控制端 A（便携版新界面），被控端 B（便携版新界面，远程是 Windows，经内网外的另一台机器），一次性数据放专用目录，测前备份两端配置，测完盖回。
-
-**构建**：`CARGO_BUILD_JOBS=2`。新界面 `bridge,build -ForceBridge`，`flutter_windows.dll` `8667024A…`（自编引擎）、`leapgate.exe` `0E69D866…`、`libleapgate.dll` `94196EBA…`、`data/app.so` `2F2C9B21…`；旧界面 `patch,bridge,build`（Rust 改了 `src/common.rs`），`leapgate.exe` `7F7BFDD1…`、`libleapgate.dll` `26FF0C84…`、`data/app.so` `B633D127…`。
-
-**没做的（交回主会话）**：Mac 对端（官方 1.5.0）没有可用的密码，也不能在上面设密码或点"接受"，对应各项标未验证；Explorer 拖放是 OLE 拖放，脚本模拟不了；带修饰键的按键投递不进 Flutter（Ctrl+A、Ctrl+L、Shift 连选等），真实键盘注入会打扰 A 上正在用电脑的人。
-
-| 项 | 结果 |
-|---|---|
-| 入口：设备菜单 | **通过**。主页设备菜单里有"远程桌面""文件传输""经中继连接""始终经中继连接""创建桌面快捷方式""重命名""加入收藏""删除"；这台设备已有标签时点"文件传输"不新开标签，直接切过去，不问密码 |
-| 入口：连接框下拉 | **通过**。"连接方式"下拉里有"远程桌面（默认）""文件传输""经中继连接"；没有现成标签时点"文件传输"出连接面板，输密码后两栏读完 |
-| 入口：标签右键 | **通过**。"复制设备 ID""关闭其他标签""关闭"；这个标签里文件传输视图已经开着，菜单里没有"打开文件传输"（视图没开时的状态没单独验） |
-| 入口：工具栏视图切换 | **通过**。远程桌面开着时视图菜单列"远程桌面 / 直连""文件传输 / 未打开"，点开后两栏读完，**已有远程桌面时不问密码**（复用令牌） |
-| 入口：设备菜单"远程桌面"（小项） | **观察**。标签里只有文件传输视图时，设备菜单点"远程桌面"只是切到该标签，视图仍是文件传输（菜单里写"远程桌面 / 未打开"），没有打开远程桌面视图。01/02 没写这种情形该怎样，是缺口还是预期要维护者定 |
-| 切到文件视图后远程桌面不推帧 | **通过（间接）**。V1 没有日志行。同一标签两个视图都开、B 上不停刷屏：远程桌面在前时 A 进程 CPU 25.4%（单核）、3D 2.2%、视频解码 4.7%；文件视图在前 CPU 20.1%、3D 0.8%、视频解码 4.7%（照常收流解码，和 M2a 的 V1 口径一致）。**键盘不发到远程**：未验证（投递的按键本来就进不了远程，真实键盘注入会打扰 A 上的人） |
-| 标签连接方式取最差的 | **未验证**。要一个视图直连、另一个经中继；对端的"始终经中继"对两个视图同时生效，做不出混合态 |
-| 标签 ×、右键"关闭"、"关闭其他标签"的确认 | **通过**。标签里远程桌面加文件传输两个会话时 × 和右键"关闭"都是"断开与此设备的 2 个会话？"（取消 / 断开）；有未完成传输时多一句"1 个传输尚未完成，下次打开文件传输时可继续。"；"关闭其他标签"只有在有未完成传输时才确认（"关闭其他标签？"加同一句），没有时直接关；只剩错误面板的标签（未知 ID）关闭标签无确认 |
-| 远程桌面冒烟（`冒烟清单.md`） | **部分通过**（改的是外壳，只跑了和这次改动相关的）。同一标签先文件传输再远程桌面；工具栏全部按钮在（固定、远程桌面、画面、输入、操作、会话、聊天、录制、连接方式、断开、移动工具栏、全屏、收起）；画面、输入、操作、会话四个菜单能打开；全屏时多"最小化"和"退出全屏"并能退出；ID 加下拉"经中继连接"→标签"经中继"、对端配置写入"始终经中继"（已盖回）；连接框里 ID 后面写 `/r`（脚本逐字输入）没有触发中继，直接直连（疑为脚本输入，没追）；不存在的 ID 的错误面板和"关闭标签"、密码错误（"密码 / 密码错误"）、被控端关掉文件传输权限、连接断开后的"重试"都对。没跑：2FA、不安全连接、1.5 秒唤醒、改用中继、对方重启（本轮没有对应条件，和前几轮一样留给试用） |
-| 浏览：两栏读完、后退、上一级、主文件夹、刷新、面包屑 | **通过**。两栏各自读完；面包屑按宽度省略中间；"此电脑"一级列"C: / 驱动器""D: / 驱动器"；另一栏在"此电脑"时这一栏的上传读屏名变成"上传. 目标位置不能是“此电脑”"（灰显）；盘符右键菜单"打开""复制路径"；根下拉没有单独点开列盘符 |
-| 浏览：路径输入和"未找到" | **通过**。点"编辑路径"输入不存在的路径回车，输入框保持，读屏名"编辑路径 / 未找到“…”。"。Ctrl+L 未验证（修饰键） |
-| 浏览：搜索 | **通过**。不区分大小写（`ALPHA` 找到 `Alpha.txt`），无结果写"未找到匹配的项目"，状态行 0 个项目；Esc 清除 |
-| 浏览：排序记忆 | **通过**。本机栏按"大小"升序、远程栏按"名称"升序，重启 A 的程序后各自保持，两栏分开记 |
-| 浏览：显示隐藏的项目、半透明 | **通过**（本机栏验了半透明，远程栏验了默认不显示）。打开后隐藏文件出现且半透明，状态行"5 个项目"，默认关时是 4 个 |
-| 浏览：符号链接、目录联接、临时文件的样子 | **通过**。目录符号链接、目录联接、文件符号链接在类型列都写"符号链接"，大小列空；`.download`、`.digest` 在类型列写"未完成的传输" |
-| 浏览：没有权限的文件夹 | **通过**。B 上拒绝读取的文件夹：停在原文件夹，栏顶横幅"无法打开“prot”：没有访问权限。"和"关闭" |
-| 上传、下载 | **通过**。文件（含隐藏文件）和文件夹（含隐藏项和子文件夹）各上传一次、下载一次，两端 SHA256 逐个一致；传完后两栏自动刷新；队列行的路径写"源 → 目标"，进行中写"百分比 · 已传 / 总大小 · 速度 · 剩余约 ‹时间›"。双击文件夹打开；双击文件传输**没有验**（双击到另一栏的传输没单独测）。**"排队中"没有看到**：同一方向两个任务同时建出后，第二个行显示"0% · 0 字节 / 120 MB"，汇总行写"2 个进行中"（02 要"排队中"单独显示、汇总"1 个进行中，1 个排队"），见下面"问题 1" |
-| 续传：连接断开后自动接着传 | **部分通过，有问题**。B 的程序被杀、约 6 秒后重启（A 的自动重试第二次连上）：下载在 42% 停住，约 24 秒后自动从 16.9 MB 接着传；完成后哈希一致。B 离线约 45 秒（A 重试一次后面板写"无法连接服务器。请检查网络连接。"和"重试"，队列行变"已暂停 · 已传 9 MB / 32 MB"，和 02 一致）后点"重试"：见下面"问题 2"。断线期间队列行被面板盖住（不在语义树里），没有截到"已中断，重新连接后将继续"那几秒的文字 |
-| 续传：关视图再打开 | **通过，进度文字有问题**。有未完成传输时视图"断开"先确认（"断开文件传输？/1 个传输尚未完成，下次打开文件传输时可继续。"）；重开后汇总"1 个已暂停"加"全部继续"，行"已暂停"带"继续""取消"；点"继续"从临时文件的大小处接着传（20316160 字节处），完成后哈希一致。整个标签关掉、经设备菜单重开（要重新输密码）同样。进度文字见下面"问题 3" |
-| 替换确认 | **通过**。同名文件且两个文件相同：标题"替换“h.txt”？"、正文"目标文件夹“…”中已有同名文件。"加"两个文件的大小和修改时间相同。"，默认焦点在"跳过"，勾选项"对此次传输中的其他冲突执行相同操作"，按钮"取消传输""跳过""替换"；勾选后点"跳过"只弹一次，其余按跳过处理；下载时目标只有临时文件：正文"目标文件夹“…”中有上次未完成传输留下的临时文件。"、无大小时间行、默认焦点在"替换"，"取消传输"后行"已取消"，"替换"后接着完成、临时文件清掉、哈希一致；上传方向目标只有临时文件时不弹确认（上游那段在接收一侧）；确认等着时切到别的标签，标签上出现警告三角（`tab-alert-crop.png`）。整批跳过后行写"已完成 · 3 个文件"（"已跳过 k 个"是 M7b） |
-| 删除 | **通过**。一个文件"永久删除“x.txt”？/此文件将从远程设备上删除，无法恢复。"；两个文件"永久删除这 2 个项目？/将从远程设备上删除 2 个文件（240 MB），无法恢复。"；空文件夹"此文件夹为空，将从远程设备上删除。"，确认后行"已完成"；1200 个文件的文件夹"将从远程设备上删除 1200 个文件（4.78 KB）"，确认后行"正在删除… 290 / 1200 个文件"，点取消变"已取消"、文件夹留着；统计较久的文件夹（B 上约 10 万文件的缓存目录）先出"删除 / 正在统计要删除的项目…"和"取消"，取消后没有任何删除任务（没有确认过删除）。统计超过 2 秒才完成的情形只有这一例，统计中点取消通过 |
-| 删除链接 | **通过**。B（Windows 远程）上目录符号链接、目录联接、文件符号链接各删一次，确认框"删除符号链接“…”？/只删除符号链接本身，其指向的内容不受影响。"，删后三个目标（含里面的文件）完好；A 本机栏同样三种加一个第二个目录符号链接，只删链接、目标完好。**Mac 对端的符号链接**：未验证（见上） |
-| 新建、重命名 | **部分通过**。新建：默认名"新建文件夹"已存在时输入框读屏名"名称 / 此位置已有同名的文件或文件夹"；名称含 `:` 时"名称不能包含下列字符：\ / : * ? " < > \|"；在 B 上写权限被拒的文件夹里新建：对话框内写"无法新建文件夹。没有访问权限。"，对话框保持。重命名：右键菜单"下载 / 重命名 F2 / 删除 Delete / 复制路径"，对话框"重命名“new1.txt”"，预选扩展名之前的部分，提交后列表即时更新。**局限**：投递的文字在对话框里只有第一个字符能替换预选内容，之后的字符丢（M6a 起就有的脚本限制），所以名字只能用单字符；"名称为空 / 名字没变时按钮不可点"没法读出，未验证 |
-| 失败原因 | **部分通过，有问题**。"正被使用"：下载被独占打开的文件→"失败：文件正被其他应用使用"；"不存在"：删掉列表里的文件再下载→"失败：未找到“report.txt”，可能已被移动或删除"；"没有权限"：见"浏览"和"新建"；**上传到无写权限的文件夹**见下面"问题 4"。空间不足（可选）没做 |
-| 拖放 | **未验证**。Explorer 拖入是 OLE 拖放，脚本模拟不了；应用内两栏互拖：投递鼠标按下加带左键标志的移动消息没有触发拖动（`drag-mid-0.png` 里没有跟手标签和高亮），松开也没有任务，分不清是脚本限制还是实现问题。"不接受"的提示、断线时拖入不生成任务行、拖入的方向、260 字符路径被拖放插件截断都留给维护者试用。**长路径本身**：上传含 314 个字符深层路径文件的文件夹到 B（目标 328 个字符）完成，没有被截断也没有"路径过长" |
-| 键盘 | **部分通过**。选中文件按 F2 弹重命名；Backspace 后退；对话框（重命名）用 Esc 或"取消"关掉后再按 F2 又弹出（键盘焦点回到原来那一栏，本机栏验了，远程栏同样验了 F2）。未验证：Delete（投递的 VK_DELETE 没带扩展键位，没触发删除确认）、F5、Ctrl 组合键、Shift 连选、Alt+方向键 |
-| 确认：视图"断开"、关窗 | **通过**。有未完成传输时视图"断开"确认（见上）；关窗确认"断开全部 1 个会话并关闭窗口？"，选项"退出 Leapgate""在后台运行""记住此选择""不再提示"，多一句"1 个传输尚未完成…"（会话数按视图数，一个文件传输视图是 1）；勾"不再提示"后，有未完成传输时关窗仍问（此时是"关闭窗口？"加同一句）；没有未完成传输时若没勾"记住此选择"还会问关闭方式，勾了"记住此选择"加后台以后，没有会话时关窗直接隐藏 |
-| 连接：被控端关文件传输权限 | **通过**。B 设 `enable-file-transfer=N`：标签里只有文件传输视图时面板"远程设备不允许文件传输。"、按钮"关闭标签"；标签里还有远程桌面视图时按钮是"关闭文件传输"（只关这个视图）。密码错：密码框读屏名"密码 / 密码错误" |
-| 连接：会话中断网的面板 | **通过**。杀 B 的程序后面板盖住两栏和队列（变暗），"无法连接服务器。请检查网络连接。"加"重试"，队列行变"已暂停 · 已传 9 MB / 32 MB" |
-| 连接方式详情（文件传输版） | **通过**。点连接方式标记：路径、传输、加密、端到端延迟（当前、最低、平均、最高），没有"画面数据"，也没有"在画面上显示质量数据" |
-| 整体审查留给验收：①断线时从 Explorer 拖进远程栏 | **未验证**（OLE 拖放，见"拖放"） |
-| ②一次多选上千个文件 | **通过**（间接）。上传 1200 个小文件的文件夹：队列行"541 / 1200 个文件"一路走，约 100 秒完成；传输期间每隔几秒取一次语义树，耗时一直是 1.3 秒，没有变慢；没有测真实操作的手感，留给试用 |
-| ③对话框关掉后焦点回到远程栏 | **通过**。远程栏选中文件按 F2，Esc 关掉后再按 F2 又弹出，没有先点击 |
-| 旧界面 | **通过**。两端旧界面构建：带密码连接成功；`--relay` 强制中继成功；文件传输窗口打开，本地和远程两栏都列出文件夹（FT1 加的 `is_hidden` 没有影响旧界面解析）；TCP 端口转发映射到一个 HTTP 站点，curl 200；出口（B 开"允许作为出口"）`socks5h` 和 HTTP CONNECT 访问一个 HTTPS 站点都 200。**没做**：旧界面文件传输窗口两个方向的哈希对拷（只浏览了列表） |
-| 最新 stable 检查 | 3.47.9 仍是最新 stable（2026-10-29 发布）。步骤 1（`-ForceBridge`）构建**通过**；步骤 2 画廊：**导出 2944 张但 `gallery_export_test` 失败**，3.44.9 和 3.47.9 都一样（见下面"问题 5"）；步骤 3 4K 上屏：A 用 3.47.9 构建连 B（4K）328 秒，Windows 应用程序日志没有崩溃事件，画面每分钟都在变，**通过**；步骤 4 analyze：3.47.9 下 core 96 条、app 1 条 warning（`file_dialogs.dart:269` 的 `unused_element_parameter`，参数 `unchanged` 没人传），3.44.9 下 core 91 条、app 0 条（基线 92 加 0）；两包测试 core 302 个、app 1171 个通过（2 个跳过） |
-
-**问题（按严重程度）**
-
-1. **队列"排队中"没出现**（中）。选两个大文件下载（或上传），第二个任务一直显示"0% · 0 字节 / 120 MB"的进度条，汇总行写"2 个进行中"，行里没有"排队中"三个字（02 §2.2 要求同一方向第一个未结束的是进行中、其余写"排队中"，汇总写"1 个进行中，1 个排队"）。复现：A 选两个 120 MB 的文件→下载→看队列。证据 `queue-dl-0.png`。
-2. **被控端离线较久、手动重试重连后，进行中的传输不恢复**（中）。下载 32 MB 文件到 28%，杀掉 B 的程序并 45 秒后重启；A 自动重试一次后面板写"无法连接服务器"；B 回来后点"重试"，面板消失、文件传输重新连上，队列行变回"进行中 28% · 0 字节/s"并一直停着（观察了 2.5 分钟以上，临时文件不再增长）。此时视图"断开"（确认）后重开，队列里这个任务不见了（"暂无传输任务"，临时文件还在，没有"继续"可点）。对比：B 只离线约 6 秒（自动重试第二次连上）时能自动从断点接着传；正常连接中视图断开再重开是"已暂停"带"继续"。这是已知限制"连接断开、不会自动重试时任务表里还是进行中"的后果：手动重试以后用户看到进行中但没有数据，只能取消。建议：重连成功时把停着的任务接上，或者重试之前把行派生成"已暂停"并画"继续"。
-3. **"已暂停"行写"已传 0 字节 / 0 字节"**（小）。关视图（或整个标签）后重开文件传输，已暂停的行写"已暂停 · 已传 0 字节 / 0 字节"，实际临时文件已有 20.3 MB（02 要"已传 ‹已传› / ‹总大小›"）。点"继续"后进度从实际位置接着走。复现：下载 40 MB 文件到约 45%→视图"断开"→视图菜单重开文件传输→看队列行。
-4. **上传到写权限被拒的文件夹，界面写"已完成"但文件没传过去**（中）。B 上对一个文件夹设拒绝"写入数据、附加数据"，A 往里上传文件：队列行写"已完成 · 1 个文件，372 字节"，B 上该文件夹里没有这个文件（也没有 `.download` 残留），控制端没有任何错误。02 §2.5 要求写"没有访问权限"。**与已知限制"上传覆盖被占用文件时上游什么错误都不报"同一族**（错误发生在被控端，B 是 Leapgate 自己的被控端，同一份上游代码），但这一例是最常见的权限错误，建议和 M7b 的 FT5 一起看被控端能不能报出来。新建文件夹、读文件夹的权限错误是对的。复现：B 上 `icacls <目录> /deny "<用户>:(OI)(CI)(WD,AD)"`→A 向该目录上传任意文件。
-5. **画廊导出测试失败**（小）。`flutter test test/gallery_export_test.dart` 在 3.44.9 和 3.47.9 下都 exit 1：2944 张图都导出了，但有 10 处 RenderFlex 溢出（底部溢出 19~44 像素），集中在 `gallery_m7.dart` 第 819、855、1144 行附近的样例（第 1144 行的 `Column` 约束高 88、内容更高）。上一轮（M6b）画廊 2608 张全过，所以是 M7a 新增的样例。是样例框太矮还是组件真的在窄处溢出，看设计。
-6. （观察，已写在入口一行）设备菜单"远程桌面"在只有文件传输视图的标签上不打开远程桌面视图。
-
-**环境里的几件事**
-
-- **B 上 Leapgate 崩溃一次**（22:48:12，应用程序错误 1000/1001，故障模块 `libleapgate.dll`，异常 `0xc0000005`，偏移 `0x14d1019`）。崩前日志是 3840×2160 的 AV1 编码反复失败（`aom errcode=2`）和 `hevc_nvenc` "Cannot allocate memory"，此时 B 系统的提交内存 97%（提交约 49.7 GB / 上限约 48.9 GB，可用虚拟内存约 1.4 GB，物理内存还空着 12 GB）。和 M6b 验收 A 上 4K 上屏崩溃（`av_frame_get_buffer` 同一句）是同一类，判断是被控端环境的提交内存耗尽，不是 M7a 引入的；没有拿到转储。之后文件传输都从设备菜单直接打开（不开远程桌面视频）。
-- B 的网络（老家）这几个小时里多次整机断联（telechir 超时），A 与 B 之间的会话本身没断过；B 上行带宽不大（下载约 0.6~1 MB/s），大文件传输期间 telechir 也会超时。
-- 一次脚本在设备菜单没打开时把 B 的测试固定密码当文字投递进了主页连接框，开出一个"未找到 ID …"的标签，标题和面板里带这串字符；该密码是测试用的固定密码，标签已关闭，没有连接记录。之后的做法改成先确认密码框存在再投递。
-
-**收尾**：A 8 个配置文件、B 4 个配置文件和测前备份逐个哈希一致（A 运行中多出的 `peers.toml` 已删）；两端的 Leapgate 都已停（pid 都是自己起的），A 的 `task\` 空，没有残留计划任务和 MSIX 包内副本；A、B 上一次性数据（含 B 上带拒绝 ACL 的文件夹、被独占打开的占位进程）都已删；原版 RustDesk（A 3 个进程）、mihomo 没碰；B 上对 `leapgate-allow-exit`、`enable-file-transfer` 的临时改动已还原。测试服务、测试虚拟机、Mac 没动。构建 worktree 停在 `b16f17cd1`，被跟踪文件已还原。
-
-#### 复测（2026-11-06，`c757be45e`）
-
-黑盒，无人值守，只复测上一轮的问题 1~4 和观察 6 以及修订后的重连续传。构建：新界面 `bridge,build -ForceBridge`（`CARGO_BUILD_JOBS=1`，前三次因 rustc、pub get、build_runner 内存不足或网络抖动失败，第四次一次过），`leapgate.exe` `A1FA2192…`、`libleapgate.dll` `CE97EB2A…`、`flutter_windows.dll` `8667024A…`、`data/app.so` `7836801B…`；A、B 各一份。旧界面这次没编。控制端 A、被控端 B 同上一轮。上一轮表里的结论不改，这里只写新结果。
-
-| 项 | 结果 |
-|---|---|
-| 1 排队中 | **通过**。同一方向连建两个下载（各 60 MB）：第二个行"下载 big2.bin，排队中"，汇总"1 个进行中，1 个排队"；第一个完成后第二个变进行中、汇总"1 个进行中"；两个文件两端哈希一致 |
-| 2 重开后已暂停行 | **通过**。50 MB 下载到 45% 时视图"断开"（确认）后重开：汇总"1 个已暂停"加"全部继续"，行只写"下载 res2.bin，已暂停"（不写 0 字节）；点行内"继续"从约 40.9 MB 接着传完，哈希一致 |
-| 3 上传到写权限被拒的文件夹 | **通过**。B 上 `deny (WD,AD)` 的文件夹：行"上传 w.txt，失败：没有访问权限"，不再"已完成"，B 上文件夹为空 |
-| 4 标签里远程桌面加文件传输，断线 45 秒以上重连续传 | **通过，三轮全部成功**。轮 1（res3，杀 B 时 54%）、轮 2（big1，杀 B 时 66%）：B 离线约 56 秒，A 面板"无法连接服务器。请检查网络连接。"加"重试"，B 重启后点"重试"，任务接着传完，哈希一致，没有再卡在"进行中 0 字节/s"。轮 3（big2，杀 B 时 38%，行"已暂停 · 已传 28.3 MB / 60 MB"）：B 重启后关整个标签（"断开与此设备的 2 个会话？"），经连接框重开文件传输，任务还在，"1 个已暂停"，点"继续"传完，哈希一致（上一轮"再重开任务消失"没再出现）。为避免 B 提交内存耗尽，远程桌面视图把画质设成"速度优先"、分辨率降到 1366×768，没有崩溃；测完用系统接口把 B 的分辨率改回 3840×2160（杀进程时应用来不及自己还原） |
-| 5 只有文件视图的标签点设备菜单"远程桌面" | **通过**。设备菜单点"远程桌面"，等 8 秒，标签里出现远程桌面视图（工具栏有画面、输入、操作、会话、聊天、录制），不问密码；视图菜单里同时有"远程桌面 / 直连""文件传输 / 直连"。上一轮的观察是读界面过早 |
-| 6 旧界面文件传输窗口续传 | **未验证**。旧界面语义树为空，窗口里的传输和确认没法可靠投递；旧界面构建的 Rust 又和新构建不同，验不准 |
-
-观察（小）：轮 3 关整个标签的确认里，队列只剩"已暂停"的传输时没有"1 个传输尚未完成，下次打开文件传输时可继续。"那句（此时 A 的连接已断，任务是断线后的已暂停）；上一轮在传输进行中关标签是有这句的，按"未完成"的定义可能是预期，是否要提示由设计定。另：下载选中项被列表滚出视口时点不到，是脚本坐标问题，不是实现问题。
-
-收尾：A 8 个、B 4 个配置文件和测前备份逐个哈希一致；两端 Leapgate 停；A 的 `task\` 空，无残留计划任务、无 MSIX 包内副本；A、B 上的一次性数据已删，B 上先恢复 ACL 再删；原版 RustDesk、mihomo 没碰；构建 worktree 停在 `c757be45e`，干净。
-
-#### 最终外观检查（2026-11-06，`c757be45e`，被查提交 `6a1cf0873`，代码相同）
-
-对象是准备合入 main 的最终提交。做法：画廊 3.44.9 重新导出（2944 张，没有 RenderFlex 溢出）并和上一轮 `b16f17cd1` 的画廊逐像素比；三份 P7 样稿用 Playwright 逐画框渲染（72 个）；真机 A（浅色，1280×800 逻辑、150%）截了默认态、选中、右键菜单、"⋯"菜单、视图切换菜单、新建、重命名、删除确认、替换确认（下载和上传）、队列展开和收起、传输进行中、断开确认、关窗确认、960×600 队列展开和收起、根下拉、路径输入、"此电脑"、搜索无结果、连接面板要密码、主页连接下拉和设备菜单、远程桌面视图的工具栏和视图切换；真机 B（深色，B 控制 A）截了默认态、右键菜单、"⋯"菜单、新建、替换确认、传输进行中、断开确认。真机和样稿并排比的只有下面列出的几项，其余靠画廊和肉眼看真机图。证据在 A 的 `C:\leapgate-e2e\evidence\m7a-visual-1106\`（`gallery\`、`94-gallery-diff-vs-b16f17cd1.txt`、`shots\` A 真机、`b-dark\` B 深色、`cmp\` 并排图、`tools\`、`00-`/`99-A-config-*.txt`）。
-
-**必须改（3 条）**
-
-1. **文件列表的右键菜单和"⋯"菜单缺样稿里的图标、分隔线、删除红字。** 样稿（`A-P7-文件传输-菜单与其他状态.html` 的 `d-cx-folder`、`d-more`）：每行有行首图标（打开、上传、重命名、删除、复制路径；全选、取消选择），打开 / 上传和重命名 / 删除之间、删除和复制路径之间有分隔线，"删除"红字。真机（`shots\cx-folder-0.png`、`cx-folder-zoom.png`、`more-0.png`，深色 `b-dark\b-ctx-0.png`）：五行都没有图标、没有分隔线、"删除"和别的行同色。设备菜单（M4 起，`shots\devmenu-0.png`）里"删除"是红的、有分组标题，说明菜单组件支持，是 `pane_menus.dart` 没传。只看了文件夹行的右键菜单和"⋯"；文件、空白处、盘符、符号链接、多选几种右键没截。归页面（C 那路的 `pane_menus.dart`）。视图切换菜单行没有图标已列为接受的差异，这条不是同一件事。
-2. **替换确认的按钮排列和样稿不同。** 样稿 `d-rp-normal`：左下"取消传输"是无边框文字按钮，右下"跳过""替换"。真机（`shots\replace-0.png`、`replace-up-0.png`，深色 `b-dark\b-rep-0.png`）：三个按钮并排靠右，"取消传输"是描边按钮。M6b 修"前置按钮不靠右"时组件已有前置按钮的位置。归页面（`file_dialogs.dart`），组件不支持再回 designer。
-3. **文件传输视图的"连接中"、"要密码"面板盖在变暗的两栏骨架上。** 样稿 `d-cp-conn`、`d-cp-pw`：面板在干净的页面上，两栏不画。真机（`shots\ft-pw-0.png`，对比 `cmp\pw.png`）：面板后面是变暗的两栏，写着"本机 此电脑""远程设备 msi"、路径"/"、"0 个项目"，像没初始化完。只有 `d-cp-bye`（对方已断开）样稿本来就画了盖在两栏上。归页面（`session_page.dart` 或文件视图在连上之前不画两栏），不涉及 02 的文字。
-
-**小项**
-
-- 新建、重命名对话框真机有行首图标块（`cmp\nf.png`、`cmp\rn.png`），样稿没有；样稿新建对话框多一行"位置：远程设备 · D:\备份"，02 区块 J 没写这一行，真机没有。和 M4 的表单对话框一致，以 02 为准则不算差异；需要时改样稿。
-- "⋯"菜单里"排序方式"真机是二级菜单（右箭头），样稿是同一菜单里平铺"排序方式"小标题加四项和选中勾；02 区块 F 只写"排序方式（名称 / 修改日期 / 类型 / 大小）"。
-- 根下拉（`shots\l-rootdd-0.png`）每个盘符行带盘符图标，当前所在的盘没有勾；样稿（`d-pa-dd`）无图标、当前盘有勾。
-- 展开的队列面板高度固定约 250（逻辑像素），只有一行任务时下面是大片空白（`shots\prog-exp-0.png`）；960×600 展开时两栏只剩约 1.5 行（`cmp\min1.png`），样稿同尺寸三行任务的面板约 190、两栏三行。02 没有定默认高度。收起时 960×600 和样稿一致（`cmp\min2.png`）。
-- 鼠标点选的行有深色描边的焦点环（`shots\sel1-0.png`），删除确认里默认焦点在红色"删除"上并有焦点环（`shots\dlg-delete-0.png`），样稿都没有。这次点击是用投递消息，且之前投过键盘事件，Flutter 可能已切到键盘焦点模式，要人手点一次确认；删除确认默认焦点在破坏性按钮上是否合适交维护者看。
-- 两栏分隔线拖动没验成：投递的鼠标拖动落在列表上、把列表滚了。分隔线位置会记住（窗口缩小过一次后左栏保持较窄，窄栏里搜索框收成图标，样子正常）。"拖到两头"留给试用。
-- 没看到的：详细模式的真机、列表读取中 / 打开失败 / 空文件夹、拖放的高亮、面板"不允许文件传输"和断线几态、关窗确认里"只有传输"那一句（这次传输都已完成，且便携版关窗是三选一版本）；这些只靠画廊，画廊和样稿只抽查了队列全部状态、最小窗口展开、表单对话框、连接下拉、断开确认、关窗确认，没有发现差异，不是逐张对过。
-
-**其余看过没发现差异**：默认态（浅色、深色）、视图切换菜单、队列行各状态的文案和对齐（画廊）、进度环和提醒标记（标签栏、视图标题栏、视图切换，浅色深色）、断开确认、960×600 收起、"此电脑"盘符列表、路径输入态、搜索无结果、主页连接下拉里"文件传输"、设备菜单里"文件传输"、远程桌面视图的工具栏（视图切换放在最前）、关窗确认（样式沿用 M6）、标签栏。
-
-**画廊**：和上一轮 `b16f17cd1` 逐像素比，2944 张里 2928 张完全相同，16 张只是尺寸变（`file-pane-header_platforms`、`file-pane-header_local-and-remote`、`-english`、`file-drop_chips`，浅色深色各简洁详细）：上一轮这几张底部有溢出警示条，现在没有，符合预期。
-
-#### 复测之后
-
-以上三条必须改修完后，对 `d-cx-*`、`d-more`、`d-rp-*`、`d-cp-conn`、`d-cp-pw` 对应的真机状态重截一次：已做，见下一节"外观定向复查"。
-
-#### 外观定向复查（2026-11-06，`513366fe6`，代码同 `7541abba6`）
-
-只看上一轮"最终外观检查"改过的几处，加上上一轮没截到的文件、空白、多选右键菜单。**结论：上一轮三条必须改和五条小项里改过的几处全部通过，没有新的必须改项。**
-
-**构建**：`.wt\ui-m0-build` 里 `fetch`、`checkout --detach origin/ui/m7a`，新界面 `-Ui leapgate -Steps bridge,build`（`CARGO_BUILD_JOBS=1`，一次过；这次没带 `-ForceBridge`），目录 `app-ui-m7a-513366fe6`，A、B 各一份。`leapgate.exe` `A1FA2192…`、`libleapgate.dll` `97EE74C8…`（上一轮 `CE97EB2A…`，Rust 重新链接，Dart 侧没变）、`flutter_windows.dll` `8667024A…`、`data/app.so` `1F7F63E4…`（上一轮 `7836801B…`）。
-
-**画廊**（3.44.9 重新导出，2972 张，输出里没有 RenderFlex 或 overflow）：和上一轮 `c757be45e` 的 2944 张逐文件算 sha256，**共有的 2944 张全部字节相同**（不止像素差在阈值内）。新增 28 张，都是这次补的组件参数的样例：`dialog-parts-m7a_` 的 `confirm-leading`、`form-without-icon`、`form-without-icon-or-note`、`menu-checked-row` 和各自的 `-english`（`menu-checked-row` 没有英文版），浅色深色 × 简洁详细。看过 `confirm-leading`（"取消传输"在左下、"跳过""替换"在右下）、`form-without-icon`、`menu-checked-row`（浅色深色）：和下面真机一致。
-
-**真机和样稿**（A 浅色 1936×1209 外框，150%；样稿 `A-P7-文件传输.html`、`-菜单与其他状态.html`、`-对话框.html` 用 Playwright 逐画框渲染，并排比）：
-
-| 项 | 结果 |
-|---|---|
-| 右键菜单：文件夹、文件、符号链接、盘符 | 通过。行首图标、打开 / 上传和重命名 / 删除之间和删除 / 复制路径之间的分隔线、"删除"红字、快捷键位置都和样稿一致（`cmp\cx-folder.png`、`cx-file.png`、`cx-link.png`、`cx-drive.png`）。盘符只有"打开""复制路径"，和 `d-cx-drive` 一致 |
-| 右键菜单：空白处、多选 | 通过（上一轮没截到）。空白处"新建文件夹 / 刷新 / 全选"加分隔线加"显示隐藏的项目"，和 `d-cx-blank` 逐行一致；多选时"重命名"置灰，其余和 `d-cx-multi` 一致（`cmp\cx-blank.png`、`cx-multi.png`） |
-| "⋯"菜单和"排序方式"平铺 | 通过。同一菜单里"排序方式"小标题加四项，当前项打勾，无二级箭头，和 `d-more` 一致；没有选中时"取消选择"置灰（`cmp\more.png`） |
-| 替换确认按钮 | 通过。"取消传输"在左下、无边框文字按钮，"跳过""替换"在右下；单个文件冲突和文件夹冲突两种都看了，浅色深色都看了（`cmp\replace-file.png`、`replace-dark.png`，`shots\replace-0.png`） |
-| 新建、重命名对话框没有图标块 | 通过。标题顶格，标题下直接是"名称"输入框；浅色和样稿并排、深色看真机（`cmp\newfolder.png`、`rename.png`，`shots\dk-dlg-*`）。长文件名的重命名标题折成两行，正常 |
-| 没连上过时只画连接面板 | 通过。要密码态（`shots\cp-pw-0.png`）面板在干净的页面上，两栏、路径、"0 个项目"都不画，和 `d-cp-pw` 一致；深色也看了（`shots\dk-cp-pw-0.png`） |
-| 连上过、中途断线 | 通过。杀 B 的程序约 70 秒后，面板盖在变暗的两栏和队列上，标签变"连接失败"（`shots\disc-2-0.png`，深色 `dk-disc-0.png`），和 `d-cp-bye` 同样画法 |
-| 根下拉当前盘打勾、盘符行无图标 | 通过。当前盘打勾并加粗，其余行无图标，浅色深色都看了（`shots\rootdd-c-crop.png`、`dk-rootdd-c-crop.png`，`cmp\rootdd.png`）；在"此电脑"根上时（没有当前盘）没有勾，行首留出勾的位置 |
-| 队列展开高度贴着任务行 | 通过。1 行、3 行任务时面板正好是表头加任务行，没有大片空白；960×600 展开、1 行任务时两栏有 5 行可见（上一轮约 1.5 行）（`shots\queue-after-skip-0.png`、`min-1-0.png`、`cmp\queue-few.png`） |
-| 深色的菜单和对话框 | 通过。右键（文件夹、符号链接、多选、空白、盘符）、"⋯"、新建、重命名、替换确认在深色下"删除"是浅红、勾和图标可见、分隔线可见（`cmp\dk-menus.png`、`dk-dialogs.png`） |
-
-**小项（不改也可）**
-- 真机的"删除"菜单行比样稿粗一档（样稿常规字重，真机半粗，`cmp\delete-weight.png`）；设备菜单里的"删除"也是同一个组件行为，M4 起如此，样稿没画破坏性行的字重。
-- 根下拉行高真机 44 逻辑像素，样稿 `d-pa-dd` 约 40；和别的菜单行同高，不影响用。
-- 替换确认里样稿 `d-rp-normal` 画了"本机 / 远程设备"大小和时间对照表，真机没有：02 区块 I 已记明 Rust 推来的事件没有大小和时间（拆法 M7a-5），样稿过时，不算差异。
-- 真机替换确认的"替换"按钮有焦点环、鼠标点选的行有焦点描边，样稿没有：和上一轮同一条（投递消息之前投过键盘，可能已进键盘焦点模式），留给人手点一次确认。
-- 投递的 Esc 不是每次都能关菜单：空白处菜单、"⋯"能关，盘符右键菜单和根下拉没关（点窗口空白处能关）。更像是投递消息没给菜单焦点，不是界面问题，留给试用时用真键盘按一次 Esc 确认。
-- 两栏分隔线拖动、详细模式、列表读取中 / 打开失败的真机仍没验（同上一轮，原因同）。多选用的是菜单里的"全选"（投递的 Ctrl 点击不生效）。
-
-**环境说明**：深色这次没有用 B 控制 A：要把 A 的一次性密码带到 B 上，又不能写文件，所以改成在 A 的新界面设置里"外观 → 深色"（只改应用内主题，不改 Windows 系统主题）。B 在这轮只当被控端，系统主题、分辨率（1366×768 的单屏）都没动。测完 A 的配置已按备份盖回（`Leapgate_local.toml`、`Leapgate2.toml`、`peers\1078877965.toml` 三个文件被运行改过），8 个配置文件逐个哈希一致。证据在 A 的 `C:\leapgate-e2e\evidence\m7a-visual-recheck-1106\`（`gallery\`、`94-`、`94b-`、`sample\` 样稿渲染图、`shots\`、`cmp\`、`tools\`、`00-`/`99-A-config-*.txt`）。
-
-#### 功能验收第二段（2026-11-06 12:47~14:20，`513366fe6`，代码同 `cc8c6e715`）
-
-补第一段没做的：上游对端（Mac 上的官方 1.5.0、测试虚拟机上的上游 1.4.9 便携版）、10 §4.8 的两种错误码、02 §4.3 第 19 条（安装版停在登录界面）。A（台式机）当控制端，构建 `app-ui-m7a-513366fe6`（`leapgate.exe` `A1FA2192…`、`libleapgate.dll` `97EE74C8…`）。**结论：没有不通过的项，可以合入。** 两种错误码按读码预判的那样归到"空间不足""没有访问权限"，记为已知限制，表不改。
-
-| 项 | 结果 |
-|---|---|
-| Mac（官方 1.5.0）连接 | 通过。没有密码：控制端停在"输入密码"页，Mac 上点"接受"后会话直接开始，密码页自己消失，不用点"连接"。直连，对端显示 macOS |
-| Mac：浏览 | 通过。面包屑 `/ > 根文件夹 > Users > ‹用户› > ‹测试目录›`，路径框跳转成功；点开头的文件默认不显示，打开"显示隐藏的项目"后列出 |
-| Mac：上传、下载 | 通过。文件、文件夹（含子文件夹）上传，文件夹下载，大小和内容一致 |
-| Mac：替换确认 | 通过。内容不同时"替换"后对端是 A 的版本、同目录别的文件不动；大小和时间都相同时有"两个文件的大小和修改时间相同"、勾"其他冲突执行相同操作"后选"跳过"，余下冲突不再问 |
-| Mac：删除 | 通过。文件夹只确认一次"永久删除“…”？将从远程设备上删除 5 个文件（30 字节），无法恢复。"，删后目录消失 |
-| Mac：续传 | **未验证**。局域网直连 300 MB 几秒就传完，没断成；再测要更大的文件和维护者再点一次"接受"，维护者要用 Mac，没做 |
-| 1.4.9 便携版（测试虚拟机）：浏览、上传、下载、替换确认、删除、隐藏文件 | 通过。下载包大小和 sha256 与发布页一致后运行，指向测试服务；经中继。各项同 Mac 一行，替换确认另测了多个冲突的文件夹 |
-| 1.4.9：续传，关视图再打开 | 通过。3.25 GB 上传到 8% 关标签，确认框"1 个传输尚未完成，下次打开文件传输时可继续。"；重开后行"已暂停"，"继续"从约 12% 接着传（对端 `.download` 当时 403,832,832 字节，不是从 0 开始） |
-| 1.4.9：续传，被控端进程被杀 | 通过（重连靠点"重试"）。杀进程后连接面板盖住两栏和队列，原因"无法连接服务器。请检查网络连接。"（上游重连时报 `Failed to connect via rendezvous server`，C3 归到 `rendezvous_failed`）；对端重新起来、点"重试"后从断点接着传（18%、617 MB）。不点"重试"会不会自己连上没有分开看；Leapgate 被控端的自动恢复在第一段复测里验过 |
-| 拖放（两种上游对端） | **未验证**（同第一段，OLE 和应用内拖动都模拟不了） |
-| FAT32 上超过 4 GB 的文件（10 §4.8） | 测试虚拟机装 Leapgate 安装版，建 7 GB 的 FAT32 虚拟盘，A 上传 4.8 GB 的文件：约 89% 时行变"失败：远程设备的磁盘空间不足"，对端 `.download` 停在 4,294,836,224 字节，盘上还剩约 3 GB。界面和日志都不留原文；同一块盘上用 .NET 写过 4 GiB 得到 `0x80070070`（112）。**按读码预判归到空间不足，提示误导，记已知限制**（错误码一样，分不出是盘满还是单个文件超限）。反方向（本机 FAT32 下载）没测 |
-| 下载时目标被占用（10 §4.8） | A 上同名文件被独占打开，从测试虚拟机下载：先出替换确认，选"替换"后行变"失败：没有访问权限"。原文同样不留；同一个被占文件用 .NET 打开得到 32，但下载最后一步是改名，改名到被占用的目标在 Windows 上报 5，界面显示和 5 一致。**按预判，记已知限制** |
-| 安装版停在登录界面（02 §4.3 第 19 条） | **不能用**（上游行为）：注销后 A 用固定密码打开文件传输，直接"连接失败"，原文是英文"No active console user logged on, please connect and logon first."（上游 `src/server/connection.rs` 发出，旧界面 `cn.rs` 也没翻译；C3 不认识，按原文显示），没有到密码页。要先连远程桌面登录才能传文件。中文文案记进 `待调.md` |
-
-**环境说明**：测试虚拟机测完回滚到 `m6-admin` 并强制关机（`stopped`）；A 的配置文件和测前备份逐个哈希一致，A 上的一次性数据已删；Mac 上的测试目录已删，Mac 的 RustDesk 和配置没动。测试虚拟机上装好、改了服务器以后本机 ID 从 9 位变成 10 位：测试服务上这个 9 位 ID 被以前几轮装的（不同密钥的）安装版锁过公钥，新装的换了密钥，注册回 `UUID_MISMATCH`，客户端随机换了 ID（第三期 01 的锁定规则，整机回滚的环境才会碰到）。证据在 A 的 `C:\leapgate-e2e\evidence\m7a-p2-1106\`（`results.txt`、`shots\`、`tools\`）。
-
-#### M9a 安装页（测试虚拟机，2026-11-09 11:28~13:30，被测 `0c6b156d8`，几项在 `1c3d3f44a` 上复测）
-
-按 14 §5.3。构建（`-Ui leapgate -ForceBridge -PrinterDriver`）：`0c6b156d8` 的 `leapgate.exe` `304FB91C…`、`libleapgate.dll` `5F14E611…`、`data/app.so` `4BAC2CEF…`、便携单文件 `9B078767…`、zip `7EC0B2BF…`；`1c3d3f44a` 的 `libleapgate.dll` `19458F7A…`、`data/app.so` `4CED07A1…`、便携单文件 `A19B4D56…`、zip `EE0662A4…`（`leapgate.exe`、`flutter_windows.dll` `8667024A…` 两版相同）。打印机驱动经维护者同意下载，脚本打印的 sha256：`rustdesk_printer_driver_v4-1.4.zip` `c4cf4d3b48c4d9079b243edc43bb1db03b076282bc259c9f49883e9db20fa8b5`、`printer_driver_adapter.zip` `e90e5d52c8807b4c6293c78a52479338715e0bf396b1b34802777b8c452e6781`（两个都是"还没钉住，按 sha256sums 核对通过"）；发布目录里有 `drivers\RustDeskPrinterDriver\`（6 个文件）和 `printer_driver_adapter.dll`。端点：测试虚拟机用便携单文件（解到 `%LOCALAPPDATA%\leapgate`）当被测，A 的便携版当控制端（有会话那条）。开测前测试虚拟机上装着 `d3073a33d` 的安装版（服务在跑），先 `--uninstall` 卸掉再测；没有回滚，用它当时的状态。
-
-**这台测试虚拟机的显示不刷新**：窗口内容截图一直是旧画面（整屏截图只有任务栏会变，`PrintWindow` 是白的），所以**这一节没有任何截图判断，全靠 UI Automation 的语义树（名称、值、焦点）加注册表、文件系统、进程、服务、`Get-Printer`**。凡要靠眼睛看的（盾牌图标、中间省略、悬停提示、灰显外观）都标"未验证"。台式机副屏关着，A 上的窗口留在主屏。
-
-| 项 | 构建 | 结果 |
-|---|---|---|
-| 默认安装 | 两版 | 通过。便携版点本机提示卡"安装"（卡片文字"安装后，对方远程控制本机时也能操作用户账户控制（UAC）窗口。 / 安装"）：对话框标题"安装 Leapgate"，位置 `C:\Program Files\Leapgate`，三个选项（"创建开始菜单快捷方式""创建桌面快捷方式""安装 Leapgate 打印机"带说明），"取消""安装"，打开时焦点在"安装"。焦点在"安装"时按回车直接装（`0c6b156d8`、`1c3d3f44a` 各一次，约 6 秒服务 Running、安装版界面、托盘起来）：`InstallLocation` = `C:\Program Files\Leapgate`，开始菜单有 `Leapgate.lnk`、`Uninstall Leapgate.lnk`，公共桌面有 `Leapgate.lnk`，没有打印机；装完安装版里本机 ID 和固定密码"已设置"与便携版一致，主页没有"安装"卡。三个选项的勾选状态没法读（见读屏一行），靠装出来的结果证明默认值是"两个快捷方式勾、打印机不勾" |
-| 自定义位置 | 两版；选择框归属只看 `1c3d3f44a` | 通过。选 `C:\Apps\Leap gate` 后路径显示 `C:\Apps\Leap gate\Leapgate`（选中的文件夹加 `\Leapgate`）；真装：`InstallLocation`、服务路径、托盘、界面进程都在 `C:\Apps\Leap gate\Leapgate\`（`0c6b156d8` 取消开始菜单、桌面两个快捷方式、勾上打印机装过一次：没有开始菜单的 `Leapgate` 文件夹，公共桌面没有快捷方式，`Get-Printer` 有"Leapgate Printer"（驱动名 `RustDesk v4 Printer Driver`、端口 `Leapgate Printer`），卸载后打印机和驱动都没了；`1c3d3f44a` 默认选项装过一次，结果同默认安装）。`1c3d3f44a` 上选择框打开时枚举窗口：`#32770` "选择文件夹"的所有者窗口句柄就是主窗口（`LEAPGATE_UI_MAIN`），在 z 序里排在主窗口上面、是前台窗口。"修改"的选择框起始位置按主会话说明不判。很长的路径"省略中间"：**未验证**（语义值给的是全文，看不见画面；`D:\工作资料\…` 形的长路径本身能选、值正确） |
-| 位置检查 | `0c6b156d8` | 通过（文字逐字对）。映射的网络盘（本机回环共享映射成 `Z:`）→"无法安装到网络位置或可移动磁盘。请选择本机磁盘上的文件夹。"；`subst` 盘 `Y:` → 同一句；`C:\100%` →"路径中不能包含“%”。请选择其他位置。"；选 `%LOCALAPPDATA%` →"无法安装到 Leapgate 当前所在的文件夹。请选择其他位置。"。"安装"在这几种情况下点了（UI Automation 的 Invoke）没有任何反应：没有服务、进程不变、对话框还在（只试了 `Z:`）。预先放了文件的文件夹（`C:\Apps\Warn\Leapgate\keep.txt`，选 `C:\Apps\Warn`）→ 警告"此文件夹中的现有文件将在安装或卸载 Leapgate 时被删除"，能装：安装后 `keep.txt` 还在，卸载后整个文件夹连 `keep.txt` 一起没了，和警告相符。悬停显示 Leapgate 当前所在文件夹的完整路径：**未验证**（真实鼠标悬停后语义树里没有提示节点，看不见画面） |
-| 有会话时 | `0c6b156d8` | 通过。A 的便携版连进测试虚拟机的便携版（主页出现"正在被远程控制（1 个会话）"和"查看"）：打开安装对话框，"安装"上方有一行"Leapgate 将关闭并重新打开，所有会话和正在使用的出口都将断开。"（M9c 之前的文案，没有"隧道"，按预期），焦点在"取消"；按回车关闭对话框，会话还在。另测只有出口卡片没有会话（A 开 `leapgate-allow-exit`，测试虚拟机的出口页按 ID 使用 A，卡片"可用 · 直连"）：同一行出现，焦点在"取消"，按 Esc 关闭、卡片还在。两者同时存在没单测 |
-| 远程打印 | `0c6b156d8` | 通过。便携版设置 → 传入连接 → 远程打印：状态"仅安装版支持远程打印"，右边"安装"按钮；点它打开同一个对话框，不改任何选项直接装：装完 `Get-Printer` 有"Leapgate Printer"（驱动 `RustDesk v4 Printer Driver`，上游驱动名，驱动不改名是已定的），说明打印机在这个入口是预先勾上的。按钮有没有盾牌：未验证 |
-| "升级"卡 | `0c6b156d8` | 直接升级通过，盾牌**未验证**。先 `--silent-install` 装 M8 的发布构建（`BuildDate` 2026-11-07 04:49），停掉服务和进程，起新便携版：主页卡"已安装的 Leapgate 版本低于当前版本。 / 升级"；点后没有对话框，约 6 秒服务 Running、安装版界面和托盘起来，`BuildDate` 变成 2026-11-09 12:00，`libleapgate.dll` 哈希等于被测构建的，位置不变 |
-| `--install` | `0c6b156d8` | 通过。便携版 exe 加 `--install` 0.4 秒退出、退出码 0，`log\install\` 里一行 `leapgate ui: --install is not supported, install from the home page of the portable version`，没有窗口、没有安装 |
-| 取消 UAC | — | 未验证（这台虚拟机提权不弹框） |
-| 失败后回车重试 | `1c3d3f44a` | 通过（用提权前的失败代替 UAC 取消）。把发布 zip 解到 `C:\100%\app` 起便携版，点"安装"：对话框里"安装"上方出现"安装失败：Installer path or name contains characters unsafe for cmd.exe"，对话框留着，焦点（语义树）在"安装"；按回车，`log\leapgate-install\` 里那条失败日志的时间戳变成新的（每次尝试重写一次），再次出现同一句错误，没有装上。UAC 被取消那条路径本身没走 |
-| 长路径悬停，系统文字放大到 125% 以上 | `1c3d3f44a` | 未验证（没有可看的画面；真实鼠标悬停后语义树里也没有提示节点，没有去改系统文字大小） |
-| 读屏 | `0c6b156d8`、`1c3d3f44a` | 部分通过。用 `scripts/e2e/leapgate-uia.ps1`（本次加了读取值和遗留 MSAA 状态的副本）读对话框：所有可操作控件都有名字（"修改安装位置""创建开始菜单快捷方式""创建桌面快捷方式""安装 Leapgate 打印机. ‹说明›""取消""安装"），标题"安装 Leapgate"，路径是名为"安装位置"的文本、值是完整路径，错误和提示行是文本节点；对话框开着时底下主页的控件不在树里（被遮）。**两处不满意**：①三个勾选行是 `Button`（只有 Invoke），没有 Toggle 模式，遗留状态里没有"已选中"，屏幕阅读器读不出有没有勾上；②位置不可用时"安装"灰显，但语义树里它的"启用"仍是真（只有 Invoke 无效这一条行为证据），读屏不会报"不可用"。需要时交 designer 看（同一个勾选行组件在别的页面里是不是一样没查） |
-| 旧界面 | `1c3d3f44a`（`-Ui upstream`，`patch,bridge,build`） | **通过**（14 §5.3 末行，细节见下面"旧界面五项"）。A、B 两端都是旧界面便携版：带密码连接、`--relay`、文件传输两个方向（哈希一致）、TCP 端口转发（200）、出口（socks5h 和 HTTP CONNECT 都 200）、ID 加盐（9 位且不小于 268435456） |
-
-**旧界面五项（2026-11-09 13:41~14:08，`1c3d3f44a`，台式机 A 和 msi B）**：用 `-Ui upstream -Steps patch,bridge,build` 在 `.wt\ui-m0-build` 编，`leapgate.exe` `7F7BFDD1…`、`libleapgate.dll` `6CD1612B…`（本次新编）、`flutter_windows.dll` `8667024A…`、`data/app.so` `B633D127…`。两端先停掉别的 Leapgate，A、B 测前备份配置、测后盖回，逐个哈希核对无差异（A 8 个文件，B 4 个）。B 被控端用 `Configure` 开 `leapgate-allow-exit` 并设固定密码，`Start -TraceIce`；A 的 `peers\<B>.toml` 的 `port_forwards` 换成 `[[21180, "leapgate-exit.invalid", 65536], [21181, "example.com", 80]]`。
-
-| 项 | 结果 |
-|---|---|
-| 连接（带密码） | 通过。A 日志 `leapgate ice: selected host/v6/ethernet <-> host/v6 in 2191 ms`，随后 `handle_peer_info`（出画面前登录成功）；B 日志 `Connection opened` |
-| 强制中继（`--relay`） | 通过。A 日志 `used to establish Relay connection`、没有 `leapgate ice:` 行，`handle_peer_info` 登录成功；测前的 peer 配置里没有 `force-always-relay`，测后整份配置盖回 |
-| 文件传输两个方向 | 通过。两栏用 peer 配置里的 `local_dir`、`remote_dir`（`[options]` 下，新旧界面共用）定位到测试文件夹，窗口里按坐标点：上传 24 MiB 的 `aa-ub.bin`（日志 `New job 1, read … to remote …`）、下载 24 MiB 的 `aa-db.bin`（`New job 2, write to … from remote …`），两边 SHA-256 与发送前一致（`41-ft-hashes.txt`） |
-| TCP 端口转发 | 通过。日志 `listening on port 127.0.0.1:21181`，curl 21181（Host: example.com）200，`port forward channel 1 ended` |
-| 出口 | 通过。日志 `leapgate exit: listening on 127.0.0.1:21180`、`tunnel up (direct)`，`--socks5-hostname` 和 `--proxy`（HTTP CONNECT）取 `https://example.com/` 都是 200 |
-| ID 加盐 | 通过。配置目录挪开、空配置起一次，日志 `Generated id 471945469`（9 位，不小于 268435456），测完放回 |
-| 本机端口被别的程序以 `0.0.0.0:P` 占着时出口报不报占用 | **这个构建里还没有这个行为，不是回归**。另起一个 `TcpListener` 占 `0.0.0.0:21182`，把出口占位映射写成 21182：旧界面照常绑上 `127.0.0.1:21182`（日志 `leapgate exit: listening on 127.0.0.1:21182`，没有占用报错；`Get-NetTCPConnection` 见两个监听、分属两个进程）。这和上游行为一致。14 §4.1 的"查系统监听表"（`GetExtendedTcpTable`）是 M9c 提交顺序的最后一步（"独占监听和出口回归"），`1c3d3f44a` 的 `src`、`libs` 里没有它。所以这一条要在 M9c 的构建上用旧界面再测一次（14 §5.1 的"独占端口"三种占法） |
-
-没做：被控端是 Leapgate 便携版、控制端是旧界面这一个组合之外的对端；旧界面文件传输窗口的语义树仍为空，所以是坐标点击加文件哈希做判定。窗口没有挪到副屏：台式机现在只有主屏和一块 1024×768 的小显示器。证据在 A 的 `C:\leapgate-e2e\evidence\m9a-upstream\`。
-
-**前提实测（13 R3-Q24 第 1、3 项，14 §5.1 第 2 条）**：用旧界面（`app-ui-m7a-upstream-b16f17cd1`）的安装页（没有任何检查）在测试虚拟机上装，每次装完清理（删服务、卸载项、快捷方式、`HKCR\leapgate`、防火墙规则）。
-
-| 情形 | 结果 |
-|---|---|
-| 选映射的网络盘 `Z:\`（安装位置 `Z:\Leapgate`） | **装出空壳，13 的说法成立**。服务注册了（Stopped，路径 `"Z:\Leapgate\Leapgate.exe" --service`）、卸载项 `InstallLocation` = `Z:\Leapgate`、开始菜单和公共桌面快捷方式都建了；提权的脚本看不到当前用户的 `Z:`（映射只在未提权的会话里），共享的根目录里也是空的，哪里都没有程序文件 |
-| 选 Leapgate 所在的文件夹本身（目标就是正在运行的文件夹） | **没有装出空壳，13 的说法不成立**。文件齐全（94 个文件对来源 92 个，多的是 `RuntimeBroker_leapgate.exe` 和卸载快捷方式），服务 Running、托盘和界面起来；安装脚本没有删正在运行的文件夹，也没有报循环复制。但随后 `--uninstall` 把整个文件夹（便携版自己解出来的那份）连同程序删了，所以"卸载会删掉整个安装文件夹"仍然成立 |
-| 选 Leapgate 所在文件夹**里面**（目标是 `‹运行文件夹›\Leapgate`） | **装出空壳，成立**。目标里只有 `RuntimeBroker_leapgate.exe` 和 `Uninstall Leapgate.lnk`，没有 `leapgate.exe`，服务 Stopped。在管理员 shell 里手动 `xcopy ‹运行文件夹› ‹运行文件夹›\Leapgate /Y /E /H /C /I` 报"Cannot perform a cyclic copy"，退出码 4；安装脚本自己的 xcopy 输出没看到 |
-
-13 要据此改的两处：①单文件便携版运行在 `%LOCALAPPDATA%\leapgate`，在选择框里选 `%LOCALAPPDATA%`（Windows 路径不分大小写）得到的目标就是它本身，这一类**装得上**，不是空壳，但卸载会把便携版自己的解压目录删掉（便携版下次启动会重新解压）；真正装出空壳的是装进它里面的子文件夹。②现在检查把这两种情形用同一句"无法安装到 Leapgate 当前所在的文件夹"挡掉，对"本身"这一类是偏严（装得上、只是卸载后果特殊），要不要放宽由主会话和维护者定。
-
-**环境说明**：测试虚拟机测完回滚到 `m6-admin` 并 `qm shutdown 110 --forceStop 1`（`stopped`）；回滚后时钟会落后，telechir 连不上，下次用要维护者同步时间。A 的配置：测前备份 8 个文件，测中为了出口项改过（`leapgate-allow-exit`、固定密码）、A 的便携版是从 `app-ui-m9a-0c6b156d8` 起的，测完删掉整个配置目录用备份盖回，8 个文件逐个哈希一致；A 上没有 Leapgate 进程，没有残留计划任务，没有 MSIX 包内副本；原版 RustDesk、msi、mihomo 没碰（msi 没用）。测试虚拟机上测试共享用的本地账户 `lgshare` 随回滚消失。构建 worktree `.wt\ui-m0-build` 停在 `1c3d3f44a`。证据在 A 的 `C:\leapgate-e2e\evidence\m9a-accept\`（`results.txt` 逐项流水账、`premise-test.txt`、`00-build-hashes-*.txt`、`build*.log`、`99-A-config-after.txt`、`tools\` 脚本）。
-
-#### M9a 最新 stable 检查和最终外观检查（台式机 A，2026-11-09 18:05~19:15，待合入的 `51e8eef16`）
-
-**最新 stable 检查（03 §8.8）：这一轮没做，挪到 M9b。** 原因：台式机可用提交内存（`FreeVirtualMemory`）从 18:05 起一直只有 3.0~3.5 GB（物理内存空闲约 17 GB，提交上限 77.7 GB、已提交 73.9 GB，其中进程合计只占 56.5 GB），等了约 60 分钟没有回到手册 §0 的 8 GB 线，所以没编。协调者定：不占维护者机器的内存，整个 M9 只做一次最新 stable，放在 M9b 验收时编。3.47.9 是否仍是最新 stable 也到那时再查。
-
-**画廊对比（3.44.9，`flutter test test/gallery_export_test.dart`）**：`origin/main`（`05a9fa194`，与 `ui/m9a` 的合并基点相比只多 LEAPGATE.md 改动）2988 张，`ui/m9a`（`51e8eef16`）3156 张。逐像素比较（任何差异都算，不设阈值）：2988 张共有的图里 2984 张完全一致，只有 `icons_all_{light,dark}-{compact,detail}` 四张变了（新增 rdp、cameras 两个图标）；新增 168 张全是安装页相关（`install-dialog_*`、`install-option_*`、`install-path-row_*`、`install-banner_*`、`install-license_*`、`local-notice-install_*`）。也就是说这次改的共享组件：`LgPressable` 的 checked 语义、`LgCheckbox`、`LgOptionCheck`、`LgDialogAction.focusNode`，在设置页的勾选、文件传输替换确认等所有旧页面图上外观完全没变（语义改动不画到像素里）。
-
-**安装页画廊对样稿 A-P11**：用 Playwright 渲染样稿画框后，并排看了默认、有会话时、很长的路径三张，其余（网络位置、含"%"、在程序所在文件夹、非空文件夹、正在安装、未获得管理员权限、安装失败两条、从远程打印进入、勾选框六种状态、路径行五种、本机提示卡五种）对着样稿说明的文案和样式看了画廊图，没有逐张并排。结果：版式、间距、颜色、文案和样稿一致；样稿里画了的"许可协议"一行，画廊里有、真机里没有（真机按 13 §4.2 区块 C 的定法不显示，一致）。
-
-**真机（台式机 A，便携版，只开安装页、选位置、看状态、取消，从没点过"安装"）**：只在 `1c3d3f44a` 的构建上做（`app-ui-m9a-1c3d3f44a`），`51e8eef16` 没编；两者之间只有 Dart 改动，Rust 没变。窗口在主屏上（副屏只有 1024×768，放不下新界面窗口，会被裁掉），只截 Leapgate 自己的窗口（`PrintWindow`），不用整屏截图；主页截图含一次性密码和本机 ID，已删，只留对话框区域的截图。
-| 项 | 浅色 | 深色 |
-|---|---|---|
-| "安装"按钮盾牌图标 | 在，主按钮和灰显时都在 | 在 |
-| 默认位置、两个快捷方式勾上、打印机不勾 | 与样稿一致，打开时焦点环在"安装"上 | 一致 |
-| 含"%"（`C:\LGT\100%`） | 红框、红字"路径中不能包含“%”。请选择其他位置。"，"安装"灰显 | 一致 |
-| 映射的网络盘（A 上本来就有的 `Y:`，没动它） | 红字"无法安装到网络位置或可移动磁盘……"，灰显 | — |
-| `subst` 盘（`W:`，测完撤掉） | 同一句红字，灰显 | — |
-| 选 Leapgate 所在的文件夹（`C:\leapgate-e2e\app-ui-m9a-1c3d3f44a`，目标在它里面） | 路径中间省略（`C:\leapgate-e2e\app-ui-m... \Leapgate`），红字"无法安装到 Leapgate 当前所在的文件夹……"，灰显 | 一致 |
-| 非空文件夹 | 琥珀色框和警告三角、"此文件夹中的现有文件将在安装或卸载 Leapgate 时被删除"，"安装"可点、有焦点环 | 一致 |
-| 很长的路径 | 中间省略，最后一级固定；悬停有提示浮层，内容是完整的安装位置 | — |
-| 空文件夹 | 无提示，普通样式 | — |
-对应截图：`C:\leapgate-e2e\evidence\m9a-final\shots\`（`m-old1.png`、`m-old2.png` 浅色拼图，`m-olddark.png` 深色拼图，`old-*.png`、`olddark-*.png` 单张）。
-
-**判定**
-- **必须改**：没有。
-- **小项**（不挡合入）：
-  1. 悬停提示的内容：在 `1c3d3f44a` 上悬停"在程序所在的文件夹里"那一行，浮层显示的是**选中的安装位置**（`…\app-ui-m9a-1c3d3f44a\Leapgate`），不是 13 §4.2 区块 A 写的"这个文件夹（程序所在的文件夹）的完整路径"。`51e8eef16` 加了 `messageTooltip` 就是为了给红字配这条提示，真机上悬停红字那一行是否显示程序所在文件夹，要在 M9b 验收构建上看；`install_dialog_test` 里有对应的单测。
-  2. 长路径省略号和 `\Leapgate` 之间有一个空格的间隔：样稿里同样画成这样，不用改。
-  3. 悬停浮层会盖住路径行下面那一行红字（鼠标在路径行时），和样稿里把浮层画在路径行下方、盖住下面一行的画法一致，不用改。
-  4. 画廊 `local-notice-install_default-unchanged` 画的是描边的"安装"按钮、无箭头；真机主页本机提示卡是蓝色提示底、实心带下载箭头的"安装"按钮。没有搞清这张图想表达的状态和真机默认卡的关系（卡片在真机上和 M8 起一样），M9b 看一眼代码里它指哪个状态。
-- **不用改**：画廊里图标表四张变化是新增图标；真机窗口被我手动移动后高度变成 2186（在 1024×768 副屏和主屏之间挪动、改尺寸造成，测试操作的副作用，没有当成产品问题，也没有复现于直接启动的窗口）。
-
-**挪到 M9b 的两件事**：①最新 stable 检查（4K 上屏仍要 B 有 4K 屏，B 现在是 1366×768）；②`51e8eef16` 的真机悬停（红字的 `messageTooltip`）和读屏（勾选框的 checked 状态、灰显按钮的 enabled=false：`install_dialog_test` 里有 getSemantics 单测，真机用讲述人或 UI Automation 的 Toggle/IsEnabled 看一次）。
-
-#### M8 切换，安装版（测试虚拟机，2026-11-06 20:00~21:25，被测 `57c0087fd`）
-
-按 11 §5.3。构建：新界面（`-Ui leapgate`）`leapgate.exe` `A1FA2192…`、`libleapgate.dll` `570E2E52…`、便携单文件 `leapgate-0.4.0-x86_64.exe` `CF5EFA8F…`、发布目录 zip `204B25C1…`；旧界面（`-Ui upstream`，同一提交）`leapgate.exe` `7F7BFDD1…`、`libleapgate.dll` `26FF0C84…`；"构建时间早"的对照是 `8769ee3ce` 的新界面构建（`libleapgate.dll` `609FDC3A…`）。端点 A 当控制端（新界面便携版），测试虚拟机当被控端（先回滚快照；快照里管理员提权不弹框）。
-
-| 项 | 结果 |
-|---|---|
-| "安装"卡：卡片文案、点后进行中 | 通过。`8769ee3ce` 构建：点后卡片变"正在安装…"，便携版窗口一直在，服务起来的同一秒便携版退出。`57c0087fd` 便携单文件：采样（每 0.7 秒）见便携版进程活到约 3.5 秒，服务 Running 后约 0.5 秒退出；点击后的卡片文字没采到（第一次点击的采样起得太晚） |
-| "安装"卡：装完安装版接手 | **复测通过（`fb1acefa2`）**。`57c0087fd` 不通过：便携单文件"安装"、zip 目录"升级"共 4 次，装完 60 秒内都没有界面和托盘进程，只有 `--service`、`--server`（`8769ee3ce` 那次能起来是竞速碰巧赢了，根因见 §10.16"在子进程里装"）。改成在子进程里装以后，用 `fb1acefa2` 的构建在测试虚拟机上复测（2026-11-06 22:00~22:09）：<br>"安装" 4 次（zip 目录 3 次、便携单文件 1 次），"升级" 3 次（先 `--silent-install` 装 `8769ee3ce`，构建时间 18:27，停掉它的服务和进程后起便携版；zip 目录 2 次、便携单文件 1 次）。每次点击后约 0.7 秒内便携版界面被脚本的 `taskkill` 结束，约 3.5 秒时安装版的界面（有窗口）和 `--tray` 同时起来，服务 Running，子进程退出 0。升级后卸载项 `BuildDate` 是新的（21:44）、`DisplayVersion` 0.4.0。<br>失败回卡片：从路径带 `%` 的目录起便携版点"安装"，卡片下出现"安装失败：Installer path or name contains characters unsafe for cmd.exe"，便携版还在。<br>做法：WMI 进程跟踪看父子进程和退出码，每 0.5 秒采一次进程和窗口（手册 §25）。<br>**审查后复测（`4e6d0a3ed`，2026-11-06 23:13~23:22）**：管道不再留给安装版和托盘（§10.16）。"安装" 2 次（zip 目录、便携单文件各 1 次），"升级" 2 次（先装 `8769ee3ce`；zip 目录、便携单文件各 1 次），每次安装版界面和 `--tray` 都起来，升级后 `BuildDate` 22:58、`DisplayVersion` 0.4.0。审查给的触发路径在装完和升级完各走一遍：关主窗口 → 托盘打开（还是原来的界面）→ 用链接连本机 ID → 输入密码处"取消"；再结束界面进程 → 托盘打开（新界面，父进程是托盘）→ 同样连一次再取消。4 次界面进程都还在。同一路径在 `fb1acefa2` 上，托盘开的新界面在会话结束时中止 |
-| 服务、开机自启、快捷方式、防火墙、卸载项 | 通过。服务 `Leapgate`（显示名 `Leapgate Service`，自启，`--service`，Running）；`Startup\Leapgate Tray.lnk`；开始菜单 `Leapgate\` 下 `Leapgate.lnk`、`Uninstall Leapgate.lnk`；公共桌面快捷方式；防火墙 `Leapgate Service` 入站、出站各一条（程序是安装目录里的）；`HKCR\leapgate`（带 `URL Protocol`）；卸载项 `DisplayVersion` = `0.4.0`（M8-5），`InstallLocation` = `C:\Program Files\Leapgate`；管道 `\\.\pipe\Leapgate\query`、`query_service`；服务配置目录有 `Leapgate.toml`、`Leapgate2.toml`、`log\server\`。第二期清单 §4 第 3 条起各条都过 |
-| 设置沿用 | 通过。装完服务配置目录的 `Leapgate.toml`、`Leapgate2.toml` 大小和便携版用户配置一致（`--import-config` 带过去）；安装版界面里 ID 和便携版相同；便携版里设的固定密码，A 用原密码连安装版成功（出现新界面连接管理小窗）；ID 服务器、Key 也在（能注册、能连）。固定密码、一次性密码都不打印 |
-| "升级"卡 | 通过。装 `8769ee3ce`（构建时间 18:27）后跑 `57c0087fd` 便携版，主页出现"已安装的 Leapgate 版本低于当前版本。"和"升级"；点后"正在升级…"，便携版窗口一直在；完成后卸载项 `BuildDate` 是新的（20:21）、`libleapgate.dll` 哈希是新的。再测自定义路径：用旧界面（`-Ui upstream`）的安装页（安装路径用文件夹选择框改成非默认路径）装在自定义路径，再跑便携版"升级"：安装路径、服务路径、卸载项都留在自定义路径，默认路径没有被创建。装完同样没有界面接手（`57c0087fd`；`fb1acefa2` 复测通过，见上一条。改后点了以后便携版窗口不再"一直在"，脚本卸载那一步就把它结束） |
-| 覆盖安装 | 通过。旧界面安装版（自定义路径）→ 新界面"升级"：目录里没有旧界面独有的文件（`desktop_multi_window_plugin.dll`、`file_selector_windows_plugin.dll`、`url_launcher_windows_plugin.dll`、`window_size_plugin.dll`），服务、托盘是新界面的。反过来用旧界面的安装页装回去：装在已装的自定义路径，没有 `dartjni.dll` 等新界面文件，旧界面（`FLUTTER_RUNNER_WIN32_WINDOW`）正常起来，托盘也起来。注意：从空机器上用新界面"安装"卡装在旧界面安装版上这一条，没有单独测（旧界面装着时主页显示的是"升级"卡） |
-| 托盘"打开" | 通过。关主窗口：窗口隐藏（`vis=False`）、进程都在；对托盘图标做 UI Automation 的调用（等于单击），窗口回来；不带参数再启一次同一个 exe 也让隐藏窗口回来，没有新进程 |
-| 来访小窗 | 通过。A 连进来时测试虚拟机弹出的是 `LEAPGATE_UI_CM`，进程是 `--cm`；会话关闭后进程也消失 |
-| 交换控制方向 | 通过（至今第一次有记录）。A 连测试虚拟机，"操作 > 交换控制方向"，确认框"远程设备将改为控制本机，此会话将关闭。"；点"交换"后 A 的标签关闭，A 主页显示"正在被远程控制（1 个会话）"，测试虚拟机的界面出现到 A 的会话标签（直连）；测试虚拟机日志 `Connection closed: switch sides` |
-| 链接 | 通过（有限）。`leapgate://‹ID›` 开远程桌面标签（带密码输入）；`/r`、`connection/new/`、`file-transfer/` 各开一个标签（用不存在的 ID，标签出现"未找到 ID 为 … 的设备"，文件传输的面板比其余的高一行；用已开着的同一个对端 ID 时不新开标签）；`--file-transfer ‹ID›` 在主窗口已开着时交给主窗口，新开标签，进程不增加。**没能分清的**：用不存在的 ID 时看不出标签类型（远程桌面还是文件传输）和 `/r` 是否真走中继，只有文件传输面板高度不同这一条间接证据。四种第三轮的（`port-forward`、`rdp`、`view-camera`、`terminal`）各出一条全局轻提示，文案分别是"暂不支持打开端口转发会话。""暂不支持打开 RDP 会话。""暂不支持打开摄像头会话。""暂不支持打开终端会话。"，不开标签 |
-| 主页密码行"修改"先要解锁 | 通过（部分）。设置里把密码方式改成"仅固定密码"后，主页出现"修改固定密码"，点后打开"设置固定密码"对话框，离开设置页再进设置页各小节都重新"已锁定"。快照里 UAC 不弹框，所以**看不出**这次修改是否真的走了解锁，只能确认设置页的解锁、上锁本身（"解锁"一点即解开）。PIN 路径没测 |
-| 卸载 | 通过。`--uninstall`：服务、`HKCR\leapgate`、`HKCR\.leapgate`、防火墙规则、卸载项、安装目录、开始菜单文件夹、`Leapgate Tray.lnk`、公共桌面快捷方式都没了，进程全停；服务配置目录和用户配置目录（含日志）保留 |
-| 与原版共存（M8-10） | 通过。上游 1.4.9 安装包在测试虚拟机上下载，大小 24,472,432 字节、sha256 `eaedeb00…6274`，与指定值一致；先装 Leapgate（便携"安装"卡）、再 `--silent-install` 原版：两个服务都 Running、安装目录、配置目录（`ServiceProfiles\LocalService\AppData\Roaming\Leapgate` 与 `…\RustDesk`）、`HKCR`、卸载项、管道、托盘快捷方式各自独立；两个 ID 不同（原版 9 位，Leapgate 10 位，见环境说明）；A 的新界面分别连两个都成功（各自的连接管理小窗弹出）；改 Leapgate 固定密码并重启 Leapgate 服务后，原版的 4 个进程 PID 不变，原版原密码的会话不受影响。卸载 Leapgate 时原版服务、PID、卸载项、协议、防火墙规则不变；再装回 Leapgate（原版在）正常；卸载原版时 Leapgate 的服务、PID、ID 不变 |
-| 外呼（第二期 §5） | 部分通过。打开 DNS 客户端日志后（20:55~21:08，含服务重启、设置各页、登录对话框、安装、升级、连接、交换控制方向）共 170 条查询，**没有 `rustdesk` 开头或包含的名字**；能看到 4 个 STUN 服务器（`stun.antisip.com`、`stun.cloudflare.com`、`stun.l.google.com`、`stun.nextcloud.com`）。没做：10 分钟连续使用、登录（只开了登录框，没提交）、"Auto update"那条（新界面没有这个选项） |
-| 卸载（第二期 §9） | 通过：卸载后各项都清掉（见"卸载"行）；卸载后原版 Running、ID 和配置没变（同"共存"行）；重装 Leapgate 再卸原版，Leapgate 不受影响。没做：虚拟显示驱动那条 |
-| 取消 UAC | 未验证（快照不弹框，按 11 §5.4 留给维护者） |
-| 打印机 | 未验证（构建不带驱动，没装打印机） |
-
-**新发现**
-1. **装完不起界面（`57c0087fd`，`fb1acefa2` 已修）**：见"安装"卡第二行。`57c0087fd` 的便携版点"安装"或"升级"后，便携版退出、服务起来，但没有安装版的界面和托盘；`8769ee3ce` 的同一操作会起。根因是新服务的 `--server` 拿不到主 IPC，结束了正在等安装脚本的便携版（§10.16"在子进程里装"）。
-2. **旧界面的构建时间没刷新**：`-Ui upstream` 的构建（`build.py` 路径）日志里没有刷新 `build.rs` 的动作，装出来卸载项 `BuildDate` 是 `2026-11-05 05:51`（前一天的残留），新界面构建的是当次的（`2026-11-06 20:21`）。结果：旧界面构建出来的便携版是否提示"升级"，不取决于当次构建时间（11 §4.4 的副作用比预想的更不可控）。coder 查过：原因见第 3 条，那份产物的 `libleapgate.dll` 是旧的；脚本在两种界面的 cargo 之前都改 `build.rs` 的修改时间，重编 `-Ui upstream` 时构建时间是当次的。
-3. **旧界面安装的卸载项版本是 `1.5.1`**：旧界面的安装页（`--install`）装出来 `DisplayVersion` 是上游版本，新界面"安装"卡装出来是 `0.4.0`。M8-5 的版本挂钩只对新界面的安装生效，还是旧界面的 Rust 没带挂钩，没追，需要时回头查。**coder 查过（2026-11-06）**：是那份旧界面产物里的 `libleapgate.dll` 是旧的。它里面的构建时间是 `2026-11-05 05:51`（构建 worktree 05:42 检出过 M6b 的 `8efb531f0`），也找不到任何 M8 的代码（例如 `leapgate install: ` 这段日志文字），所以 `install_me` 里没有 M8-5 的挂钩。第 2 条"构建时间没刷新"也是同一个原因。用同一个构建脚本在 `fb1acefa2` 上重编 `-Ui upstream`，`flutter\build\…\Release\libleapgate.dll` 和 `target\release\librustdesk.dll` 是同一份，构建时间是当次的（22:12），带 M8 的代码。旧 DLL 怎么进了那份产物没查出来，构建脚本本身没发现问题。
-4. 旧界面的安装页默认路径是**已装的路径**（自定义路径装着时再进安装页，路径框是自定义路径），不是 `Program Files`。上游行为。
-5. 便携单文件第二次双击不重新解压：解压目录里 `leapgate.exe`、`libleapgate.dll` 的修改时间在 21:15 的第二次启动后仍是第一次的 20:29（顺带观察，便携包那一节由便携版验收做）。
-6. 便携版从 `%LOCALAPPDATA%\leapgate` 起时进程路径是 `…\leapgate\.\leapgate.exe`（带 `.\`），`scripts/e2e/leapgate-uia.ps1` 和 `leapgate-post-input.ps1` 按路径精确比较会找不到进程；测试虚拟机上的副本改成了先 `GetFullPath`。总仓库 `ui/m8` 里的两份已改成比较前把进程路径也规范化。
-
-**环境说明**：测试虚拟机没有回滚，留在安装了 `57c0087fd` 新界面的状态（路径 `C:\Program Files\Leapgate`，固定密码是测试值），由主会话回滚；A 的配置文件和测前备份逐个哈希一致，A 上的 Leapgate 已停。测试虚拟机上本机 ID 是 10 位（第三期 01 的锁定规则，同 M7a 记录）；原版在测试虚拟机上装完又卸载了。证据在 A 的 `C:\leapgate-e2e\evidence\m8-1106\`（`build-new.log`、`build-new2.log`、`build-up.log`、旧界面安装页截图、`tools\`）。
-
-#### M8 切换，安装版：覆盖安装回归（测试虚拟机，2026-11-07 01:25~01:35，旧界面 `fb1acefa2`、新界面 `4e6d0a3ed`）
-
-上一轮旧界面那份产物里混进了旧 DLL（见上"新发现"第 3 条），所以用新编的旧界面重测两个方向。没有回滚、没有关机。旧界面 `libleapgate.dll` `96DFA9F7…`（构建时间 22:15，zip 解开后和目录版哈希一致），新界面便携目录 `libleapgate.dll` `ED8FDE17…`。每步前先 `Stop-Service Leapgate` 加结束全部 `leapgate.exe`，再起下一个。
-
-| 方向 | 结果 |
-|---|---|
-| 旧界面装在新界面上（旧界面自己的安装页：`leapgate.exe --install`，800×600，点"同意并安装"） | 通过。约 6 秒后服务 Running、4 个进程。安装目录 94 个文件 = 旧界面目录 92 个 + `RuntimeBroker_leapgate.exe` + `Uninstall Leapgate.lnk`（这两个是安装脚本生成的），逐个哈希与旧界面目录一致、0 个不符；新界面独有的 `dartjni.dll`、`meta.toml`、字体和 `app_icon` 资源都没了。进程：服务 `--service`、`--server`、`--tray`、旧界面主窗口，都来自 `C:\Program Files\Leapgate`。卸载项 `DisplayVersion` = `0.4.0`、`BuildDate` = `2026-11-06 22:12`（上一轮那份旧 DLL 装出来的是前一天的时间，这次对了）。A 的新界面连进来后，起的是安装目录里的 `leapgate.exe --cm`（旧界面的小窗；窗口类这次没查） |
-| 新界面便携版的"升级"卡装回新界面 | 通过。关干净后从 zip 解开的目录起新界面便携版，主页出现"已安装的 Leapgate 版本低于当前版本。/ 升级"（UIA 读到）。点"升级"后 4.1 秒便携版退出，安装版界面窗口和托盘出现，服务 Running。安装目录 33 个文件 = 新界面目录 31 个 + 上面那两个生成的，哈希 0 个不符；旧界面独有的 `desktop_multi_window_plugin.dll`、`file_selector_windows_plugin.dll`、`url_launcher_windows_plugin.dll`、`window_size_plugin.dll` 都没有。卸载项 `DisplayVersion` = `0.4.0`、`BuildDate` = `2026-11-06 22:58`，`libleapgate.dll` `ED8FDE17…`，进程同上（`--service`、`--server`、`--tray`、界面） |
-
-测试虚拟机停在装着 `4e6d0a3ed` 的状态，服务、界面、托盘都在跑。中途 telechir 对它约 40 分钟没有响应（01:00 前后到 01:24，`machines` 一度显示不可用），自己恢复，期间发出的 `exec_admin` 没有执行，恢复后重发。
-
-#### M8 切换，便携版（两台端点，2026-11-06 22:18~23:45，被测 `fb1acefa2`）
-
-按 11 §5.2 前五条（压力项、最新 stable 留给下一轮）。构建：新界面目录 `app-ui-m8-fb1acefa2`（`libleapgate.dll` `BFE63945…`、`flutter_windows.dll` `8667024A…`）、便携单文件 `leapgate-0.4.0-fb1acefa2.exe`（`5AFCB7F4…`）和同名 zip；旧界面（`-Ui upstream`）`libleapgate.dll` `96DFA9F7…`（构建时间 22:15，带 M8 的代码，字符串 `leapgate install: ` 在里面；`leapgate.exe` `7F7BFDD1…` 与以前的旧界面相同）。端点 A（台式机）、B（笔记本）各一份。期间端点 B 两次长时间联系不上（约 22:20~22:35、23:12~23:35），后半段互连的另一端改用测试虚拟机的安装版（`4e6d0a3ed`），见下表标注。
-
-| 项 | 结果 |
-|---|---|
-| 冒烟 §2 启动 | 通过。窗口类 `LEAPGATE_UI_MAIN`，左栏三位一组的 ID、密码行、"已就绪"，日志 `leapgate ui: version 0.4.0` 和 `this device id`；再启动一次：只剩一个进程，隐藏的窗口回到前台 |
-| §3 连接框 | 通过（点到即止）。输入设备名出"搜索结果"、第一行"连接到 ‹输入›"、结果带"最近"标；"修改 ID"回主页并把 ID 填进框；不存在的 ID 出"未找到 ID 为 … 的设备。…"、"关闭标签""修改 ID"。`/r` 后缀没验成（输入时前面残留了字符，连了一个错的 ID），`--relay` 在下面验了 |
-| §4 连接过程 | 通过：A→B 自研 ICE 胜出直连（`leapgate ice: selected`，标签"直连"）；`--relay` 经中继（只有 `Relay` 行、没有 ICE 行，标"经中继"）；要密码（两步进度、密码框有焦点）；密码错（"密码错误"）；输对加"记住密码"，之后不带密码直接进。未验证：2FA、等对方接受、选用户会话、不安全连接、自动重试、对方重启、1.5 秒唤醒（本轮没做，按"未验证"记） |
-| §5 标签和输入、工具栏 | 通过（点到即止）：标签、"×"关闭、工具栏展开，画面、输入、操作、会话四个菜单都能打开并列出项（`20-session-menus.txt`）。键盘、全屏、V1 未验证 |
-| §6 关闭 | 通过。有会话时关窗出"断开全部 1 个会话并关闭窗口？"，选"在后台运行"并"断开"：会话断开、窗口隐藏、进程留着；再启动一次程序窗口回来 |
-| §11 主页和设置 | 通过（部分）。设置的 19 个小节逐个打开都有内容（`30-settings-sections.txt`）；关于页：版本 0.4.0、"基于 RustDesk 1.5.1"、构建日期、指纹。其余各条未验证 |
-| §12 被控端连接管理小窗 | 通过（部分）。B→A、测试虚拟机安装版→A 连入后，A 起 `--cm` 进程，日志 `Start cm`。小窗里的各项未验证 |
-| §13 账号 | 部分。登录对话框打开；密码错出"用户名或密码错误"、对话框不关；取消后回到原页。空用户名、空密码的两条提示没读到（读屏里没有对应文字，可能脚本时机问题），登录成功后各项、地址簿、共享簿、同组设备都没做（没有账号） |
-| §14 出口 | 通过（经中继）。B 开"允许作为出口"，A 出口页"按 ID 指定出口"输 B 的 ID、"使用"：卡片"可用 · 经中继"（那台的对端配置里有始终经中继），`socks5h` 和 HTTP CONNECT 访问 https 站点都是 200；"停止"后监听关闭（curl 失败）。其余各条未验证 |
-| §15、§16 设置 | 见 §11 行，只验了小节能打开 |
-| §17 文件传输 | 通过（部分）。A→B：上传 3 MB、下载 2 MB，两边哈希一致，队列显示"已完成"。其余各条未验证 |
-| 默认 ID 加盐（新界面便携版，空配置目录） | 通过。日志 `Generated id 471945469`：9 位，大于等于 268435456。旧界面同一做法得同一个数（由 MAC 决定，是确定的）。配置挪开再放回，哈希一致 |
-| 冷启动 `--connect` | 通过，但有一个观察。新界面没运行时 `leapgate.exe --connect ‹ID› --password …` 起来后本进程就是主进程（一个进程），会话连上；回到主页，本机区 ID 对，但一次性密码一直是"正在生成…"，状态行写"无法连接服务器，正在自动重试。请检查网络连接。"（等了 1 分钟以上不变），因为按 `core_main.rs` 这条路径本进程不起服务。服务器其实可达，文案对用户有误导；这台这时也不能被连。以"如实记录"，是否算问题请主会话定 |
-| 旧界面五项（两端旧界面，22:58~23:17） | 通过。①带密码连接：自研 ICE 直连，`handle_peer_info`；②`--relay`：中继，无 ICE 行；③文件传输窗口：上传、下载各一个 2 MB 文件，两边哈希一致；④TCP 端口转发（本地端口到 example.com:80）：curl 200；⑤出口（B 开 `leapgate-allow-exit`）：socks5h、HTTP CONNECT 访问 https 站点都是 200。顺带：空配置目录起一次，`Generated id 471945469` |
-| 便携包（清单 §20） | 通过。①双击单文件：2 秒内解到 `%LOCALAPPDATA%\leapgate`（33 个文件，含一个以前就有的 `RuntimeBroker_leapgate.exe`，不是这次解出的）并起来，`libleapgate.dll` 哈希和目录版一致；②第二次双击：已在运行时不新开进程；结束后再双击，数据文件的修改时间不变（没重解），只有 `meta.toml` 被重写；③进程路径是 `…\leapgate\.\leapgate.exe`（已知）；④zip 解开直接能跑，主窗口 UIA 读到树 |
-| 测试虚拟机安装版当对端（`4e6d0a3ed`，端点 B 离线期间） | 通过。A（新界面便携版）→ 安装版：直连（`host/v4`），工具栏出来；安装版 → A：连入后 A 起小窗。安装版的固定密码和手上的测试文件对不上（先"密码错误"），我用该机的 `--password`（`exec_admin`）重设成同一个测试值才连上；A→安装版第一次重连还出现过一次"对方已断开连接"（服务端日志 `closed: connection manager`），点"重新连接"后连上，没再复现 |
-
-**新发现**
-1. **便携版主页左栏在默认窗口下，"安装"卡显示时导航被挤到栏底之外**（默认窗口约 1290×800 逻辑像素，密码行显示"也可使用固定密码"那一行时）：UIA 里"出口"高度只剩 17、"设置"在栏底之外，截图只看得到"设备"。左栏本身能滚，要把真实光标放到左栏上再滚才行（投递的滚轮消息 Flutter 不认其坐标），所以是"有安装卡时要滚一下才看得到出口和设置"，不是点不到；观感上这个首屏不太好，留给外观检查看（`shots/a-home-left.png`，截图里一次性密码已遮）。
-2. **冷启动 `--connect` 后主页状态误导**：见上表。
-3. 脚本：`leapgate-uia.ps1 -Op Dump` 会原样打出主页的一次性密码，要自己遮；`CloseSessions` 对旧界面要调两次才关掉远程桌面窗口；`m-ft.cmd` 这类 `.cmd` 会等被起的进程退出，旧界面起文件传输窗口时进程不退出，计划任务超时被 `/end` 杀掉，要换成"detached 启动、立刻写完成标记"的 `.cmd`。
-
-**没做**：压力项和最新 stable 检查（下一轮）；清单 §7 的 4K 场景（端点 B 现在是 1366×768 的一块屏）；§8 的"升级"卡不点；§13 登录后的各条、§15、§16 的功能细项、§17 的暂停重试跳过等、§18 的第四期挪来几项、§19 压力项。
-
-**环境**：A、B 的配置文件和测前备份逐个哈希一致（A 8 个、B 4 个），两端 Leapgate 都停，`task\` 空，没有残留计划任务和包内副本，原版 RustDesk 和 mihomo 没碰；A 的便携包解出目录 `%LOCALAPPDATA%\leapgate`、`zip-test`、测试数据都已删。测试虚拟机：固定密码被我重设成了 `pw.txt` 里那个值（hash 与 A 的 `pw-vm110-m8.txt` 一致），没回滚、没关机、没卸载，它上面的界面当时有一个连向 A 的会话标签（A 停止后随之结束）。证据在 A 的 `C:\leapgate-e2e\evidence\m8-1106-portable\`。
-
-#### M8 切换，压力项和最新 stable（2026-11-06 23:41~2026-11-07 02:00，被测 `4e6d0a3ed`）
-
-按 11 §5.2 第二条（03 §8.7 第 2 段，清单 §19）和 03 §8.8。控制端是端点 A（台式机）上的新界面便携版（`app-ui-m8-4e6d0a3ed`，计划任务启动），被控端是端点 B（笔记本）上的新界面便携版（目录 `app-ui-m8-fb1acefa2`，后半段换成同一个 `4e6d0a3ed`，见下面第 1 条发现）；第二个会话标签的对端是测试虚拟机的安装版（它没有显示输出，只有 1280 宽的基本显示适配器）。脚本和原始数据在 A 的 `C:\leapgate-e2e\evidence\m8-1106-stress\`（`tools\stress50.ps1`、`dlgloop.ps1`、`uiapoll.ps1`，`stress50-run1~4.csv`、`dlgloop.csv`、`uiapoll.csv`、`v1-cpu-gpu*.txt`、`80-`~`82-` stable）。
-
-| 项 | 结果 |
-|---|---|
-| 会话标签开关 50 次（清单 §19 第 1 条） | **句柄不通过，内存和崩溃通过**。每轮：`--connect` 开标签、等工具栏、停 3 秒、点"关闭标签"、等 15 秒（`stress50-run4.csv`，50 轮全部连上、关闭都成功，连上平均 3.6 秒）。A 控制端进程（单进程，pid 不变）：句柄 1425 → 1519（线性，斜率 **+2.02 个/轮**，前半 1.98、后半 2.05，即每开关一个会话标签约多 2 个句柄不还）；私有内存 255 → 280 MB（斜率 +0.27 MB/轮，前半 0.47、后半 0.11，在收敛）；工作集 445 → 505 MB（+0.37 MB/轮，后半 0.27）；线程 206 不变。Windows 应用程序日志没有 `leapgate.exe` 的 1000 事件，没有崩溃。另两次间隔短的运行（`run1`、`run3`）上涨的句柄斜率同量级（1.9、约 1.6） |
-| 开着 UIA 客户端反复开关标签和对话框（§19 第 2 条） | 通过。`uiapoll.ps1` 用原生 COM 的 IUIAutomation（`leapgate-uia.ps1 -Op Dump`）连续轮询 14 分钟，共 575 次，退出码全 0，从没拿不到树；同时 `dlgloop.ps1` 做 20 轮"开标签 → 点关闭出'断开全部 1 个会话并关闭窗口？'→ 取消 → 开'新建连接'标签 → 关标签"，每一步全部成功、进程一直在、没有 1000 事件。元素数随界面状态变（主页 13~15、会话 54~56、对话框 30~31）；有 6 次（约 1%）读到元素在但名字全空（对话框切换的瞬间），下一次轮询就恢复，树没有消失 |
-| 3~4 个会话标签同时开着的 CPU、GPU（§19 第 3 条） | **只做了 2 个会话标签 + 主页，结论不明显**。端点只有一台有画面（B），第二个标签连测试虚拟机，4 个标签凑不出来。A 的进程 CPU（占一个核的百分比，30 秒均值，各两轮）：停在主页 11.5 / 13.2，停在 B 的标签 16.5 / 14.9，停在测试虚拟机的标签 13.1 / 13.0；GPU 3D 0.4% / 0.9% / 0.5%，视频解码 0.7% 不变。B 桌面基本不动，画面变化少，主页略低于 B 的标签，但差距在测量噪声（第一轮主页 31%、同样的主页第二轮 12%）里，不能证明"明显低于"。V1 的有效判据是 M2a 当时的验收，这里没有重做 |
-| 最新 stable 检查（03 §8.8） | **Flutter 3.47.9 仍是最新 stable**（发布 2026-10-29；2026-11-07 读 `storage.googleapis.com/flutter_infra_release/releases/releases_windows.json` 的 `current_release.stable`）。官方 SDK、官方引擎，Impeller 开（stderr `Using the Impeller rendering backend (OpenGLESSDF)`）：①`build-client.ps1 -Steps bridge,build -ForceBridge -FlutterRoot … -AllowOfficialEngine` 通过（`flutter_windows.dll` `30494FB0…`、`app.so` `BCD54FB1…`；第一次尝试在 cargo 编 `libc` 时报 `0xc0000043`（文件共享冲突）失败，重试通过，没追原因）；②analyze：core 96 条（含上游复制件 `file_model.dart` 的 5 条 warning，和 M7a 同数），app 1 条 warning（`file_dialogs.dart:269` 参数 `unchanged` 没人传；其实 `_NameDialog.rename` 经重定向构造函数传了，3.47.9 的 analyzer 不算这种传法。`c8ce376a2` 把它改成 `required`、新建文件夹那条显式传 `null`，3.47.9 的 `dart analyze` 对这个文件 0 条，3.44.9 下 app 照旧 0 条）；③core 305、app 1186 个测试通过（app 2 个跳过）；④画廊导出 2972 个文件，3.47.9 和 3.44.9 各一份；⑤上屏：A 起 3.47.9 的构建连 B（1920×1080 屏），5 分钟，每分钟窗口截图（只记哈希，图已删）每次不同、大小 430~440 KB，进程一直在、句柄 1500 左右、工作集 172~234 MB，没有崩溃事件，stderr 只有那一行 Impeller。**4K 上屏未验证**：端点 B 只有 1920×1080 的物理屏和 1366×768 的虚拟屏（GameViewer），没有 4K 的源 |
-| 复原 | 构建 worktree `.wt/ui-m0-build` 停在 `4e6d0a3ed`，锁文件和 `analysis_options.yaml` 已还原，只剩构建产生的未跟踪 `libs/portable/app_metadata.toml`。用 3.44.9 加自编引擎重编（`-ForceBridge`），`flutter_windows.dll` `8667024A…`（带补丁 0003）、`data\app.so` `C24D4907…`（与 `app-ui-m8-4e6d0a3ed` 一致）；`libleapgate.dll`、`leapgate.exe` 是重新编的，哈希和当时那份不同（时间戳等） |
-
-**新发现**
-1. **被控端新界面便携版在两次连入间隔很短时，连接管理小窗起不来，之后一段时间连不上**。A 每轮收尾只等 2 秒就开下一轮（上一个会话的小窗进程还在退出的几秒里）：`run1` 第 26 轮起、`run3` 第 23 轮起、`run2` 第 7 轮起，之后每一次都是 A 报"对方已断开连接"。B 的日志（主日志）：新连入 `Connection opened` 后马上 `Connection closed: connection manager`、`ipc to connection manager exit: expected`，此后没有 `Start cm`，也没有新的 `--cm` 进程（B 上只剩一个主进程）；小窗日志里最后一次 `Got new connection … cm ipc connection closed from connection request`。`run1` 里手动点"重新连接"（约 8 分钟后）就好了，B 重启也好。没有崩溃事件。换 B 为 `4e6d0a3ed` 同样出现（`run3`），所以不是 `fb1acefa2` 的问题。每轮间隔拉到 15 秒（`run4`）50 轮零失败。真实使用里"断开后几秒内重连"就会撞上，建议 coder 查小窗进程退出和新连入的竞争（可能是小窗的命名管道正在关闭时收到新连接，之后主进程认为小窗还在、不再拉起）。复现：A、B 都是新界面便携版，A 用 `leapgate.exe --connect ‹B› --password …` 开标签、3 秒后关标签，间隔约 5 秒循环，多半在 20~30 轮内出现
-   - **结论（coder，2026-11-07，已修，`c8ce376a2`）**：B 只关掉了一个连接，"之后一直连不上"在 A 和测试脚本。
-     - **B 那一次**：新界面小窗在最后一个来访断开后还活 6~6.5 秒（复制件丢了上游 `onRemoveId` 的当场关窗，只剩 500 ms 轮询数 12 次的兜底，见 10.10"没有来访后退出"）。下一次连入正好落在这段末尾：轮询请求关窗，页面 `onWindowClose` 的 `closeAll` 拿到刚登记的新来访，`cmCloseConnection` 把它关掉，控制端收到不重试的"Closed manually by the peer"，然后小窗进程退出。`run1` 的证据：上一个连接 `#1324` 23:54:43.585 关，`#1327` 50.037 连入（相隔 6.45 秒），小窗 50.097 收到它的登记、50.143 `closed from connection request`，主日志同刻 `#1327 Connection closed: connection manager`；`run3` 的 `#2028` 同样。2026-11-07 用 `fb1acefa2` 当 B、`-Gap 3` 重现了两次：`#222`、`#231` 分别在上一个关闭后 6.40、6.46 秒连入，85~95 ms 后被关。2 秒间隔那一轮这次是 5.2~5.4 秒就重连，13 轮里没撞上（2 秒还是 3 秒撞得上，取决于 A 每轮的耗时）；那一轮第 14 轮起是另一回事：会话照常连上，A 的 UIA 脚本却报主窗口下没有 `FLUTTERVIEW`，A 进程句柄一下多了约 230、线程多了 45（当时同机在编构建），原因没查，重启 A 后之后 150 轮没再出现。
-     - **"之后每次都失败"不在 B**：`run1` 从 23:55:05 到手动重连的 00:03:23，B 主日志里一个连入都没有；A 的日志只有 `link received leapgate://connect`，没有新会话。A 的会话标签停在"对方已断开连接"，脚本等不到工具栏、点不到工具栏上的"关闭标签"，标签一直留着；之后的 `--connect` 打到同一台设备时，注册表返回已有的视图、不重新连（`core/lib/leapgate/session_registry.dart` 的 `open`，和上游 `DesktopTabController.add` 已有标签就跳过去一致）。"手动点重新连接就好了""重启 B 也好"都是因为换掉了这个死标签。真实使用里用户看得到"对方已断开连接"，点"重新连接"即可。
-     - **上游对照**：B 换旧界面便携版 `fb1acefa2`（`libleapgate.dll` 22:19 构建，`96DFA9F7…`），A 照旧是新界面 `4e6d0a3ed`，2 秒间隔 50 轮零失败；B 日志 50 次连入、50 次 `Start cm`、0 次 `connection manager`：每个会话结束后小窗进程当场退出，下一次连入起新的。
-     - **改法**：core `models/server_model.dart` 的 `onClientRemove`，列表因关闭变空时当场 `window.close()`（上游 `onRemoveId` 的对应），测试 `core/test/cm_server_model_test.dart` 改一条、加一条。
-     - **验证**：B 用新构建 `app-ui-m8-c8ce376a2`（A 照旧 `4e6d0a3ed`），`-Gap 2` 50 轮、`-Gap 3` 50 轮都零失败；两轮里 B 日志 100 次连入、100 次 `Start cm`、0 次 `connection manager`；`-Gap 3` 那一轮有 38 次重连落在上一个关闭后 5.9~6.6 秒（修之前被关的正是这一段）。证据在 A 的 `C:\leapgate-e2e\evidence\m8-1107-cmrace\`（`up-b-gap2.csv`、`new-fb1-b-gap2.csv`、`new-fb1-b-gap3.csv`、`fix-b-gap2.csv`、`fix-b-gap3.csv`）
-2. **控制端每开关一个会话标签多留约 2 个句柄**（上表第一行），线性、不收敛，每天几千次才碰到上限，不急；没有查来源，也没有拿旧界面做对照
-   - **结论（coder，2026-11-07）：上游也这样，只记录、不修**。A 换旧界面便携版 `fb1acefa2` 当控制端（B 是修好的新界面），同样 50 轮"`--connect` 开会话、停约 6 秒、关窗、等 10 秒"：句柄斜率 **+2.05 个/轮**（1327 → 1422），和新界面当控制端同一晚的三轮（+2.24、+2.28、+1.92）同量级。旧界面的远程窗口没有 UIA 树，脚本按窗口类 `RustdeskMultiWindow` 找、发 `WM_CLOSE` 关（`m8-1107-cmrace\tools\old-ctl50.ps1`，数据 `up-a-ctl.csv`）；关窗后上游的窗口不隐藏，所以表里"关上"一列全是 0，B 日志 50 次连入、50 次 `Peer close`，会话确实都关了。来源在两个界面共用的部分（Rust 会话或引擎、驱动），没往下查
-3. 测试虚拟机失联约 40 分钟（见上"覆盖安装回归"），`vm110` 的 `exec` 在失联期间不返回，`machines` 也报不可用；这一类留给环境说明
-4. 工具：`leapgate-e2e.ps1 -InTask` 在 A 上这轮起不来任务（`task … did not finish within 120 s`，计划任务没把程序拉起来，原因没查），改用 `run-task.ps1` 加 `m-start-new.cmd`。`run-task.ps1 -Arg 'a','b'` 经 `pwsh -File` 调用时逗号数组被当成一个字符串，要在脚本里再包一层
-
-**没做**：4 个会话标签同时开着（只有 2 个对端）；4K 上屏（没有 4K 的源）；用旧界面做句柄斜率对照。
-
-**环境**：A 的 Leapgate 配置 8 个文件和测前备份（`backup\pre-m8s-1106`）逐个哈希一致（`99-A-config-after.txt`），B 4 个配置文件一致（`Leapgate2.toml` 前 12 位 `93916754BB49`）；两端我起的 Leapgate 都已停，`task\` 空，没有残留计划任务，没有包内副本；B 上我传的新界面 zip 和解开的目录已删；原版 RustDesk（A、B）、mihomo 没碰。测试虚拟机的临时文件（旧界面解开目录、zip、截图、清单）已删，留装着 `4e6d0a3ed` 的安装版。
-
-#### M8 切换，最终外观检查和最终构建冒烟（2026-11-07 03:50~04:30，被测 `d3073a33d`）
-
-对象是准备合入 main 的提交 `d3073a33d`（相对 `4e6d0a3ed` 改了：安装卡文案缩短、左栏提示卡图标改成文字第一行行首的内联元素并把文字到按钮的间距从 12 改成 8、来访小窗最后一个来访离开时当场退出；Rust 没改）。这一版有意偏离样稿 `A-P1.html` 的 `.pcard`（样稿里图标单独一列），所以按新排版判断，没有把"和样稿不同"本身算成问题。
-
-**构建**（`.wt\ui-m0-build` 检出 `d3073a33d`，`build-client.ps1 -Source` 编新界面，等到"产物："一行才拷）：目录 A 的 `C:\leapgate-e2e\app-ui-m8-d3073a33d\`，单文件 `leapgate-0.4.0-d3073a33d.exe`、zip `leapgate-0.4.0-d3073a33d.zip`（同在 `C:\leapgate-e2e\`）。
-
-| 文件 | sha256 |
-|---|---|
-| `leapgate-0.4.0-d3073a33d.exe` | `7078c1342fbb491f9d59fd1babc7a23467949ae1e1d924d83898d4e61508a60f` |
-| `leapgate-0.4.0-d3073a33d.zip` | `f5e6637f441000b70c195e08103414b584ee1837f4f8db6f01c986ce2375a07c` |
-| `leapgate.exe` | `b25544ab2fc67f60158b35974339df333108b09df43871b6d705c299ca309303` |
-| `libleapgate.dll` | `b68535e246d2ed59ebf9249ab1562c0c2358a1351400cb330538ff3e5a584ebb` |
-| `data\app.so` | `4c71fd445541af71ac0c417e8305379e9168ddafdf2b2984b1270723096344cf` |
-| `flutter_windows.dll` | `8667024a358cb83d352278dd649d929c59492d54b04bef022d08668baa480c50`（带补丁 0003） |
-
-`libleapgate.dll` 和上一版 `4e6d0a3ed`（`ED8FDE17…`）不同，是新编的，不是旧产物。
-
-**结论**（图在 A 的 `C:\leapgate-e2e\evidence\m8-1106-visual\shots\`；真机用 PrintWindow 或整屏截图，A 是 150% 缩放，一次性密码区已盖色块）
-
-| # | 项 | 结论 | 依据 |
-|---|---|---|---|
-| 1 | 主页左栏安装卡，A，默认窗口，浅色、深色 | **通过** | `a-light-0.png`、`a-dark-0.png`（放大 `a-light-card-zoom.png`）。文字第二、三行、"安装"按钮左边缘同在 x=115（放大图），图标在第一行行首、和文字间留一个字宽；没有难看的折行，只有"用户/账户控制"在行尾行首断开（读起来是"用户 / 账户控制"，小问题，见下）。"设备 / 出口 / 设置"三项导航在默认窗口里不滚动、完整可见（UIA 里三项都在窗口内，登录按钮和下方说明也在）。A 上没点"安装" |
-| 2 | 升级卡、"正在升级…"，vm110 | **通过** | `vm-upgrade-light.png`（窗口最大化后重绘的整屏，100% 缩放）：卡片"已安装的 Leapgate 版本低于当前版本。"、"升级"按钮，文字和按钮左边缘对齐（图标 x=41、文字 x=40、按钮 x=40）。点击后 `vm-upgrading-s12.png`：按钮变成带转圈的"正在升级…"（灰），宽度比"升级"大但仍在卡片内、左对齐。约 3 秒后便携版退出，安装版界面（`vm-after-s59.png`）和托盘起来了 |
-| 2' | 升级后核对（最终构建冒烟） | **通过** | 升级前卸载项 `BuildDate` 2026-11-06 22:58、`libleapgate.dll` `ED8FDE17…`（`4e6d0a3ed`）；升级后 `BuildDate` 2026-11-07 03:51、`libleapgate.dll` `B68535E2…`、`app.so` `4C71FD44…` 都和这次构建一致；进程是 `--service`（会话 0）、`--server`、`--tray`、界面各一个，服务 Running，`DisplayVersion` 0.4.0 |
-| 3 | 失败态、系统错误卡 | **通过**（看画廊） | 画廊 `local-notice_*` 浅色深色各一组拼图 `gallery-local-notice-light.png`、`-dark.png`：失败态"安装失败：…"红字和文字、按钮同一左边缘，"安装"按钮还在、可以重试；错误卡（红底）、信息卡、警告卡（带"启动服务"）都对齐。真机没造失败态。画廊导出（3.44.9）2980 张，没有 RenderFlex 溢出 |
-| 4 | 全局轻提示，vm110 安装版触发 `leapgate://port-forward/123456789` | **通过，有一条小建议** | `vm-toast-link.png`：窗口底部居中的白色圆角条，"暂不支持打开端口转发会话。"，阴影清楚、不压住登录区。建议：它用的是绿色对勾（成功）图标，"暂不支持"不是成功，画廊里有警告变体（`toast_warning_*`），建议这类提示改用警告或中性图标 |
-| 5 | 标题栏图标，主窗口和会话标签页，浅色和深色 | **通过** | `a-light-icon-zoom.png`、`a-dark-icon-zoom.png`（主窗口，A 150%，放大 4 倍：青绿色圆角方块里一扇白门，边缘清楚），`a-session-light-0.png`、`a-session-dark-0.png`（会话标签页，图标同位同大小）；vm110 100% 的 `vm-scr1.png` 左上角也清楚。画廊 `title-bar_*` 没有异常 |
-| 6 | 来访小窗当场退出，A 连 vm110 安装版再断开 | **通过** | 连上后 vm110 起 `--cm`（`Start cm`）；A 关标签后 vm110 日志 `Connection closed: Peer close` 04:19:00.468，每 100 ms 采样的进程表在 04:19:00.677 就没有 `--cm` 了（约 0.2 秒）。再测一轮：关标签（04:20:28.416）→ `--cm` 消失（04:20:28.568，0.15 秒）→ 1.5 秒后重新 `--connect`（A 的脚本记 04:20:30.06）→ vm110 04:20:30.495 新连入、04:20:30.614 `Start cm`、04:20:30.695 新 `--cm` 进程，A 上会话工具栏出来，`vm-cm-again.png` 里小窗重新出来（"11967 正在远程控制本机 断开"）。没有"对方已断开连接" |
-
-**小问题（都不挡合入）**
-1. 全局轻提示的图标语义（上表第 4 项）。
-2. 安装卡文字在"用户 / 账户控制"处折行，"用户账户控制"这个词被拆开；可以把文案改成"……也能操作用户账户控制（UAC）窗口"之外的断句，或接受（Flutter 对中文按字折行，没法按词）。
-3. 画廊里错误卡的"无法写入配置文/件：拒绝访问（错误/5）。"折行难看（"文件"、"错误 5"被拆开）。是样例文字加窄卡片（280 宽）造成，真机没造出这类错误；不是这一版改的。
-
-**环境**：A 的 Leapgate 配置 8 个文件和测前备份（`backup\pre-m8v-1107`，和 `pre-m8s-1106` 一致）逐个哈希一致（`99-A-config-after.txt`），A 上 `task\` 空、没有残留计划任务、我起的 Leapgate 已停；主题测试用应用内"外观"（只改 Leapgate 配置，已还原）。vm110 没回滚、没关机：停在装着 `d3073a33d` 的安装版（服务、界面、托盘都在跑）。vm110 的新界面窗口第一帧会一直是白的（整屏截图和 PrintWindow 都白），要触发一次重绘（UIA 点"最大化"或有状态变化）才画出来，之后正常。
-
-#### M7b 文件传输的暂停、保留重试、个别跳过（被测 `64a2fdc81`）
-
-**验收第一段（2026-11-07 11:30~14:05，tester）**：12 §5.1 的第 1、2（对应 1 的上传方向用第 4 条）、4、5、7、8、10 条加三项探针。控制端 A 上 `app-ui-m7b-64a2fdc81`，对端测试虚拟机上的 Leapgate 安装版（`d4dca63e9`，直连）和上游 1.4.9 便携版（经中继）；Mac 两项（第 1 条的官方 1.5.0 对端、第 6 条 `a:b.txt`）放在最后，见文末。端点、命令、坑记在 `internal/e2e-运行手册.md` §28，证据在 A 的 `C:\leapgate-e2e\evidence\m7b-accept1\`。
-
-| 编号 | 项 | 对端 | 结论 | 现象 |
-|---|---|---|---|---|
-| 1 | 下载时对端读失败（锁第 8 个文件，20 个 0.5~1.5 MB 文件） | Leapgate 安装版 | **通过** | 行"已完成，1 个文件未传输"；详情"dl8\f08.bin · 文件正被其他应用使用"；本机 f01~f07、f09~f20 共 19 个，哈希对，没有 `.download`、`.digest`（f07 是正式名）；解锁后"重试未传输的文件"，行变"已完成 · 20 个文件，20.5 MB"，20 个哈希对 |
-| 1 | 同上 | 1.4.9（经中继） | **未验证**（受上游断线影响） | 锁 f08 或锁 f03 都在第 1 个文件完成后约十几秒弹"替换“f01.bin”？"（大小和修改时间相同），不是从被锁文件的下一个接着传；点"跳过"后继续，f08 没有、f09 起有，之后还弹过别的替换框（f15、f05），一次断线重连（"连接已被远程设备断开。60 秒后重试（第 9 次）"）。不锁文件的对照 20 个文件全部传完（行"已完成 · 20 个文件"，约 4.5 分钟，没有弹框）。原因见下面"断线原因核查"：上游问题，不算 M7b 不通过 |
-| 4 | 上传时本机读失败（A 上锁第 8 个文件） | Leapgate 安装版 | **通过** | 行"已完成，1 个文件未传输"，详情同上，对端 19 个文件，解锁后重试，20 个哈希对 |
-| 4 | 同上 | 1.4.9 | **通过** | 同上，重试后 20 个哈希对、无残留 |
-| 5 | 上传时远程建文件失败（远程 `ulsub\b_sub` 是普通文件，要传 `ulsub\b_sub\x1~x3`，另有 a1、c3、d4） | Leapgate 安装版 | **通过（带上游缺陷）** | 任务没有卡住，行"已完成，3 个文件未传输"；x1~x3 各一行详情，原因写"未找到“x1.bin”，可能已被移动或删除"（实际原因是远程目录建不出来，文案不贴切，记小问题）；c3、d4 哈希对；**a1.bin 被写坏**：716800 字节变成 892928 字节（末尾多 176128 字节），即 4.8 的"还在路上的数据块被追加到上一个文件末尾"，上游缺陷，不算不通过；`b_sub` 普通文件没动 |
-| 7 | 磁盘满，上传（远程 200 MB 虚拟盘，先填到只剩约 55 MB，传 150 MB + 1 MB） | Leapgate 安装版 | **通过** | 行"上传 uldf，失败：远程设备的磁盘空间不足"，带"重试"；对端 `d1.bin.download`（真实长度 57409536）和 `.digest` 留着；删掉填充文件后点"重试"，行"已完成 · 2 个文件，151 MB"，两个文件哈希对。**对端发现**：重试完成后 `d1.bin` 在对端被占用（独占打开失败，`d2.bin` 没有），直到对端服务重启才释放；对端是 `d4dca63e9` 的安装版，M7b 没改它，记下 |
-| 7 | 磁盘满，下载 | — | **未验证** | A 上没有管理员权限、也没有小容量的本地卷（C、D 都几百 GB），造不出本机写满。只做了上传方向 |
-| 7 | "重试"的显示条件 | 1.4.9 | **通过** | 往没有写权限的 `C:\Windows` 上传：行"失败：未找到“ulafter”，可能已被移动或删除"，只有"移除"，没有"重试"（原因不能重试）；磁盘满那条有"重试" |
-| 8 | 4 GiB 以上单个文件（下载 5 GiB） | Leapgate 安装版 | **通过** | 传到 4.21 GB 时暂停：本机 `big5g.bin.download` 当场删掉，行"已暂停 · 已传 4.21 GB / 5 GB"，附注"当前文件超过 4 GB，不支持断点续传，将从头传输。"；继续后 `.download` 从 0 起长（40 秒后 12.7 MB，行"14%，725 MB / 5 GB"，附注还在）；传完 SHA-256 与源一致 |
-| 10 | 断线自动重连时用户暂停的行不被自动继续 | Leapgate 安装版 | **通过** | 两个用户暂停的上传行（`q1.bin` 已传 117 MB、213 MB），一个正在传的 `q2.bin`。先用 `Disable-NetAdapter` 断对端网卡 51 秒：会话没有断，传输停住 58 秒后接着传，没有触发重连，这一种不算数。改成对端服务停 20 秒再起：行停在 49% 约 65 秒，出现"正在连接…"，之后 `q2.bin` 从 509 MB 附近接着传完（哈希对），两个暂停的行一直是"已暂停"，对端目录里 `q1.bin.download` 长度不变（239206400），没有被开始 |
-| 探针 9 | 本机第 2 个文件修改时间 1969-06-01，上传文件夹 | Leapgate 安装版 | **通过** | 该任务"传输失败"（没有原因文字，没有"重试"），对端留下 `f01.bin.digest`、完整长度的 `f01.bin.download`（没改成正式名，上游缺陷）；同一会话里排在后面的上传 `ulafter` 照常完成，3 个文件 |
-| 探针 10 | 暂停和继续的回归：两个上传排队，暂停 A，B 开始传，再继续 A | Leapgate 安装版 | **通过** | 暂停 q1 后行"已暂停 · 已传 718 MB / 1 GB"，q2 从排队变"4%…"开始传；继续 q1 后行显示 q1 进行中、q2"排队中"，对端 0.5 秒采样：q2 的临时文件停在 259653632 不长，q1 接着长到完成，之后 q2 从同一个长度接着传；两个文件哈希都对 |
-| 删除 | 远程文件夹里锁住一个文件，删除这个文件夹（6 个文件） | Leapgate 安装版 | **通过** | 确认框"将从远程设备上删除 6 个文件（44 字节）"；完成后行"已完成，1 个项目未删除"，详情"delme\c.txt · 文件正被其他应用使用"，远程只剩 `c.txt`；解锁后点"重试"，行"已完成 · 1 个文件"，远程文件夹整个没了 |
-
-**断线原因核查（主会话加的三项）**：
-1. **旧界面**（`app-ui-m8-upstream-fb1acefa2`，上游原路）连 1.4.9，同样锁住 `dl8b\f08.bin` 下载这个文件夹：f01 完成后（开始后约 50 秒）弹"覆盖 f01.bin？"（"此文件与对方的一致"），和新界面一样；对端日志同一时段 `Connection closed: Timeout`。旧界面也一样，不是 M7b 引起。
-2. **换加锁方式**：用计划任务起加锁进程（不用 telechir 的长时间 exec），新界面照样出现第一个文件后的"替换 f01.bin"，对端同样记 Timeout。
-3. **对端日志**（退出 1.4.9 让它写盘，只取断开几行）：每次出问题前 1.4.9 记 `Connection closed: Timeout`（新界面一轮是 13:42:15、13:47:27、13:51:04，旧界面 13:55:58，距开始 23~50 秒不等），随后 `create_relay requested`，再是 `Failed to create relay connection … deadline has elapsed` 或 `Failed to receive public key`；我自己杀旧界面时记 `Reset by the peer`。结论：是 1.4.9 对端自己判超时关闭的会话，锁住的文件会让它在传输中触发，和哪一端界面无关；超时的具体条件没有进一步定。
-
-**小问题**：（1）上传时远程建文件夹失败，原因文字写"未找到…，可能已被移动或删除"；（2）本机读失败之外的失败（修改时间 1969）行只写"传输失败"，没有原因；（3）磁盘满重试后对端文件句柄不释放（对端老版本，非 M7b）。
-
-**Mac 两项（2026-11-07 19:10~19:25，控制端 A 上 `64a2fdc81`；对端是 Mac 上的官方 RustDesk 1.5.0，维护者点"接受"）**：
-
-| 编号 | 项 | 结论 | 现象 |
-|---|---|---|---|
-| 1 | 下载时对端读失败（Mac 上 `dl8m` 20 个文件，第 8 个 `chmod 000`） | **通过** | 行"已完成，1 个文件未传输"，详情"dl8m\f08.bin · 没有访问权限"；本机 f01~f07、f09~f20 共 19 个，哈希对、无临时文件；Mac 上 `chmod 644` 后点"重试未传输的文件"，行"已完成 · 20 个文件，17.1 MB"，20 个哈希对。没有出现 1.4.9 那种第一个文件后弹"替换"的情况 |
-| 6 | 下载时文件名在 Windows 上无效（Mac 上 `a:b.txt`） | **不通过** | 两个文件夹各试一次：`dlcolon`（`a:b.txt`、f1、f3、f4，无效名排在第一）、`dlcolon2`（`b1.bin`、`c:d.txt`、`e1.bin`，无效名在中间）。两次都是整个任务"失败：名称无效"，本机连文件夹都没建出来，一个文件也没传，没有详情、没有"重试"。预期是其余照传、详情写原因。推测是接收一侧建任务时一次性检查全部名字，失败发生在任务创建阶段（Rust 的"跳过无效名"挂钩管不到），读码没做，交回 coder 核对 |
-
-**第 6 条复测（2026-11-07 20:10~20:45，新界面 `f591c755e`，哈希见 A 的 `evidence\m7b-accept1\00-builds.txt`；Mac 官方 1.5.0，维护者点"接受"）**：Mac 上 `dlcolon`（`a:b.txt`、f1、f3、f4，无效名排第一）、`dlcolon2`（`b1.bin`、`c:d.txt`、`e1.bin`，无效名在中间）、`dlq`（`g1.bin`、`g2.bin`、`x?y.txt`，无效名最后）。结论：**M7b 的跳过通过**（三种无效名都只跳过这一个文件、详情写原因、其余文件哈希对、本机没有坏名字和临时文件）；"写到错误的目录"另记，主会话核对后判断与跳过无关，见表后（上面 `a:b.txt` 整个任务失败的记录保留，是修之前的）。
-
-| 情形 | 结果 |
-|---|---|
-| `dlcolon`，本机目标文件夹不存在 | 通过：行"已完成，1 个文件未传输"，详情"dlcolon\a:b.txt · 名称无效"，`dl_a\dlcolon\` 里 f1、f3、f4 三个文件哈希对，没有带冒号或问号的文件、没有临时文件 |
-| `dlcolon`，本机目标文件夹已存在（空的 `dl_b\dlcolon`） | 通过：f1、f3、f4 三个文件哈希对，行同上 |
-| `dlcolon2`、`dlq`，本机目标文件夹不存在 | **不通过**：行都是"已完成，1 个文件未传输"，详情对（`dlcolon2\c:d.txt · 名称无效`、`dlq\x?y.txt · 文件名“x?y.txt”在 Windows 上无效`），但**其余文件写到了错误的目录**：本机目标是 `C:\leapgate-e2e\m7b-a1\dl_a` 时，文件落在 `C:\leapgate-e2e\dlcolon2\`、`C:\leapgate-e2e\dlq\`，`dl_a` 里什么都没有；目标换成 `...\m7b-a1\deep\x\y` 再下载 `dlq`，落在 `C:\leapgate-e2e\m7b-a1\dlq\`。界面上看不出来 |
-| `dlcolon2`、`dlq`，目标文件夹已存在 | 未单独验：目标在 `dl_b` 时下载 `dlcolon2` 弹出"替换“b1.bin”？"，路径是 `C:\leapgate-e2e\dlcolon2`（上一次落错位置留下的同名文件），同样是落错目录 |
-
-tester 原先的推断是"跳过以后接着传时目标不对"。主会话查 A 的日志（`io_loop.rs:811` "New job N, write to …"）更正：落错的几次，任务**一建出来**本机目标就已经是错的（job 2 `C:\leapgate-e2e\dlcolon2`、job 3 `C:\leapgate-e2e\dlq`、job 5 `C:\leapgate-e2e\m7b-a1\dlq`；对的 job 1 是 `…\dl_a\dlcolon`、job 6 是 `…\dl_b\dlcolon`），Rust 照界面给的目标写，和跳过、接着传无关。界面发起下载时用的是本机栏当时的目录（`file_model.dart` `transfer` 的 `other.path`）。测试脚本点"下载"前没有确认本机栏位置（只用 `Nav` 打字跳转，不核对面包屑），jobs 2、3、5 没有位置记录，所以落错目录可能是本机栏不在 `dl_a`；但 job 4 时有一次转储，本机面包屑显示 `m7b-a1 > dl_b`，日志里任务目标却是 `C:\leapgate-e2e\dlcolon2`，这一处解释不了，不能排除"面包屑和本机栏实际路径不一致"（M7a 的问题）。交给验收第二段先在两台端点之间复现（每次点"下载"前记面包屑、"下载到…"按钮名和日志里的目标）。已核对：本机没有带冒号或问号的文件，没有 `.download`、`.digest` 残留。落错目录的文件已复制到 `evidence\m7b-accept1\T6r-stray\` 后从 `C:\leapgate-e2e\` 删掉。
-
-**没验**：下载方向的磁盘满；1.4.9 对端的第 1 条完整流程（被上游断线打断）。Mac 上的测试数据 `~/leapgate-ft-test/` 已整个删掉，没动 Mac 上 RustDesk 的配置。
-
-**环境**：A 的 Leapgate 配置 8 个文件和测前备份（`backup\pre-m7b-accept1-1107`）逐个哈希一致（`99-A-config-after.txt` 与 `00-A-config-before.txt` 无差异）；A、对端的锁文件进程、计划任务、测试虚拟盘（V:）都已清掉；对端 Leapgate 服务已重新启动（测前是 Running），1.4.9 便携版进程已停；没有碰 A 上的原版 RustDesk。
-
-**验收第二段（2026-11-07 20:56~23:15，tester，被测 `f591c755e`，新界面 `app-ui-m7b-f591c755e`、旧界面 `app-ui-m7b-upstream-f591c755e`，哈希见 A 的 `evidence\m7b-accept2` 旁的 `m7b-accept1\00-builds.txt`）**：控制端 A，对端 B（Leapgate 便携版，新界面，直连）和测试虚拟机（Leapgate 安装版 `d4dca63e9`，直连，约 20 MB/s）。端点、命令和坑记在 `internal/e2e-运行手册.md` §29，证据在 A 的 `C:\leapgate-e2e\evidence\m7b-accept2\`。
-
-**第 0 项，"下载落到本机栏以外的目录"：没有复现为应用的不一致**。A、B 之间下载文件夹 10 次（`step0.txt`，`tools\rep.ps1`；每次点"下载"前记面包屑、"下载到“…”"按钮名和日志 `io_loop.rs:811` 的 "New job N, write to …"；中间夹了"刚下完立刻跳到别的文件夹""跳到不存在的路径再跳回""跳到上一级再进"）。结果：5 次任务目标和本机栏一致；4 次没有建出任务（行选中没生效，点"下载"没反应）；1 次（r7）本机栏的路径输入丢了字符，栏停在上一级，按钮写"下载到“leapgate-e2e”"、任务目标是 `C:\leapgate-e2e\srcD`，三者互相一致，只是和脚本以为的目录不一致。没有出现"按钮名或本机栏是 X、任务目标是 Y"的情况。第一段看到的落错目录，更可能是 `Nav` 打字丢字符（手册早有记录：路径停在上一级）加上 `Crumb` 在面包屑被截断时读到别的行，而不是应用写错；结论：应用的按钮名、本机栏、任务目标三者一致，**未发现缺陷**。`Crumb` 要改成只信"下载到“…”"按钮名。
-
-| 项 | 对端 | 结论 | 现象 |
-|---|---|---|---|
-| 22 下载暂停继续（768 MB） | 测试虚拟机 | **通过** | 暂停在 27.8 MB，60 秒内 `.download` 长度不变；继续后长度从 28.0 MB 单调增长，传完哈希与源一致，只剩正式文件 |
-| 22 上传暂停继续（640 MB） | 测试虚拟机 | **通过** | 暂停在 96 MB 时对端临时文件 117178368 字节，两次采样相同；继续后从 ≥245 MB 单调增长，哈希一致 |
-| 22 排队时暂停 | 测试虚拟机 | **部分** | 暂停 ub1 后 ub2 从"排队中"变进行中（通过）；继续 ub1 时它只剩约 3% 就传完，没能看到"第二个回到排队中" |
-| 22 关视图再打开（一个暂停的下载加一个暂停的上传） | 测试虚拟机 | **通过** | 点"断开"没有弹确认（暂停的不计入）；重开后汇总"2 个已暂停"加"全部继续"，两行"已暂停"；继续后两个都接着传（下载 `.download` 起点 26345472，单调）。另：有进行中的任务时点"断开"出"断开文件传输？"加"2 个传输尚未完成，下次打开文件传输时可继续。" |
-| 22 下载时对端读失败（锁第 8 个，20 个文件） | 测试虚拟机 | **通过** | 行"已完成，1 个文件未传输"；详情"dl20\f08.bin · 文件正被其他应用使用"；本机 19 个，没有残留；解锁后"重试未传输的文件"，行"已完成 · 20 个文件，19.6 MB"，20 个哈希对 |
-| 22 上传时本机文件被占用（锁第 8 个） | 测试虚拟机 | **通过** | 同上，重试后对端 20 个哈希对 |
-| 22 删除部分失败和重试 | 测试虚拟机 | **通过** | 确认"将从远程设备上删除 6 个文件（48 字节），无法恢复。"；锁住一个后行"已完成，1 个项目未删除"、详情"delme\c.txt · 文件正被其他应用使用"；解锁后"重试"，行"已完成 · 1 个文件"，远程文件夹没了 |
-| 复测 删除时取消不卡住 | 测试虚拟机 | **通过** | 12000 个小文件的文件夹，删除开始约 2 秒后点取消：行"已取消"，没有卡住，远程还剩 11200 个文件 |
-| 复测 取消后行不复活 | 测试虚拟机 | **通过** | 下载 3 秒后取消：行"已取消"，12 秒内保持，没有 `.download` 残留；已取消的暂停行断开重开后不再出现 |
-| 复测 文件全部被跳过 | B | **通过** | 上传的 20 个文件在对端都已存在，勾"对此次传输中的其他冲突执行相同操作"后点"跳过"：行"已完成，20 个文件已跳过"，详情每行"dl20\fNN.bin · 已跳过：目标位置已有同名文件"，没有"重试"；"清除已完成"把它清掉。措辞与 02 §2.4.7 的表一致 |
-| 复测 4 GB 附注 | — | **通过（反例）** | 暂停、继续的普通行都没有"当前文件超过 4 GB…"附注（第一段 5 GiB 那条是正例） |
-| 远程桌面回归（`io_loop.rs` 改过） | B（直连） | **通过** | 新界面连 B：状态"直连"，视频 H265，工具栏和被控端画面正常；同一标签里再开文件传输不再问密码，下载 20 个文件哈希一致。经中继那一轮**未做** |
-| 旧界面五项 | B | **部分** | 1 连接通过（直连，视频正常）；3 文件传输窗口（没有 M7b 的界面）下载 12 个文件哈希一致，上传同名同内容文件时出上游的"覆盖"对话框。2 强制中继、4 端口转发、5 出口、6 ID 加盐**没做** |
-| 最新 stable（官方 3.47.9，仍是最新 stable） | A | **通过（4K 未做）** | 编译通过；analyze：app 无问题，core 96 条（91 info、5 条 `file_model.dart` 的上游 warning，同基线）；core 测试 327 个、app 测试 1193 个通过（2 个跳过）；画廊 2988 张，和 3.44.9 的 2988 张比，`identical=2856 changed=132`，差异像素（通道差 >32）最多 3 个；上屏：A 用 3.47.9 构建连测试虚拟机，文件传输页完整出现（语义树 143 个节点）。4K 上屏没有条件（B 只有一块 1366×768）。构建目录 `app-ui-m7b-stable3479-f591c755e`；之后用 3.44.9 加路线 C 引擎编回，`flutter_windows.dll` `8667024A…`、`app.so` 与发布构建相同 |
-
-**发现（交主会话判断）**：
-1. **同时下载加上传时传输卡死**（中，可能是 KCP 层，未确认是否 M7b 引起）。测试虚拟机直连，一个下载（768 MB）和一个上传（640 MB）同时进行：几秒到 20 秒后速度掉到 100 KB/s 以下，约 60 秒后日志出现 `kcp conn reaped by peer silence`、`stream closed`，**界面在会话已死之后仍显示两个任务"N%，… KB/s"，远程栏出现"读取远程文件夹超时。"和"重试"，没有断线提示**，点"断开"才出现确认。三次复现（两次是"全部继续"后同时继续两个任务，一次是新开连接后手工同时起一个下载和一个上传）。单方向的传输（含同时两个上传）没有出现。没拿到 M8 构建（无 M7b 挂钩）的同场景对照（对照那次第二个任务没有真的并行启动），所以不能说是 M7b 引入。请 coder 在测试虚拟机上用 M8 构建和本构建各跑一次"同时下载加上传"。
-2. 断线后行没有改成"已暂停"：同上现象下，行一直写进行中，直到手工断开重开才变"已暂停"；与 M7a 清单"断线续传"一条的预期不同，但那一条是对端进程被杀、会话由关闭引起，这次是 KCP 静默超时，会话管道没有收到关闭。
-3. 重开后取消"已暂停"的行，其 `.download` 不一定被删（A 上一个 147 MB 的 `big.bin.download` 留在目标目录）。只见一次，未单独复现。
-
-**没验**：下载方向磁盘满；单文件下载 `job_error` 带可重试原因时的"重试"（造不出本机写失败）；"失败保留行撤回提示"（不清楚怎么触发）；删除确认和新建文件夹对话框的各种报错（`SetValue` 不生效、对话框打字只收第一个字符）；Mac 对端（本段没有开）；经中继的远程桌面回归；旧界面的强制中继、端口转发、出口、ID 加盐；4K 上屏；冒烟清单 §17 里除上面几项外的条目（入口、浏览、特殊项、替换确认的其余分支、被控端不允许文件传输、上游 1.4.9 的整套、要人在场的拖放和修饰键）。
-
-**§22 清单的问题**：第一条"下载时对端读失败"写"Leapgate 安装版和便携版至少各测一种"，便携版这轮没有测；"失败行的重试"那条要虚拟盘，A 没有管理员权限；"排队时暂停"在直连快链路上两个 640 MB 文件传得太快，建议改成限速或用 1.4.9 经中继；§22 没有"同时下载加上传"一条，建议补。
-
-**环境**：A 的 8 个配置文件和测前备份（`backup\pre-m7b-accept2-1107`）逐个哈希一致（`99-A-config-after.txt` 与 `00-A-config-before.txt` 无差异）；B 的 4 个配置文件与测前一致；A、B 的 Leapgate 都停，测试数据（A 的 `m7b-a2`、B 的 `m7b-a2`、测试虚拟机的 `ftdata2`）都已删；测试虚拟机没有回滚、没有关机，Leapgate 服务 Running；构建 worktree `.wt\ui-m0-build` 停在 `f591c755e`、3.44.9 加路线 C，工作区除生成的 `libs/portable/app_metadata.toml` 外干净；没有碰 A、B 上的原版 RustDesk 和 mihomo。
-
-**验收第二段补一轮（2026-11-07 23:00~2026-11-08 00:10，tester，构建不变 `f591c755e`；窗口放副屏，手册 §0）**：端点和做法记在 `internal/e2e-运行手册.md` §29 末尾，证据在 A 的 `C:\leapgate-e2e\evidence\m7b-accept3\`。
-
-**A. "同时下载加上传卡死"的对照：旧界面、强制中继的新界面、M8 发布构建全都一样卡，不是 M7b 引入的**。场景：A 控制端，测试虚拟机被控端（Leapgate 安装版 0.4.0，`leapgate.exe` 与发布构建 `d4dca63e9` 的 `leapgate.exe` 哈希相同，即 `d4dca63e9`），768 MB 下载加 640 MB 上传先后相隔几秒到十几秒启动；每秒采样 A 上下载临时文件和测试虚拟机上上传临时文件的真实长度（用共享方式打开读 `Length`，目录项长度滞后）。判"卡"：长度连续 ≥ 60 秒不变且没传完。
-
-| 控制端 | 路径 | 次数 | 结果 |
-|---|---|---|---|
-| 旧界面 `app-ui-m7b-upstream-f591c755e`（M7b 开关关着） | ICE 直连（`selected host/v4/ethernet`） | 3 | **3 次都卡**：R1 下载 25.7 MB、上传 155 MB，约启动后 16 秒起长度不变；R2 下载停在 7.3 MB（上传传完了 640 MB）；R3 下载停在 21.2 MB、上传停在 330 MB（约 60 秒起）。3 分钟内日志没有 `kcp conn reaped by peer silence` |
-| 新界面 `f591c755e`，`--relay` 强制走中继（日志只有 `used to establish Relay connection`，标签"经中继"） | 中继 | 3 | **3 次都卡**：N1 上传 41.4 MB 起长度不变（下载没出现临时文件）；N2 上传 7.08 MB（约 10 秒起），下载没出现临时文件；N3 下载 131072 字节、上传 34.6 MB。2 分钟内日志没有 `reaped` |
-| M8 发布构建 `app-rel-d4dca63e9`（M7b 之前） | ICE 直连（`selected host/v4/ethernet`）；另一次因 `--relay` 写进的对端配置没清，走了中继 | 各 1 | **都卡**：直连下载 22.5 MB 起不变，中继下载 131072 字节起不变 |
-
-补充：我第二段自己复现的三次（新界面，ICE 直连）里，有两次约 60~68 秒后日志出现 `kcp conn reaped by peer silence`，这轮的 8 次没有等到（观察窗口 2~3 分钟，之后手动结束）。启动间隔不同、先传上传还是先传下载不同，卡的时刻不同，但每次都是两个方向同时有数据时才卡，单方向（含同时两个上传）没有卡。结论：**M7b 之前的 M8 发布构建就有，ICE 和中继都有，旧界面也有**；位置更可能在被控端（测试虚拟机上的 0.4.0 安装版，上游的服务端文件传输代码）或两端共用的传输层，与 M7b 的挂钩无关。没做的对照：被控端换成上游 1.4.9（可以分清是 Leapgate 改动还是上游本来就有）。**建议单列一个缺陷，不阻塞 M7b 合并。**
-
-**B. 远程桌面经中继回归**（A 新界面 `--connect --relay` 连 B）：**通过**。标签"经中继"；视频 H265；A 上点击 (500,400) 和 (1300,800)，B 的光标分别到 (213,0) 和 (1014,766)，输入有效；同一标签里再开文件传输（不问密码，标签仍是"经中继"），下载 3 个文件的文件夹（439 KB，B 经中继约 12 KB/s）3 个哈希与源一致。
-
-**C. 上游 `job_error` 可重试原因的重试**：**通过**。测试虚拟机上一个 2 MB 的文件被独占打开，单文件下载：行"失败：文件正被其他应用使用"，带"重试"，"1 个失败"；本机目标目录里没有任何文件；解锁后点"重试"，行"已完成 · 1 个文件，1.91 MB"，哈希与源一致。
-
-**D. 重开后取消"已暂停"的行，`.download` 是否留下**：**留下，新旧界面一样，是上游行为**。新界面：768 MB 下载暂停在 19.8 MB，"断开"、重开，取消那一行，行变"已取消"，目标目录里 `big.bin.download`（26607616 字节）和 `big.bin.digest`（40 字节）仍在，等了 10 秒没删。旧界面：在新界面留下的记录上点 ×，两个文件仍在；再用纯旧界面做一遍（开始下载约 4 秒、强杀进程、重开出现未完成记录、点 ×），`big.bin.download`（125042688 字节）和 `.digest` 仍在。另一个观察：新界面取消后这条记录会被旧界面重开时再次恢复（旧界面显示"….bin 0/0 files"带刷新和 ×）；新界面自己重开时没有再出现（上一轮验证过）。两种界面都不清理临时文件，M7b 没有改变这一点。
-
-**这三样继续记"未验证"**：旧界面另外四项（强制中继、端口转发、出口、ID 加盐）——协调者定 M7b 只要求五项里的文件传输那项；下载方向磁盘满——A 没有管理员权限，也没有小容量的本地卷；"失败保留行撤回提示"——触发方式不清楚。
-
-**环境**：A 的 8 个配置文件与测前备份（`backup\pre-m7b-accept3-1107`）逐个哈希一致（`99-A-config-after.txt` 对 `00-A-config-before.txt` 无差异；`--relay` 会往对端配置写 `force-always-relay`，用 `m-restore-a3.cmd` 盖回）；B 的 4 个配置文件与测前一致；A、B 的 Leapgate 都停，测试数据（A 的 `m7b-a3`、B 的 `m7b-a3`、测试虚拟机的 `C:\ftdata2`）和 B 上的新界面副本已删；测试虚拟机没有回滚、没有关机，Leapgate 安装版服务 Running；原版 RustDesk、mihomo 没碰。
-
-
-##### 最终外观检查（2026-11-08，被测 `f591c755e`，代码同 `ui/m7b` HEAD，之后只改了本文件）
-
-对象是准备合入 main 的提交。做法：画廊 3.44.9 重新导出（2988 张，没有 RenderFlex 溢出；队列的新状态逐个看过浅色深色、简洁详细）；样稿 `A-P7-文件传输-菜单与其他状态.html` 用 Playwright 渲染成 `cmp\sample-*.png` 对照；真机 A（新界面，连测试虚拟机的安装版 `d4dca63e9`，直连）造出各状态截图，浅色、深色、英文各看一遍。证据在 A 的 `C:\leapgate-e2e\evidence\m7b-visual-1108\`（`gallery\`、`cmp\`、`shots\`、`partial.txt` 是被打断前的记录）。真机状态：
-
-- 已暂停（`v2-paused`）：768 MB 下载暂停在 61.9 MB，行"已暂停 · 已传 61.9 MB / 768 MB"、进度条、播放和 × 两个按钮，汇总行"1 个已暂停"加"全部继续"。
-- 已完成，100 个文件未传输（`v1-partial-collapsed`、`v1-partial-detail`）：150 个文件的文件夹里 100 个被对端独占打开（每三个锁两个，不会连续 20 个失败），行带警告图标、"查看详情"、重试和 ×；展开后每行"路径 · 文件正被其他应用使用"，原因红字。
-- 全部跳过（`v4-skipped-detail`）：替换确认勾选"对此次传输中的其他冲突执行相同操作"后点"跳过"，行"已完成，2 个文件已跳过"、没有重试图标，详情"已跳过：目标位置已有同名文件"；"清除已完成"清掉它和已完成、已取消的行，不清"部分未传输"的行（符合 M7b-7）。
-- 删除部分失败（`v6-del-partial-detail`）：删除确认"永久删除“scat”？ 将从远程设备上删除 150 个文件（214 KB），无法恢复。"，结果行"已完成，100 个项目未删除"，带查看详情和重试。
-- 汇总行（`v5-summary-mixed`、`w2-dark-replace-checked`）：只剩已暂停和部分未传输的行时"1 个已暂停"、"全部继续"、"收起"，没有"清除已完成"；替换确认等着时"1 个已暂停，1 个等待确认"（警告色）。
-- 深色（`w1-dark-panel`、`w2-dark-*`、`w3-dark-skipped-detail`）：上面各状态都看了，对比度、警告图标、详情红字、汇总行都正常。英文（`x1-en-panel`）：各状态文案完整、没有截断，"Paused · 61.9 MB of 768 MB transferred"、"Completed, 100 files not transferred"、"Completed, 2 files skipped"。
-- 旧页面顺带看：队列行结构、轻提示（"已复制"带成功图标，浅色深色英文）没有变化，样稿对照一致。
-
-**判定：通过，没有必须改项。**
-
-**必须改**：无。
-
-**小项**
-1. 全是用户自己选"跳过"的行（"已完成，2 个文件已跳过"）也用警告色图标（`v4-skipped-detail-0.png`）。02 只写了"已完成，部分未传输的行用警告色图标"，没说跳过这一种；用户自己的选择配警告图标偏重，可考虑用中性图标。以 02 为准则不算差异。
-2. 队列面板里展开"查看详情"后，同一面板里别的行被推出可视区（`v1-partial-detail-0.png`，窗口 1936×1209 物理像素、面板约 300 高时只能看到约 6 行详情，不能同时看到别的任务行）。能否滚动没有在真机上验到：我用投递的鼠标滚轮和真实鼠标滚轮都没有滚动任何列表（连两栏文件列表也不动），属于测试手段的限制，不能当成界面不能滚动。留给维护者试用看一眼：展开后能不能用滚轮在详情里滚、详情超过 50 行时最后一行是否是"另有 ‹k› 个文件"（这一行只在画廊 `file-queue_expanded-all-states` 看到，真机的 100 行详情没滚到底）。
-3. 替换确认的正文在 660 宽的框里折行成"……已有同名文 / 件。"，末行只剩一个字和句号（`w2-dark-replace-checked-0.png`，浅色同样）。是目标路径较长造成，M7a 就有，不是 M7b 引入。
-4. 上一个 tester 记的：画廊夹具 `file-queue_paused-rows` 标题写"2 个已暂停"但只画了 1 行（夹具的过滤问题，不是界面问题）。
-
-**和样稿不同、以说明为准**
-- 样稿里单个文件的"已跳过：目标位置已有同名文件"是没有图标的普通行；实现里文件夹任务全部被跳过时写"已完成，‹k› 个文件已跳过"并带"查看详情"（02 §2.5、12 §4.5）。
-- 02 的"暂停中"这个过渡态在实现里不存在，02、12 里也没有这个字符串，没有东西可查。
-- 样稿的详情两行用 2 个文件；真机详情行用同一套文字样式，原因红字、路径粗体，一致。
-
-**不属于 M7b、顺带看到**：英文下本机栏"类型"列里"Incomplete tra…"被省略号截断（`x1-en-panel-0.png`，M7a 起）；窗口高度只有 800 逻辑像素时主页左栏的登录卡片压住"设备"那一行的下半部分（M6b 试用说明里"左栏被搜索框遮半行"同一类，`待调.md` 已有）。
-
-**环境**：A 的 8 个配置文件与测前一致（`99-A-config-after.txt` 对 `00-A-config-before.txt` 逐个哈希相同；这轮改过主题和语言，已用备份盖回）；A 的 Leapgate 已全部停掉；A 的 `m7b-v`、测试虚拟机的 `C:\ftvis`、锁文件用的计划任务都已删，测试虚拟机没回滚、没关机、Leapgate 服务 Running；原版 RustDesk、mihomo 没碰。真机截图里一次性密码和本机 ID 只出现在一张主页截图上，看完已删。
+验收记录不在公开仓库。
 
 ### 10.6 core 的结构（M1）
 
@@ -1672,7 +608,7 @@ tester 原先的推断是"跳过以后接着传时目标不对"。主会话查 A
 |---|---|---|
 | `session.dart` | 会话对象 `FFI`（改写档，沿用上游类名和 `sessionId`、`id`、`connType`、`closed` 这几个成员名）和 `ConnType`（从 `model.dart` 挪来，`.index` 传给 Rust，顺序不能动）；`events`、`notices`、按会话记的状态、`connToken`、`ask`、`start`、`close` | 每个会话自己的 model 字段（`imageModel`、`ffiModel`、`canvasModel` 等）照上游写成 `late final`，在构造函数里用 `WeakReference(this)` 建；`start` 里各 model 的初始化、`close` 里的清理（放在 `bind.sessionClose` 之前）、`_onMessage` 里 `Rgba`、`Cursor`、`Texture` 三种消息，照上游 `FFI.start`、`FFI.close` 补进去 |
 | `session_registry.dart` | 会话注册表：一台设备一个标签，标签里每个视图一个会话；`open`、`close`、`closeDevice`；同一设备再开别的视图时用标签里已有会话的连接令牌；`singleSession` 时（手机，01 §8 Q8）开新会话前关掉已开的 | 只有它创建、启动、关闭 `FFI`；页面不再自己 `FFI(...)`、`start`、`close` |
-| `app_core.dart` | 全局持有者 `AppCore`（窗口接口、注册表、全局轻提示、提问接口），全局变量 `appCore` 由 app 的 `main` 设 | 上游 `FFI` 里标着 global 的 model（`serverModel`、`abModel`、`groupModel`、`userModel`、`peerTabModel`、三个 `Peers`、CM 的 `cmFileModel`）不进会话对象，到各自的里程碑（M3、M4）加到这里 |
+| `app_core.dart` | 全局持有者 `AppCore`（窗口接口、注册表、全局轻提示、提问接口），全局变量 `appCore` 由 app 的 `main` 设 | 上游 `FFI` 里标着 global 的 model（`serverModel`、`abModel`、`groupModel`、`userModel`、`peerTabModel`、三个 `Peers`、CM 的 `cmFileModel`）不进会话对象，随用到它们的功能加到这里（§10.10、§10.11） |
 | `session_events.dart` | 事件按 `name` 查表分发，会话流和全局流各用一个表；没人处理的名字经 L1 写一行警告（只写流和名字，事件里可能有密码和路径），每种流每个名字一次运行只写一次 | 会话流 `ffi.events.on('<name>', handler)`，全局流 `appCore.events.on(...)`。复制进来的 model 的事件在 `FFI` 构造函数里登记，`FfiModel` 的在它自己的构造函数里登记；同一个名字只能登记一次 |
 | `notices.dart` | 会话通知 `SessionNotices`（列表，后来的不冲掉前面的；同 `tag` 的原地替换，`dismissTag` 按 tag 去掉）和全局轻提示 `Toasts`（一次一条，新的替换旧的，到时自动消失） | 通知和轻提示都只带 key 和参数，文案在 app。key 用上游的翻译 key（`translate(...)` 的参数、Rust 推来的文本）。`showToast(translate(k))` 改成 `appCore.toasts.show(k)`；上游弹窗前的 `dialogManager.dismissAll()` 不再照搬；Rust 的 `cancel_msgbox` 对应 `dismissTag(evt['tag'])` |
 | `prompts.dart` | 提问接口 `Prompter.ask(prompt, session:)`：带会话时只遮那个会话的标签，不带时只遮主页；关掉不答返回 null。三种提问：`OverwritePrompt`（覆盖 / 跳过 / 取消 + 全部照此）、`DeletePrompt`（删除 / 取消 + 全部照此）、`RenamePrompt`（提交时用 `check` 校验，返回新名字） | 会话里用 `ffi.ask(...)`。`file_model` 里 `showFileConfirmDialog`、`showRemoveDialog` 保留函数名和返回值，函数体改成调 `ask` 再换回上游的 `bool?` 和"全部照此"勾选；`renameAction` 改成 `RenamePrompt`，重名和非法名放进 `check`。`removeAction` 里的 `showLoading` 没有对应接口，出错的 `msgBox` 改成会话通知 |
@@ -1691,7 +627,7 @@ tester 原先的推断是"跳过以后接着传时目标不对"。主会话查 A
 | `rustDeskWinManager.call(WindowType.Main, kWindowBumpMouse, …)`（`model.dart:2673`） | 本来就在主窗口里，直接调 `RdPlatformChannel.instance.bumpMouse` |
 | 按 `desktopType`、`kWindowId` 分支 | 按主窗口处理 |
 
-接口里没有的：`windowManager.minimize`、`close`（`server_model.dart:169`、`:584`，CM 是单独的进程，M3 再定）；`model.dart:755-756` 的关闭全部窗口（URL 动作，只来自 macOS 和 Linux）；窗口标题（跟着当前标签，在 app 的外壳里设）；`chat_model.dart:319-332` 的聊天窗口大小（`chat_model` 只留消息存储）。
+接口里没有的：`windowManager.minimize`、`close`（`server_model.dart:169`、`:584`，CM 是单独的进程，见 §10.10）；`model.dart:755-756` 的关闭全部窗口（URL 动作，只来自 macOS 和 Linux）；窗口标题（跟着当前标签，在 app 的外壳里设）；`chat_model.dart:319-332` 的聊天窗口大小（`chat_model` 只留消息存储）。
 
 **复制进来的 models 和 `FfiModel`（M1 B 块）**。下面的行号都是上游 `bd9262397` 的。
 
@@ -1731,18 +667,18 @@ tester 原先的推断是"跳过以后接着传时目标不对"。主会话查 A
 
     另有 §3.7 示例序列、2FA 的 C4、等对方接受加选 Windows 会话、通知分流和 `cancel_msgbox`、取消关视图、`no displays ends the connection (model.dart:1713, ui_session_interface.rs:1845)`、`the password is trimmed, and sent once (common/widgets/dialog.dart:1000-1002)` 几条。变异检查过：去掉 `_reconnects *= 2`、`pi.isSet` 条件、`!isRefreshing`、`onDisplays` 里的 30 秒起点复位、`onFirstImage` 里的重启计时复位、密码 trim、渲染切换的阶段判断、`login` 的状态检查，各自都有测试失败。
   - 和上游不同的地方：任何状态变化都结束倒计时（上游手动重试后定时器还会再重连一次）；通知类 msgbox 不动重连计时和重连计数（上游的 else 分支会取消、重置）；隐私模式的通知不延迟 3 秒（上游怕画布刷新冲掉对话框）；等画面计时器重开前先取消（上游只覆盖引用）；`restarting-show` 标题是 Restarting 时进 restarting 面板（上游只显示 Connecting）；`wait-uac` 去掉 `on-uac` 通知（上游 `dismissAll`）；`connection_ready` 一律进 verifying，所以重启时最后一帧变暗在通道建立时就结束了，而不是第一帧到时；5 秒计时器触发的重连保持 restarting（上游显示 Connecting）；换渲染方式只在 connected 时进等画面（上游在任何状态上都叠一个等画面框）。Android 文档选择器的分支（手机阶段）和结束时询问备注（01 §5.5 已去掉）没搬。
-  - 已知限制和留给后面的：01 §4.1 进度条的"查找设备""建立连接"两步 Rust 不区分（`connection_ready` 之前没有任何事件），合成 connecting 一种，要分就得在 Rust 加挂钩，暂不做；提权通知上的"请求提升权限"按钮要弹选方式的对话框，随 M2b 的工具栏做，现在通知没有动作；"已等待多久"、等画面超过几秒后加的那行说明，由页面自己计时；要密码时 `sessionGetRemember` 返回之前，如果 `wait-remote-accept-nook` 先到，返回后阶段会被打回密码框（上游也一样，修要加状态，不修）。
-  - **接 V1 时要处理**（M2b 的标签切换）：第一帧到之前标签就被隐藏时，`showConnectedWaitingForImage` 起的 1.5 秒计时会误发空的系统登录密码（隐藏后 Rust 不再推帧）。接 V1 时，隐藏期间不按"没画面"处理（例如隐藏时取消计时，切回时如果仍在 `waitForFirstImage`，再起一次），具体做法 M2b 定。
+  - 已知限制：01 §4.1 进度条的"查找设备""建立连接"两步 Rust 不区分（`connection_ready` 之前没有任何事件），合成 connecting 一种，要分就得在 Rust 加挂钩，不做；提权通知上的"请求提升权限"按钮弹的选方式对话框由工具栏提供（§10.9）；"已等待多久"、等画面超过几秒后加的那行说明，由页面自己计时；要密码时 `sessionGetRemember` 返回之前，如果 `wait-remote-accept-nook` 先到，返回后阶段会被打回密码框（上游也一样，修要加状态，不修）。
+  - **接 V1 时要处理**（标签切换）：第一帧到之前标签就被隐藏时，`showConnectedWaitingForImage` 起的 1.5 秒计时会误发空的系统登录密码（隐藏后 Rust 不再推帧）。接 V1 时，隐藏期间不按"没画面"处理（隐藏时取消计时，切回时如果仍在 `waitForFirstImage`，再起一次），见 §10.8 的 V1 一条。
 - Rust 推事件走两种流：每个会话自己的流（`sessionStart`），和全局流（`startGlobalEventStream`，`PlatformFFI.init` 里开始收）。全局流的事件先给 `PlatformFFI.tryHandle`，没人认领的交给 `setEventCallback` 设的回调（`models/native_model.dart:274-277`）。新界面的回调是 `AppCore.events`（`SessionEvents(stream: 'global')`），在 `AppCore` 的构造函数里设；app 的 `main` 先建 `AppCore` 再调 `platformFFI.init`，所以一开始的事件也不会丢。两种流没人处理的名字都按"每种流每个名字一次"写日志，日志里写明是哪种流。
-- 会话流上没登记、等各自的块或要主会话定的：`screenshot`（:468，:484-550，"另存为"要选文件的对话框）、`printer_request`（:466，:552-722，要选打印机的提问）、`switch_back`（:407-410）；聊天和语音的 6 个（`chat_client_mode`、`chat_server_mode`、`on_voice_call_*`，:362-367、:416-428）随 M2b（`chat_model` 改写）；`terminal_response`（第三轮）；`selected_files`、`send_emptry_dirs` 只在 Web 上有。
+- 会话流上 M1 没登记、由各自的块登记的：`screenshot`（:468，:484-550，"另存为"要选文件的对话框）、`printer_request`（:466，:552-722，要选打印机的提问）、`switch_back`（:407-410）；聊天和语音的 6 个（`chat_client_mode`、`chat_server_mode`、`on_voice_call_*`，:362-367、:416-428）由 M2b 登记（`chat_model` 改写，§10.9）；`terminal_response`（M9b，§10.18）；`selected_files`、`send_emptry_dirs` 只在 Web 上有。
 - 全局流上没登记的：CM 的 `add_connection`、`on_client_remove`、`show_elevation`、`update_voice_call_state`、`cm_file_transfer_log`（`src/flutter.rs:1534-1596`）在 M3，`sync_peer_hash_password_to_personal_ab`（`src/client.rs:3742`）在 M4，都登记在 `appCore.events` 上，不登记在会话的表上；`on_url_scheme_received`（`src/server.rs:776`，只来自 macOS 和 Linux）。
 - M2a 的会话页要做的：`canvasModel.initializeEdgeScrollFallback(this)`（`desktop/pages/remote_page.dart:179`，要页面的 TickerProvider）。会话 model 的其余初始化已在 `FFI.start` 里：首帧时 `activateLocalCursor`（只远程桌面）和录制状态（`remote_page.dart:160-165`、`view_camera_page.dart:105-110`），`checkShowQualityMonitor`（`remote_page.dart:198`）。
-- **M1 暂删、M2b 已照上游原样补回**（`shortcut_model` 复制进 core 时，见 10.9 会话·工具栏）：`models/input_model.dart:426` 本地快捷键分发器里的 `ffi.shortcutModel.onTriggered(action)`；同文件 `_matchFlutterShortcut` 的匹配部分（:1212-1236，读 `ShortcutModel.config`；`shortcut_utils.dart` 一并复制）；`model.dart:473-477` 的 `kShortcutEventName` 事件在 `leapgate/session.dart` 登记；会话关闭时照上游 `model.dart:4397` 调 `shortcutModel.clear()`。
-- `cm_file_model.dart` 推迟到 M3，和 `server_model` 一起复制（它读 `serverModel.clients`、`tabController` 和 `chatModel`）。`ElevationModel` 留在 `model.dart` 里（peer info 和便携服务事件要用）。`QualityMonitorModel.webrtcTransport` 只在 Web 上有值、读 `CachedPeerData`，删了。
+- **照上游原样保留的快捷键部分**（`shortcut_model` 复制进 core 时，见 10.9 会话·工具栏）：`models/input_model.dart:426` 本地快捷键分发器里的 `ffi.shortcutModel.onTriggered(action)`；同文件 `_matchFlutterShortcut` 的匹配部分（:1212-1236，读 `ShortcutModel.config`；`shortcut_utils.dart` 一并复制）；`model.dart:473-477` 的 `kShortcutEventName` 事件在 `leapgate/session.dart` 登记；会话关闭时照上游 `model.dart:4397` 调 `shortcutModel.clear()`。
+- `cm_file_model.dart` 归 M3，和 `server_model` 一起复制（它读 `serverModel.clients`、`tabController` 和 `chatModel`）。`ElevationModel` 留在 `model.dart` 里（peer info 和便携服务事件要用）。`QualityMonitorModel.webrtcTransport` 只在 Web 上有值、读 `CachedPeerData`，删了。
 - 复制件里的提示：`msgBox` 改成会话通知，key 用 msgbox 的正文（`file_model` 的单向传输错误是翻译 key `one-way-file-transfer-tip`，删除时的出错是原始错误文本）；`JobState.display`、`JobProgress.display` 这类返回界面文字的仍调 core 的 `translate`（经 Rust 翻译），没改。
 - `FFI.close` 除了上游 `FFI.close` 的清理，还做了上游页面在关会话前做的 model 清理：文件视图的 `FileModel.close`（`file_manager_page.dart:125`），远程桌面的纹理、图像、光标图（`remote_page.dart:676`、`:684-685`）。纹理在 `start` 里建，跟会话走，不跟页面走。页面自己的（`enterOrLeave`、`hostStopSystemKeyPropagate`、键盘焦点）归 M2a 的会话页。
-- `StateGlobal`（`models/state_model.dart`，改写档）只留复制件和 `FfiModel` 用到的：`fullscreen`；`setFullscreen`（经 `appCore.window.setFullscreen`）M1 里没有调用方，留着给 M2a 的全屏；`windowBorderWidth`、`tabBarHeight`、`relativeMouseModeState`、`getInputSource`。工具栏分辨率菜单记的上次选择（`_lastResolutionGroupValues` 和它的三个方法）M2b 已随工具栏补回，`leapgate/ffi_model.dart` 的 `handlePeerInfo` 照上游 :1487 在每次 peer info 后清它。`relativeMouseModeState` 照上游按设备 ID 记：一台设备只有一个远程桌面视图，不会互相覆盖。`tabBarHeight` 照上游是 28（全屏时 0），`CanvasModel` 拿它算画面可用的高度；M2a 的会话页上方占的高度不同时改这里。`consts.dart` 的 `kDragToResizeAreaPadding` 恒为 0（上游只在 Linux 上留改大小的边）。
-- core 的 `flutter analyze` 用 `--no-fatal-infos` 跑。M1 B 块后的基线是 92 条 info，全是复制件从上游原件带来的（同一份原件在同样规则下也报，主要是 `RawKeyEvent` 和 `window` 的废弃提示），只看新增的。
+- `StateGlobal`（`models/state_model.dart`，改写档）只留复制件和 `FfiModel` 用到的：`fullscreen`；`setFullscreen`（经 `appCore.window.setFullscreen`，会话页的全屏用它）；`windowBorderWidth`、`tabBarHeight`、`relativeMouseModeState`、`getInputSource`。工具栏分辨率菜单记的上次选择（`_lastResolutionGroupValues` 和它的三个方法）随工具栏照上游保留，`leapgate/ffi_model.dart` 的 `handlePeerInfo` 照上游 :1487 在每次 peer info 后清它。`relativeMouseModeState` 照上游按设备 ID 记：一台设备只有一个远程桌面视图，不会互相覆盖。`tabBarHeight` 照上游是 28（全屏时 0），`CanvasModel` 拿它算画面可用的高度；会话页上方占的高度不同时改这里（§10.8）。`consts.dart` 的 `kDragToResizeAreaPadding` 恒为 0（上游只在 Linux 上留改大小的边）。
+- core 的 `flutter analyze` 用 `--no-fatal-infos` 跑。基线是 92 条 info，全是复制件从上游原件带来的（同一份原件在同样规则下也报，主要是 `RawKeyEvent` 和 `window` 的废弃提示），只看新增的。
 
 ### 10.7 选项 model（M1）
 
@@ -1757,7 +693,7 @@ tester 原先的推断是"跳过以后接着传时目标不对"。主会话查 A
 - 三种作用域是同一个 `OptionScope`：`get` / `set`（字符串，空串表示没设，写空串删除这个键）、`getBool` / `setBool`、`listenable(key)`。
 - **`SessionOptions(sessionId)`**：一个会话的选项，只依赖会话 ID，由会话对象持有。`get` / `set` 是 `bind.sessionGetOption` / `sessionPeerOption`（会话内存里的设备选项，写入时存回设备文件；会话已关时 `get` 返回 null）；`getToggle` / `toggle` 是 `bind.sessionGetToggleOptionSync` / `sessionToggleOption`。开关选项只有 "Y" 和空两种值，不用 `option2bool`（上游 `common.dart:1676-1678`）。
 - **布尔语义**：`option2bool` 照抄上游（`enable-` 开头和其他键空值为真；`allow-` 开头、`stop-service`、`direct-server`、`force-always-relay` 只认 "Y"）。`bool2option` 一律写 'Y' / 'N'：上游在 `isCustomClient` 为真时就是这样，而 Leapgate 的应用名不是 RustDesk，`isCustomClient` 恒为真，所以和旧界面写进配置的值相同。只认 "Y" 但不在上面名单里的键（例如 `leapgate-allow-exit`，空值按 `option2bool` 会算成真）用 `get(key) == 'Y'`，不用 `getBool`。
-- **写入的返回值**：`set`、`setBool`、`toggle` 返回是否保存成功。S9（03 §6.1）到位之前 Rust 不报结果，桥调用返回就算成功、恒为真；桥抛的异常照常往上抛（由 M0 的全局错误处理写进日志），不吞。S9 到位后改成 Rust 给的真值，接口不变。
+- **写入的返回值**：`set`、`setBool`、`toggle` 返回是否保存成功。`config.set` 的返回值是 S9（03 §6.1）给的真值（§10.13），其余写入桥调用返回就算成功；桥抛的异常照常往上抛（由 M0 的全局错误处理写进日志），不吞。
 - **变更通知**：`listenable(key)` 在经同一个对象写这个键之后触发（值没变也触发），监听方自己重新读。别处改的值不通知：服务进程、服务端策略（心跳策略直接改 Config）、上游界面。需要跟上这类变化的页面在显示时重新读。
 - **接入办法**（每块开工的第一步）：
   1. 列出这一块页面要用的上游 `bind.*` 选项调用，对照两份说明去掉已经不做的功能。
@@ -1767,27 +703,27 @@ tester 原先的推断是"跳过以后接着传时目标不对"。主会话查 A
 
 ### 10.8 M2a 的分工约定
 
-依据：总仓库 `docs/新界面/04-M2a拆法.md`（下称"04"；维护者 2026-10-31 定了 D1~D5：V1、全屏、"重启远程设备"提前进 M2a，连接进度合成两步）。界面行为以 01 为准（P1 区块 A、E、F，P2 区块 A~E、G，§2.1、§4.1、§4.3、§4.4、§4.5、§7.6），样稿 `A-P1.html`、`A-P2.html`，令牌和图标以 `A-基础.html` 为准。04 §7 列的不做。
+M2a 是最小控制端：连接框、最近列表、会话标签、画面和输入、连接状态面板、基础工具栏、关窗确认，另含 V1、全屏和"重启远程设备"；连接进度合成"建立连接 → 验证身份"两步。界面行为以 01 为准（P1 区块 A、E、F，P2 区块 A~E、G，§2.1、§4.1、§4.3、§4.4、§4.5、§7.6），样稿 `A-P1.html`、`A-P2.html`，令牌和图标以 `A-基础.html` 为准。
 
 **分支和文件边界**（都从 `ui/m2a` 切，做完合回 `ui/m2a`）
 
-| 分支 | 谁 | 只改这些 |
+| 分支 | 块 | 只改这些 |
 |---|---|---|
-| `ui/m2a-ds` | designer | `app/lib/widgets/`（新组件；M0 组件缺什么补什么）、`app/lib/gallery_main.dart`、`app/test/` 里组件的测试 |
-| `ui/m2a-session` | coder A | `app/lib/shell/`、`app/lib/pages/session/`、`app/lib/main.dart`、core 的 `leapgate/session.dart`、`leapgate/session_registry.dart`、`models/state_model.dart` 和它们的测试；`app/windows/` 只在链接和窗口前台确实需要时改 |
-| `ui/m2a-home` | coder B | `app/lib/pages/home/`、core 的新文件（"输入像不像地址"的判断等）、`leapgate/local_status.dart`、`leapgate/app_core.dart`（只加最近列表的 model）和它们的测试 |
+| `ui/m2a-ds` | 组件 | `app/lib/widgets/`（新组件；M0 组件缺什么补什么）、`app/lib/gallery_main.dart`、`app/test/` 里组件的测试 |
+| `ui/m2a-session` | 会话块 | `app/lib/shell/`、`app/lib/pages/session/`、`app/lib/main.dart`、core 的 `leapgate/session.dart`、`leapgate/session_registry.dart`、`models/state_model.dart` 和它们的测试；`app/windows/` 只在链接和窗口前台确实需要时改 |
+| `ui/m2a-home` | 主页块 | `app/lib/pages/home/`、core 的新文件（"输入像不像地址"的判断等）、`leapgate/local_status.dart`、`leapgate/app_core.dart`（只加最近列表的 model）和它们的测试 |
 
-- 两个 coder 都要往 `app/lib/l10n/app_zh.arb`、`app_en.arb` 加键：会话块的键以 `session`、`conn`、`toolbar`、`closing` 开头，主页块以 `home`、`connectBox`、`recent` 开头，各自加在文件末尾，冲突在整合时解决。两种语言同时加，文案照 01 §7.6 和术语表；01 里写好的句子逐字照抄，没写的按 §7.6 写，并在提交说明里列出新写的句子。
-- 两个 coder 先用 M0 的组件和简单的占位控件把逻辑写通，整合时换成 designer 的组件。占位控件不求好看，但行为测试要能按文字和语义标签找到它们。
-- 外壳和主页的两条约定（2026-10-31 审查主页块时补）：外壳把非当前标签（包括被会话标签盖住的主页）包在 `TickerMode(enabled: false)` 里，主页靠它停掉在线状态查询（`IndexedStack`、`Offstage`、`Visibility.maintain` 都不关 ticker）；主页切走时不销毁。全局轻提示的 key 是上游翻译 key（例如 `Copied`），文案在 ARB 里，由外壳显示。
-- 本机区 ID 旁的"复制"和双击 ID 复制（01 区块 A）M0 没做，归主页块。
+- 会话块和主页块都要往 `app/lib/l10n/app_zh.arb`、`app_en.arb` 加键：会话块的键以 `session`、`conn`、`toolbar`、`closing` 开头，主页块以 `home`、`connectBox`、`recent` 开头，各自加在文件末尾，冲突在整合时解决。两种语言同时加，文案照 01 §7.6 和术语表；01 里写好的句子逐字照抄，没写的按 §7.6 写，并在提交说明里列出新写的句子。
+- 会话块和主页块先用 M0 的组件和简单的占位控件把逻辑写通，整合时换成组件块的组件。占位控件不求好看，但行为测试要能按文字和语义标签找到它们。
+- 外壳和主页的两条约定：外壳把非当前标签（包括被会话标签盖住的主页）包在 `TickerMode(enabled: false)` 里，主页靠它停掉在线状态查询（`IndexedStack`、`Offstage`、`Visibility.maintain` 都不关 ticker）；主页切走时不销毁。全局轻提示的 key 是上游翻译 key（例如 `Copied`），文案在 ARB 里，由外壳显示。
+- 本机区 ID 旁的"复制"和双击 ID 复制（01 区块 A）归主页块。
 - 共用接口 `app/lib/shell/navigation.dart`（`ui/m2a` 上已有）：`mainNavigation.connect(id, …)` 开会话或切到已有标签；`mainNavigation.showHome(focusConnectBox:, connectBoxText:)` 回主页；主页监听 `connectBoxFocusRequests`。会话块实现，主页块只调用，测试里换成假的。
 
-**组件约定（designer）**
+**组件约定**
 
 - 组件只管画：输入是普通的值和回调，不引用 core 的 model、会话对象和 `bind`（身份色这类纯函数可以用）；文字全部由调用方传进来（照 M0 `LgTitleBarLabels` 的做法），组件里不写死文案、不读 `AppLocalizations`。
-- 每个可操作的地方带语义标签：`Semantics` 的 label 用它显示的文字，只有图标的用它的名字。讲述人和端到端的 UI Automation 脚本都靠它找控件（04 §6.3）。
-- 合并语义的容器（`MergeSemantics`，以及自己包了一层的 `MenuItemButton` 这类上游控件）里不放带浮层的组件（悬停提示、弹层的锚点）：锚点被合并后照样发给引擎，成了从根走不到的孤儿，补丁 0003 会丢掉它（2026-11-02 菜单读屏排查，`docs/新界面/无障碍语义树为空排查.md` §10）。非放不可时在外面包 `Semantics(label: …, excludeSemantics: true)`，照 `LgEllipsisText`。可以点的行要有 `button` 标志，上游 `MenuItemButton` 只在 web 上给，没有标志的叶子节点在 Windows 上只当静态文字、没有 Invoke。
+- 每个可操作的地方带语义标签：`Semantics` 的 label 用它显示的文字，只有图标的用它的名字。讲述人和端到端的 UI Automation 脚本都靠它找控件。
+- 合并语义的容器（`MergeSemantics`，以及自己包了一层的 `MenuItemButton` 这类上游控件）里不放带浮层的组件（悬停提示、弹层的锚点）：锚点被合并后照样发给引擎，成了从根走不到的孤儿，补丁 0003 会丢掉它（`docs/新界面/无障碍语义树为空排查.md` §10）。非放不可时在外面包 `Semantics(label: …, excludeSemantics: true)`，照 `LgEllipsisText`。可以点的行要有 `button` 标志，上游 `MenuItemButton` 只在 web 上给，没有标志的叶子节点在 Windows 上只当静态文字、没有 Invoke。
 - 浅色、深色和简洁、详细两套尺寸都对；尺寸、颜色、间距、圆角只用令牌。
 - 每个组件的每种状态在画廊（`buildSpecimens`）里有一项，能用 `LG_GALLERY_EXPORT` 导出和样稿对照；`app/test/` 里写行为测试（回调被调、禁用时不响应、焦点能到），不比像素。
 - 要做的组件（名字是建议，可以按 M0 的命名习惯改，接口的意思不变）：
@@ -1796,7 +732,7 @@ tester 原先的推断是"跳过以后接着传时目标不对"。主会话查 A
 |---|---|---|
 | `LgDeviceAvatar` | 设备 ID（取身份色）、平台（Windows、macOS、Linux、Android、未知）、尺寸 | 设备卡片和列表视图的平台图标 |
 | `LgDeviceRow` | 名称、格式化的 ID、`用户名@主机名`、平台、在线状态（在线、离线、正在查询，带文字）、可选的来源分类文字；选中、高亮（连接框里键盘移到的那一行）；`onTap`、`onDoubleTap`、`onConnect`（悬停时出现的"连接"）、`focusNode`；"连接"按钮的文字 | `p1-list-simple`、`p1-card-*`、`p1-cb-*` |
-| `LgConnectToRow` | 整行文字（"连接到 ‹输入›"，调用方拼好）、高亮、`onTap`；行尾的"⋯"（连接方式菜单）随 M2b，先不放 | `p1-cb-conn`、`p1-cb-none` |
+| `LgConnectToRow` | 整行文字（"连接到 ‹输入›"，调用方拼好）、高亮、`onTap`；行尾的"⋯"（连接方式菜单）见 §10.9 | `p1-cb-conn`、`p1-cb-none` |
 | 连接框 | 输入框用 M0 的 `LgTextField`；问号按钮和说明弹层（文字由调用方传）；"连接"带下拉的按钮（菜单项由调用方传，用 M0 的 `LgMenuItem`；禁用态） | `p1-cb-empty`、`p1-cb-help`、`p1-cb-menu` |
 | 空、加载中、搜索无结果 | 文字；加载中的骨架行 | `p1-cb-none`、`p1-st-empty-recent`、`p1-st-loading` |
 | `LgPasswordRow` | 标签、内容、可选的小字说明、内容是否灰显（"已设置""不可用"这类）、`onCopy`（null 时不显示"复制"）；留一个可选的操作区给 M2b 的"刷新""修改" | `p1-ben-*` |
@@ -1809,22 +745,22 @@ tester 原先的推断是"跳过以后接着传时目标不对"。主会话查 A
 | `LgConfirmDialog`、页内确认条 | 标题（问句）、正文、附加控件（"不再提示""记住此选择"勾选，Q6 的两个单选和单选下面的说明）、按钮（文字、主次、危险）；遮罩颜色和卡片。遮罩只盖调用方给的那一块，挂在哪由会话块的作用域浮层决定 | `p1-close-sessions`、`p1-close-exit`、`g-close` |
 | 会话标签的状态 | M0 `LgSessionTab.status` 放得下的不新做；按 `tabs-s` 补齐连接中（转圈加"正在连接…"）、已中断、连接失败、已断开变灰，和悬停提示的内容块 | `tabs-s`、`tabs-tip` |
 
-**会话块（coder A）**
+**会话块**
 
-- 输入和焦点照 04 §4 的七条。上游依据：`flutter/lib/desktop/pages/remote_page.dart` 的 `_windowsCanFocusRemoteInput`、`enterView`、`leaveView`、`onWindowBlur`、`onWindowFocus`、`RawKeyFocusScope` 的 `onFocusChange`、`dispose`；`hostStopSystemKeyPropagate` 在画面的 `MouseRegion` 进出时切换。macOS、Linux 专用的分支不搬（第一阶段只做 Windows）。
-- 从上游复制、按改写档登记（04 §2.5）：`ImagePaint`、`CursorPaint`、`_ViewStyleUpdater`（`flutter/lib/desktop/pages/remote_page.dart`）放 `app/lib/pages/session/image_paint.dart`；`RawKeyFocusScope`、`RawPointerMouseRegion`（`flutter/lib/common/widgets/remote_input.dart`）放 `app/lib/pages/session/remote_input.dart`。来源行写 `// 上游：<路径>@bd9262397（改写：只留 <类名>；…）`，写明删了什么、改了什么（按设备 ID 的共享状态改成会话字段、`Get.find` 改成参数等）。合并上游时这两个上游文件按改写档人工核对（03 §3.8 第 2 条）。
-- core：`FFI.start`、`SessionRegistry.open` 加 `password`、`isSharedPassword`、`switchUuid` 参数（04 §2.4），注册表测试跟着补；`StateGlobal.tabBarHeight` 改成新顶栏的高度、全屏时 0；会话页开始时调 `canvasModel.initializeEdgeScrollFallback(this)`、会话开始后读"显示远程光标"的初值（10.6 末尾几条）。
-- 外壳：标签列表跟 `appCore.sessions`；每个标签的内容区一个 `Overlay`，会话里的确认框和面板只挡这个标签（03 §4.5）；`appCore.prompter` 在这里实现（带会话的只遮那个标签，不带的只遮主页），M2a 还没有提问的来源，结构先做好；窗口标题"Leapgate"或"‹设备名› - Leapgate"；"+" 调 `showHome(focusConnectBox: true)`；`MainNavigation` 的实现：`connect` 照上游 `flutter/lib/common.dart:2572` 的 `connect`（去空格，`bind.mainHandleRelayId` 去掉 `/r` 并转成强制中继），标签按处理后的 ID 记。
-- 连接状态面板：`ConnectionModel` 的 `stage`、`input`、`reason`、`retryCountdown`、`retryAttempt`、`dimLastFrame` 映射到面板（01 P2 区块 D 的表；进度两步"建立连接 → 验证身份"，connecting 时第 1 步进行中，verifying 起第 1 步完成）；按钮调 `login`、`submit2fa`、`selectWindowsSession`、`continueInsecure`、`rejectInsecure`、`retry`、`useRelay`、`cancel`。原因码到文案和下一步按钮的表照 01 §4.3（10.4 C3 表的"对应"一列），`other` 显示 `reason.text`；"修改 ID"调 `showHome(connectBoxText: id)`；"打开网络设置"在 M2a 不显示；"已等待时间"、等画面几秒后加的说明由页面计时。
-- 工具栏：04 §1.1 那一行，加 D3 全屏（`appCore.window.setFullscreen`，全屏时顶栏隐藏）和 D4"重启远程设备"（确认框文案在 01 §4.4，确认后调 `bind.sessionRestartRemoteDevice`，照上游 `common/widgets/dialog.dart:1403-1431` 的出现条件）；不固定时鼠标进入画面 5 秒后收起（上游 `remote_toolbar.dart:648-676`）；画质三档、显示器切换照上游的导出；位置固定在顶部居中。
-- V1（D2）：标签切走时 `lgBind.leapgateSessionSetVisible(..., false)`，切回时设回 `true` 再 `bind.sessionRefresh`；第一帧到之前就被切走时取消 1.5 秒唤醒计时，切回时仍在等第一帧再起一次（10.4 V1、10.6"接 V1 时要处理"）。先在不接 V1 的提交上把会话页做完（验收要在它上面量一次占用基线），V1 单独一个提交。
+- 输入和焦点的上游依据：`flutter/lib/desktop/pages/remote_page.dart` 的 `_windowsCanFocusRemoteInput`、`enterView`、`leaveView`、`onWindowBlur`、`onWindowFocus`、`RawKeyFocusScope` 的 `onFocusChange`、`dispose`；`hostStopSystemKeyPropagate` 在画面的 `MouseRegion` 进出时切换。macOS、Linux 专用的分支不搬（第一阶段只做 Windows）。
+- 从上游复制、按改写档登记：`ImagePaint`、`CursorPaint`、`_ViewStyleUpdater`（`flutter/lib/desktop/pages/remote_page.dart`）放 `app/lib/pages/session/image_paint.dart`；`RawKeyFocusScope`、`RawPointerMouseRegion`（`flutter/lib/common/widgets/remote_input.dart`）放 `app/lib/pages/session/remote_input.dart`。来源行写 `// 上游：<路径>@bd9262397（改写：只留 <类名>；…）`，写明删了什么、改了什么（按设备 ID 的共享状态改成会话字段、`Get.find` 改成参数等）。合并上游时这两个上游文件按改写档人工核对（03 §3.8 第 2 条）。
+- core：`FFI.start`、`SessionRegistry.open` 加 `password`、`isSharedPassword`、`switchUuid` 参数，注册表测试跟着补；`StateGlobal.tabBarHeight` 改成新顶栏的高度、全屏时 0；会话页开始时调 `canvasModel.initializeEdgeScrollFallback(this)`、会话开始后读"显示远程光标"的初值（10.6 末尾几条）。
+- 外壳：标签列表跟 `appCore.sessions`；每个标签的内容区一个 `Overlay`，会话里的确认框和面板只挡这个标签（03 §4.5）；`appCore.prompter` 在这里实现（带会话的只遮那个标签，不带的只遮主页）；窗口标题"Leapgate"或"‹设备名› - Leapgate"；"+" 调 `showHome(focusConnectBox: true)`；`MainNavigation` 的实现：`connect` 照上游 `flutter/lib/common.dart:2572` 的 `connect`（去空格，`bind.mainHandleRelayId` 去掉 `/r` 并转成强制中继），标签按处理后的 ID 记。
+- 连接状态面板：`ConnectionModel` 的 `stage`、`input`、`reason`、`retryCountdown`、`retryAttempt`、`dimLastFrame` 映射到面板（01 P2 区块 D 的表；进度两步"建立连接 → 验证身份"，connecting 时第 1 步进行中，verifying 起第 1 步完成）；按钮调 `login`、`submit2fa`、`selectWindowsSession`、`continueInsecure`、`rejectInsecure`、`retry`、`useRelay`、`cancel`。原因码到文案和下一步按钮的表照 01 §4.3（10.4 C3 表的"对应"一列），`other` 显示 `reason.text`；"修改 ID"调 `showHome(connectBoxText: id)`；"打开网络设置"不在这里显示；"已等待时间"、等画面几秒后加的说明由页面计时。
+- 工具栏：基础工具栏，加全屏（`appCore.window.setFullscreen`，全屏时顶栏隐藏）和"重启远程设备"（确认框文案在 01 §4.4，确认后调 `bind.sessionRestartRemoteDevice`，照上游 `common/widgets/dialog.dart:1403-1431` 的出现条件）；不固定时鼠标进入画面 5 秒后收起（上游 `remote_toolbar.dart:648-676`）；画质三档、显示器切换照上游的导出；位置固定在顶部居中。
+- V1：标签切走时 `lgBind.leapgateSessionSetVisible(..., false)`，切回时设回 `true` 再 `bind.sessionRefresh`；第一帧到之前就被切走时取消 1.5 秒唤醒计时，切回时仍在等第一帧再起一次（10.4 V1、10.6"接 V1 时要处理"）。V1 单独一个提交，不接 V1 的那个提交用来量占用基线。
 - 会话通知横条接 `ffi.notices`，轻提示接 `appCore.toasts`。通知的 key 是上游的英文原文或翻译 key：01 P2 区块 E 有文案的照它，没有的显示原文，每个 key 只写一次日志。第一次连上时轻提示"已建立直连"或"已建立中继连接"。
-- 关闭：标签"×"、工具栏"断开"关这个标签（M2a 一个标签只有一个视图）。关窗：有会话时确认"断开全部 ‹N› 个会话并关闭窗口？"带"不再提示"（选项 `enable-confirm-closing-tabs`，上游 `flutter/lib/consts.dart:170`）；便携版（`appCore.options.isInstalled` 为假）把 Q6 的"退出 Leapgate / 在后台运行"和"记住此选择"合进同一个确认，没有会话时只问 Q6，记住的选择是新的 LocalConfig 键（`leapgate-` 开头，放在用它的文件里，10.7 接入办法第 2 条）；安装版隐藏到托盘。"在后台运行"隐藏窗口，进程照常当被控端，再次启动程序把窗口找回来（W1）。
-- 链接：`uni_links` 收到的 `--connect` 和 `leapgate://` 链接（M0 只写日志）解析出 ID、密码、是否中继，调 `mainNavigation.connect` 并把窗口提到前面；进程自己启动时命令行里带的链接同样处理（10.5 M0"发现的问题"第二条）。解析照上游 `flutter/lib/common.dart:2207-2256` 的 `handleUriLink`，只做新建远程桌面连接这一种，其余动作写一行日志。
+- 关闭：标签"×"、工具栏"断开"关这个标签（这时一个标签只有一个视图，多视图见 §10.15）。关窗：有会话时确认"断开全部 ‹N› 个会话并关闭窗口？"带"不再提示"（选项 `enable-confirm-closing-tabs`，上游 `flutter/lib/consts.dart:170`）；便携版（`appCore.options.isInstalled` 为假）把 Q6 的"退出 Leapgate / 在后台运行"和"记住此选择"合进同一个确认，没有会话时只问 Q6，记住的选择是新的 LocalConfig 键（`leapgate-` 开头，放在用它的文件里，10.7 接入办法第 2 条）；安装版隐藏到托盘。"在后台运行"隐藏窗口，进程照常当被控端，再次启动程序把窗口找回来（W1）。
+- 链接：`uni_links` 收到的 `--connect` 和 `leapgate://` 链接（M0 只写日志）解析出 ID、密码、是否中继，调 `mainNavigation.connect` 并把窗口提到前面；进程自己启动时命令行里带的链接同样处理。解析照上游 `flutter/lib/common.dart:2207-2256` 的 `handleUriLink`，只做新建远程桌面连接这一种，其余动作写一行日志。
 
-**主页块（coder B）**
+**主页块**
 
-- 本机区密码行：01 P1 区块 A 表的五种。数据（一次性密码、审批方式 `approve-mode`、密码方式 `verification-method`、服务是否停止）加在 `LocalStatusModel` 上，照上游 `flutter/lib/models/server_model.dart` 的读法；"复制"后轻提示"已复制"。"刷新""修改"随 M2b。
+- 本机区密码行：01 P1 区块 A 表的五种。数据（一次性密码、审批方式 `approve-mode`、密码方式 `verification-method`、服务是否停止）加在 `LocalStatusModel` 上，照上游 `flutter/lib/models/server_model.dart` 的读法；"复制"后轻提示"已复制"。"刷新""修改"见 §10.9。
 - 连接框：01 P1 区块 E、Q2。"输入像不像地址"写成 core 里的纯函数加单测（纯数字 ID、IPv4、IPv6、`域名:端口`、带 `@服务器`、带 `/r`）；回车规则、上下键、Esc；匹配 ID、别名、主机名、用户名、备注，M2a 的结果只来自"最近"；输入为空时"连接"禁用；下拉只有"远程桌面""经中继连接"（后者下面那行说明照 01）；问号说明照上游 `id_input_tip` 按 §7.6 重写。
 - 最近列表：`Peers(name: 'recent', loadEvent: 'load_recent_peers', …)`（复制件 `models/peer_model.dart`）由 `AppCore` 持有一份，`bind.mainLoadRecentPeers` 触发加载；在线状态照上游 `flutter/lib/common/widgets/peers_view.dart:313-346`：只查看得见的行、每 6 秒一次、窗口失焦就停；名称取别名、主机名、格式化的 ID 中第一个有的；单击选中，双击或回车连接，悬停出现"连接"；空状态和加载中。连接一律调 `mainNavigation.connect`。
 
@@ -1832,29 +768,29 @@ tester 原先的推断是"跳过以后接着传时目标不对"。主会话查 A
 
 - core 的新代码有单测；app 每个页面状态一个行为测试（03 §8.3）：面板的每一种（用假的连接状态）、最近列表空和加载中、连接框几种默认高亮、关窗确认的几种组合（有无会话 × 便携或安装 × 是否勾过不再提示）。
 - 合入前：`git diff main -- flutter/` 为空；core 的 `flutter analyze --no-fatal-infos` 不超出 92 条基线，app 0 条；复制件不跑格式化（10.1）。
-- 审查重点：会话块看焦点和按键释放、钩子开关的先后、关闭流程、注册表参数、复制件和上游原件的差异；主页块看回车规则和匹配；组件看样稿对照的必修项（03 §8.4）。
+- 评审重点：会话块看焦点和按键释放、钩子开关的先后、关闭流程、注册表参数、复制件和上游原件的差异；主页块看回车规则和匹配；组件看样稿对照的必修项（03 §8.4）。
 
 ### 10.9 M2b 的分工约定
 
-依据：总仓库 `docs/新界面/05-M2b拆法.md`（下称"05"；维护者 2026-10-31 四条全部按推荐定）。界面行为以 01 为准（P1 区块 A~C、E、F、J、K，P2 区块 A~C、E、F，§2.1、§2.3、§4.2、§4.4），界面模式和工具栏、显示器的几项设置看 02；样稿 `A-P1.html`、`A-P2.html`，令牌和图标以 `A-基础.html` 为准，画框名见 05 §2.2。05 §1.3 列的项等对应的块做完再加，§7 列的不做。
+M2b 是控制端完整的会话页和主页。界面行为以 01 为准（P1 区块 A~C、E、F、J、K，P2 区块 A~C、E、F，§2.1、§2.3、§4.2、§4.4），界面模式和工具栏、显示器的几项设置看 02；样稿 `A-P1.html`、`A-P2.html`，令牌和图标以 `A-基础.html` 为准。
 
 **分支和文件边界**（都从 `ui/m2b` 切，做完合回 `ui/m2b`；`ui/m2b` 上已有下面"挂载点"的骨架）
 
-| 分支 | 谁 | 只改这些 |
+| 分支 | 块 | 只改这些 |
 |---|---|---|
-| `ui/rust-q3` | coder R | Q3、本机显示名两个块 2 导出和 `src/client.rs` 的挂钩（10.4） |
-| `ui/m2b-ds` | designer | `app/lib/widgets/`、`app/lib/gallery_main.dart`、`app/test/` 里组件的测试 |
-| `ui/m2b-toolbar` | coder A（会话·工具栏） | `app/lib/pages/session/session_toolbar.dart`、新目录 `app/lib/pages/session/toolbar/`、`canvas_hints.dart`、`app/lib/shell/tab_shortcuts.dart`；core 新复制的 `models/shortcut_model.dart`、`models/input_model.dart` 里 10.6 暂删的几处、`models/state_model.dart`；它们的测试 |
-| `ui/m2b-session` | coder B（会话·其余） | `app/lib/pages/session/` 下的 `route_details.dart`、`quality_overlay.dart`、`recording.dart`、`chat/`、`session_notices.dart`、`connection_panel.dart`，`app/lib/shell/tab_menu.dart`；core 改写的 `models/chat_model.dart` 和新文件（延迟统计等）；`app/pubspec.yaml` 和锁文件（只加 `file_picker`）；它们的测试 |
-| `ui/m2b-home` | coder C（主页） | `app/lib/pages/home/`；`app/lib/main.dart` 里界面模式接到主题的那几行；`app/lib/theme/` 里按选项切 `LgMode` 要的（不改令牌值）；core 的 `leapgate/local_status.dart`、`leapgate/app_core.dart`（只加分类的 `Peers`）、`leapgate/recent_peers.dart` 和新文件；它们的测试 |
+| `ui/rust-q3` | Rust | Q3、本机显示名两个块 2 导出和 `src/client.rs` 的挂钩（10.4） |
+| `ui/m2b-ds` | 组件 | `app/lib/widgets/`、`app/lib/gallery_main.dart`、`app/test/` 里组件的测试 |
+| `ui/m2b-toolbar` | A（会话·工具栏） | `app/lib/pages/session/session_toolbar.dart`、新目录 `app/lib/pages/session/toolbar/`、`canvas_hints.dart`、`app/lib/shell/tab_shortcuts.dart`；core 新复制的 `models/shortcut_model.dart`、`models/input_model.dart` 里 10.6 暂删的几处、`models/state_model.dart`；它们的测试 |
+| `ui/m2b-session` | B（会话·其余） | `app/lib/pages/session/` 下的 `route_details.dart`、`quality_overlay.dart`、`recording.dart`、`chat/`、`session_notices.dart`、`connection_panel.dart`，`app/lib/shell/tab_menu.dart`；core 改写的 `models/chat_model.dart` 和新文件（延迟统计等）；`app/pubspec.yaml` 和锁文件（只加 `file_picker`）；它们的测试 |
+| `ui/m2b-home` | C（主页） | `app/lib/pages/home/`；`app/lib/main.dart` 里界面模式接到主题的那几行；`app/lib/theme/` 里按选项切 `LgMode` 要的（不改令牌值）；core 的 `leapgate/local_status.dart`、`leapgate/app_core.dart`（只加分类的 `Peers`）、`leapgate/recent_peers.dart` 和新文件；它们的测试 |
 
-- A、B 都可能要改 core 的 `leapgate/session.dart`：A 加 `shortcutModel` 和 `kShortcutEventName` 的登记，B 加聊天 model 和 6 个聊天语音事件、`screenshot`、`printer_request`、`switch_back` 的登记。只在字段表和构造函数里追加，整合时合并相邻行。其余文件不越界；确实要改别人的文件时写进汇报，由主会话协调。
+- A、B 都可能要改 core 的 `leapgate/session.dart`：A 加 `shortcutModel` 和 `kShortcutEventName` 的登记，B 加聊天 model 和 6 个聊天语音事件、`screenshot`、`printer_request`、`switch_back` 的登记。只在字段表和构造函数里追加，整合时合并相邻行。其余文件不越界。
 - ARB 的键按前缀分：A 用 `toolbar`、`menu`、`shortcut`；B 用 `route`、`notice`、`chat`、`record`、`tabMenu`、`conn`；C 用 `home`、`peers`、`peerMenu`、`pwd`、`uiMode`。加在文件末尾，中英文同时加，文案照 01 §7.6：01 里写好的句子逐字照抄，没写的按 §7.6 写，并在提交说明里列出新写的句子。已有的键能用就用。
-- 三个 coder 先用 M0、M2a 的组件和简单的占位控件把逻辑写通，整合时换成 designer 的组件。占位控件不求好看，但行为测试要能按文字和语义标签找到它们。
+- A、B、C 三块先用 M0、M2a 的组件和简单的占位控件把逻辑写通，整合时换成组件块的组件。占位控件不求好看，但行为测试要能按文字和语义标签找到它们。
 
 **挂载点**（`ui/m2b` 上的骨架提交，行为和 M2a 相同）
 
-| 文件 | 现在的内容 | 谁填 |
+| 文件 | 骨架里的内容 | 由哪块填 |
 |---|---|---|
 | `pages/session/route_details.dart` | `sessionRouteMark(context, ffi, overlays)`：工具栏上的连接方式标记，连接就绪前是 null；现在是 M2a 的标记加悬停说明，要改成能点开详情（01 §4.2） | B |
 | `pages/session/chat/chat.dart` | `chatToolbarButtons(context, ffi, overlays)`（现在是空表）、`ChatLayer`（会话页里通知之上的一层，现在不画东西） | B |
@@ -1867,72 +803,70 @@ tester 原先的推断是"跳过以后接着传时目标不对"。主会话查 A
 - 工具栏里的顺序已经放好：A 现有和要加的菜单（视图、显示器、画面、输入、操作、会话）之后，是 `chatToolbarButtons` 和 `recordButton` 一组，然后 `sessionRouteMark`，最后"断开"。"更多"按"录制、聊天、会话"的顺序收（01 P2 区块 B），A 按这一组的位置判断，B 的函数不用另外返回什么。
 - 会话页的层（从下往上）：画面 → `QualityOverlay` → `CanvasHints` → 工具栏 → 通知 → `ChatLayer` → 连接状态面板。每层都是 `Positioned.fill`，自己定位；没画东西的地方要让鼠标事件落到画面上，所以层里不铺满底色、不加整块的手势监听。菜单和详情弹层用现有的菜单浮层或这个标签的 `TabOverlays`。
 
-**组件（designer）**：规则同 10.8"组件约定"（只管画、文字由调用方传、带语义标签、两套主题和两套尺寸、画廊里每种状态一项、有行为测试）。要做的组件和样稿画框见 05 §2.2。接口补充：
+**组件**：规则同 10.8"组件约定"（只管画、文字由调用方传、带语义标签、两套主题和两套尺寸、画廊里每种状态一项、有行为测试）。接口补充：
 
 - 设备卡片 `LgDeviceCard` 和列表视图 `LgDeviceTable`：数据同 `LgDeviceRow`，另有星标、来源分类、选中、多选时的勾选、`onMore`（"⋯"）；表格的列、可排序的列和当前排序由调用方给。卡片网格每列至少 300 宽（01 区块 F）。
 - 菜单：在 `LgMenuItem`、`LgMenuGroup` 上补滑块项（标签、值、范围、步长、显示值的格式化、`onChanged`）、步进器项、右侧的快捷键文字、灰显项的悬停说明、危险项、组标题旁的说明（例如"此地址簿为只读"）。
 - 工具栏：`LgSessionToolbar` 加沿边拖动（回调给出新位置，0~1 的相对值）、停靠的边（上下左右）、左右两边竖排只显示图标、拖动时的落点预览、"更多"（调用方给出可以收进去的项和顺序，组件按宽度决定收几个）、显示器平铺按钮、收起后拖动条上的切屏按钮。位置记忆和吸附规则由 A 算，组件只画。
 - 连接方式详情 `LgRouteDetails`：分组的键值行、可复制的值（指纹）、延迟表（每行名字、当前值、最低、平均、最高）、折线 `LgSparkline`（多条线，颜色加线型，图例文字由调用方传）、开关行。
-- 聊天面板 `LgChatPanel`：消息列表（自己 / 对方、时间、文字）、输入框、发送、关闭、拖动。语音通话的几种状态不在面板里，画在工具栏的聊天按钮和它的菜单上（2026-11-01 按实现回写）。
+- 聊天面板 `LgChatPanel`：消息列表（自己 / 对方、时间、文字）、输入框、发送、关闭、拖动。语音通话的几种状态不在面板里，画在工具栏的聊天按钮和它的菜单上。
 - 通知：`LgNoticeStack` 加按钮组、勾选（"记住此选择"）、一直保留直到处理。
 - 对话框：设置固定密码 `LgPasswordDialog`（两个输入框、强度条、规则逐条通过、错误、按钮）；其他小对话框用 `LgConfirmDialog` 加输入件拼，不另做。
 - 本机提示卡、被控时的遮罩、多选条、分类分段、列表工具条。
 - 详细模式：组件已经支持两套尺寸；`LgRouteMark` 详细模式下的路径标记画法、工具栏菜单按钮的"图标加文字"按 `LgTokens.of(context).mode` 切换，不另加参数（01 §2.3）。
 
-**会话·工具栏（coder A）**
+**会话·工具栏（A）**
 
-- 菜单：05 §1.1 会话页表的"显示器""画面""输入""操作""会话"五行和"灰显和快捷键"一行。每项的出现条件和动作照上游 `flutter/lib/common/widgets/toolbar.dart`、`flutter/lib/desktop/widgets/remote_toolbar.dart`（01 P2 区块 B 有行号），分组照 01 的表，不搬上游的菜单结构；权限不够、仅查看模式时灰显并给说明（01 的文案），隐私模式和录制两处例外照上游。菜单文件放 `pages/session/toolbar/`，文件头注明对应的上游出处。
+- 菜单："显示器""画面""输入""操作""会话"五组，以及灰显和快捷键。每项的出现条件和动作照上游 `flutter/lib/common/widgets/toolbar.dart`、`flutter/lib/desktop/widgets/remote_toolbar.dart`（01 P2 区块 B 有行号），分组照 01 的表，不搬上游的菜单结构；权限不够、仅查看模式时灰显并给说明（01 的文案），隐私模式和录制两处例外照上游。菜单文件放 `pages/session/toolbar/`，文件头注明对应的上游出处。
 - 菜单打开的小对话框（自定义分辨率、键盘布局 ANSI / ISO、系统登录密码、请求提升权限的方式、交换控制方向确认、Wayland 授权确认、添加备注）也放 `pages/session/toolbar/`，挂在这个标签的 `TabOverlays` 上。"请求提升权限的方式"做成能从外面调的函数，B 的提权通知按钮也调它。
 - 工具栏拖动和停靠、"更多"；显示器的三种形态（读 `show_monitors_toolbar` 等现有选项，01 P2 区块 B）和"全部显示器"（`kAllDisplayValue`，同一个标签里合并显示）。
-- 快捷键：把 `flutter/lib/models/shortcut_model.dart` 复制进 core（只删界面调用），补回 10.6"暂删、`shortcut_model` 改写时补回"的几处；菜单项右侧显示绑定的组合键（默认绑定见 01 P2 区块 B）；`TabShortcuts` 实现切标签，按键照上游 `shortcut_model` 的切标签动作。
+- 快捷键：把 `flutter/lib/models/shortcut_model.dart` 复制进 core（只删界面调用），补回 10.6 列的快捷键那几处；菜单项右侧显示绑定的组合键（默认绑定见 01 P2 区块 B）；`TabShortcuts` 实现切标签，按键照上游 `shortcut_model` 的切标签动作。
 - `StateGlobal` 补回分辨率菜单记的上次选择（10.6 末尾）。
 - `CanvasHints`：相对鼠标模式的提示（这时工具栏隐藏，上游 `remote_page.dart:782-792`）、Android 导航浮条。
-- `待调.md` 第 29 条（自动收起后点"展开"会把收起设置存成开）对照上游行为判断，改不改写进汇报。
 
-**会话·其余（coder B）**
+**会话·其余（B）**
 
-- 连接方式详情（01 §4.2 第二级）：路径、中继名用 Q3 的导出 `leapgate_session_connection(session_id)`（10.4；coder R 在 `ui/rust-q3` 上做，合进 `ui/m2b` 之前用一个测试里能换掉的取值函数，返回值照 10.4 的 JSON），每次连接就绪后重新取，返回 `{}` 时不显示"路径""中继服务器"两行。指纹、画面数据来自 core 已有的 `FfiModel`、`QualityMonitorModel`。延迟只有"端到端"一行（Q13 之前，01 §4.2）：core 里每个会话记近 60 秒每 2 秒一个点和本次会话的最低、平均、最高，重连后接着记。"在画面上显示质量数据"照上游的会话选项；界面模式是详细时默认开（02 R2-Q11）。
+- 连接方式详情（01 §4.2 第二级）：路径、中继名用 Q3 的导出 `leapgate_session_connection(session_id)`（10.4；取值函数在测试里能换掉，返回值照 10.4 的 JSON），每次连接就绪后重新取，返回 `{}` 时不显示"路径""中继服务器"两行。指纹、画面数据来自 core 已有的 `FfiModel`、`QualityMonitorModel`。延迟只有"端到端"一行（Q13 之前，01 §4.2）：core 里每个会话记近 60 秒每 2 秒一个点和本次会话的最低、平均、最高，重连后接着记。"在画面上显示质量数据"照上游的会话选项；界面模式是详细时默认开（02 R2-Q11）。
 - "服务器拒绝了此连接："：连接阶段出错、原因码是 `other` 时调同一个导出，有 `refused` 就照 01 §4.3 显示前缀加原文。
 - 通知：登记 `screenshot`、`printer_request`、`switch_back`（10.6），做 01 P2 区块 E 里带按钮的几种。截图"另存为"要选位置，加 `file_picker`（版本先用上游 `flutter/pubspec.lock` 锁的，解析不了时选能和 frb 1.80.1 的 `uuid ^3.0.6`、`js ^0.6.4` 共存的版本）；提权通知的"请求提升权限"调 A 的选方式对话框；录屏通知的"停止"。权限中途被收回时加一条通知。
 - 聊天和语音：`chat_model` 改写进 core（只留消息存储、未读数、语音状态；消息类型用 core 自己的，不带 `dash_chat_2`），登记 6 个事件；`ChatLayer` 里的面板、`chatToolbarButtons` 的聊天菜单（文字聊天、语音通话、等待接听、通话中的麦克风选择和挂断）、`tabUnread`。
 - 录制：`recordButton` 和录制态，权限例外照上游。
 - 标签右键菜单：`showSessionTabMenu`，"复制设备 ID""关闭其他标签""关闭"。
-- 连接状态面板：等对方接受时加"显示给对方的名称：‹本机名›"（块 2 导出 `leapgate_local_display_name()`，coder R 做，取值方式同上）；`待调.md` 第 30 条（密码错误后保留输入、带"输入密码"标签）、第 33 条（关掉确认框后密码框拿回焦点）照样稿改。
+- 连接状态面板：等对方接受时加"显示给对方的名称：‹本机名›"（块 2 导出 `leapgate_local_display_name()`，取值方式同上）；密码错误后保留输入、带"输入密码"标签，关掉确认框后密码框拿回焦点，照样稿。
 
-**主页（coder C）**
+**主页（C）**
 
 - 分类：最近、收藏、局域网三类。`AppCore` 加收藏、局域网两份 `Peers`（照 M2a 的 `recentPeers`），加载用 `bind.mainLoadFavPeers`、`bind.mainLoadLanPeers`，事件 `load_fav_peers`、`load_lan_peers`。哪些分类显示、顺序照上游的选项（`peer_tab_page.dart` 的读法），在"视图"菜单里改。
 - 卡片和列表视图、排序（修掉上游按在线状态排序那个不合法的比较函数，`peers_view.dart:389-391`）、多选、设备菜单（四组，出现条件照上游 `peer_card.dart:958-1348`，地址簿相关的项不出现）、各分类的空状态、1000 台上限；在线状态查询照 M2a。网络唤醒、创建桌面快捷方式、始终经中继、重命名（别名）、收藏、清除保存的密码、删除（最近）、移除（局域网）各照上游的调用。
-- 连接框：搜索扩到三类（同一个 ID 只出现一次，标出来源，顺序最近、收藏、局域网）；"连接到"行尾的"⋯"（远程桌面、经中继连接）；结果按当前视图显示（`待调.md` 第 25 条）。"输入看起来像地址"的判断和回车规则不变。
-- 本机区：密码行"刷新"（一次性密码）、"修改"（只在便携版显示，打开设置固定密码对话框，校验和保存照上游 `desktop_home_page.dart:890-1126`）；服务已停止时的"启动服务"；"正在被远程控制（N 个会话）"，N 用现有的远程桌面连接数，"查看"不显示（M3）；提示卡只显示系统错误那张。
+- 连接框：搜索扩到三类（同一个 ID 只出现一次，标出来源，顺序最近、收藏、局域网）；"连接到"行尾的"⋯"（远程桌面、经中继连接）；结果按当前视图显示。"输入看起来像地址"的判断和回车规则不变。
+- 本机区：密码行"刷新"（一次性密码）、"修改"（只在便携版显示，打开设置固定密码对话框，校验和保存照上游 `desktop_home_page.dart:890-1126`）；服务已停止时的"启动服务"；"正在被远程控制（N 个会话）"，N 的算法和"查看"见 §10.10 第二段；提示卡只显示系统错误那张。
 - 被控时的遮罩：照上游 `canBeBlocked`、`shouldBeBlocked`（`flutter/lib/common.dart:3138-3205`），只盖主页。
 - 界面模式：02 §4.1 的新选项，键 `leapgate-ui-mode`（值 `detail` 是详细，其余是简洁），Leapgate 自己的 LocalConfig 键放在用它的文件里（10.7 接入办法第 2 条）；"视图"菜单里切换；`main.dart` 把它接到 `buildLgTheme` 的 `mode`，切换立即生效；设备页默认视图跟着它，用户手动选过视图后按用户选的。
 
 **测试和合入**
 
-- core 的新代码有单测（延迟统计、分类合并搜索、排序、遮罩判断、聊天消息存储）；app 每个页面状态一个行为测试（05 §6.1）。
+- core 的新代码有单测（延迟统计、分类合并搜索、排序、遮罩判断、聊天消息存储）；app 每个页面状态一个行为测试。
 - 合入前：`git diff main -- flutter/` 为空；core 的 `flutter analyze --no-fatal-infos` 在 3.44.9 下不超出 92 条 info 的基线，新复制的 `shortcut_model` 带来的上游提示单列；app 0 条；复制件不跑格式化。改已有文件时不对整个文件跑 `dart format`：M2a 的文件不是按当前格式化器的样式排的，整文件格式化会把差异放大到几百行；只格式化新文件。
-- 审查重点见 05 §3 第 2 步。
 
 ### 10.10 M3 的分工约定
 
-依据：总仓库 `docs/新界面/06-M3拆法.md`（下称"06"；维护者 2026-10-31 按推荐定）。界面行为以 01 §3.3（P3 全部）为准，02 §0.4 第 2、11 条、R2-Q16 有更正；样稿 `A-P3.html`，画框名见 06 §2.2；令牌和图标以 `A-基础.html` 为准。M3 和 M2b 并行，M2b 的约定在 10.9（在 `ui/m2b` 上，合入后两节并存）。
+M3 是被控端的连接管理小窗（CM）。界面行为以 01 §3.3（P3 全部）为准，02 §0.4 第 2、11 条、R2-Q16 有更正；样稿 `A-P3.html`；令牌和图标以 `A-基础.html` 为准。M3 和 M2b 并行开发，M2b 的约定在 10.9。
 
-**两段**：第一段现在做（窗口、来访标签、信息头、权限区、操作区、贴边小条、远程点击保护、关窗确认、主题和语言跟随（2026-11-01 改为和主窗口一样跟随系统，见下面"主题、语言"），加 Rust 三项）；第二段等 M2b 合入 main、main 合进 `ui/m3` 以后做（聊天侧栏、文件记录侧栏、主窗口本机区的连入数和"查看"、界面模式跟随）。
+**两段**：第一段是窗口、来访标签、信息头、权限区、操作区、贴边小条、远程点击保护、关窗确认、主题和语言跟随（见下面"主题、语言"），加 Rust 三项；第二段依赖 M2b，是聊天侧栏、文件记录侧栏、主窗口本机区的连入数和"查看"、界面模式跟随。
 
 **分支和文件边界**（都从 `ui/m3` 切，做完合回 `ui/m3`）
 
-| 分支 | 谁 | 只改这些 |
+| 分支 | 块 | 只改这些 |
 |---|---|---|
-| `ui/rust-m3` | Rust coder | `src/ipc.rs`（`Data` 末尾一个变体，主进程一侧 `handle` 一处分发）、`src/ui_cm_interface.rs`（CM 一侧消息循环一处分发）、`src/server/connection.rs`（只在出口连接的编号从现有挂钩拿不到时加一行）、`src/leapgate_ffi.rs`（末尾追加 M3 一段）、`src/leapgate_hooks` 下的新文件、`libs/leapgate/src/ipc.rs`（新）；测试 |
-| `ui/m3-ds` | designer | `app/lib/widgets/` 下 `lg_cm` 开头的新文件、`app/lib/gallery_main.dart` 的追加、这些组件的测试 |
-| `ui/m3-cm` | CM coder | `app/lib/cm/`（新）、`app/lib/main.dart` 的 `--cm` 分支、`app/windows/runner/main.cpp` 里 CM 窗口的初值；core 的 `models/server_model.dart`（新复制）、`leapgate/` 下 `cm_` 开头的新文件、`consts.dart`（只追加）；它们的测试 |
+| `ui/rust-m3` | Rust | `src/ipc.rs`（`Data` 末尾一个变体，主进程一侧 `handle` 一处分发）、`src/ui_cm_interface.rs`（CM 一侧消息循环一处分发）、`src/server/connection.rs`（只在出口连接的编号从现有挂钩拿不到时加一行）、`src/leapgate_ffi.rs`（末尾追加 M3 一段）、`src/leapgate_hooks` 下的新文件、`libs/leapgate/src/ipc.rs`（新）；测试 |
+| `ui/m3-ds` | 组件 | `app/lib/widgets/` 下 `lg_cm` 开头的新文件、`app/lib/gallery_main.dart` 的追加、这些组件的测试 |
+| `ui/m3-cm` | CM 页面 | `app/lib/cm/`（新）、`app/lib/main.dart` 的 `--cm` 分支、`app/windows/runner/main.cpp` 里 CM 窗口的初值；core 的 `models/server_model.dart`（新复制）、`leapgate/` 下 `cm_` 开头的新文件、`consts.dart`（只追加）；它们的测试 |
 
-- 和 M2b 重叠的只有 `app/lib/main.dart`（M2b 主页块改界面模式接主题那几行）、core `consts.dart`（M2b 两个 coder 也追加选项键）、`gallery_main.dart`，都只追加，整合时合并相邻行。
+- 和 M2b 重叠的只有 `app/lib/main.dart`（M2b 主页块改界面模式接主题那几行）、core `consts.dart`（M2b 也追加选项键）、`gallery_main.dart`，都只追加，整合时合并相邻行。
 - ARB 键用 `cm` 前缀，加在两个 ARB 文件末尾，中英文同时加，文案照 01 §3.3 和 §7.6，新写的句子列进提交说明。
-- CM coder 先用 M0、M2a 的组件和简单占位把逻辑写通，整合时换成 designer 的组件；占位要能被行为测试按文字和语义标签找到。
+- CM 页面先用 M0、M2a 的组件和简单占位把逻辑写通，整合时换成组件块的组件；占位要能被行为测试按文字和语义标签找到。
 
-**进程间消息和块 2 导出**（Rust coder 做；Rust 合进 `ui/m3` 之前，CM coder 用测试里能换掉的取值函数）
+**进程间消息和块 2 导出**（CM 页面用测试里能换掉的取值函数）
 
 `ipc::Data` 末尾加 `Leapgate(leapgate::ipc::Msg)`，`Msg` 定义在 `libs/leapgate/src/ipc.rs`，以后 Leapgate 的进程间消息都加在 `Msg` 里（03 §6.1 C1），只追加、不改已有变体的顺序和含义。上游 `Data` 两头的消息循环都有兜底的 `_ => {}`，两头各加一处分发，漏了新消息会被静默吞掉。
 
@@ -1947,28 +881,28 @@ tester 原先的推断是"跳过以后接着传时目标不对"。主会话查 A
 - 已知限制：新旧版本的进程短暂同时在跑时，旧进程收不懂新变体，解码失败（上游 `Data::DrmCursor` 的注释写过同类问题）。新界面便携版和旧界面不同时运行（03 §7.1），日常碰不到。
 - C1 在 M6 也要用（关出口前的确认）。
 
-**组件（designer）**：规则同 10.8"组件约定"。要做的见 06 §2.2：CM 外框（可拖动的标题区、"收起""关闭"，紧凑和展开两种宽度）、来访标签条、信息头（头像规则同 01 §3.1 区块 D）、几种会话类型的信息区、权限区（带文字的开关两列、只读态）、操作区的各种组合、贴边小条（一个连接按类型的文案、几个连接）、远程点击被拦下的提示、文件记录侧栏的列表行和空状态、关窗确认。聊天侧栏是第二段 designer 做的 `LgCmChat`（`app/lib/widgets/lg_cm_chat.dart`：M2b 聊天气泡的嵌入形态，铺满侧栏、没有标题和关闭，带只读态；`LgChatMessage` 加了可选的 `sender`）。CM 的颜色跟主题，信息头用固定的浅青功能底（01 §2.4），不用来访者的身份色。
+**组件**：规则同 10.8"组件约定"。要做的：CM 外框（可拖动的标题区、"收起""关闭"，紧凑和展开两种宽度）、来访标签条、信息头（头像规则同 01 §3.1 区块 D）、几种会话类型的信息区、权限区（带文字的开关两列、只读态）、操作区的各种组合、贴边小条（一个连接按类型的文案、几个连接）、远程点击被拦下的提示、文件记录侧栏的列表行和空状态、关窗确认。聊天侧栏用第二段加的 `LgCmChat`（`app/lib/widgets/lg_cm_chat.dart`：M2b 聊天气泡的嵌入形态，铺满侧栏、没有标题和关闭，带只读态；`LgChatMessage` 加了可选的 `sender`）。CM 的颜色跟主题，信息头用固定的浅青功能底（01 §2.4），不用来访者的身份色。
 
-**CM 页面（CM coder，第一段）**
+**CM 页面（第一段）**
 
 - 初始化：`--cm` 分支照上游 `flutter/lib/main.dart:285-302`：先建 `AppCore`，再按 CM 初始化平台接口（`kAppTypeConnectionManager`，它会调 Rust 的 `cm_init`，`core/lib/models/native_model.dart` 里已有这一处），登记 CM 的全局事件 `add_connection`、`on_client_remove`、`show_elevation`、`update_voice_call_state`（登记在 `appCore.events`，10.6；`theme`、`language` 不登记，见下面"主题、语言"），第二段加了 `chat_server_mode`、`cm_file_transfer_log`（见下面"第二段"）。不读 `hide_cm`（03 §5.2 M3）。
-- 复制件：`flutter/lib/models/server_model.dart` 复制进 core，CM 用到的部分按"只删界面调用"保留（客户端列表、`addConnection`、`onClientRemove`、接受和拒绝、断开、提权、撤销交换、语音状态、关闭全部、500 ms 的轮询和约 6 秒退出；最后一个来访离开时当场关窗，见下面"没有来访后退出"），主窗口和 Android 的部分（密码、ID、起停服务）整段删掉，来源行写明删了什么。标签不用上游的 `DesktopTabController`，用自己的列表。一条连接的两次 `add_connection`、`on_client_remove` 的关闭标记、同一个人重连时删旧的那条，照上游的规则（06 §4.2）。
-- 窗口：紧凑态 320×500、贴主显示器工作区右上角、置顶、不能改大小；展开侧栏时向左展开到 700×500（2026-10-31 组件审查后定：样稿是 320×500，01 §3.3 写"约 300~320 宽"，选 320；外框 320 含不可见缩放边框，客户区 150% 下约 309，组件按最窄客户区 304 设计，见 §10.5 M3 必修项的修法；尺寸用组件里的 `kLgCmWidth`、`kLgCmHeight`、`kLgCmExpandedWidth`，不另写一套）；隐藏照上游用透明加隐藏、不销毁；runner 里 CM 的初值（现在 800×600）改成和 Dart 一致。
-- 贴边小条：同一个窗口缩成一条，贴主显示器上边、靠右，沿上边左右拖动、位置只在本次运行内记住（记在 `LgCmWindow` 的内存里，不写 LocalConfig：CM 进程的 LocalConfig 是启动时读的快照，写任何一个键都会把整份旧配置存回文件，盖掉主窗口之后改过的本地配置；第一段原来写的 `leapgate-cm-strip-offset` 键第二段审查后去掉）；授权后自动收起的时机和取消条件照上游 `server_model.dart:571-590`、`server_page.dart:180-186`（01 §3.3 改成"收成小条"而不是最小化）；新来访时恢复成完整小窗并置顶。
+- 复制件：`flutter/lib/models/server_model.dart` 复制进 core，CM 用到的部分按"只删界面调用"保留（客户端列表、`addConnection`、`onClientRemove`、接受和拒绝、断开、提权、撤销交换、语音状态、关闭全部、500 ms 的轮询和约 6 秒退出；最后一个来访离开时当场关窗，见下面"没有来访后退出"），主窗口和 Android 的部分（密码、ID、起停服务）整段删掉，来源行写明删了什么。标签不用上游的 `DesktopTabController`，用自己的列表。一条连接的两次 `add_connection`、`on_client_remove` 的关闭标记、同一个人重连时删旧的那条，照上游的规则。
+- 窗口：紧凑态 320×500、贴主显示器工作区右上角、置顶、不能改大小；展开侧栏时向左展开到 700×500（样稿是 320×500，01 §3.3 写"约 300~320 宽"，选 320；外框 320 含不可见缩放边框，客户区 150% 下约 309，组件按最窄客户区 304 设计；尺寸用组件里的 `kLgCmWidth`、`kLgCmHeight`、`kLgCmExpandedWidth`，不另写一套）；隐藏照上游用透明加隐藏、不销毁；runner 里 CM 的初值和 Dart 一致（原来是 800×600）。
+- 贴边小条：同一个窗口缩成一条，贴主显示器上边、靠右，沿上边左右拖动、位置只在本次运行内记住（记在 `LgCmWindow` 的内存里，不写 LocalConfig：CM 进程的 LocalConfig 是启动时读的快照，写任何一个键都会把整份旧配置存回文件，盖掉主窗口之后改过的本地配置；所以没有 `leapgate-cm-strip-offset` 这样的键）；授权后自动收起的时机和取消条件照上游 `server_model.dart:571-590`、`server_page.dart:180-186`（01 §3.3 改成"收成小条"而不是最小化）；新来访时恢复成完整小窗并置顶。
 - 远程点击保护：照上游 `server_page.dart:1237-1253`，被拦下时在按钮旁提示"无法远程执行此操作"；`allow-remote-cm-modification` 开着时放行。小条上的"断开"同样受保护。
 - 关窗：多于一个连接时始终确认"断开全部会话？"，不读 `enable-confirm-closing-tabs`（R2-Q16）；关闭照上游 `closeAll`。标题栏"关闭"和确认里的"断开"也做远程点击保护，问的是任意一个还连着的来访（已断开的问不到、会读到旧值）；一个都没连着时直接执行。整个窗口（标题栏按钮、标签、面板、确认框、小条）都不接键盘焦点（`allow-remote-cm-modification` 开着时除外）：服务端只在左键抬起和回车时更新对方的输入时间，Tab 加空格能绕过点击判断。
-- 主题、语言（2026-11-01 整体审查后定，代替原来"启动时读设置、运行中收事件切换"的写法）：CM 和新主窗口一样跟随系统，不读 LocalConfig 的 `theme`、`lang`，也不登记 `theme`、`language` 事件（新主窗口现在只跟系统、不会发）；到 M6 设置页存下用户的选择时，主窗口和 CM 一起接。语言只有简体中文和英文，系统是其他语言时用英文（IQ10）。
+- 主题、语言：CM 和新主窗口一样跟随系统，不读 LocalConfig 的 `theme`、`lang`，也不登记 `theme`、`language` 事件；设置页存下用户的选择以后，主窗口和 CM 一起接，见 §10.13 的"外观"。语言只有简体中文和英文，系统是其他语言时用英文（IQ10）。
 
 **测试和合入**
 
-- core：客户端列表的增删和两次事件、已断开的保留和清理、自动收起的取消条件、没有来访时退出的计时（用假时钟），各有单测；Rust：C1 的分类（含出口表清理）、`Msg` 的编解码。app：06 §5.1 列的每种状态一个行为测试。
+- core：客户端列表的增删和两次事件、已断开的保留和清理、自动收起的取消条件、没有来访时退出的计时（用假时钟），各有单测；Rust：C1 的分类（含出口表清理）、`Msg` 的编解码。app：每种状态一个行为测试。
 - 合入前：`git diff main -- flutter/` 为空；core 的 `flutter analyze --no-fatal-infos` 在 3.44.9 下不超出 92 条 info 的基线，新复制的 `server_model` 带来的上游提示单列；app 0 条；复制件不跑格式化；改已有文件时不对整个文件跑 `dart format`。
-- 审查重点：Rust 看两头分发都在、出口计数和清理、旧界面的 CM 不受影响；CM 看事件处理和上游规则一致、窗口和小条的状态切换、远程点击保护；组件看样稿必修项。
+- 评审重点：Rust 看两头分发都在、出口计数和清理、旧界面的 CM 不受影响；CM 看事件处理和上游规则一致、窗口和小条的状态切换、远程点击保护；组件看样稿必修项。
 
-**没有来访后退出**（M8 压力测试后改，2026-11-07，`c8ce376a2`）
+**没有来访后退出**
 
 - 上游有两条关窗的路：标签控制器移除最后一个标签时 `server_page.dart` 的 `onRemoveId` 当场 `windowManager.close()`（`onClientRemove` 以关闭移除、`sendLoginResponse` 拒绝时都走它）；500 ms 轮询里空着数到 12 次再关是兜底。复制件不用标签控制器，第一条路跟着丢了，小窗进程在最后一个来访断开后还要活 6~6.5 秒。
-- 后果：同一台控制端约 6 秒后再连进来，登录正好落在轮询请求关窗和 `onWindowClose` 之间，`closeAll` 把这个新来访一起关掉（服务端 `Connection closed: connection manager`，控制端收到不重试的"Closed manually by the peer"）。详见 10.5"M8 切换，压力项"新发现 1 的结论。
+- 后果：同一台控制端约 6 秒后再连进来，登录正好落在轮询请求关窗和 `onWindowClose` 之间，`closeAll` 把这个新来访一起关掉（服务端 `Connection closed: connection manager`，控制端收到不重试的"Closed manually by the peer"）。
 - 改法：`onClientRemove` 里列表因关闭（`close` 为真）变空时，隐藏之后当场 `window.close()`（带 `leapgate:` 注释），对应上游的 `onRemoveId`。拒绝时上游也当场关；这里拒绝后服务端随即结束连接、发来 `close` 为真的 `on_client_remove`，同样走这一行。轮询的 6 秒计数保留，只管上游也只靠它的情形：启动后一直没有来访、轮询发现和服务进程的列表对不上并重读成空表。
 - 剩下的竞争窗口和上游一样：另一台控制端恰好在这一台断开后的几十毫秒内登录，仍会被 `closeAll` 带走。
 
@@ -1979,15 +913,15 @@ tester 原先的推断是"跳过以后接着传时目标不对"。主会话查 A
 - 按 Alt+F4 关闭 CM 不弹"断开全部会话？"，直接断开全部会话（同上游）。
 - 第二位来访者的自动收起计时会覆盖第一位的：在小窗里移动鼠标只取消最后一个，前一个到时照样收起（同上游）。
 
-**第二段**（2026-11-01，M2b 合入 main 后把 main 合进 `ui/m3` 再做）
+**第二段**（依赖 M2b）
 
 - 侧栏：信息头按钮开关侧栏（远程点击保护照旧）。侧栏只在所选来访者有侧栏时显示（已授权的远程桌面、摄像头是聊天，文件传输是文件记录；`_hasSide`），窗口宽度跟着它：显示时 700（`kLgCmExpandedWidth`），否则 320。`LgCmWindow.setExpanded` 记住这个宽度，`_toFront`（新来访、从小条展开、"查看"）照它摆，不再一律放回 320。侧栏开着时来了新来访：新来访者已授权（密码直接通过）时侧栏照开、宽度不变；还在请求中时没有侧栏，窗口回到 320，接受后回到 700。所有来访者都没了时侧栏关上，6 秒内再来的来访者从关着开始。
 - 聊天：`leapgate/cm_chat.dart` 的 `CmChatModel`，管上游 `ChatModel` 在 CM 里的那部分。消息按来访者 ID 存（上游 `MessageKey` 也只比 ID），重连后还能看到；发送用所在标签的连接编号，所以上游 `_addTab` 里的 `chatModel.updateConnIdOfKey` 没有加回（复制件来源行已写明）。收到消息时（上游 `receive`）：窗口提到前面（小条会展开；已经是完整小窗时只显示、取得焦点，不挪回角落，同上游 `main.dart:321-329`），切到发消息的人的标签并打开聊天；正在聊天里写字（侧栏开着、输入框有焦点）时不切，发消息的是另一个人（按 `peerId` 比，同一个人的远程桌面和摄像头共用一份聊天）才计入他标签上的未读数。发送时当场取出文字、清空输入框，再走远程点击保护（要等约 120 ms），所以连按不会发两次、等待期间输入的新草稿不会被清掉；被拦下时输入框还空着就把原文填回去。回车发送后输入框留着焦点（`LgTextField` 透传 `onEditingComplete`，会话页的 `LgChatPanel` 一起改）。点有未读的标签会打开它的侧栏（上游 `server_page.dart:131-145`）。对方断开后聊天只读，提示"对方已断开连接"。
 - 文件记录：`models/cm_file_model.dart` 复制上游并改写（来源行列了差异）：日志解析、每条记录的状态规则、删目录时去掉其下的删除记录照抄；记录表在第一条日志到时建（上游在标签被选中时建，没选中过的连接的日志会被丢掉）；"侧栏正显示这个连接"由页面设 `shownConnId`。方向按 Windows 上 CM 的读写定：`isRemote`（CM 读文件、对方下载）是"从本机下载"，其余是"上传到本机"；名字只显示最后一段路径，重命名是"旧名 → 新名"；最新的在上面；已取消或跳过的显示"已跳过"。
 - 未读数：聊天和文件记录共用上游的 `Client.unreadChatMessageCount`，改它的地方都会接着通知页面（聊天、文件记录 model 的通知，页面自己的 `setState`），标签和侧栏按钮跟着变。
-- 焦点：`LgCmFrame` 加了 `sideFocusOnly`（默认 false，和原来一样不管焦点）。CM 页面传 `!allowRemoteCmModification()`：标题行、标签、面板、确认层不接焦点，侧栏可以（聊天输入框要能打字），代替第一段在整个窗口外包的 `ExcludeFocus`。发送只有两条路：输入框里按回车、鼠标点"发送"，都走远程点击保护（服务端在对方按回车和左键抬起时更新对方的输入时间，所以对方的回车和点击都会被拦下，提示出现在侧栏上方）。"发送"按钮不接焦点（`LgCmChat` 里包了 `ExcludeFocus`）：Tab 加空格不会更新对方的输入时间，否则对方点进输入框打字后能用它以本机身份发出。"查看"在 CM 没有来访者时不处理，免得弹出空窗口。
+- 焦点：`LgCmFrame` 加了 `sideFocusOnly`（默认 false，和原来一样不管焦点）。CM 页面传 `!allowRemoteCmModification()`：标题行、标签、面板、确认层不接焦点，侧栏可以（聊天输入框要能打字），不在整个窗口外包 `ExcludeFocus`。发送只有两条路：输入框里按回车、鼠标点"发送"，都走远程点击保护（服务端在对方按回车和左键抬起时更新对方的输入时间，所以对方的回车和点击都会被拦下，提示出现在侧栏上方）。"发送"按钮不接焦点（`LgCmChat` 里包了 `ExcludeFocus`）：Tab 加空格不会更新对方的输入时间，否则对方点进输入框打字后能用它以本机身份发出。"查看"在 CM 没有来访者时不处理，免得弹出空窗口。
 - 语音：通话中操作区一行是麦克风选择加"挂断"（`LgCmMicRow`）。设备照上游 `AudioInput`（`isCm: true`）：能用"系统声音"时它在第一项、也是默认；一个设备都没有时点选择框提示"未找到音频输入设备" 3 秒。选设备不做远程点击保护（同上游），"挂断"做。
-- 主窗口：本机区按 06 M3-1，N 是 C1 的全部类型之和，有远程桌面或终端时"正在被远程控制（N 个会话）"，否则"‹N› 个传入会话进行中"，旁边"查看"调 `leapgate_show_cm`。`LocalStatusModel` 每 3 秒问一次 `leapgate_incoming_counts`（单独的计时器，不放在每秒的状态轮询里）：主窗口收不到会话开始、结束的事件，`video_conn_count` 又只数远程桌面；一次查询是本机的一次进程间连接，服务进程在内存里数，最坏约 2 秒，3 秒的间隔不会叠起来。原来的 `remoteSessions`（`video_conn_count`）删掉。
+- 主窗口：本机区的 N 是 C1 的全部类型之和，有远程桌面或终端时"正在被远程控制（N 个会话）"，否则"‹N› 个传入会话进行中"，旁边"查看"调 `leapgate_show_cm`。`LocalStatusModel` 每 3 秒问一次 `leapgate_incoming_counts`（单独的计时器，不放在每秒的状态轮询里）：主窗口收不到会话开始、结束的事件，`video_conn_count` 又只数远程桌面；一次查询是本机的一次进程间连接，服务进程在内存里数，最坏约 2 秒，3 秒的间隔不会叠起来。原来的 `remoteSessions`（`video_conn_count`）删掉。
 - 界面模式：主窗口切换简洁 / 详细（`setDetailMode`）后调 `leapgate_ui_mode_changed`，值和 LocalConfig 里的一样（`detail` 或空）。CM 启动时读一次 LocalConfig，并订阅 `leapgate_cm_events`（`listenToMainWindow`）：`ui_mode` 换 `LeapgateApp` 的 `detailMode`，只换尺寸；`show_cm` 把窗口提到前面。CM 不把收到的模式写回 LocalConfig：CM 进程里的 LocalConfig 是启动时读的，写一次会把这份旧的整个存回去，盖掉主窗口之后的改动。
 
 **第二段的已知限制**
@@ -2003,37 +937,37 @@ tester 原先的推断是"跳过以后接着传时目标不对"。主会话查 A
 
 ### 10.11 M4 的分工约定
 
-依据：总仓库 `docs/新界面/07-M4拆法.md`（下称"07"；维护者 2026-11-02 把 M4-1~M4-9 全部按推荐定）。界面行为以 01 §3.1 区块 D、E、F、G、H、K 为准，账号的文案看 02 §1.5.3，标签颜色看 02 §3.6；样稿 `A-P1.html`，画框名见 07 §2.2；令牌和图标以 `A-基础.html` 为准。07 §6 列的不做。
+M4 是账号、地址簿和同组设备。登录只做账号密码，不做 2FA 和邮箱验证码。界面行为以 01 §3.1 区块 D、E、F、G、H、K 为准，账号的文案看 02 §1.5.3，标签颜色看 02 §3.6；样稿 `A-P1.html`；令牌和图标以 `A-基础.html` 为准。
 
 **分支和文件边界**（都从 `ui/m4` 切，做完合回 `ui/m4`；`ui/m4` 上已有下面"挂载点"的骨架）
 
-| 分支 | 谁 | 只改这些 |
+| 分支 | 块 | 只改这些 |
 |---|---|---|
-| `ui/rust-h1` | coder R（H1） | `libs/leapgate/src/api.rs`（加一个带 Bearer 的通用请求函数）、`libs/leapgate/src/account/`（新）、`libs/leapgate/src/lib.rs`（声明模块一行）、`src/leapgate_ffi.rs`（末尾追加 M4 一段）；测试。不改 Dart，不生成桥 |
-| `ui/m4-ds` | designer | `app/lib/widgets/`（新组件；`LgDeviceCard`、`LgDeviceRow`、`LgDeviceTable` 加备注）、`app/lib/gallery_main.dart`、组件的测试 |
-| `ui/m4-account` | coder A（账号、登录、同组设备） | core `leapgate/account.dart`、`leapgate/group.dart`、`leapgate/peer_tabs.dart`（只改 `isEnabled`）；app `pages/home/account/`、`pages/home/group/`、`pages/home/home_page.dart` 的 `_SideColumn`（账号区摆在哪、间距）、`main.dart`（启动时调 `appCore.account.start()` 那几行）；它们的测试 |
-| `ui/m4-ab` | coder B（地址簿） | core `leapgate/address_book.dart`、`leapgate/peer_list.dart` 的 `peerMenu`（条件和参数）、`consts.dart`（只追加地址簿的选项键）；app `pages/home/address_book/`、`peer_views.dart` 里 `peerMenuItems` 调 `peerMenu` 那几行（跟着参数改）；它们的测试 |
+| `ui/rust-h1` | Rust（H1） | `libs/leapgate/src/api.rs`（加一个带 Bearer 的通用请求函数）、`libs/leapgate/src/account/`（新）、`libs/leapgate/src/lib.rs`（声明模块一行）、`src/leapgate_ffi.rs`（末尾追加 M4 一段）；测试。不改 Dart，不生成桥 |
+| `ui/m4-ds` | 组件 | `app/lib/widgets/`（新组件；`LgDeviceCard`、`LgDeviceRow`、`LgDeviceTable` 加备注）、`app/lib/gallery_main.dart`、组件的测试 |
+| `ui/m4-account` | A（账号、登录、同组设备） | core `leapgate/account.dart`、`leapgate/group.dart`、`leapgate/peer_tabs.dart`（只改 `isEnabled`）；app `pages/home/account/`、`pages/home/group/`、`pages/home/home_page.dart` 的 `_SideColumn`（账号区摆在哪、间距）、`main.dart`（启动时调 `appCore.account.start()` 那几行）；它们的测试 |
+| `ui/m4-ab` | B（地址簿） | core `leapgate/address_book.dart`、`leapgate/peer_list.dart` 的 `peerMenu`（条件和参数）、`consts.dart`（只追加地址簿的选项键）；app `pages/home/address_book/`、`peer_views.dart` 里 `peerMenuItems` 调 `peerMenu` 那几行（跟着参数改）；它们的测试 |
 
-- 共用文件只往挂载点里填，挂载点以外的行不改：`devices_page.dart`、`peer_views.dart`、`account_category.dart`，core 的 `account_api.dart`、`app_core.dart`，`core/test/account_fakes.dart`。挂载点的签名不够用、或者要改共用文件的别处时，写进汇报，由主会话改。
+- 共用文件只往挂载点里填，挂载点以外的行不改：`devices_page.dart`、`peer_views.dart`、`account_category.dart`，core 的 `account_api.dart`、`app_core.dart`，`core/test/account_fakes.dart`。
 - ARB：A 的键以 `account`、`login`、`group` 开头，B 以 `ab` 开头，加在两个 ARB 文件末尾，中英文同时加，文案照 01 §7.6：01 里写好的句子逐字照抄，新写的句子列进提交说明。分类名 `abCategory`、`groupCategory` 骨架里已经加了。
-- 两个 coder 先用 M0~M3 的组件和简单的占位控件把逻辑写通，整合时换成 designer 的组件。占位不求好看，但行为测试要能按文字和语义标签找到它们。
+- A、B 两块先用 M0~M3 的组件和简单的占位控件把逻辑写通，整合时换成组件块的组件。占位不求好看，但行为测试要能按文字和语义标签找到它们。
 - 测试里换掉导出：设 `accountApi = FakeAccountApi()`（`core/test/account_fakes.dart`；app 的测试照 `home_fakes.dart` 引 `FakeLeapgate` 的办法用相对路径引它）。三个 model 第一次用到时才建，`accountApi` 要在第一次用 `appCore.account`、`addressBook`、`group` 之前设好。
 
-**H1 的块 2 导出**（coder R；R 合进 `ui/m4` 之前，A、B 只经 `account_api.dart`，测试用 `FakeAccountApi`）
+**H1 的块 2 导出**（A、B 只经 `account_api.dart`，测试用 `FakeAccountApi`）
 
 都放在 `src/leapgate_ffi.rs` 末尾新的 "Account (M4)" 一段，逻辑在 `libs/leapgate/src/account/`，`src/` 只做薄壳。除 `leapgate_account_local` 外在 Dart 侧都是异步：Rust 函数照 `leapgate_incoming_counts` 的写法同步返回 `String`，请求放在用 `#[tokio::main(flavor = "current_thread")]` 包的函数里跑（frb 在工作线程上调，不在运行时里，符合 AGENTS.md 的 Tokio 规则）。返回值都是 JSON 字符串，出错时是下面"错误的形状"。
 
 | 导出 | 参数 | 成功时返回 | 做什么 |
 |---|---|---|---|
 | `leapgate_account_local()`，同步 | | 有令牌时 `{"user":<user_info>}`，没有时 `{}` | 不发请求：读 LocalConfig 的 `access_token`（只看是否非空）和 `user_info` |
-| `leapgate_account_login_options()` | | `{}` | `GET /api/login-options`，2xx 就算成功，内容不解析（M4-4；rustdesk-api 回 `common-oidc/null` 也照样成功） |
+| `leapgate_account_login_options()` | | `{}` | `GET /api/login-options`，2xx 就算成功，内容不解析（rustdesk-api 回的登录方式列表也照样成功） |
 | `leapgate_account_login(username, password)` | 原样，trim 由界面做 | `{"user":<用户对象>}` | `POST /api/login`，体 `{username, password, id, uuid, autoLogin: true, type: "account", deviceInfo}`（上游 `common/hbbs/hbbs.dart` `LoginRequest`，不带验证码字段）；`id`、`uuid`、`deviceInfo` 由导出在 `src/` 取（`ui_interface::get_id()`、`get_uuid()`、`get_login_device_info()`）再传进 `libs/leapgate`。成功后写 `access_token`、`user_info` |
 | `leapgate_account_current_user()` | | `{"user":<用户对象>}` | `POST /api/currentUser`，体 `{id, uuid}`；成功后重写 `user_info` |
-| `leapgate_account_logout()` | | 总是 `{}` | `POST /api/logout`，体 `{id, uuid}`，2 秒超时；不管结果如何都删 `access_token`、`user_info`、两份缓存（M4-9） |
+| `leapgate_account_logout()` | | 总是 `{}` | `POST /api/logout`，体 `{id, uuid}`，2 秒超时；不管结果如何都删 `access_token`、`user_info`、两份缓存 |
 | `leapgate_ab_cache()` | | `{"entries":[…]}` | 不发请求：`_ab` 缓存里的令牌和当前令牌相同时，原样给它的 `ab_entries`（每条 `guid`、`name`、`peers`、`tags`、`tag_colors`），否则空数组 |
 | `leapgate_group_cache()` | | `{"users":[…],"peers":[…]}` 或 `{}` | 不发请求：`_group` 缓存的令牌相同时给它的 `users`、`peers`（上游 `toGroupCacheJson` 的格式），否则 `{}` |
-| `leapgate_ab_books()` | | `{"max_peers":n,"personal":"<guid>","shared":[{"guid","name","owner","note","rule"}…]}` | `POST /api/ab/personal`、`/api/ab/settings`、`/api/ab/shared/profiles`（分页）。任一个失败整个失败；`personal` 回 404 是 `unsupported`（07 §4.4）；`max_peers` 是 0 表示不限 |
-| `leapgate_ab_book(guid, name, personal)` | 簿的 guid；`name`、`personal` 只用来写缓存 | `{"peers":[…],"tags":[{"name","color"}…]}` | `POST /api/ab/peers?current&pageSize&ab=<guid>`（分页，按 ID 去重，某一页没有新 ID 就停，07 §4.3）、`POST /api/ab/tags/<guid>`。`peers` 是服务器给的设备对象原样（个人簿带 `hash`、共享簿带 `password`，M4-3）。成功后写 `_ab` 缓存（见下面"缓存"） |
+| `leapgate_ab_books()` | | `{"max_peers":n,"personal":"<guid>","shared":[{"guid","name","owner","note","rule"}…]}` | `POST /api/ab/personal`、`/api/ab/settings`、`/api/ab/shared/profiles`（分页）。任一个失败整个失败；`personal` 回 404 是 `unsupported`；`max_peers` 是 0 表示不限 |
+| `leapgate_ab_book(guid, name, personal)` | 簿的 guid；`name`、`personal` 只用来写缓存 | `{"peers":[…],"tags":[{"name","color"}…]}` | `POST /api/ab/peers?current&pageSize&ab=<guid>`（分页，按 ID 去重，某一页没有新 ID 就停）、`POST /api/ab/tags/<guid>`。`peers` 是服务器给的设备对象原样（个人簿带 `hash`、共享簿带 `password`）。成功后写 `_ab` 缓存（见下面"缓存"） |
 | `leapgate_ab_add_peer(guid, peer)` | `peer`：设备对象的 JSON 字符串 | `{}` | `POST /api/ab/peer/add/<guid>`，体原样（个人簿去掉 `password`、共享簿去掉 `hash` 由界面做，上游 `addPeers`） |
 | `leapgate_ab_update_peer(guid, peer)` | `peer`：`id` 加要改的字段的 JSON 字符串 | `{}` | `PUT /api/ab/peer/update/<guid>`，体原样。上游 5 处都走它：标签、别名、备注、`hash` 或 `password`、与最近会话同步 |
 | `leapgate_ab_delete_peers(guid, ids)` | `ids: Vec<String>` | `{}` | `DELETE /api/ab/peer/<guid>`，体是 ID 数组 |
@@ -2041,9 +975,9 @@ tester 原先的推断是"跳过以后接着传时目标不对"。主会话查 A
 | `leapgate_ab_rename_tag(guid, old_name, new_name)` | | `{}` | `PUT /api/ab/tag/rename/<guid>`，体 `{old, new}` |
 | `leapgate_ab_set_tag_color(guid, name, color)` | `color: i64` | `{}` | `PUT /api/ab/tag/update/<guid>`，体 `{name, color}` |
 | `leapgate_ab_delete_tags(guid, names)` | `names: Vec<String>` | `{}` | `DELETE /api/ab/tag/<guid>`，体是标签名数组 |
-| `leapgate_group()` | | `{"users":[<用户对象>…],"peers":[<设备对象>…]}` | `GET /api/users`、`GET /api/peers`（都带 `accessible`、`status=1`，分页，`current` 和 `page` 都带，07 §4.3）；两个都成功才算成功，成功后整份重写 `_group` 缓存。不调 `/api/device-group/accessible`（M4-6） |
+| `leapgate_group()` | | `{"users":[<用户对象>…],"peers":[<设备对象>…]}` | `GET /api/users`、`GET /api/peers`（都带 `accessible`、`status=1`，分页，`current` 和 `page` 都带）；两个都成功才算成功，成功后整份重写 `_group` 缓存。不调 `/api/device-group/accessible` |
 
-- 共 17 个导出，覆盖 07 的 18 个端点。写操作按端点各一个、不合成"操作种类 + 参数"的一个：各端点的体和 404、409 的含义都不同，合成一个要在 JSON 里再编一层，界面调用反而不清楚。参数名避开 Dart 的保留字（`new`），所以叫 `old_name`、`new_name`。一次加一台设备、一个标签（上游 `addPeers`、`addTags` 也是逐个发），多选"加入地址簿"由界面循环，遇到第一个错误就停（上游同样）。
+- 共 17 个导出，覆盖 18 个端点。写操作按端点各一个、不合成"操作种类 + 参数"的一个：各端点的体和 404、409 的含义都不同，合成一个要在 JSON 里再编一层，界面调用反而不清楚。参数名避开 Dart 的保留字（`new`），所以叫 `old_name`、`new_name`。一次加一台设备、一个标签（上游 `addPeers`、`addTags` 也是逐个发），多选"加入地址簿"由界面循环，遇到第一个错误就停（上游同样）。
 - 用户对象、设备对象都是服务器给的原样（用户对象有 `name`、`display_name`、`avatar`、`email`、`note`、`status`、`is_admin`），界面按 `account_api.dart` 的数据类解析。
 - 写 `user_info` 照上游 `UserPayload.toJson`：`{"name","display_name","avatar","status"}`，`status` 照它的换算（0 停用、-1 未验证、其余 1）。Rust 别处在读它：登录消息的显示名（`src/client.rs`）、本机显示名导出。
 - 写操作 2xx 且体为空或体里没有 `error` 时算成功（上游 `_jsonDecodeActionResp`）。
@@ -2053,41 +987,41 @@ tester 原先的推断是"跳过以后接着传时目标不对"。主会话查 A
 | 种类 | 什么时候 | Rust 顺带做的 |
 |---|---|---|
 | `unauthorized` | 登录以外的接口回 401；`currentUser` 回 400 | 删 `access_token`、`user_info`、`_ab`、`_group` |
-| `wrong_credentials` | 登录回 401：Leapgate 服务端用它表示用户名或密码错误（07 §4.1） | 不动令牌 |
-| `verification_required` | 登录 2xx 但 `type` 不是 `access_token`（要验证码或 2FA，M4-1） | 不写令牌；界面显示"此服务器要求验证码登录，Leapgate 暂不支持" |
+| `wrong_credentials` | 登录回 401：Leapgate 服务端用它表示用户名或密码错误 | 不动令牌 |
+| `verification_required` | 登录 2xx 但 `type` 不是 `access_token`（要验证码或 2FA） | 不写令牌；界面显示"此服务器要求验证码登录，Leapgate 暂不支持" |
 | `not_found` | 写操作回 404（设备、标签不在这本簿里） | |
 | `conflict` | 409（新标签名已存在） | |
 | `unsupported` | `ab/personal` 回 404 | |
 | `network` | 连不上、TLS 失败、超时（单次 12 秒，登出 2 秒） | |
-| `server` | 其余：别的 4xx（含限流 429、只读簿写入的 403、簿满的 400）和 5xx，2xx 里带 `error`（`currentUser` 的内部错误），回的不是预期的 JSON；`settings`、`shared/profiles` 的 404 也在这里（07 §4.4） | |
+| `server` | 其余：别的 4xx（含限流 429、只读簿写入的 403、簿满的 400）和 5xx，2xx 里带 `error`（`currentUser` 的内部错误），回的不是预期的 JSON；`settings`、`shared/profiles` 的 404 也在这里 | |
 
 - `currentUser` 的 400 照上游（`models/user_model.dart:85-88`）也清令牌。上游 400 只清令牌、不当场复位地址簿和组，但紧接着 finally 里的拉取因为没有令牌也会复位它们，结果和 401 相同，所以这里两者一样处理。
 - 界面不认识的种类当 `server`（`parseApiResult`）。
 
-**缓存**（M4-2、M4-9）
+**缓存**
 
-- `_ab`：格式照 `hbb_common::config::Ab`（`access_token` 加 `ab_entries`）。个人簿那条的 `name` 必须是 `My address book`：`AbEntry::personal()` 按名字认，`src/client.rs` 的 `try_get_password_from_personal_ab` 靠它找个人簿里存的密码（07 §4.2）。`leapgate_ab_book` 成功后改写：最多两条，个人簿一条、最近拉过的共享簿一条（上游存"个人簿 + 当前簿"，界面拉的共享簿就是当前簿）；`personal` 为真时换个人簿那条，否则换共享簿那条；文件里的令牌和当前令牌不同时先清空再写。条目的 `peers` 照 `AbPeer` 只留 `id`、`username`、`hostname`、`platform`、`alias`、`tags`，个人簿另带 `hash`（上游 `toCustomJson(includingHash:)`）；`tag_colors` 是 `{"名字": 颜色}` 的 JSON 字符串。
+- `_ab`：格式照 `hbb_common::config::Ab`（`access_token` 加 `ab_entries`）。个人簿那条的 `name` 必须是 `My address book`：`AbEntry::personal()` 按名字认，`src/client.rs` 的 `try_get_password_from_personal_ab` 靠它找个人簿里存的密码。`leapgate_ab_book` 成功后改写：最多两条，个人簿一条、最近拉过的共享簿一条（上游存"个人簿 + 当前簿"，界面拉的共享簿就是当前簿）；`personal` 为真时换个人簿那条，否则换共享簿那条；文件里的令牌和当前令牌不同时先清空再写。条目的 `peers` 照 `AbPeer` 只留 `id`、`username`、`hostname`、`platform`、`alias`、`tags`，个人簿另带 `hash`（上游 `toCustomJson(includingHash:)`）；`tag_colors` 是 `{"名字": 颜色}` 的 JSON 字符串。
 - `_group`：照 `config::Group`，`leapgate_group` 成功后整份重写。
 - 退出、`unauthorized` 时两份都删。登录成功时不删（令牌不同的缓存不会被读到）。
 
-**令牌和请求**（M4-3、M4-8、IQ7）：`access_token` 只在 Rust 里读写，Dart 不读不写它，也不写 `user_info`。API 地址用 `report::api_root()`（已知限制：不认程序文件名里带的配置，M4-8）。请求用 `api.rs` 的严格客户端（系统根证书加 webpki、不跟随重定向、证书失败不回退、按上游规则走代理），带 `Authorization: Bearer <令牌>`。日志不记令牌、密码、`hash`、共享密码，失败只记端点路径和状态码。
+**令牌和请求**（IQ7）：`access_token` 只在 Rust 里读写，Dart 不读不写它，也不写 `user_info`。API 地址用 `report::api_root()`（已知限制：不认程序文件名里带的配置）。请求用 `api.rs` 的严格客户端（系统根证书加 webpki、不跟随重定向、证书失败不回退、按上游规则走代理），带 `Authorization: Bearer <令牌>`。日志不记令牌、密码、`hash`、共享密码，失败只记端点路径和状态码。
 
 **Dart 侧的调用层**：`core/lib/leapgate/account_api.dart`（骨架，共用）
 
 - 数据类：`AccountUser`（`displayNameOrName`）、`ShareRule`（上游同名枚举去掉文字）、`AbProfile`、`AbBooks`、`AbTag`、`AbBookData`（设备用 core 的 `Peer.fromJson`）、`GroupData`（设备经 `groupPeer`，照抄上游 `PeerPayload.toPeer`，`loginName` 是主人的用户名）。
 - `ApiErrorKind`（上表八种）、`ApiError(kind, text)`、`ApiResult<T>`（`ok`、`value`、`error`）、`parseApiResult(json, ok)`。
 - 接口 `AccountApi`，方法和导出一一对应：`localUser`、`loginOptions`、`login`、`currentUser`、`logout`、`abCache`（返回 `entries` 的列表）、`groupCache`、`books`、`book(guid, name:, personal:)`、`addPeer(guid, peer)`、`updatePeer(guid, id, fields)`（`id` 由它并进体里）、`deletePeers`、`addTag`、`renameTag`、`setTagColor`、`deleteTags`、`group`。全局 `accountApi` 默认是 `RustAccountApi`，测试换成 `FakeAccountApi`。
-- `RustAccountApi` 现在是占位：`localUser` 回 null，两份缓存回空，`logout` 什么也不做，其余回 `unsupported`。整合时每个方法体换成一行 `lgBind.leapgate…` 加 `parseApiResult`。
+- `RustAccountApi` 的每个方法体是一行 `lgBind.leapgate…` 加 `parseApiResult`。
 
 **core 的三个 model**（`ChangeNotifier`，同 M1 的做法，不用 Get、Rx；挂在 `appCore` 上，`late final`，第一次用时建）
 
-| model | 文件 | 谁 | 别的路要用的成员 |
+| model | 文件 | 块 | 别的块要用的成员 |
 |---|---|---|---|
 | `AccountModel` | `leapgate/account.dart` | A | `user`（null 是没登录）、`loggedIn`、`error`（最近一次和服务器核对失败的原因，仍算登录着）、`disabled`、`start()`、`checkLoginOptions()`、`login(username, password)`、`logout()`、`refresh()`、`signedOutByServer()` |
 | `AddressBookModel` | `leapgate/address_book.dart` | B | `disabled`、`loaded`、`loading`、`unsupported`、`pullError`、`books`（个人簿第一、共享簿按名字）、`current`、`isPersonal(book)`、`peers`、`shownPeers`（经标签筛选）、`allPeers`（已加载的各簿，连接框用）、`canWrite`、`writableBooks`（"加入地址簿"列的簿）、`sharedPasswordOf(id)`、`syncPeerHash(id, hash)` |
 | `GroupModel` | `leapgate/group.dart` | A | `disabled`、`loaded`、`loading`、`error`、`users`（自己第一）、`peers`、`selectedUser`、`selectUser(name)`、`shownPeers` |
 
-- 地址簿和组都实现 `AccountData`（`loadCache()`、`pull()`、`reset()`，定义在 `account.dart`）。`AccountModel` 构造时拿到 `[addressBook, group]`（M5 的出口目录以后也加进来），由它按下面的顺序调这三个方法；页面上的"刷新""重试"直接调各自 model 的 `pull()`。其余成员各路自定，不进约定。
+- 地址簿和组都实现 `AccountData`（`loadCache()`、`pull()`、`reset()`，定义在 `account.dart`）。`AccountModel` 构造时拿到 `[addressBook, group]`（M5 的出口目录也实现它，§10.12），由它按下面的顺序调这三个方法；页面上的"刷新""重试"直接调各自 model 的 `pull()`。其余成员各块自定，不进约定。
 - 顺序（A 实现，照上游 `refreshCurrentUser`、`updateOtherModels`）：`start()` 先读 `localUser()`，有就当已登录、调各 `loadCache()` 先显示；再 `currentUser()`：成功就更新用户、并行调各 `pull()`；`network`、`server` 记进 `error`、保持登录、不拉（上游 `pullAb`、`group.pull` 在有网络错误时直接返回），"重试"调 `refresh()` 再走一遍；`unauthorized` 走 `signedOutByServer()`。`login` 成功后更新用户、并行拉。`logout()` 调导出后清用户、`reset()` 各个。`signedOutByServer()` 清用户和 `error`、`reset()` 各个（令牌 Rust 已经删了）。
 - 地址簿和组的请求回 `unauthorized` 时，调 `appCore.account.signedOutByServer()`，不自己复位别人。
 - 在线状态：地址簿和同组设备的 `Peer.online` 由各自的 model 更新：照 `CategoryPeers` 用 `platformFFI.registerEventHandler('callback_query_onlines', <自己的 handler 名>, …)`，只改自己列表里的设备，变了就通知。页面判断"有没有回答"沿用 `categoryPeers(...).hasOnlineState`（每个 `CategoryPeers` 都收下全部 ID，不用改）。
@@ -2097,7 +1031,7 @@ tester 原先的推断是"跳过以后接着传时目标不对"。主会话查 A
 
 **挂载点**（`ui/m4` 上的骨架提交，行为和 M3 相同）
 
-| 文件 | 现在的内容 | 谁填 |
+| 文件 | 骨架里的内容 | 由哪块填 |
 |---|---|---|
 | `pages/home/account/account.dart` | `accountArea(context, overlays)`：左栏最下面的账号区，现在是空；`showLoginDialog(overlays)`：登录对话框，返回是否登录成功，地址簿和同组设备"没登录"状态的登录按钮也调它 | A |
 | `pages/home/group/group.dart` | `groupCategory(context, overlays)`，返回 `AccountCategoryView` | A |
@@ -2113,50 +1047,48 @@ tester 原先的推断是"跳过以后接着传时目标不对"。主会话查 A
 - `peerMenu` 照 01 区块 F 的菜单表：管理组补"加入地址簿"（已登录，各分类）、"编辑标签""编辑备注""设置共享密码"（地址簿；共享密码只在共享簿）、"查看所在地址簿"；危险组在地址簿里是"从地址簿中删除"；同组设备只有连接方式和"加入地址簿"；只读簿的写操作灰显（`LgMenuItem.disabledNote`），说明只在第一个出现灰显项的组标题旁写一次。地址簿分类里的"重命名"改的是簿里的别名（上游 `common/widgets/peer_card.dart` 的 `AddressBookPeerCard`），由 `abPeerMenuItem` 接管；"清除保存的密码"在所有分类都由 `abPeerMenuItem` 接管：设备在个人簿里时连簿里的 `hash` 一起清，再清本机保存的密码（上游 `_unrememberPasswordAction`，否则 Rust 下次连接仍会从 `_ab` 缓存自动填）。
 - 骨架里多选条的写法（`if (!accountCategory)` 下面那段没有重新缩进）是为了不动原有的行，整合时可以格式化这一段。
 
-**组件（designer）**：规则同 10.8"组件约定"（只管画、文字由调用方传、带语义标签、两套主题和两套尺寸、画廊里每种状态一项、有行为测试）。要做的和样稿画框见 07 §2.2。接口要点：
+**组件**：规则同 10.8"组件约定"（只管画、文字由调用方传、带语义标签、两套主题和两套尺寸、画廊里每种状态一项、有行为测试）。接口要点：
 
 - 账号区：没登录（"登录"按钮、下面一行说明，`onLogin`）；已登录（头像字、显示名，点开菜单向上展开：`@用户名` 那一行、"退出登录"，菜单项由调用方给）；退出的页内确认条（问句、正文、两个按钮）。头像字由调用方算好传入（01 区块 D 的规则归 A）。
 - 登录对话框：用户名、密码两个输入框（控制器由调用方给）、"登录"按钮（忙时转圈，输入框不可改）；错误文字三处：用户名框下、密码框下（服务器返回的错误也在这）、整块的"无法获取登录选项"加"重试"（`onRetry`）；回车提交。
 - 簿切换下拉：当前簿名，旁边的权限文字和所有者（调用方拼好）；展开后有搜索框、簿的列表（簿名、权限文字、所有者、选中态）、底部一行说明；`onSelect`。
 - 标签筛选条：第一项"未标记"（文字由调用方给），其余每项是 `LgDeviceTag` 加选中态（描边加勾，不用标签色铺满）；`onToggle`、`onContextMenu(tag, globalPosition)`（标签右键）；放不下时横向滚动。
-- 地址簿"更多"菜单、只读簿的设备菜单：用现成的菜单项拼，designer 只核对 `p1-ab-more`、`p1-ab-readonly`、`p1-ab-readonly-card`。
-- 其余小对话框（添加标签、重命名、编辑标签、编辑备注、设置共享密码、加入地址簿、查看所在地址簿）统一用 designer 另做的表单外壳 `LgFormDialog` + `LgFormField` + `LgTextArea` 拼（2026-11-02 改：原写"用 `LgConfirmDialog` 加输入件拼，不另做组件"）。忙态时正在操作的控件一禁用焦点就会掉，失败后由调用方把焦点放回出错的输入框（例如登录失败放回密码框）。
+- 地址簿"更多"菜单、只读簿的设备菜单：用现成的菜单项拼，组件块只核对 `p1-ab-more`、`p1-ab-readonly`、`p1-ab-readonly-card`。
+- 其余小对话框（添加标签、重命名、编辑标签、编辑备注、设置共享密码、加入地址簿、查看所在地址簿）统一用表单外壳 `LgFormDialog` + `LgFormField` + `LgTextArea` 拼。忙态时正在操作的控件一禁用焦点就会掉，失败后由调用方把焦点放回出错的输入框（例如登录失败放回密码框）。
 - 人员列表：搜索框；每行头像字、显示名、"我"标记；选中行带 ×（`onClear`）；`onSelect`。
 - 卡片和列表视图的备注：`LgDeviceCard`、`LgDeviceRow` 加 `note`（null 不显示那一行或那一格），`LgDeviceColumn` 加 `note`，有没有这一列由调用方的表头决定（地址簿和同组设备有）。
 - 列表状态：没登录（一句话加"登录"按钮）、网络错误（一句话加"重试"）、报错横幅（现有 `lg_banner.dart` 加"重试"按钮、可关闭，两句文字由调用方拼）、两类空、加载中骨架（现成的）。"服务器不提供地址簿"用空状态的样式。
-- 添加设备对话框：ID、别名、密码（只在共享簿，下面一行提示）、备注（300 字上限）、标签选择（浅底小块，可多选）；提交中、ID 重复、簿满、服务器报错四种状态的文字由调用方给。其余小对话框（添加标签、重命名标签、编辑标签、编辑备注、设置共享密码、加入地址簿、查看所在地址簿）照它的样式用 `LgConfirmDialog` 加输入件拼，不另做组件。
+- 添加设备对话框：ID、别名、密码（只在共享簿，下面一行提示）、备注（300 字上限）、标签选择（浅底小块，可多选）；提交中、ID 重复、簿满、服务器报错四种状态的文字由调用方给。其余小对话框见上一条，用 `LgFormDialog` 拼。
 - 修改标签颜色对话框：预览（标签小块）、一排预设色、自定义（色相环加明度条，自己画，不引第三方依赖）、`#RRGGBB` 输入框（格式错误的提示文字由调用方给）；提交中、失败；结果是 ARGB 整数（和上游存的一样）。
 
 **测试和合入**
 
-- R：每个端点的请求（方法、路径、查询、体）、响应解析、状态码到错误种类的映射（两种 401、`currentUser` 400、`personal` 404、409、2xx 带 `error`）、分页去重和停止条件、缓存的写入和删除（个人簿的名字、令牌不同时清空）；对两种服务器的集成测试 `#[ignore]`，地址和测试账号由环境变量给（07 §5.1）。假 HTTP 服务照 `api.rs` 现有的测试起。
+- R：每个端点的请求（方法、路径、查询、体）、响应解析、状态码到错误种类的映射（两种 401、`currentUser` 400、`personal` 404、409、2xx 带 `error`）、分页去重和停止条件、缓存的写入和删除（个人簿的名字、令牌不同时清空）；对两种服务器的集成测试 `#[ignore]`，地址和测试账号由环境变量给。假 HTTP 服务照 `api.rs` 现有的测试起。
 - core：A 的启动顺序（有没有本地用户 × `currentUser` 的几种结果）、登录、退出、`signedOutByServer` 复位、人员筛选和自己排第一；B 的权限判断、只读簿灰显项、标签筛选（并集和交集）、与最近会话同步的比对、`syncPeerHash`、退出后清空。都用 `FakeAccountApi`。
-- app：07 §5.1 列的每个页面状态一个行为测试。
+- app：每个页面状态一个行为测试。
 - 改写档登记来源（10.1）：`account.dart` 改写上游 `models/user_model.dart`，`group.dart` 改写 `models/group_model.dart`，`address_book.dart` 改写 `models/ab_model.dart`；照上游 `common/widgets/login.dart`、`my_group.dart`、`address_book.dart` 重写的页面在文件头注明出处。
 - 合入前：`git diff main -- flutter/` 为空；core 的 `flutter analyze --no-fatal-infos` 在 3.44.9 下不超出 92 条 info 的基线，app 0 条；复制件不跑格式化；改已有文件时不对整个文件跑 `dart format`，只格式化新文件。
 
 **整合时要做的**
 
 1. 合 R：重新生成块 2 的桥；`RustAccountApi` 的方法体换成 `lgBind` 调用加 `parseApiResult`；`core/test/fakes.dart` 的 `FakeLeapgate` 补上新导出（测试走 `FakeAccountApi`，补的可以直接抛错）。
-2. 换上 designer 的组件；`PeerCard`、`PeerTableRow` 在地址簿和同组设备里传 `note`，表头加备注列。
+2. 换上组件块的组件；`PeerCard`、`PeerTableRow` 在地址簿和同组设备里传 `note`，表头加备注列。
 3. 合 A、B：两个 ARB 文件的末尾合并；`peer_views.dart` 里 `peerMenu` 的调用参数以 B 为准。
 4. `shell/toast_view.dart` 的 `toastText` 补 B 的两个轻提示 `abToastAdded`、`abToastDeleted`（不补会显示键名）。
-5. 整体审查时看一眼 B 的 `pull()` 用 `_pulling` 判断"中途被复位"：退出后马上重新登录会把 `_pulling` 重新置真，旧那轮拉取的后半段会接着跑（H1 审查交回的提示）。
-6. 整体审查，再按 07 §5 验收。
 
-2026-11-02 主会话定的（B 交回的问题）：共享簿的默认共享密码（上游设备自己没存密码时退回用簿资料里的默认密码）不做，Leapgate 服务端的簿资料 `info` 恒为空，写进已知限制；从地址簿连接时把地址簿别名抄到本机记录（上游行为）不做，写进已知限制；网络错误时整块显示"无法连接服务器"盖住缓存，照 01 和上游；同组设备菜单照 01 没有"始终经中继连接""创建桌面快捷方式"，地址簿分类菜单照 01 有收藏项，删除标签照上游不确认。
+另外几处取舍：共享簿的默认共享密码（上游设备自己没存密码时退回用簿资料里的默认密码）不做，Leapgate 服务端的簿资料 `info` 恒为空；从地址簿连接时把地址簿别名抄到本机记录（上游行为）不做；网络错误时整块显示"无法连接服务器"盖住缓存，照 01 和上游；同组设备菜单照 01 没有"始终经中继连接""创建桌面快捷方式"，地址簿分类菜单照 01 有收藏项，删除标签照上游不确认。
 
 **已知限制和与上游的不同**
 
 - `leapgate_ab_books` 任一步失败整个失败；上游 `settings`、`shared/profiles` 失败时照样显示个人簿。两种支持的服务器都实现了这两个端点，失败多半是网络，整体重试就行。
 - 缓存只存个人簿和最近拉过的共享簿（上游是"当前簿"，界面里两者相同）。
 - `currentUser` 回 400 和 401 一样处理（理由见上面"错误的形状"）。
-- API 地址不认程序文件名里带的配置（M4-8）。
+- API 地址不认程序文件名里带的配置。
 - 地址簿正在拉取时，写操作之后的静默重新拉取被跳过，那次拉取的结果可能盖掉刚做的本地改动，直到下一次拉取（上游 `abPulling` 同样）。
 - 从连接框搜到别的共享簿里的设备，连接时不带那本簿的共享密码，只看当前簿（上游 `connectInPeerTab` 同样）。
 - 退出后马上用同一账号登回来，旧那轮拉取在簿列表回来之前分不清两次登录，可能接着写完（数据是同一账号的）；簿列表回来之后的部分已挡住（地址簿按"拉取开始时的用户名"和"簿列表是否被换掉"核对）。彻底分清要代次计数，不做。
 - 退出后马上用同一账号登回来，旧令牌的请求（`refresh()` 的 `currentUser`，地址簿和同组设备在途的拉取、写入，所有导出都一样）12 秒内回 401 时，Rust 那边因为令牌已换、不清新登录，Dart 这边却调了 `signedOutByServer()`：界面显示没登录，下次启动又显示已登录（Dart 侧只按用户名丢弃账号变了以后的回答，令牌的比对只在 Rust 侧）。
-- 菜单的语义（2026-11-03 合入 `ui/menu-semantics`，排查文档 §10）：菜单行文字的提示锚点不再成孤儿，菜单行带 `button` 标志。还剩两种孤儿，0003 丢掉它们不少信息：菜单行尾部带提示的按钮（目前只有"输入系统密码"那行的编辑按钮）、悬停放不下的文字时提示浮层自带的空节点。`LgTextField` 尾部的按钮（显示 / 隐藏、清除）是同一类缺 `button` 标志的问题，没修。
+- 菜单的语义（排查文档 §10）：菜单行文字的提示锚点不成孤儿，菜单行带 `button` 标志。还剩两种孤儿，0003 丢掉它们不少信息：菜单行尾部带提示的按钮（目前只有"输入系统密码"那行的编辑按钮）、悬停放不下的文字时提示浮层自带的空节点。`LgTextField` 尾部的按钮（显示 / 隐藏、清除）是同一类缺 `button` 标志的问题，没修。
 - 在最近、收藏、局域网里点"清除保存的密码"：本机密码先清掉，再清个人簿里的 `hash`；后一步失败（例如网络错误）时本机已清，错误只显示在地址簿的横幅里（上游同样）。
 - 启动时先显示缓存、服务器回答之前，共享簿一律按只读显示（簿切换写"只读"、写操作灰显），时间很短。
 - 正在登录时点"取消"或按 Esc 关掉对话框，请求仍会完成并登录上（上游相同）。
@@ -2164,7 +1096,7 @@ tester 原先的推断是"跳过以后接着传时目标不对"。主会话查 A
 - 每个请求新建一个 reqwest 客户端，分页每一页都重新建连接和握手（同 `api.rs` 现有的请求，上游也是每次新建）。
 - 服务器上名叫 `My address book` 的共享簿会被当成个人簿（`AbEntry::personal()` 按名字认，上游用簿名做键，有同样的歧义）。Leapgate 服务端不许共享簿用这个名字，rustdesk-api 不拦。
 
-**H1 的实现结论**（2026-11-02，分支 `ui/rust-h1`）
+**H1 的实现结论**
 
 - 代码：`api.rs` 的 `bearer`（令牌为空时不带 `Authorization`，登录和登录选项用）；`libs/leapgate/src/account/` 的 `mod.rs`（账号四个端点、状态码映射、分页、令牌和 `user_info`）、`ab.rs`、`group.rs`；`src/leapgate_ffi.rs` 末尾 17 个导出。设备 ID、UUID、登录设备信息在导出里、进运行时之前取：桌面上 `get_id` 经 IPC 问服务，自己会起运行时，放进 `#[tokio::main]` 里就是嵌套运行时。令牌、`user_info`、两份缓存经一个小接口 `Store` 读写，正式实现就是 LocalConfig 和 `config::{Ab, Group}`，测试换成内存里的，免得单测写进本机的配置目录。
 - 和上面约定的出入（都不改界面的用法）：
@@ -2177,45 +1109,31 @@ tester 原先的推断是"跳过以后接着传时目标不对"。主会话查 A
   - 2xx 但内容不是这个端点该回的形状，报 `server`，文字 `HTTP 200`。写操作的 2xx 只认空体或不带 `error` 的 JSON，非 JSON 的内容（例如代理插进来的网页）报 `server`（上游 `_jsonDecodeActionResp` 同样算失败）。`ab/tags` 回 `null` 当没有标签（rustdesk-api 簿里没有标签时）。
   - `_group` 缓存按 `config::Group` 的字段写（用户 `name`、`display_name`；设备 `id`、`username`、`hostname`、`platform`、`login_name`），没有备注和设备组名：上游缓存本来就不存备注，`Group::load` 也会丢掉设备组名。`leapgate_group_cache` 给的设备是这种缓存格式，不是 `/api/peers` 的原样。
   - 日志：非 2xx 只记路径和状态码，连不上记路径和错误描述，两处各自每分钟最多一行（`throttled_log`）；登出失败另记一行。
-- 测试：`libs/leapgate` 单测 160 个（新增 19 个，测试里起最小的假 HTTP 服务，覆盖每类端点的请求、两种 401、旧令牌的 401 不清新登录、`currentUser` 400、`personal` 404、404/409、2xx 带 `error` 或非 JSON、两种分页停止（各自单独起作用）、缓存的写入、替换、令牌不同时清空、登出和 401 时删除、拉取中途退出不写回、两本簿同时保存都留下）；对真实服务器的集成测试 `account::live_tests::live_account_flow`（`#[ignore]`，环境变量见文件头）。core 的 `RustAccountApi` 用假绑定测了一条（184 个测试，analyze 92 条 info 不变）。
-- 对两种服务器的实测（2026-11-02，从开发机跑集成测试；两边都用命令行或管理接口新建的专用账号、三本各一种权限的共享簿、一个共享组）：
-
-| 项目 | Leapgate 服务端（验收服务 `7fbe55a`） | rustdesk-api v2.7（Docker `lejianwen/rustdesk-api:v2.7`，2025-09-28 发布，2026-11 时最新稳定版） |
-|---|---|---|
-| 登录选项 | 通过（`[]`） | 通过；回的是 `["common-oidc/[{\"name\":\"webauth\"}]","oidc/webauth"]`，不是读码推断的 `common-oidc/null`，只看 2xx，不受影响 |
-| 密码错 | 通过：401 → `wrong_credentials` | 回 400 `Username or password error.` → `server`，文字照原文显示 |
-| 登录、`user_info`、当前用户 | 通过 | 通过 |
-| 簿列表 | 通过：`max_peers` 5000，三本共享簿的 `rule` 1/2/3、`owner` 对 | 通过：`max_peers` 0（不限），`rule`、`owner` 对 |
-| 个人簿加设备、改设备（标签、备注）、加标签、改颜色、改名、删标签、删设备 | 通过；读回 `hash`，缓存个人簿条目名字和 `hash` 对 | 通过；不存设备的 `note`（读回 `null`），标签改名不级联到设备上的标签 |
-| 改名到已有的标签名 | `conflict` | 400 `Item already exists.` → `server` |
-| 改不存在的设备、标签 | `not_found` | 400 `Item not found.` → `server` |
-| 删除含不存在名字的标签 | 忽略不存在的 | 整个请求失败（400 `Item not found.`） |
-| 分页（个人簿 121 台） | 通过：按 `total` 取两页，121 台 | 通过：`ab/peers` 不看任何分页参数（`current`、`page` 换成 2 都回同样的全部条目，实测 120 条），第二页没有新 ID 就停，121 台 |
-| 只读簿写入 | 拒绝（403 `Read-only address book` → `server`） | 拒绝（400 `No access.` → `server`） |
-| 读写簿加、删设备 | 通过 | 加通过；删要完全控制，读写簿删除回 400 `No access.` |
-| 完全控制簿加、删设备 | 通过 | 通过 |
-| 共享簿读回 `password`、缓存里不带 `hash` | 通过 | 通过 |
-| 同组设备 | 通过：人员是自己和同组的人；设备列表为空 | 通过：同上；`users` 认 `page`、不认 `current`（`page=2&pageSize=1` 回第二个人，`current=2&pageSize=1` 回第一个人） |
-| 退出后旧令牌 | 通过：`currentUser` 回 401 → `unauthorized` | 通过：同左 |
-
-- 没验的：同组设备有设备时的转换（两边的测试账号名下都没有设备，`/api/peers` 只验了请求和空列表，转换由单测覆盖）；簿满；登录限流；个人簿自动填密码（要真实连接，归 07 §5.2 验收）；经 frb 的实际调用（桥已生成、根 crate 编译通过，Dart 侧只用假绑定测了）。
+- 测试：`libs/leapgate` 单测里起最小的假 HTTP 服务，覆盖每类端点的请求、两种 401、旧令牌的 401 不清新登录、`currentUser` 400、`personal` 404、404/409、2xx 带 `error` 或非 JSON、两种分页停止（各自单独起作用）、缓存的写入、替换、令牌不同时清空、登出和 401 时删除、拉取中途退出不写回、两本簿同时保存都留下）；对真实服务器的集成测试 `account::live_tests::live_account_flow`（`#[ignore]`，环境变量见文件头）。core 的 `RustAccountApi` 用假绑定测了一条。
+- 对 Leapgate 服务端和 rustdesk-api v2.7 实测，两者在下面几处不同，导出都能处理：
+  - rustdesk-api 的登录选项回的是登录方式列表（例如 `["common-oidc/[…]","oidc/webauth"]`），只看 2xx，不受影响。
+  - rustdesk-api 密码错回 400 `Username or password error.`，归 `server`，文字照原文显示；改名到已有的标签名、改不存在的设备或标签回 400（`Item already exists.`、`Item not found.`），也归 `server`，Leapgate 服务端分别是 `conflict`、`not_found`。
+  - rustdesk-api 不存设备的 `note`（读回 `null`），标签改名不级联到设备上的标签；删除的标签名里有一个不存在时整个请求失败，Leapgate 服务端忽略不存在的。
+  - rustdesk-api 的 `ab/peers` 不看任何分页参数、每次回全部条目，靠"某一页没有新 ID 就停"收住；`users` 认 `page`、不认 `current`。
+  - 只读簿写入两边都拒绝（Leapgate 服务端 403，rustdesk-api 400 `No access.`），都归 `server`；rustdesk-api 在读写簿里删设备也要完全控制。
+  - rustdesk-api 的 `max_peers` 是 0（不限）。
 - rustdesk-api 的几处行为（找不到、重名都回 400，读写簿不能删设备，不存备注，标签改名不级联）是它自己的，界面照 `server` 显示服务器原文，不另做适配。
 
 ### 10.12 M5 的分工约定
 
-依据：总仓库 `docs/新界面/08-M5拆法.md`（下称"08"；维护者 2026-11-03 把 M5-1~M5-13 全部按推荐定）。界面行为以 01 §3.1 区块 I（出口页）、区块 C（导航）、区块 E、F（"用作出口"入口）、§2.1（窗口关闭）为准；样稿 `A-P1.html` 的 `p1-exit-*`、`p1-ex-*`、`p1-xc-*`、`p1-close-exit`、`p1-cb-menu`、`p1-menu-more-top`。出口本身的实现说明在 §9。
+M5 是出口页。界面行为以 01 §3.1 区块 I（出口页）、区块 C（导航）、区块 E、F（"用作出口"入口）、§2.1（窗口关闭）为准；样稿 `A-P1.html` 的 `p1-exit-*`、`p1-ex-*`、`p1-xc-*`、`p1-close-exit`、`p1-cb-menu`、`p1-menu-more-top`。出口本身的实现说明在 §9。
 
-**分支和文件边界**（都从 `ui/m5` 切，做完合回 `ui/m5`；整合 worktree 是 `.wt/ui-m4`，块 2 的桥和 pub 缓存在它里面）
+**分支和文件边界**（都从 `ui/m5` 切，做完合回 `ui/m5`）
 
-| 分支 | 谁 | 只改这些 |
+| 分支 | 块 | 只改这些 |
 |---|---|---|
-| `ui/rust-exit` | coder R（E1~E3） | `src/leapgate_hooks/exit.rs`、`src/leapgate_ffi.rs`（末尾追加 M5 一段）、`libs/leapgate/src/exit/`（状态类型和 JSON，新文件或追加）、`src/port_forward_mux.rs`（只加 `Tunnel::ended()`，带 `// leapgate:` 注释）、本节的 Rust 部分 |
-| `ui/m5-ds` | designer | `app/lib/widgets/`（新组件；`LgTitleBar` 加提醒标记的参数）、`app/lib/gallery_*.dart`、组件的测试 |
-| `ui/m5-exit` | coder E（core 和出口页） | core `leapgate/exit_api.dart`、`exit_directory.dart`、`exit_nodes.dart`、`exit_card.dart`（都是新文件）、`app_core.dart`（加出口 model 一处）、`peer_list.dart`（加 `PeerAction.useAsExit` 和条件）、`consts.dart`（只追加选项键）；app `pages/home/exit/`（新目录）、`home_page.dart`（出口页分支、导航数字）、`main_window.dart`（主页标签的数字和提醒）、`shell/window_close.dart`（出口那句和 M5-11 的退出确认）、`shell/navigation.dart`（打开出口页并使用某台设备）、`peer_views.dart`、`devices_page.dart`（两处下拉加"用作出口"）；ARB；测试 |
+| `ui/rust-exit` | Rust（E1~E3） | `src/leapgate_hooks/exit.rs`、`src/leapgate_ffi.rs`（末尾追加 M5 一段）、`libs/leapgate/src/exit/`（状态类型和 JSON，新文件或追加）、`src/port_forward_mux.rs`（只加 `Tunnel::ended()`，带 `// leapgate:` 注释）、本节的 Rust 部分 |
+| `ui/m5-ds` | 组件 | `app/lib/widgets/`（新组件；`LgTitleBar` 加提醒标记的参数）、`app/lib/gallery_*.dart`、组件的测试 |
+| `ui/m5-exit` | E（core 和出口页） | core `leapgate/exit_api.dart`、`exit_directory.dart`、`exit_nodes.dart`、`exit_card.dart`（都是新文件）、`app_core.dart`（加出口 model 一处）、`peer_list.dart`（加 `PeerAction.useAsExit` 和条件）、`consts.dart`（只追加选项键）；app `pages/home/exit/`（新目录）、`home_page.dart`（出口页分支、导航数字）、`main_window.dart`（主页标签的数字和提醒）、`shell/window_close.dart`（出口那句和便携版的退出确认）、`shell/navigation.dart`（打开出口页并使用某台设备）、`peer_views.dart`、`devices_page.dart`（两处下拉加"用作出口"）；ARB；测试 |
 
 - ARB 键以 `exit` 开头，加在两个 ARB 文件末尾，中英文同时加，文案照 01：区块 I 里写好的句子逐字照抄，英文照 §7.5 新加的两行；新写的句子列进提交说明。
-- coder E 先用 M0~M4 的组件和简单的占位控件把逻辑写通，整合时换成 designer 的组件。占位不求好看，但行为测试要能按文字和语义标签找到它们。
-- 块 2 的新导出在 R 合入、重新生成桥之前不存在：`RustExitApi` 先写成调用约定里的名字，用 `// TODO(M5 整合)` 标出、方法体抛 `UnimplementedError`，整合时由主会话换成真实调用；测试一律用 `FakeExitApi`（放 `core/test/exit_fakes.dart`）。
+- E 先用 M0~M4 的组件和简单的占位控件把逻辑写通，整合时换成组件块的组件。占位不求好看，但行为测试要能按文字和语义标签找到它们。
+- `RustExitApi` 调块 2 的真实导出；测试一律用 `FakeExitApi`（放 `core/test/exit_fakes.dart`）。
 
 **Rust 导出（块 2）**
 
@@ -2223,11 +1141,11 @@ tester 原先的推断是"跳过以后接着传时目标不对"。主会话查 A
 |---|---|---|
 | `leapgate_exit_session_add` | `session_id: SessionID`、`id: String`、`port: i32`、`password: String`、`is_shared_password: bool`、`conn_token: Option<String>`、`force_relay: bool` | `SyncReturn<String>`：成功 `{}`；失败 `{"error":"already"}`（这台设备已有出口或端口转发会话）、`{"error":"invalid_port"}`（不在 1~65535）、`{"error":"invalid_id"}`（上游建会话时改写了这个 ID，例如 `ID@服务器?key=…`、末尾的 `/r`；卡片按原样的 ID 登记和查找，改写过的找不到）、`{"error":"other","text":…}`。成功后界面照常调第一块的 `bind.sessionStart(sessionId, id)` 拿这个会话的事件流 |
 | `leapgate_exit_events` | `sink: StreamSink<String>` | 新订阅替换旧的；订阅时先把每张卡片的当前状态各推一次。每条 `{"id":设备ID,"session_id":会话ID,"port":端口,"state":…}`，`state` 见下；`session_id` 是这张卡片的出口会话的 SessionID 字符串（和 `leapgate_exit_session_add` 收到的同一个），界面停止一张卡片后马上对同一台设备再"使用"时，按它丢掉旧会话迟到的事件（补推的当前状态也带） |
-| `leapgate_exit_retry` | `id: String` | `SyncReturn<bool>`（没有这张卡片为假）：清冷却、马上登录。"重试"（已停止）和"重新连接"（暂时断开）共用（M5-7） |
-| `leapgate_exit_set_port` | `id: String`、`port: i32` | `SyncReturn<bool>`：关旧监听、在新端口监听，隧道保留（M5-5）；新端口被占时推 `port_in_use` |
+| `leapgate_exit_retry` | `id: String` | `SyncReturn<bool>`（没有这张卡片为假）：清冷却、马上登录。"重试"（已停止）和"重新连接"（暂时断开）共用 |
+| `leapgate_exit_set_port` | `id: String`、`port: i32` | `SyncReturn<bool>`：关旧监听、在新端口监听，隧道保留；新端口被占时推 `port_in_use` |
 | 停止、取消 | 第一块现成的 `bind.sessionClose(sessionId)` | 卡片模式收到关闭后关监听、关隧道（登录中也能取消，见下），推 `closed` |
 | 目录 | 第一块现成的 `bind.mainGetCommon(key: 'leapgate-exits')` | `{"state":"ok","exits":[{"id","hostname","owner","own"}]}` / `unsupported` / `not_logged_in` / `error`，不改 |
-| 路径和中继名 | 现成的 `leapgate_session_connection(session_id)` | 出口卡片不用（2026-11-04 按 M5 整体审查删掉了界面里的调用） |
+| 路径和中继名 | 现成的 `leapgate_session_connection(session_id)` | 出口卡片不用 |
 
 `state` 的取值：
 - `connecting`：首次登录或懒重连正在进行。输密码、2FA、等对方接受这几步看会话事件流，E2 只说"正在连接"。
@@ -2237,36 +1155,36 @@ tester 原先的推断是"跳过以后接着传时目标不对"。主会话查 A
 - `port_in_use`：带 `"port"`。
 - `closed`：卡片模式结束。
 
-**Rust 的做法和约束**（08 §1.2、§2.4、§4）
+**Rust 的做法和约束**
 - `leapgate_exit_session_add` 照 `session_add`（`src/flutter.rs:1301-1380`）抄，固定 `ConnType::PORT_FORWARD`，`args = [端口, 出口哨兵地址, "65536"]`，走 `io_loop` 现成的三参数分支（`src/ui_session_interface.rs:2050-2069`），不碰设备配置里的 `port_forwards`；去掉 `LocalConfig::set_remote_id`；先查 `get_session_by_peer_id(id, PORT_FORWARD)`，有了就回 `already`；登记进 `exit.rs` 的卡片登记表（键是设备 ID）。
 - `exit.rs` 的 `run` 开头按卡片登记表分流：查到就进卡片模式 `run_card`，查不到走原来的懒登录。原来的 `run`、`serve` 一行不动。
-- `run_card`：起监听 → 失败推 `port_in_use`，等改端口或关闭（不登录）→ 成功就立刻登录。第一次登录的占位连接（M5-4）三条约束：监听起来后**先**接受自己连自己的那条占位连接，**再**开始接真实客户端；占位连接不交给 SOCKS / HTTP 握手；登录函数返回后两头一起丢，不开通道。代码注释写清原因。
-- 取消：`run_card` 自己持有会话的接收端，登录和关闭信号放进同一个 `select!`；收到 `Close` 就关监听、关掉转给登录的那个接收端，等登录自己收尾后推 `closed`；其余 `Data`（`Login`、`Message`、`ContinueInsecureConnection` / `RejectInsecureConnection`）转给登录。登录（`connect_and_login_mux`，上游函数里加了两处 `leapgate:`）看到接收端关了就先丢 stream 再 `release_kcp`、返回 `Ok(None)`，走 KCP 时 FIN 也能发出去，被控端当场关连接、CM 消失（09 §5.3 第 9 项）；登录恰好在关闭时完成的，也照 K0 先丢 stream 再 `release_kcp`。最初是直接丢掉登录，KCP 守卫跟着丢、端点当场中止，被控端要等自己的超时：上游 IPv6 打洞的 KCP 没有 20 秒静默关闭，一般是约 30 秒的空闲超时先到（登录等待期间控制端仍回 TestDelay，空闲计时从最后一条消息算），取消得晚时由 180 秒的登录期限先关（M6a 验收那次就是这样）。已知限制：卡片停在"不安全连接"提示时取消，`connect_and_login_mux` 在提示返回 false 后直接 `return`，守卫照旧被丢，被控端约 30 秒后才关；在提示上点"拒绝"也一样，这是上游原样的行为，改它会连带改旧界面拒绝不安全连接的路径，不在 M6a 里动。
-- 登录结局照 `serve` 的三种处理守卫（K0）：可用 → `set_muxed`，推 `in_use`；被拒 → 先丢 stream 再 `release_kcp`（`exit.rs:165-169`），关监听，推 `stopped`，运行实例不退出、原地等重试或关闭（M5-7）；临时失败 → 推 `interrupted`（`login_failed`），记冷却。
+- `run_card`：起监听 → 失败推 `port_in_use`，等改端口或关闭（不登录）→ 成功就立刻登录。第一次登录的占位连接三条约束：监听起来后**先**接受自己连自己的那条占位连接，**再**开始接真实客户端；占位连接不交给 SOCKS / HTTP 握手；登录函数返回后两头一起丢，不开通道。代码注释写清原因。
+- 取消：`run_card` 自己持有会话的接收端，登录和关闭信号放进同一个 `select!`；收到 `Close` 就关监听、关掉转给登录的那个接收端，等登录自己收尾后推 `closed`；其余 `Data`（`Login`、`Message`、`ContinueInsecureConnection` / `RejectInsecureConnection`）转给登录。登录（`connect_and_login_mux`，上游函数里加了两处 `leapgate:`）看到接收端关了就先丢 stream 再 `release_kcp`、返回 `Ok(None)`，走 KCP 时 FIN 也能发出去，被控端当场关连接、CM 消失；登录恰好在关闭时完成的，也照 K0 先丢 stream 再 `release_kcp`。不能直接丢掉登录：KCP 守卫跟着丢、端点当场中止，被控端要等自己的超时：上游 IPv6 打洞的 KCP 没有 20 秒静默关闭，一般是约 30 秒的空闲超时先到（登录等待期间控制端仍回 TestDelay，空闲计时从最后一条消息算），取消得晚时由 180 秒的登录期限先关。已知限制：卡片停在"不安全连接"提示时取消，`connect_and_login_mux` 在提示返回 false 后直接 `return`，守卫照旧被丢，被控端约 30 秒后才关；在提示上点"拒绝"也一样，这是上游原样的行为，改它会连带改旧界面拒绝不安全连接的路径，不改。
+- 登录结局照 `serve` 的三种处理守卫（K0）：可用 → `set_muxed`，推 `in_use`；被拒 → 先丢 stream 再 `release_kcp`（`exit.rs:165-169`），关监听，推 `stopped`，运行实例不退出、原地等重试或关闭；临时失败 → 推 `interrupted`（`login_failed`），记冷却。
 - 隧道结束：`Tunnel::ended()`（`self.state.subscribe()` 后等到不再是 `Muxed`），推 `interrupted`（`tunnel_ended`）；之后照 C9 由下一条本地连接触发懒重连（推 `connecting`）。
 - 事件推送照 M3 的 `leapgate_cm_events`：块 2 一个全局 `StreamSink<String>`，不经会话事件流、不经 `libs/leapgate` 的广播。
 - 状态类型和 JSON 放 `libs/leapgate`，带单测。
 
 **会话事件流里卡片要看的**（第一块 `sessionStart` 的流，msgbox 的 `type`）：`input-password`、`re-input-password`（密码错）、`input-2fa`、`wait-remote-accept-nook`、`insecure-connection*`（卡片直接回 `RejectInsecureConnection`，显示"已停止：此连接未加密，无法用作出口"）；错误框的 C3 原因码里 `exit_blocked`、`exit_fake_ip_literal` 是**卡片通知**（同一原因只提示一次、可关），不是失败；`exit_not_enabled`、`exit_not_supported`、`exit_need_encryption`、`too_many_attempts`、`peer_too_old` 是"已停止"的原因；`local_port_in_use` 以 E2 的 `port_in_use` 为准。两条流没有先后保证，卡片状态以 E2 为准，会话流只补"要输入什么"和失败原因。
 
-**core（coder E）**
-- `exit_api.dart`：`abstract interface class ExitApi`（`sessionAdd`、`events`、`retry`、`setPort`、`close`、`directory`、`connection`），`RustExitApi`（见上"整合时换"），全局 `exitApi`（测试里换成 `FakeExitApi`），照 M4 的 `account_api.dart`。
+**core（E）**
+- `exit_api.dart`：`abstract interface class ExitApi`（`sessionAdd`、`events`、`retry`、`setPort`、`close`、`directory`、`connection`），`RustExitApi`（调块 2 导出），全局 `exitApi`（测试里换成 `FakeExitApi`），照 M4 的 `account_api.dart`。
 - `exit_directory.dart`：`ExitDirectoryModel`，状态 `loading / ok / empty / unsupported / notLoggedIn / error`；没登录时不发请求；打开出口页时取一次、"刷新"再取，不轮询；实现 M4 的 `AccountData`（退出登录清空）。目录回 `not_logged_in` 而账号区仍是已登录时，调 `appCore.account` 的当前用户确认一次（服务端回了 401 时按 M4 的令牌失效走）。
 - `exit_nodes.dart`：`ExitNodesModel`，进 `AppCore`：卡片列表（按添加顺序）、`use(id, {String? name})`（已有就返回那张）、`remove(id)`、`runningCount`（本地监听开着的卡片：正在连接、要密码、要验证码、正在验证、等对方接受、在用、暂时断开）、`needsAttention`（任一卡片在要密码、要验证码、等对方接受）、端口：本机配置一张表，键 `leapgate-exit-ports`（LocalConfig，JSON `{设备ID: 端口}`），建议值从 21180 起，跳过别的卡片在用的和表里别的设备记过的；改端口撞上另一张卡片时不调 Rust，直接报"此端口已被另一个出口使用"。卡片只在内存里，重启不恢复。退出登录不动卡片。
 - `exit_card.dart`：`ExitCard`，一张卡片一个出口会话（`SessionID` 由卡片生成）：订阅这个会话的事件流和 E2（按设备 ID 过滤），状态 `connecting / password / twoFactor / verifying / waitAccept / inUse(direct|relay) / interrupted / stopped(reason) / portBusy`；动作 `submitPassword(password, remember)`、`submit2fa(code, trust)`、`cancel()`、`stop()`（停止和移除都是它：`sessionClose` 后从列表移走）、`retry()`、`changePort(port)`；通知集合按原因去重、可关。"要输入什么"的判断照 `ConnectionModel`（`connection.dart:225-262`）抄一份，不改 `ConnectionModel`。
-- **出口会话不登记进 `appCore.sessions`，不建 `FFI`，不用 `ConnectionModel`**：注册表里的会话关主窗口时会被一起关掉（`window_close.dart:83-87`），`ConnectionModel` 的自动重试会让 Rust 再起一个运行实例抢端口（08 §4.2）。
+- **出口会话不登记进 `appCore.sessions`，不建 `FFI`，不用 `ConnectionModel`**：注册表里的会话关主窗口时会被一起关掉（`window_close.dart:83-87`），`ConnectionModel` 的自动重试会让 Rust 再起一个运行实例抢端口。
 
-**app（coder E）**
-- `pages/home/exit/exit_page.dart`（页面、三块、滚到卡片和高亮、按 ID 指定：只收设备 ID 去空格和 `ID@服务器`，M5-12）、`exit_card_view.dart`（`ExitCard` 到卡片组件的映射、文案；"已停止"的原因文字用 `pages/session/reasons.dart` 的 `reasonView`）、`exit_directory_view.dart`。
-- "用作出口"：`PeerAction.useAsExit`，在连接方式组，**对端**平台是 Windows 时才列（菜单现有的 `windows:` 参数是本机平台，另加一个参数），手输 ID 的"连接到 ‹输入›"行照常列；点了等于目录里点"使用"（M5-9）：切到主页标签的出口页、`use(id)`、滚过去。
-- 导航"出口"和主页标签：数字 `runningCount`，提醒 `needsAttention`；出口页正显示时导航上不画提醒；读屏名"出口，‹N› 个正在使用"，有提醒时加"，需要处理"（M5-8）。
-- 关窗（M5-11）：有出口在跑时，动作是"在后台运行"或安装版关窗才加"‹N› 个出口将在后台继续运行。"；便携版动作是"退出 Leapgate"（包括记住了"退出"、没有会话不再问的情况）时仍确认：标题"退出 Leapgate？"，正文"‹N› 个出口将停止。"，按钮"退出""取消"。
+**app（E）**
+- `pages/home/exit/exit_page.dart`（页面、三块、滚到卡片和高亮、按 ID 指定：只收设备 ID 去空格和 `ID@服务器`）、`exit_card_view.dart`（`ExitCard` 到卡片组件的映射、文案；"已停止"的原因文字用 `pages/session/reasons.dart` 的 `reasonView`）、`exit_directory_view.dart`。
+- "用作出口"：`PeerAction.useAsExit`，在连接方式组，**对端**平台是 Windows 时才列（菜单现有的 `windows:` 参数是本机平台，另加一个参数），手输 ID 的"连接到 ‹输入›"行照常列；点了等于目录里点"使用"：切到主页标签的出口页、`use(id)`、滚过去。
+- 导航"出口"和主页标签：数字 `runningCount`，提醒 `needsAttention`；出口页正显示时导航上不画提醒；读屏名"出口，‹N› 个正在使用"，有提醒时加"，需要处理"。
+- 关窗：有出口在跑时，动作是"在后台运行"或安装版关窗才加"‹N› 个出口将在后台继续运行。"；便携版动作是"退出 Leapgate"（包括记住了"退出"、没有会话不再问的情况）时仍确认：标题"退出 Leapgate？"，正文"‹N› 个出口将停止。"，按钮"退出""取消"。
 
-**组件（designer）**：规则同 10.8"组件约定"（只管画、文字由调用方传、带语义标签、两套主题和两套尺寸、画廊里每种状态一项、有行为测试），加 10.8 新加的"合并语义的容器里不放带浮层的组件"。要做的和画框见 08 §2.2：出口页版式、出口卡片（含验证码态、端口被占用加"移除"、暂时断开加地址行，这三张样稿没画，照现有画框推）、卡片里原地改端口、浏览器设置说明展开块、目录行、线性不定进度条、按 ID 指定行、导航项的数字和提醒标记、`LgTitleBar` 主页标签的提醒标记、滚到卡片后的短暂高亮。
+**组件**：规则同 10.8"组件约定"（只管画、文字由调用方传、带语义标签、两套主题和两套尺寸、画廊里每种状态一项、有行为测试），加 10.8 的"合并语义的容器里不放带浮层的组件"。要做的：出口页版式、出口卡片（含验证码态、端口被占用加"移除"、暂时断开加地址行，这三张样稿没画，照现有画框推）、卡片里原地改端口、浏览器设置说明展开块、目录行、线性不定进度条、按 ID 指定行、导航项的数字和提醒标记、`LgTitleBar` 主页标签的提醒标记、滚到卡片后的短暂高亮。
 
 **测试**
 - R：状态类型的 JSON；`run_card` 的三种登录结局和守卫交还；中途取消；改端口；`already`；旧的 `run` / `serve` 测试照常过。
-- coder E：卡片状态在两条流下的走向（含先后颠倒）；目标被拦按原因去重；`runningCount`、`needsAttention`；端口建议值和撞端口；退出登录只清目录；页面三块的各态；"用作出口"只在对端是 Windows 时出现；关窗两种文案。
+- E：卡片状态在两条流下的走向（含先后颠倒）；目标被拦按原因去重；`runningCount`、`needsAttention`；端口建议值和撞端口；退出登录只清目录；页面三块的各态；"用作出口"只在对端是 Windows 时出现；关窗两种文案。
 
 **已知限制（界面一侧）**
 - 会话流里 `relay-hint` 这类提示卡片不处理：出口没有"改用中继"，这种失败只进"暂时断开"。
@@ -2276,7 +1194,7 @@ tester 原先的推断是"跳过以后接着传时目标不对"。主会话查 A
 - 起会话后几毫秒内就关：Rust 的会话主循环还没设好发送端，关闭消息会被上游静默丢掉，会话照常起监听和登录，界面上看不到（上游所有会话都有这个空当）。
 - 停止要等关会话的异步调用回来才移卡片，这几毫秒里再"使用"同一台设备会拿到正在移除的旧卡片，那次点击落空。
 
-**Rust 实现说明**（2026-11-03，分支 `ui/rust-exit`）
+**Rust 实现说明**
 
 - 代码：
   - `libs/leapgate/src/exit/card.rs`：卡片状态 `State`（带 `Transport`、`Cause`）、事件 JSON `event(id, session_id, port, &State)`、`stopped(msg, insecure_refused)`（Rust 知道的两种原因）。
@@ -2284,7 +1202,7 @@ tester 原先的推断是"跳过以后接着传时目标不对"。主会话查 A
   - `src/port_forward_mux.rs`：`Tunnel::ended()`，6 行。
   - `src/leapgate_ffi.rs` 末尾四个导出：`leapgate_exit_session_add(session_id: SessionID, id: String, port: i32, password: String, is_shared_password: bool, conn_token: Option<String>, force_relay: bool) -> SyncReturn<String>`、`leapgate_exit_events(sink: StreamSink<String>) -> ResultType<()>`、`leapgate_exit_retry(id: String) -> SyncReturn<bool>`、`leapgate_exit_set_port(id: String, port: i32) -> SyncReturn<bool>`。Android、iOS 上是空实现：`session_add` 回 `other`，`retry`、`set_port` 回假。
 - 和约定不同的地方：
-  - 占位连接（M5-4）不连卡片自己的端口，而是另开一个只用一次的回环监听（`127.0.0.1:0`）连成一对，登录用其中一头。约定的三条约束因此都自然成立：浏览器早就指着卡片端口时，它的连接照常进握手、排队等登录结束，不会被当成占位连接；占位连接不经过卡片的监听，进不了 SOCKS / HTTP 握手；登录返回后两头一起丢，不开通道。连自己端口的写法还得按地址认出哪条是自己的，多一段判断，结果一样。
+  - 占位连接不连卡片自己的端口，而是另开一个只用一次的回环监听（`127.0.0.1:0`）连成一对，登录用其中一头。约定的三条约束因此都自然成立：浏览器早就指着卡片端口时，它的连接照常进握手、排队等登录结束，不会被当成占位连接；占位连接不经过卡片的监听，进不了 SOCKS / HTTP 握手；登录返回后两头一起丢，不开通道。连自己端口的写法还得按地址认出哪条是自己的，多一段判断，结果一样。
   - `port_in_use` 不另带 `port` 字段：事件顶层的 `port` 就是被占的端口（每条事件的 `port` 都是卡片当时在用或刚试过的端口，改端口后是新端口）。
   - 改端口先关旧监听再开新的，所以改成原来的端口也行。新端口被占时旧监听已经关了，卡片进 `port_in_use`，隧道仍保留；再改一个能用的端口就回到 `in_use`，不重新登录。新端口开好时如果没有隧道（一开始就被占、暂时断开、已停止），马上登录，和"重试"一样。`set_port` 的端口不在 1~65535 时直接回假，不推事件。
   - 登录结局照 `serve` 仍各调一次上游的提示：版本不支持时 `on_error`，临时失败时 `on_establish_connection_error`。会话事件流里因此有原来的错误框，界面取失败原因用它；卡片状态以 E2 为准。
@@ -2293,18 +1211,18 @@ tester 原先的推断是"跳过以后接着传时目标不对"。主会话查 A
   - 为了不接真实对端也能测，`run_card` 对会话的要求收成一个小接口 `CardSession`（登录、隧道建立后发连接就绪事件两个方法），正式实现就是 `Session<T>`，测试换成假的。
 - 已知限制：
   - 登录中途取消时，登录还在上游 `Client::start` 里（打洞、连中继）的话，要等它连上或失败才收尾（登录循环开始前先看接收端，关了就直接关连接，不向被控端发登录请求）；监听当场关，卡片在界面上当场消失，只是 Rust 这边的会话线程多留一会儿。收尾时 `release_kcp` 最多再等 10 秒。
-  - 旧界面懒登录中途关隧道窗口时，`Close` 仍被上游登录循环吞掉，监听一直留着（M5-13，不修）。
+  - 旧界面懒登录中途关隧道窗口时，`Close` 仍被上游登录循环吞掉，监听一直留着（不修）。
   - 登录进行中收到的"重试""改端口"排队，等这次登录结束再处理。
   - 刚 `session_close` 一张卡片、它的运行实例还没关掉监听时，马上为同一台设备再 `session_add`，新卡片可能先报 `port_in_use`（端口还被旧的占着），再"重试"一次就好。登记表按代号区分新旧卡片：新卡片登记以后，旧卡片的事件不再推出、清理也不会删掉新卡片的登记；新卡片登记之前已经推出的旧事件，界面按 `session_id` 丢掉。
   - 加了会话却一直没调 `session_start` 的卡片会留在登记表里（只是一条记录，不占端口），下次为同一台设备 `session_add` 时被替换；它还没有事件，订阅时不补发。
   - 改端口时先关旧监听，新端口被占时两个端口都不在听：卡片进 `port_in_use`，由用户再改一个。这时隧道断了也仍报 `port_in_use`（没有监听，谈不上暂时断开）。
-  - 界面不能对出口会话调 `sessionReconnect`：上游会另起一个 `io_loop`，和正在跑的卡片抢同一个端口（08 §4.2 已要求界面不调）。
-  - 停掉一张走 KCP、隧道正在用的卡片时，`run_card` 丢掉隧道后马上返回，会话的运行时随 `io_loop` 结束，隧道任务和它后面的 `release_kcp` 来不及跑完，KCP 发不出 FIN，被控端要等约 20 秒静默关闭；登录被拒、守卫刚交给 `release_kcp` 后不久（对端常不回 FIN，`release_kcp` 通常等满 10 秒，§9 K0）就关卡片，同样会被截断。要修得让 `run_card` 返回前等这些任务做完：被拒那一路要在循环里记下任务句柄；隧道那一路要改 `port_forward_mux.rs` 的 `set_muxed` 交出它起的任务。都是新加的状态，这次不做；改成在循环里直接等 `release_kcp` 也试过，卡片会有几秒不响应"重试"和关闭，没采用。验收时看停止后被控端多久关。
-- 测试：`libs/leapgate` 新增 2 个（每种状态的事件 JSON、`stopped` 的原因）；根 crate `leapgate_hooks::exit::cards` 7 个，用假会话和本机回环连接：登录成功后第一个通道是本地程序的（占位连接没开通道）、对端断开后进 `interrupted`（`tunnel_ended`）；版本不支持时进 `stopped`（`exit_not_supported`）、监听关掉、KCP 守卫交给 `release_kcp` 后对端收到关闭（把守卫改成直接丢掉，这个测试会失败），"重试"后不安全连接被拒进 `stopped`（`exit_need_encryption`），再"重试"进 `in_use`；临时失败进 `interrupted`（`login_failed`，`retry_after_ms` 10000）、监听留着，"重试"马上登录；登录中途关闭，1 秒内卡片关掉、端口不再接受连接并能被别的程序占用；改端口后旧端口关掉、新端口的连接走原来的隧道（没有第二次登录）；端口被占时不登录，改端口后登录；`retry`、`set_port` 只对登记过的卡片和合法端口生效。端口关没关用连接去试（3 秒内不再接受连接即可）：整套测试一起跑时，丢掉的监听在 Windows 上还会接受连接约 1 秒，单独跑时当场关。根 crate `cargo test --lib` 215 个通过，失败的 1 个是 `installer_handoff::directory::tests::protected_directory_enforces_creator_permissions`（删测试目录时拒绝访问，单独跑也失败，和本改动无关）。
+  - 界面不能对出口会话调 `sessionReconnect`：上游会另起一个 `io_loop`，和正在跑的卡片抢同一个端口（所以界面不调）。
+  - 停掉一张走 KCP、隧道正在用的卡片时，`run_card` 丢掉隧道后马上返回，会话的运行时随 `io_loop` 结束，隧道任务和它后面的 `release_kcp` 来不及跑完，KCP 发不出 FIN，被控端要等约 20 秒静默关闭；登录被拒、守卫刚交给 `release_kcp` 后不久（对端常不回 FIN，`release_kcp` 通常等满 10 秒，§9 K0）就关卡片，同样会被截断。要修得让 `run_card` 返回前等这些任务做完：被拒那一路要在循环里记下任务句柄；隧道那一路要改 `port_forward_mux.rs` 的 `set_muxed` 交出它起的任务。都是新加的状态，不做；改成在循环里直接等 `release_kcp` 也试过，卡片会有几秒不响应"重试"和关闭，没采用。
+- 测试：`libs/leapgate` 2 个（每种状态的事件 JSON、`stopped` 的原因）；根 crate `leapgate_hooks::exit::cards` 7 个，用假会话和本机回环连接：登录成功后第一个通道是本地程序的（占位连接没开通道）、对端断开后进 `interrupted`（`tunnel_ended`）；版本不支持时进 `stopped`（`exit_not_supported`）、监听关掉、KCP 守卫交给 `release_kcp` 后对端收到关闭（把守卫改成直接丢掉，这个测试会失败），"重试"后不安全连接被拒进 `stopped`（`exit_need_encryption`），再"重试"进 `in_use`；临时失败进 `interrupted`（`login_failed`，`retry_after_ms` 10000）、监听留着，"重试"马上登录；登录中途关闭，1 秒内卡片关掉、端口不再接受连接并能被别的程序占用；改端口后旧端口关掉、新端口的连接走原来的隧道（没有第二次登录）；端口被占时不登录，改端口后登录；`retry`、`set_port` 只对登记过的卡片和合法端口生效。端口关没关用连接去试（3 秒内不再接受连接即可）：整套测试一起跑时，丢掉的监听在 Windows 上还会接受连接约 1 秒，单独跑时当场关。
 - 只有新界面调的几个（`register`、`retry`、`set_port`、`send`、`NEXT_GEN`、`Card.ctl`）带 `#[cfg(any(feature = "flutter", test))]`，`Ctl` 在不带 flutter 时允许未构造，默认特性的 `cargo check --lib` 不报它们未使用。
-- 没在单测里做、留给验收的：`already`、`invalid_id`（要上游的会话表；单测里建会话会在本机配置目录写一份设备配置，并经 IPC 把会话数报给正在运行的服务，所以不做）；经 frb 的实际调用；真实对端下的密码、2FA、等对方接受、不安全连接提示（卡片回拒绝之后带 `exit_need_encryption` 那一步用假登录结果验了）；`connection_ready` 之后 `leapgate_session_connection` 给出的路径；中途取消时被控端当场关（单测用假登录验了 `login_or_close` 让登录自己收尾，`connect_and_login_mux` 里那两处要真实对端）；登录被拒时被控端 CM 当场消失（03 §8.5 第 9 项）。
+- 单测没覆盖、要真实对端或上游会话表的：`already`、`invalid_id`（要上游的会话表；单测里建会话会在本机配置目录写一份设备配置，并经 IPC 把会话数报给正在运行的服务，所以不做）；经 frb 的实际调用；真实对端下的密码、2FA、等对方接受、不安全连接提示（卡片回拒绝之后带 `exit_need_encryption` 那一步用假登录结果验了）；`connection_ready` 之后 `leapgate_session_connection` 给出的路径；中途取消时被控端当场关（单测用假登录验了 `login_or_close` 让登录自己收尾，`connect_and_login_mux` 里那两处要真实对端）；登录被拒时被控端 CM 当场消失（03 §8.5 第 9 项）。
 
-**组件接口（designer，`ui/m5-ds` 交付，给 coder E 整合用）**
+**组件接口**
 
 组件都只画：参数是普通的值、数据类和回调，文字全部由调用方传，不引用 core 的 model、会话对象和 `bind`。每个参数、每种状态在画廊（`app/lib/gallery_m5.dart`，分区 `exit-card`、`exit-grid`、`exit-page`、`exit-directory`、`exit-by-id`、`exit-parts`、`exit-reminder`）里有一项，行为测试在 `app/test/exit_components_test.dart`。
 
@@ -2362,50 +1280,50 @@ tester 原先的推断是"跳过以后接着传时目标不对"。主会话查 A
 
 ### 10.13 M6a 的分工约定
 
-依据：总仓库 `docs/新界面/09-M6拆法.md`（下称"09"；维护者 2026-11-04 把 M6-1~M6-6 全部按推荐定）。界面行为以 `docs/新界面/02-第二轮内容与逻辑说明.md`（下称"02"）§1.2~§1.6、§3 为准，主页的联动以 01 §3.1 区块 A 为准；样稿 `A-P6-设置.html`、`A-P6-设置-对话框.html`（"修改 ID"、多语言列表、TLS 回退的旧说明按 02 §5.2 作废）。M6a 做框架、搜索、解锁和八个小节，designer 的全部组件和全部 Rust 项也在这一段；其余十二个小节是 M6b，到时另写一节。
+M6a 是设置页的框架、搜索、解锁和八个小节，设置页的全部组件和全部 Rust 项也在这一段；其余十二个小节是 M6b（§10.14）。界面行为以 `docs/新界面/02-第二轮内容与逻辑说明.md`（下称"02"）§1.2~§1.6、§3 为准，主页的联动以 01 §3.1 区块 A 为准；样稿 `A-P6-设置.html`、`A-P6-设置-对话框.html`（"修改 ID"、多语言列表、TLS 回退的旧说明按 02 §5.2 作废）。
 
-**分支和文件边界**（都从 `ui/m6a` 切，做完合回 `ui/m6a`；整合 worktree 是 `.wt/ui-m4`，块 2 的桥和 pub 缓存在它里面）
+**分支和文件边界**（都从 `ui/m6a` 切，做完合回 `ui/m6a`）
 
-| 分支 | 谁 | 只改这些 |
+| 分支 | 块 | 只改这些 |
 |---|---|---|
-| `ui/rust-m6` | coder R | `libs/leapgate/src/`（`exit/policy.rs` 拆出逐项解析、新文件 `server_info.rs`（S1、S2）、`sign.rs`、`lan.rs`、新文件 `direct.rs`（S5）、`ipc.rs` 的 `Msg` 末尾加变体、`lang.rs`（Telegram 正文）、`report/mod.rs`（S2 的落盘、`root_from` 改调 S1 的推导）、`exit/directory.rs`（09 §4.1））；`src/leapgate_ffi.rs`（末尾追加 M6 一段）；`src/leapgate_hooks/ipc.rs`（S5 的分支）；新文件 `src/leapgate_hooks/settings.rs`（S9、S10 的进程间部分）；上游只两处：`src/rendezvous_mediator.rs` 监听那一行（S5）、`src/server/connection.rs` Telegram 正文那 6 行换成 1 个调用（S11），各带 `// leapgate:` 注释；本节的 Rust 部分 |
-| `ui/m6-ds` | designer | `app/lib/widgets/`（新组件）、`app/lib/icons/`（盾牌图标）、`app/lib/gallery_*.dart`、组件的测试；`app/pubspec.yaml` 加 `qr_flutter: 4.1.0` 和用同一个 `PUB_CACHE` 重新生成的 lock |
-| `ui/m6a-access` | coder A（框架和访问） | core 新文件 `leapgate/settings/unlock.dart` 和 A 需要的其他 `leapgate/settings/*.dart`；`consts.dart`（只在"M6a access"下追加）；app `pages/settings/` 下的 `settings_page.dart`（换掉占位）、`settings_section_state.dart`（可加成员，不改已有接口）、新文件（搜索、导航之类）、`sections/access.dart`、`permissions.dart`、`service.dart`、`dialogs/` 下解锁 PIN 和设置 PIN 两个对话框；`pages/home/home_page.dart`（密码行"修改"先解锁、M6-4 的警告行）、`pages/home/password_row.dart`（"更多访问设置"）、`shell/main_window.dart`（切标签、窗口隐藏时让解锁控制器上锁）；ARB；测试 |
-| `ui/m6a-net` | coder B（出口和网络） | core `leapgate/settings/` 下 B 需要的新文件（服务器配置的导入导出编解码、出口前提的计算等）；`consts.dart`（只在"M6a network"下追加）；app `pages/settings/sections/exit_node.dart`、`connection.dart`、`appearance.dart`、`network.dart`、`account.dart`，`dialogs/` 下放行的网段、服务器、代理三个对话框；`app/lib/main.dart`（主题、语言）、`app/lib/cm/cm_main.dart`（登记 `theme`、`language` 事件）、`pages/session/reasons.dart`、`pages/session/connection_panel.dart`（"打开网络设置"）；ARB；测试 |
+| `ui/rust-m6` | Rust | `libs/leapgate/src/`（`exit/policy.rs` 拆出逐项解析、新文件 `server_info.rs`（S1、S2）、`sign.rs`、`lan.rs`、新文件 `direct.rs`（S5）、`ipc.rs` 的 `Msg` 末尾加变体、`lang.rs`（Telegram 正文）、`report/mod.rs`（S2 的落盘、`root_from` 改调 S1 的推导）、`exit/directory.rs`）；`src/leapgate_ffi.rs`（末尾追加 M6 一段）；`src/leapgate_hooks/ipc.rs`（S5 的分支）；新文件 `src/leapgate_hooks/settings.rs`（S9、S10 的进程间部分）；上游只两处：`src/rendezvous_mediator.rs` 监听那一行（S5）、`src/server/connection.rs` Telegram 正文那 6 行换成 1 个调用（S11），各带 `// leapgate:` 注释；本节的 Rust 部分 |
+| `ui/m6-ds` | 组件 | `app/lib/widgets/`（新组件）、`app/lib/icons/`（盾牌图标）、`app/lib/gallery_*.dart`、组件的测试；`app/pubspec.yaml` 加 `qr_flutter: 4.1.0` 和用同一个 `PUB_CACHE` 重新生成的 lock |
+| `ui/m6a-access` | A（框架和访问） | core 新文件 `leapgate/settings/unlock.dart` 和 A 需要的其他 `leapgate/settings/*.dart`；`consts.dart`（只在"M6a access"下追加）；app `pages/settings/` 下的 `settings_page.dart`（换掉占位）、`settings_section_state.dart`（可加成员，不改已有接口）、新文件（搜索、导航之类）、`sections/access.dart`、`permissions.dart`、`service.dart`、`dialogs/` 下解锁 PIN 和设置 PIN 两个对话框；`pages/home/home_page.dart`（密码行"修改"先解锁、服务状态行的警告）、`pages/home/password_row.dart`（"更多访问设置"）、`shell/main_window.dart`（切标签、窗口隐藏时让解锁控制器上锁）；ARB；测试 |
+| `ui/m6a-net` | B（出口和网络） | core `leapgate/settings/` 下 B 需要的新文件（服务器配置的导入导出编解码、出口前提的计算等）；`consts.dart`（只在"M6a network"下追加）；app `pages/settings/sections/exit_node.dart`、`connection.dart`、`appearance.dart`、`network.dart`、`account.dart`，`dialogs/` 下放行的网段、服务器、代理三个对话框；`app/lib/main.dart`（主题、语言）、`app/lib/cm/cm_main.dart`（登记 `theme`、`language` 事件）、`pages/session/reasons.dart`、`pages/session/connection_panel.dart`（"打开网络设置"）；ARB；测试 |
 
-- `settings_registry.dart`、`settings_ids.dart`、`shell/navigation.dart` 的 `showSettings` 和 `settingsPageRequests`、core `leapgate/settings/settings_api.dart`、两份 `settings_fakes.dart` 是第 0 步写好的接口，两个 coder 都不改；确实要改先报主会话。小节文件只认注册表、选项 model、`settingsApi` 和组件，彼此不引用。
+- `settings_registry.dart`、`settings_ids.dart`、`shell/navigation.dart` 的 `showSettings` 和 `settingsPageRequests`、core `leapgate/settings/settings_api.dart`、两份 `settings_fakes.dart` 是第 0 步写好的接口，A、B 都不改。小节文件只认注册表、选项 model、`settingsApi` 和组件，彼此不引用。
 - ARB 键以 `settings` 开头，A 用 `settingsAccess*`、`settingsPerm*`、`settingsService*`、`settingsUnlock*`、`settingsSearch*`，B 用 `settingsExit*`、`settingsConn*`、`settingsAppearance*`、`settingsNet*`、`settingsAccount*`；加在两个 ARB 文件末尾，中英文同时加，文案照 02 逐字照抄，英文照 02 §5.5，没有的新写并列进提交说明。改完 ARB 跑 `flutter gen-l10n`。
-- coder 先用 M0~M5 的组件和简单的占位控件把逻辑写通，整合时换成 designer 的组件。占位不求好看，但行为测试要能按文字和语义标签找到它们。
-- 块 2 的新导出在 R 合入、重新生成桥之前不存在：`RustSettingsApi` 现在每个方法都抛 `UnimplementedError`（标着 `TODO(M6 整合)`），整合时由主会话换成真实调用；测试一律用 `FakeSettingsApi`（core 和 app 的 `test/settings_fakes.dart` 各一份，内容相同）。页面不直接调 `bind`：第一块的 `bind.main*` 调用包在 core 的 model 里（§10.7），会弹 UAC 的三处见下。
+- A、B 先用 M0~M5 的组件和简单的占位控件把逻辑写通，整合时换成组件块的组件。占位不求好看，但行为测试要能按文字和语义标签找到它们。
+- `RustSettingsApi` 调块 2 的真实导出；测试一律用 `FakeSettingsApi`（core 和 app 的 `test/settings_fakes.dart` 各一份，内容相同）。页面不直接调 `bind`：第一块的 `bind.main*` 调用包在 core 的 model 里（§10.7），会弹 UAC 的三处见下。
 
-**框架的接口**（第 0 步已写，`app/lib/pages/settings/`）
+**框架的接口**（`app/lib/pages/settings/`）
 - `settings_ids.dart`：三组、二十个小节的固定 id（`SettingsSectionId`），链接在小节建好之前就能指名。
-- `settings_registry.dart`：`SettingsSection`（id、标题、`items()`、`visible()`、`locked`、`build(context, ctx)`）、`SettingsItem`（id、名字、说明、单选项名，给搜索用）、`SettingsSectionContext`（`overlays`、`locked`、`keyOf(item)`、`isMarked(item)`、`errorOf` / `setError`、`save(item, write)`）、`settingsSections(l10n)`（按 id 顺序；M6b 往这里加）。`items()` 只列此刻显示的项（被开关藏起来的不列，锁住的照列）。
+- `settings_registry.dart`：`SettingsSection`（id、标题、`items()`、`visible()`、`locked`、`build(context, ctx)`）、`SettingsItem`（id、名字、说明、单选项名，给搜索用）、`SettingsSectionContext`（`overlays`、`locked`、`keyOf(item)`、`isMarked(item)`、`errorOf` / `setError`、`save(item, write)`）、`settingsSections(l10n)`（按 id 顺序；M6b 的小节也登记在这里）。`items()` 只列此刻显示的项（被开关藏起来的不列，锁住的照列）。
 - `settings_section_state.dart`：`SettingsSectionState`，上面接口的实现，页面和测试共用；`save` 失败时那一项下面写 `settingsSaveFailed`，成功清掉，两种都重建小节。
-- 小节在每次重建时从选项 model 重新读值；页面在打开小节、主窗口拿回焦点、保存之后重建（09 §4.2），不加定时刷新。
+- 小节在每次重建时从选项 model 重新读值；页面在打开小节、主窗口拿回焦点、保存之后重建，不加定时刷新。
 - 跨小节链接用的项 id（出口前提的"修改"要用，A 必须用这几个 id 登记）：访问与密码的 `approve-mode`、`verification-method`、`permanent-password`；权限的 `enable-tunnel`。其余项 id 用选项键或小写短横线的名字，各自定。
 - `MainNavigation.showSettings(section, {item})`：切到主页标签的设置页、打开那个小节、滚到那一项并标记约 2 秒（`SettingsSectionState.mark`）。
-- 选项 model（§10.7）加了 `userDefault`（UserDefaultConfig）。`config.set` 在整合时改走 S9（`stop-service` 除外），`failed` 时返回 false；在那之前恒为真。
+- 选项 model（§10.7）加了 `userDefault`（UserDefaultConfig）。`config.set` 走 S9（`stop-service` 除外），`failed` 时返回 false。
 
-**解锁**（coder A，02 §1.2.6，R2-Q3、R2-Q31）
+**解锁**（A，02 §1.2.6，R2-Q3、R2-Q31）
 - 只在安装版。`locked` 为真的小节（访问与密码、权限、出口、服务与 ID、网络和服务器，以及 M6b 的传入连接各节）共用一次解锁；离开设置页（切到设备、出口页，切到任一会话标签，主窗口隐藏或关闭）上锁，设置页里切小节、搜索不上锁。
-- 点"解锁"时才调 `mainGetUnlockPin`（同步、内部经 IPC 最多等 1 秒，不在构建时调）：有 PIN 就弹"输入解锁 PIN"（底部"改用管理员权限解锁"），在界面里比对、不限次数（M6-3）；没有就调 `mainCheckSuperUserPermission`，返回假就在锁定条下写"未获得管理员权限，设置仍处于锁定状态"。
+- 点"解锁"时才调 `mainGetUnlockPin`（同步、内部经 IPC 最多等 1 秒，不在构建时调）：有 PIN 就弹"输入解锁 PIN"（底部"改用管理员权限解锁"），在界面里比对、不限次数；没有就调 `mainCheckSuperUserPermission`，返回假就在锁定条下写"未获得管理员权限，设置仍处于锁定状态"。
 - 主页密码行"修改"在安装版先走同一套解锁，成功后打开设置固定密码对话框，对话框关闭时上锁。
 - 不受锁约束的：服务的启动 / 停止（自己弹 UAC）。
 
-**coder A 的其余要点**
-- 服务与 ID：服务状态行和主页逐字相同（`LocalStatusModel`）；安装版停止 / 启动服务调 `mainSetOption('stop-service', …)`，成功时进程退出重开，调用返回就说明没成，下面写"未获得管理员权限，服务未停止"（启动时"……服务未启动"），取消和失败不分（09 §4.4）；便携版停止的确认正文等 02 §4.3 第 3 条的实测结果（R2-Q7），先按 02 写。解锁 PIN：设置 / 修改 / 移除，长度在 Dart 里先校验（至少 4 个字符）。
+**A 的其余要点**
+- 服务与 ID：服务状态行和主页逐字相同（`LocalStatusModel`）；安装版停止 / 启动服务调 `mainSetOption('stop-service', …)`，成功时进程退出重开，调用返回就说明没成，下面写"未获得管理员权限，服务未停止"（启动时"……服务未启动"），取消和失败不分；便携版停止的确认正文按 02 §4.3 第 3 条（R2-Q7）。解锁 PIN：设置 / 修改 / 移除，长度在 Dart 里先校验（至少 4 个字符）。
 - 访问与密码：选"仅固定密码"而没设固定密码时先开对话框（02 §1.3.1）；"仅使用数字"改了当场刷新一次性密码。
 - 权限：访问模式不是"自定义"时整组灰显并显示实际生效的值（02 §1.3.2）。
 - 搜索：索引来自各小节的 `items()`，只匹配当前语言，不区分大小写，键盘上下、回车、Esc（02 §1.2.4）。
 - 本次运行内记住上次打开的小节。
-- M6-4：主页服务状态行在代理、WebSocket、禁用 UDP 开着时的警告，等 02 §4.3 第 4 条的实测结果再做（主会话转给 A）。
+- 主页服务状态行在代理、WebSocket、禁用 UDP 开着时的警告：做法取决于 02 §4.3 第 4 条的实测结果。
 
-**coder B 的要点**
-- 出口：开关写 Y / N；前提状态行从访问与密码、权限的值算，"修改"用 `showSettings` 和上面固定的项 id；关闭前的确认数在点关闭时现查一次 C1 的 `exit`（2026-11-04 按实现改，原写从 `LocalStatusModel` 取；为 0 时不确认，查不到时用不带数字的那句）；放行的网段对话框用 `settingsApi.allowNetsCheck`，保存它给的 `value`。
+**B 的要点**
+- 出口：开关写 Y / N；前提状态行从访问与密码、权限的值算，"修改"用 `showSettings` 和上面固定的项 id；关闭前的确认数在点关闭时现查一次 C1 的 `exit`（为 0 时不确认，查不到时用不带数字的那句）；放行的网段对话框用 `settingsApi.allowNetsCheck`，保存它给的 `value`。
 - 连接方式：打洞直连和三个键的对应照 02 §1.4.1（打开只写 `enable-ipv6-punch = Y`，关闭两个都写 N）；等待直连的时间 0.1~99.9、一位小数、空 = 2.5；顶部状态条：代理、WebSocket、禁用 UDP、Key 不可用（`keyCheck` 为 `invalid`，或为 `empty` 且 S1 的 Key 来源是 `none`）、兼容服务器（`serverKind`）。
-- 外观：`theme`、`lang` 是和旧界面共用的 LocalConfig 键；写入后主题照上游调 `mainChangeTheme`，语言调 `leapgate_lang_changed`（传解析后的语言，不调上游 `mainChangeLanguage`，见下表）；主窗口的 `MaterialApp` 按这两个键设 `themeMode` 和 `locale` 并监听；CM 只登记 `theme` 全局事件，语言从 `leapgate_cm_events` 的 `lang` 事件来、不写盘。`lang` 存的是新界面不支持的语言时按"跟随系统"显示和处理、不改写（09 §4.8）。启动时和改语言后，把解析后的实际语言（`zh-cn` 或 `en`）经 S9 写进 Config 键 `leapgate-ui-lang`（值不同才写）。
-- 网络和服务器：摘要用 `serverSummary` 和 `serverKind`；实际生效的 API 是明文 http 且不是回环地址时显示警告；服务器对话框照 02 §1.6.8，"API 留空时会用的地址"用第一块现成的 `mainGetCommonSync('resolve-api-server:…')`，Key 用 `keyCheck`，ID 和中继服务器用 `mainTestIfValidServer` 验证；已登录且 API 变了时按 09 §4.5 的先后（先验证、再向旧服务器退出登录、再保存，退出失败不挡保存）；导入导出走剪贴板，编解码照上游 `common.dart:2921-2973`，导入只预填、点"确定"才保存；代理对话框读 `mainGetSocks`、写 `settingsApi.setSocks`；WebSocket、禁用 UDP 开启前页内确认。TLS 回退的说明按 09 §4.6：B 列出还走上游代码的 HTTP 请求，写进提交说明，文案由主会话定稿。
+- 外观：`theme`、`lang` 是和旧界面共用的 LocalConfig 键；写入后主题照上游调 `mainChangeTheme`，语言调 `leapgate_lang_changed`（传解析后的语言，不调上游 `mainChangeLanguage`，见下表）；主窗口的 `MaterialApp` 按这两个键设 `themeMode` 和 `locale` 并监听；CM 只登记 `theme` 全局事件，语言从 `leapgate_cm_events` 的 `lang` 事件来、不写盘。`lang` 存的是新界面不支持的语言时按"跟随系统"显示和处理、不改写。启动时和改语言后，把解析后的实际语言（`zh-cn` 或 `en`）经 S9 写进 Config 键 `leapgate-ui-lang`（值不同才写）。
+- 网络和服务器：摘要用 `serverSummary` 和 `serverKind`；实际生效的 API 是明文 http 且不是回环地址时显示警告；服务器对话框照 02 §1.6.8，"API 留空时会用的地址"用第一块现成的 `mainGetCommonSync('resolve-api-server:…')`，Key 用 `keyCheck`，ID 和中继服务器用 `mainTestIfValidServer` 验证；已登录且 API 变了时先验证、再向旧服务器退出登录、再保存，退出失败不挡保存；导入导出走剪贴板，编解码照上游 `common.dart:2921-2973`，导入只预填、点"确定"才保存；代理对话框读 `mainGetSocks`、写 `settingsApi.setSocks`；WebSocket、禁用 UDP 开启前页内确认。TLS 回退的说明写明还有哪些 HTTP 请求走上游代码（IQ7）。
 - 账号：照 02 §1.5.3，用 M4 的账号 model 和登录对话框。
 - 会话错误 `key_mismatch`、`secure_tcp_failed` 加 `NextStep.openNetworkSettings`：`mainNavigation.showSettings(SettingsSectionId.network)`（先切到主页标签，`showSettings` 自己会切）。
 
@@ -2428,52 +1346,52 @@ tester 原先的推断是"跳过以后接着传时目标不对"。主会话查 A
 
 没有 `SyncReturn` 的都是异步导出。S11 不导出：界面经 S9 写 Config 键 `leapgate-ui-lang`。
 
-**Rust 的做法和约束**（09 §1.2、§2.4、§4.1）
+**Rust 的做法和约束**
 - S9：自己开一条 IPC 连接，同一条连接上先发 `Options(None)` 取服务进程当前的整表，合并改动，发 `Options(Some)`，等服务进程回 `Options(None)` 确认；确认到了写本地 `Config::set_options` 并调 `ui_interface::refresh_options()`，返回 `saved`。连不上时：安装版、`stop-service` 不是 Y → `failed`，不写本地；其他情况写本地，返回 `saved_local`（服务下次启动时导入）。照搬上游写选项时的副作用：`CheckTestNatType` 的判断、TLS 回退改了清 TLS 缓存、`audio-input` 改了重启音频服务。上游 `ui_interface.rs`、`ipc.rs` 不改。
-- S1、S2 和 `exit/directory.rs`：服务器地址和能力从界面进程的选项缓存（`ui_interface::get_option`）取，交给 `libs/leapgate` 的纯函数；不在界面进程里直接读 `Config`（安装版界面进程的 `Config` 可能是旧的，09 §4.1）。S1 的来源推导写成纯函数，`report::root_from` 也改调它，不出第三份复刻。
+- S1、S2 和 `exit/directory.rs`：服务器地址和能力从界面进程的选项缓存（`ui_interface::get_option`）取，交给 `libs/leapgate` 的纯函数；不在界面进程里直接读 `Config`（安装版界面进程的 `Config` 可能是旧的）。S1 的来源推导写成纯函数，`report::root_from` 也改调它，不出第三份复刻。
 - S2：确认不支持时写 `leapgate-api-nocaps = <api 根>`，确认支持时清掉；三态 = 有对得上的 caps → `leapgate`，有对得上的 nocaps → `compat`，都没有 → `checking`。
 - S5：`leapgate::direct::noted(port, result)` 原样返回 `result` 并记下结果，上游那一行只多这一层包装；查询走 `leapgate::ipc::Msg` 末尾新加的变体，服务端分支在 `src/leapgate_hooks/ipc.rs`。`denied` 对应 Windows 10013。
-- S10 分两步（2026-11-05 改，02 §1.6.4"确认收件对话"）：上游 `get_chatid_telegram` 取 getUpdates 里**最早**一条消息的对话、不给人看就保存，机器人的用户名谁都能搜到，有人先给它发过消息，验证码就会发到那个人那里。所以不再调它：`leapgate_bot_lookup` 照上游在新线程里调 `post_request_sync` 发 getUpdates（带 `offset=-100`：不带时 Telegram 给最早未确认的 100 条，积压超过 100 条就拿不到刚发的那条；负数取队尾 100 条，代价是更早的更新被 Telegram 标成已确认、之后不再返回），由 `libs/leapgate` 的 `settings::bot_chat` 取**最近**一条带 `message` 或 `channel_post`（频道里发的帖子是这种）的更新里的对话，两者一视同仁，`edited_message`、`edited_channel_post` 等其他种类跳过（id 数字或字符串都转成字符串；显示名私聊是 `@username`，没有就是"名 姓"、去掉开头的 `@`，免得把名字设成"@某人"冒充用户名；群组、频道是 `title`），什么都不存、不拿保存锁；请求本身失败直接归 `network`，拿到响应后 Telegram 的错误照上游原文的格式（`Telegram API error: … (error_code: N)`）写，再由 `bot_result` 归类：401、404 → `invalid_token`，没有对话 → `no_chat`，其余 Telegram 错误、不是 JSON、没有 `result` 列表 → `other`；`text` 里的 Token 换成 `<token>`。用户确认后 `leapgate_bot_save` 在保存锁下照上游私有的 `TelegramBot::save` 存（用上游公开的 `TelegramBot` 结构序列化，`into_string`、`save` 那几行抄进 `src/leapgate_hooks/settings.rs`，`src/auth_2fa.rs` 不改），再读一次服务进程的配置，`bot` 没存上就回 `other`。`leapgate_verify_2fa` 同理：验证码对了再确认密钥存上了。解析和归类用写死的 getUpdates 响应和 Telegram 错误原文写单测钉住。
+- S10 分两步（02 §1.6.4"确认收件对话"）：上游 `get_chatid_telegram` 取 getUpdates 里**最早**一条消息的对话、不给人看就保存，机器人的用户名谁都能搜到，有人先给它发过消息，验证码就会发到那个人那里。所以不再调它：`leapgate_bot_lookup` 照上游在新线程里调 `post_request_sync` 发 getUpdates（带 `offset=-100`：不带时 Telegram 给最早未确认的 100 条，积压超过 100 条就拿不到刚发的那条；负数取队尾 100 条，代价是更早的更新被 Telegram 标成已确认、之后不再返回），由 `libs/leapgate` 的 `settings::bot_chat` 取**最近**一条带 `message` 或 `channel_post`（频道里发的帖子是这种）的更新里的对话，两者一视同仁，`edited_message`、`edited_channel_post` 等其他种类跳过（id 数字或字符串都转成字符串；显示名私聊是 `@username`，没有就是"名 姓"、去掉开头的 `@`，免得把名字设成"@某人"冒充用户名；群组、频道是 `title`），什么都不存、不拿保存锁；请求本身失败直接归 `network`，拿到响应后 Telegram 的错误照上游原文的格式（`Telegram API error: … (error_code: N)`）写，再由 `bot_result` 归类：401、404 → `invalid_token`，没有对话 → `no_chat`，其余 Telegram 错误、不是 JSON、没有 `result` 列表 → `other`；`text` 里的 Token 换成 `<token>`。用户确认后 `leapgate_bot_save` 在保存锁下照上游私有的 `TelegramBot::save` 存（用上游公开的 `TelegramBot` 结构序列化，`into_string`、`save` 那几行抄进 `src/leapgate_hooks/settings.rs`，`src/auth_2fa.rs` 不改），再读一次服务进程的配置，`bot` 没存上就回 `other`。`leapgate_verify_2fa` 同理：验证码对了再确认密钥存上了。解析和归类用写死的 getUpdates 响应和 Telegram 错误原文写单测钉住。
 - S11：`leapgate-ui-lang` 为 `zh-cn` 时中文正文，其余（含没设）照现在的英文；正文放 `libs/leapgate/src/lang.rs`。
 - E5：从 `parse_allow_nets` 拆出逐项解析；"始终禁止"按网段整个落在回环、链路本地、保留段或元数据地址里判断，不拿首地址判断（`0.0.0.0/0` 不能报）；198.18.0.0/15 不算；"本机地址"是动态的，不报。`value` 是 `parse_allow_nets` 读得懂的存储格式。
 - 状态类型和 JSON 放 `libs/leapgate`，带单测；上游两处挂钩之外不碰上游文件。
 
-**组件（designer）**：规则同 10.8"组件约定"（只管画、文字由调用方传、带语义标签、两套主题和两套尺寸、画廊里每种状态一项、有行为测试），加 10.8 新加的"合并语义的容器里不放带浮层的组件"。要做的和画框见 09 §2.2：设置页版式（小节导航含组标题和搜索框、小节内容区、960×600 时控件换到名字下面一行）、设置行（灰显带原因、行下红字、标记约 2 秒）、小节里的小标题、锁定条（带盾牌按钮和下面一行红字）、盾牌图标、状态加按钮的行、数字输入框加单位、搜索结果列表、受信设备列表、快捷键行和录制对话框、二维码（`qr_flutter`）、关于页的行；M6b 用的几样也在这一轮做完。
+**组件**：规则同 10.8"组件约定"（只管画、文字由调用方传、带语义标签、两套主题和两套尺寸、画廊里每种状态一项、有行为测试），加 10.8 的"合并语义的容器里不放带浮层的组件"。要做的：设置页版式（小节导航含组标题和搜索框、小节内容区、960×600 时控件换到名字下面一行）、设置行（灰显带原因、行下红字、标记约 2 秒）、小节里的小标题、锁定条（带盾牌按钮和下面一行红字）、盾牌图标、状态加按钮的行、数字输入框加单位、搜索结果列表、受信设备列表、快捷键行和录制对话框、二维码（`qr_flutter`）、关于页的行；M6b 用的几样也在这里。
 
 **测试**
 - R：S9 的合并和三种返回；S1 的来源推导表；S2 三态；S3；E5 的逐行判断（含 `0.0.0.0/0`、198.18.0.0/15、各类始终禁止）；S10 按上游原文归类；S11 两种语言正文。
 - core（A、B 各自的）：解锁控制器的上锁时机；出口前提的计算；服务器摘要的显示规则；导入导出编解码。
 - app：02 §1.10 里这八个小节、搜索、锁定的每个状态一个行为测试，用 `FakeSettingsApi` 喂数据。
 
-**已知限制**（2026-11-04 整体审查后记下，不修）
-- 已登录时改 API 服务器，按 09 §4.5 先退出登录再保存；保存返回 `failed`（安装版、服务没应答）时，账号已退出、服务器没改。
+**已知限制**（不修）
+- 已登录时改 API 服务器，先退出登录再保存；保存返回 `failed`（安装版、服务没应答）时，账号已退出、服务器没改。
 - 搜索结果或链接指向的行要等异步读值才出现时（出口的"放行的网段"、网络小节的服务器摘要），第一帧找不到这一行，不会滚过去，只在数据到了以后显示标记。这几个小节都短、行在顶部。
 - S9 是"读整表、合并、写回"，读和写之间（毫秒级）服务进程自己写的键（`leapgate-api-caps`、`leapgate-api-nocaps`）可能被冲掉；上游 `set_option` 用最多旧 1 秒的缓存整表写回，窗口更大。上游每秒用服务进程的整表覆盖界面的选项缓存，和 S9 的 `refresh_options()` 之间也有约 1 秒的竞争。
-- S10 原来的 `verify_bot` 在整个 Telegram 请求期间持有保存锁（上游把查询和保存放在一个函数里）。已拆开（2026-11-05，见上面"Rust 的做法和约束"S10 那条）：查询 `leapgate_bot_lookup` 不拿锁，只有确认后的 `leapgate_bot_save` 在锁下写一次。
+- S10 的查询和保存分开（见上面"Rust 的做法和约束"S10 那条）：查询 `leapgate_bot_lookup` 不拿保存锁，只有确认后的 `leapgate_bot_save` 在锁下写一次；上游把查询和保存放在一个函数里，整个 Telegram 请求期间都持有保存锁。
 
 ### 10.14 M6b 的分工约定
 
-依据：09（§1.1 M6b 几行、§2.3、§3 第 5 步、§5.4），界面行为以 02 §1.3.3~§1.3.5、§1.3.7、§1.4.2~§1.4.7、§1.5.4、§1.5.5、§1.6.3~§1.6.5、§1.10、§3.3 为准，02 §4.3 第 1、7 条的实测结果已回填在 02（第 6、10 条没验成，按 02 现写）；样稿同 §10.13。框架、组件、Rust 导出都是 M6a 做好的（§10.13），M6b 只有两个 coder 写页面：没有占位阶段，直接用 designer 的组件和真实导出。
+M6b 是设置页其余十二个小节和三个对话框。界面行为以 02 §1.3.3~§1.3.5、§1.3.7、§1.4.2~§1.4.7、§1.5.4、§1.5.5、§1.6.3~§1.6.5、§1.10、§3.3 为准；样稿同 §10.13。框架、组件、Rust 导出都在 M6a（§10.13），M6b 只写页面，直接用 M6a 的组件和真实导出。
 
-**分支和文件边界**（都从 `ui/m6b` 切，做完合回 `ui/m6b`；整合 worktree 仍是 `.wt/ui-m4`）
+**分支和文件边界**（都从 `ui/m6b` 切，做完合回 `ui/m6b`）
 
-| 分支 | 谁 | 只改这些 |
+| 分支 | 块 | 只改这些 |
 |---|---|---|
-| `ui/m6b-in` | coder C（传入其余） | core `leapgate/settings/` 下 C 需要的新文件（受信设备的解析、声音来源（照上游 `audio_input.dart`）、白名单的校验、二次验证和 Telegram 的状态）；`consts.dart`（只在"M6b incoming"下追加）；app `pages/settings/sections/two_factor.dart`、`restrictions.dart`、`sessions.dart`、`remote_printing.dart`、`during_sessions.dart`（换掉占位），`dialogs/` 下新文件（开启二次验证、Telegram 机器人、IP / ID 白名单）；`shell/main_window.dart` 只改 `keepDisplayOn` 那一处（照 `keep-awake-during-outgoing-sessions`，`待调.md` 2026-10-31 那条）；ARB；测试 |
-| `ui/m6b-out` | coder D（传出其余和通用） | core `leapgate/settings/` 下 D 需要的新文件（快捷键的绑定读写和录制校验，从上游 `page_body.dart`、`recording_dialog.dart` 去界面化后搬进来，约 250 行）；`consts.dart`（只在"M6b outgoing"下追加）；app `pages/settings/sections/new_device_defaults.dart`、`toolbar.dart`、`rendering.dart`、`shortcuts.dart`、`print_jobs.dart`、`other.dart`、`about.dart`（换掉占位）；`pages/session/toolbar/monitor_menu.dart`（默认值改经选项 model，09 §2.1）和会话里读工具栏、显示器、渲染这几项设置的文件，只为让已开的会话当场跟着变（02 §3.3），改了哪些列进提交说明；ARB；测试 |
+| `ui/m6b-in` | C（传入其余） | core `leapgate/settings/` 下 C 需要的新文件（受信设备的解析、声音来源（照上游 `audio_input.dart`）、白名单的校验、二次验证和 Telegram 的状态）；`consts.dart`（只在"M6b incoming"下追加）；app `pages/settings/sections/two_factor.dart`、`restrictions.dart`、`sessions.dart`、`remote_printing.dart`、`during_sessions.dart`（换掉占位），`dialogs/` 下新文件（开启二次验证、Telegram 机器人、IP / ID 白名单）；`shell/main_window.dart` 只改 `keepDisplayOn` 那一处（照 `keep-awake-during-outgoing-sessions`）；ARB；测试 |
+| `ui/m6b-out` | D（传出其余和通用） | core `leapgate/settings/` 下 D 需要的新文件（快捷键的绑定读写和录制校验，从上游 `page_body.dart`、`recording_dialog.dart` 去界面化后搬进来，约 250 行）；`consts.dart`（只在"M6b outgoing"下追加）；app `pages/settings/sections/new_device_defaults.dart`、`toolbar.dart`、`rendering.dart`、`shortcuts.dart`、`print_jobs.dart`、`other.dart`、`about.dart`（换掉占位）；`pages/session/toolbar/monitor_menu.dart`（默认值改经选项 model）和会话里读工具栏、显示器、渲染这几项设置的文件，只为让已开的会话当场跟着变（02 §3.3），改了哪些列进提交说明；ARB；测试 |
 
-- 第 0 步（`ui/m6b` 第一个提交）已把十二个小节的占位文件登记进 `settings_registry.dart`，都是 `visible: () => false`。各自做完时按 02 设 `visible`（例如远程打印、收到的打印任务只在 Windows）。`settings_registry.dart`、`settings_ids.dart`、`settings_page.dart`、`settings_section_state.dart`、`settings_flow.dart`、`settings_status.dart`、`shell/navigation.dart`、core `settings_api.dart`、两份 `settings_fakes.dart`、`app/lib/widgets/` 两个 coder 都不改；确实要改先报主会话（组件缺什么由主会话转给 designer）。小节文件彼此不引用。
-- 锁：C 的四个传入小节 `locked: true`（占位已设），用 `ctx.locked` 灰显；自己弹 UAC 的（RDP 会话共享、安装打印机）不受锁约束，结果照 09 §1.2 拿：RDP 调用返回后再读一次 `mainIsShareRdp`，打印机看全局事件 `install-printer-res`。
+- 十二个小节都登记在 `settings_registry.dart`，`visible` 按 02 设（例如远程打印、收到的打印任务只在 Windows）。`settings_registry.dart`、`settings_ids.dart`、`settings_page.dart`、`settings_section_state.dart`、`settings_flow.dart`、`settings_status.dart`、`shell/navigation.dart`、core `settings_api.dart`、两份 `settings_fakes.dart`、`app/lib/widgets/` C、D 都不改。小节文件彼此不引用。
+- 锁：C 的四个传入小节 `locked: true`，用 `ctx.locked` 灰显；自己弹 UAC 的（RDP 会话共享、安装打印机）不受锁约束，结果这样拿：RDP 调用返回后再读一次 `mainIsShareRdp`，打印机看全局事件 `install-printer-res`。
 - ARB 键以 `settings` 开头，C 用 `settingsTwoFactor*`、`settingsRestrict*`、`settingsSessions*`、`settingsRemotePrint*`、`settingsDuring*`，D 用 `settingsDefaults*`、`settingsToolbar*`、`settingsRender*`、`settingsShortcut*`、`settingsPrintJobs*`、`settingsOther*`、`settingsAbout*`；加在两个 ARB 文件末尾，中英文同时加，文案照 02 逐字照抄，英文照 02 §5.5，没有的新写并列进提交说明。改完 ARB 跑 `flutter gen-l10n`。
 - 写选项一律经选项 model（`config.set` 走 S9，`ctx.save` 管"无法保存设置"），页面不直接调 `bind`；第一块的 `bind.main*` 调用包在 core 的 model 里。新设备的默认设置用 `userDefault` 作用域（§10.7）。
 
 **用到的 M6a 导出和组件**
-- C：`settingsApi.localAddresses`（S4，直接 IP 访问的本机地址）、`directListen`（S5，端口和"端口 ‹端口› 已被其他应用占用"；先读 `direct-server` 选项，记录在关掉以后还在）、`verifyBot`（S10）、`verify2fa`（验证码对了再确认密钥存上了，`not_saved` 照 02 §1.6.10 写）；组件 `LgTrustedDevices`、`LgQrCode`、`LgQrKeyRow`、`LgSettingsStatusRow`、`LgSettingsNumberField`、`LgSettingsSubtitle`。
+- C：`settingsApi.localAddresses`（S4，直接 IP 访问的本机地址）、`directListen`（S5，端口和"端口 ‹端口› 已被其他应用占用"；先读 `direct-server` 选项，记录在关掉以后还在）、Telegram 机器人的查询和保存（S10 拆成的两步 `leapgate_bot_lookup`、`leapgate_bot_save`，见 §10.13）、`verify2fa`（验证码对了再确认密钥存上了，`not_saved` 照 02 §1.6.10 写）；组件 `LgTrustedDevices`、`LgQrCode`、`LgQrKeyRow`、`LgSettingsStatusRow`、`LgSettingsNumberField`、`LgSettingsSubtitle`。
 - D：组件 `LgShortcutGroup`、`LgShortcutRow`、`LgShortcutRecordDialog`、`LgSettingsInfoRow`（关于页的行，带复制）、`LgSettingsNumberField`；关于页的版本用 `leapgate_version`（S12）。
 
 **几处约定**
-- 二次验证：开启对话框把密钥显示在二维码下（上游的做法，02 §1.6.3）。测试和画廊里只用写死的假密钥，验收时不截这个对话框（09 §5.4）。
-- S10 拆成查询和保存两步（2026-11-05，§10.13"Rust 的做法和约束"S10 那条）：Telegram 对话框先调 `leapgate_bot_lookup`，显示确认态（"验证码将发送给：‹对话›"），用户点"确认"才调 `leapgate_bot_save`；两次请求期间都显示进行中、不能重复点。
+- 二次验证：开启对话框把密钥显示在二维码下（上游的做法，02 §1.6.3）。测试和画廊里只用写死的假密钥。
+- S10 拆成查询和保存两步（§10.13"Rust 的做法和约束"S10 那条）：Telegram 对话框先调 `leapgate_bot_lookup`，显示确认态（"验证码将发送给：‹对话›"），用户点"确认"才调 `leapgate_bot_save`；两次请求期间都显示进行中、不能重复点。
 - 声音来源改了以后由 S9 照上游重启音频服务（§10.13"Rust 的做法和约束"），页面不另做。
 - 录制位置：会话（传入的录制）和会话期间（传出的录制）共用同一个目录项，都在 C；选文件夹用 app 已有的 `file_picker`。
 - 快捷键：总开关打开时写入默认绑定，录制的五种状态、冲突替换、恢复默认照 02 §1.4.6；"发送到远程设备"打开时快捷键不生效，判断沿用 M2b 的快捷键 model。
@@ -2485,37 +1403,36 @@ tester 原先的推断是"跳过以后接着传时目标不对"。主会话查 A
 
 ### 10.15 M7a 的分工约定
 
-依据：总仓库 `docs/新界面/10-M7a拆法.md`（下称"10"；维护者 2026-11-05 把 M7a-1~M7a-9 全部按推荐定，一段做完）。界面行为以 02 §2.1.1、§2.2、§2.4、§2.5、§3.1、§3.2 为准（M7a 的决定已回写），一个标签多个视图以 01 §2.1、§3.2 区块 A、G 为准；样稿 `A-P7-文件传输.html`、`A-P7-文件传输-菜单与其他状态.html`、`A-P7-文件传输-对话框.html`（替换确认的两文件对照表按 10 §1.2 去掉，外观检查不算差异）。10 §6 列的不做：M7b 的暂停、从失败处重试、个别文件跳过和汇总、"查看详情"，拖出到资源管理器，手机文件传输页。
+M7a 是文件传输，也第一次在一个会话标签里放多个视图。界面行为以 02 §2.1.1、§2.2、§2.4、§2.5、§3.1、§3.2 为准，一个标签多个视图以 01 §2.1、§3.2 区块 A、G 为准；样稿 `A-P7-文件传输.html`、`A-P7-文件传输-菜单与其他状态.html`、`A-P7-文件传输-对话框.html`（替换确认的两文件对照表去掉：事件里没有大小和时间）。不在 M7a 的：暂停、从失败处重试、个别文件跳过和汇总、"查看详情"（M7b，§10.17），拖出到资源管理器，手机文件传输页。
 
-**分支和文件边界**（都从 `ui/m7a` 切，做完合回 `ui/m7a`；整合 worktree 是 `.wt/ui-m4`，块 2 的桥和 pub 缓存在它里面）
+**分支和文件边界**（都从 `ui/m7a` 切，做完合回 `ui/m7a`）
 
-| 分支 | 谁 | 只改这些 |
+| 分支 | 块 | 只改这些 |
 |---|---|---|
-| `ui/rust-m7` | coder R | 新文件 `libs/leapgate/src/ft_reason.rs`（FT2 归类，纯函数加单测）、`libs/leapgate/src/lib.rs`（加 `pub mod ft_reason;`）、`libs/leapgate/src/reason.rs`（只把截断和日志去重改成能共用，C3 的行为不变）；新文件 `src/leapgate_hooks/file_transfer.rs`（本机读文件夹、删链接里要用会话和 `fs` 的部分）、`src/leapgate_hooks.rs`（加 `pub(crate) mod file_transfer;`）；`src/leapgate_ffi.rs`（末尾追加 M7a 一段）；上游只一处：`src/common.rs` 的 `_make_fd_to_json` 加 `is_hidden` 一行（FT1），带 `// leapgate:` 注释；本节的 Rust 部分 |
-| `ui/m7-ds` | designer | `app/lib/widgets/`（新组件；`LgTitleBar` 画出 `LgSessionTab` 的 `progress`、`alert`；`LgEmptyState` 这类现成组件只加参数、默认值不变）、`app/lib/icons/`（缺的图标）、`app/lib/gallery_m7.dart`（第 0 步已登记进 `gallery_main.dart`，designer 只改这个文件）、组件的测试 |
-| `ui/m7a-core` | coder A | core `leapgate/file_transfer/` 下：新文件 `file_model.dart`（改写的 `FileModel`、`FileController`）、`sort.dart`，`jobs.dart` 和 `errors.dart` 的分隔线以下，`pane.dart` 里 `fileTransferOf` 的函数体；`models/file_model.dart`（删掉 `FileModel`、`FileController` 两个类，其余照"只删界面调用"不动；来源行第 0 步已写成最终的样子）；`leapgate/session.dart`（事件登记、`FileModel` 的导入）、`leapgate/ffi_model.dart`（只在 `onReady` 那一处需要时改）；`leapgate/prompts.dart`（只删旧的三种提问，见下）；`consts.dart`（只在"M7a core"下追加）；core 的测试（`file_model_test.dart` 跟着改写） |
-| `ui/m7a-shell` | coder B | `app/lib/shell/`（新文件放标签里的视图容器；`main_window.dart`、`tab_menu.dart`、`window_close.dart`、`tab_overlays.dart` 的 `ShellPrompter`；`navigation.dart` 只写实现、接口不改）；`app/lib/pages/session/` 的 `session_toolbar.dart`（视图切换做成真的）、`session_page.dart`（`active` 的含义）、`connection_panel.dart`、`reasons.dart`（"关闭文件传输"）；`app/lib/pages/files/` 的 `queue_panel.dart`、`file_dialogs.dart`、新文件 `file_route_details.dart`；"文件传输"入口：core `leapgate/peer_list.dart`（`PeerAction.fileTransfer` 和条件）和它的测试、app `pages/home/peer_views.dart`、`devices_page.dart` 和地址簿里列设备菜单项的地方（只加这一项）；`consts.dart`（只在"M7a shell"下追加）；ARB；测试 |
-| `ui/m7a-panes` | coder C | `app/lib/pages/files/` 里 B 那三个以外的文件：`file_view.dart`（换掉占位），新文件 `pane.dart`、`breadcrumb.dart`、`file_list.dart`、`pane_menus.dart`、`drag_drop.dart`、`formats.dart` 等；`consts.dart`（只在"M7a panes"下追加）；ARB；测试 |
+| `ui/rust-m7` | Rust | 新文件 `libs/leapgate/src/ft_reason.rs`（FT2 归类，纯函数加单测）、`libs/leapgate/src/lib.rs`（加 `pub mod ft_reason;`）、`libs/leapgate/src/reason.rs`（只把截断和日志去重改成能共用，C3 的行为不变）；新文件 `src/leapgate_hooks/file_transfer.rs`（本机读文件夹、删链接里要用会话和 `fs` 的部分）、`src/leapgate_hooks.rs`（加 `pub(crate) mod file_transfer;`）；`src/leapgate_ffi.rs`（末尾追加 M7a 一段）；上游只一处：`src/common.rs` 的 `_make_fd_to_json` 加 `is_hidden` 一行（FT1），带 `// leapgate:` 注释；本节的 Rust 部分 |
+| `ui/m7-ds` | 组件 | `app/lib/widgets/`（新组件；`LgTitleBar` 画出 `LgSessionTab` 的 `progress`、`alert`；`LgEmptyState` 这类现成组件只加参数、默认值不变）、`app/lib/icons/`（缺的图标）、`app/lib/gallery_m7.dart`（已登记进 `gallery_main.dart`，组件块只改这个文件）、组件的测试 |
+| `ui/m7a-core` | A（core） | core `leapgate/file_transfer/` 下：新文件 `file_model.dart`（改写的 `FileModel`、`FileController`）、`sort.dart`，`jobs.dart` 和 `errors.dart` 的分隔线以下，`pane.dart` 里 `fileTransferOf` 的函数体；`models/file_model.dart`（删掉 `FileModel`、`FileController` 两个类，其余照"只删界面调用"不动；来源行第 0 步已写成最终的样子）；`leapgate/session.dart`（事件登记、`FileModel` 的导入）、`leapgate/ffi_model.dart`（只在 `onReady` 那一处需要时改）；`leapgate/prompts.dart`（只删旧的三种提问，见下）；`consts.dart`（只在"M7a core"下追加）；core 的测试（`file_model_test.dart` 跟着改写） |
+| `ui/m7a-shell` | B（多视图外壳、队列、对话框） | `app/lib/shell/`（新文件放标签里的视图容器；`main_window.dart`、`tab_menu.dart`、`window_close.dart`、`tab_overlays.dart` 的 `ShellPrompter`；`navigation.dart` 只写实现、接口不改）；`app/lib/pages/session/` 的 `session_toolbar.dart`（视图切换做成真的）、`session_page.dart`（`active` 的含义）、`connection_panel.dart`、`reasons.dart`（"关闭文件传输"）；`app/lib/pages/files/` 的 `queue_panel.dart`、`file_dialogs.dart`、新文件 `file_route_details.dart`；"文件传输"入口：core `leapgate/peer_list.dart`（`PeerAction.fileTransfer` 和条件）和它的测试、app `pages/home/peer_views.dart`、`devices_page.dart` 和地址簿里列设备菜单项的地方（只加这一项）；`consts.dart`（只在"M7a shell"下追加）；ARB；测试 |
+| `ui/m7a-panes` | C（两栏） | `app/lib/pages/files/` 里 B 那三个以外的文件：`file_view.dart`（换掉占位），新文件 `pane.dart`、`breadcrumb.dart`、`file_list.dart`、`pane_menus.dart`、`drag_drop.dart`、`formats.dart` 等；`consts.dart`（只在"M7a panes"下追加）；ARB；测试 |
 
-- 第 0 步写好的接口谁都不改：core `leapgate/file_transfer/file_transfer_api.dart`、`pane.dart`（A 只填 `fileTransferOf` 的函数体）、`errors.dart` 和 `jobs.dart` 的分隔线以上、`prompts.dart` 里 `Ft` 开头的提问；app `FileView` 的构造参数、`FileQueuePanel(jobs:)`、`MainNavigation.openFileTransfer`、`LgSessionTab` 的 `progress` 和 `alert`、`ConnectionPanel.lastView`；core 和 app 的 `test/file_transfer_fakes.dart`（两份内容相同；要多的在自己的测试文件里继承）。确实要改先报主会话。
+- 第 0 步写好的接口谁都不改：core `leapgate/file_transfer/file_transfer_api.dart`、`pane.dart`（A 只填 `fileTransferOf` 的函数体）、`errors.dart` 和 `jobs.dart` 的分隔线以上、`prompts.dart` 里 `Ft` 开头的提问；app `FileView` 的构造参数、`FileQueuePanel(jobs:)`、`MainNavigation.openFileTransfer`、`LgSessionTab` 的 `progress` 和 `alert`、`ConnectionPanel.lastView`；core 和 app 的 `test/file_transfer_fakes.dart`（两份内容相同；要多的在自己的测试文件里继承）。
 - ARB：C 的键以 `files` 开头；B 的新键以 `ft`、`queue` 开头，外壳已有前缀（`tab`、`closing`、`conn`、`toolbar`）下新加的也归 B；A 不加（core 不带文案）。加在两个 ARB 文件末尾，中英文同时加，文案照 02 §2.2、§2.4、§2.5、§3.1、§3.2 逐字照抄，英文照 02 §5.5，没有的新写并列进提交说明。改完 ARB 跑 `flutter gen-l10n`。
-- coder 先用现成组件和简单的占位控件把逻辑写通，整合时换成 designer 的组件。占位不求好看，但行为测试要能按文字和语义标签找到它们。
-- 块 2 的新导出在 R 合入、重新生成桥之前不存在：`RustFileTransferApi` 每个方法都抛 `UnimplementedError`（`TODO(M7a 整合)`），整合时由主会话换成真实调用；测试一律用 `FakeFileTransferApi`。`fileTransferOf` 在 A 合入之前也抛 `UnimplementedError`，B、C 的测试给 `FileView` 传 `FakeFileTransferModel`。
-- 整合时要接的：`RustFileTransferApi`（主会话）；`fileTransferOf`（A）；`ShellPrompter.ask` 调 `showFilePrompt`（B）；视图容器挂上 `FileView`（B）；复制件的旧提问删掉以后 `ShellPrompter` 只画 `Ft` 开头的（A、B）。
+- A、B、C 先用现成组件和简单的占位控件把逻辑写通，整合时换成组件块的组件。占位不求好看，但行为测试要能按文字和语义标签找到它们。
+- `RustFileTransferApi` 调块 2 的真实导出；测试一律用 `FakeFileTransferApi`。B、C 的测试给 `FileView` 传 `FakeFileTransferModel`。
+- 整合时要接的：`RustFileTransferApi`；`fileTransferOf`（A）；`ShellPrompter.ask` 调 `showFilePrompt`（B）；视图容器挂上 `FileView`（B）；复制件的旧提问删掉以后 `ShellPrompter` 只画 `Ft` 开头的（A、B）。
 
 **Rust 导出（块 2）**
 
 | 导出 | 参数 | 返回 |
 |---|---|---|
 | `leapgate_ft_reason`（FT2） | `text: String`（`job_error` 的 `err` 原文）、`peer_platform: String`（对端信息的 `platform` 原样：`Windows`、`Linux`、`Mac OS`、`Android`；空或认不出时按 Windows 查）、`side: String`（`local` / `remote` / `unknown`） | `SyncReturn<String>`：`{"reason":码,"args":[…],"text":原文}`。`args` 一律是字符串：`invalid_name_windows` 是 `[名字]`，`too_many_files` 是 `[本次数, 上限]`（02 文案里的 ‹N› 是上限、‹M› 是本次数，取参时别弄反），其余 `[]`；`text` 截到 200 个字符（按字符边界，同 C3），每种码都带 |
-| `leapgate_ft_read_local_dir`（M7a-4） | `path: String`、`show_hidden: bool` | `SyncReturn<String>`：成功时和上游 `session_read_local_dir_sync` 一样（同样先过 `fs::get_path`，带 FT1 的 `is_hidden`）；失败时 `{"error":原文（截到 200 个字符）,"reason":码}`，码按 `side = local` 归 |
-| `leapgate_ft_remove_link`（M7a-3） | `session_id: SessionID`、`act_id: i32`、`path: String`、`is_remote: bool`、`is_dir_link: bool` | 异步、没有返回值。结果照常经会话事件 `job_done` / `job_error` 回，`id` 是 `act_id`、`file_num` 是 0；会话不在时什么也不做（和上游的 `session_*` 导出一样），Dart 自己有超时 |
+| `leapgate_ft_read_local_dir` | `path: String`、`show_hidden: bool` | `SyncReturn<String>`：成功时和上游 `session_read_local_dir_sync` 一样（同样先过 `fs::get_path`，带 FT1 的 `is_hidden`）；失败时 `{"error":原文（截到 200 个字符）,"reason":码}`，码按 `side = local` 归 |
+| `leapgate_ft_remove_link` | `session_id: SessionID`、`act_id: i32`、`path: String`、`is_remote: bool`、`is_dir_link: bool` | 异步、没有返回值。结果照常经会话事件 `job_done` / `job_error` 回，`id` 是 `act_id`、`file_num` 是 0；会话不在时什么也不做（和上游的 `session_*` 导出一样），Dart 自己有超时 |
 
-- M7a-7：空文件夹不加导出。本机读空文件夹失败照旧只拿到空串，附注写"未能读取"，和远程同一句。
-- FT1：上游 `_make_fd_to_json`（`src/common.rs`）每条加 `"is_hidden"`，三条读文件夹的路（本机、远程 `file_dir`、空文件夹）都带上；旧界面多一个字段、不读。Dart 半边（复制件 `Entry.isHidden`，缺省 false）第 0 步已加，来源行注明了例外。符号链接不加字段：`entry_type` 2 是目录链接（Windows 的目录联接也算），5 是文件链接。
-- 02 §4.3 第 22 条（远程错误原文是不是"‹文字› (os error N)"）和第 0 步同时实测，结果回填 02；R 按结果核对下面的表。
+- 空文件夹不加导出。本机读空文件夹失败照旧只拿到空串，附注写"未能读取"，和远程同一句。
+- FT1：上游 `_make_fd_to_json`（`src/common.rs`）每条加 `"is_hidden"`，三条读文件夹的路（本机、远程 `file_dir`、空文件夹）都带上；旧界面多一个字段、不读。Dart 半边（复制件 `Entry.isHidden`，缺省 false）也加了，来源行注明了例外。符号链接不加字段：`entry_type` 2 是目录链接（Windows 的目录联接也算），5 是文件链接。
 
-**FT2 的归类**（10 §2.6、§4.3）
+**FT2 的归类**
 - 码（snake_case，界面按它查表，改名等于改接口）：`permission_denied`、`in_use`、`not_found`、`disk_full`、`file_too_large`、`path_too_long`、`invalid_name`、`invalid_name_windows`、`symlink_in_path`、`one_way`、`too_many_files`、`android_scope`、`skipped`（不是错误）、`other`。`timeout` 只在 Dart 里有（`FtError.timeout()`），Rust 不返回。
 - 原文里有 `(os error N)` 的，取最后一次出现的 N（`validation failed: …`、`failed to validate path component '…': …` 这类前缀里，内层在末尾），只认错误码、不认文字（Windows 的文字随系统语言变）：
 
@@ -2531,26 +1448,26 @@ tester 原先的推断是"跳过以后接着传时目标不对"。主会话查 A
 | `symlink_in_path` | — | 40 | 62 |
 
 - 没有错误码的，按上游自己拼的句子认：`symlink path component is not allowed` → `symlink_in_path`；以 `invalid Windows download file name: ` 开头 → `invalid_name_windows`（冒号后面是名字）；`invalid download file name`、`invalid file name component`、`invalid file name in remote directory listing: …`、`file name contains null bytes`、`path traversal detected in file name`、`absolute path detected in file name`、`empty file name in multi-file transfer`、`… cannot be empty`、`… contains null bytes`、`new file name cannot be empty`、`Invalid path` → `invalid_name`；`Not exists`、以 ` not exists` 结尾的（`"‹路径›" not exists`、`Parent directoy of … not exists`）→ `not_found`；正文等于 `one-way-file-transfer-tip`（是翻译键）→ `one_way`；以 `file transfer rejected: too many files (` 开头 → `too_many_files`，从括号里取两个数；正文等于 `Permission denied`（没有错误码，Android 的范围检查）→ `android_scope`；正文等于 `skipped` → `skipped`；其余 → `other`（续传临时文件异常、`Wrong id` 这类内部错误也是 `other`）。Windows 被控端连接管理进程给读任务的初始化错误包了一层 `validation failed: `（`ui_cm_interface.rs` `start_read_job`），先去掉再认，`validation failed: Not exists` 是 `not_found`；`validation task failed: `、`task failed: `、`serialize failed: ` 后面是任务异常或序列化错误，照旧 `other`。
-- `side`：`local` 按本机平台的表查（本机平台用 `cfg!` 取，不写死 Windows）；`remote` 按 `peer_platform` 的表查；`unknown`（传输任务）：对端也是 Windows 时两边同一张表；对端不是 Windows 时，看 `(os error N)` 前面的文字是不是那个 errno 的英文原句（Linux glibc、Android bionic、macOS 各一张小表，约 15 条；bionic 和 glibc 只有 5、40、84、122 的措辞不同，码表和 Linux 共用），是就按对端平台查，否则按本机查。只有 `(os error N)` 紧挨原文末尾时才认作错误码，在路径或名字中间的不算。小表除了上面表里的 errno，还收了号码和上面 Windows 那列撞上的文件类 errno（5 EIO、19 ENODEV、21 EISDIR、32 EPIPE、Linux 和 Android 的 39 ENOTEMPTY、123 ENOMEDIUM），否则对端的 `Input/output error (os error 5)` 会按本机查成没有访问权限；它们按对端查不到，是 `other`。实现（`ft_reason.rs` `unknown_side`）不假定本机是 Windows：两端不同时，以非 Windows 那端（都不是时以对端）的原句判断。原因：上传时本机读出错，被控端会把同一句原文原样发回来（10 §4.3），"从远程回来的"不一定是远程设备的错误。
+- `side`：`local` 按本机平台的表查（本机平台用 `cfg!` 取，不写死 Windows）；`remote` 按 `peer_platform` 的表查；`unknown`（传输任务）：对端也是 Windows 时两边同一张表；对端不是 Windows 时，看 `(os error N)` 前面的文字是不是那个 errno 的英文原句（Linux glibc、Android bionic、macOS 各一张小表，约 15 条；bionic 和 glibc 只有 5、40、84、122 的措辞不同，码表和 Linux 共用），是就按对端平台查，否则按本机查。只有 `(os error N)` 紧挨原文末尾时才认作错误码，在路径或名字中间的不算。小表除了上面表里的 errno，还收了号码和上面 Windows 那列撞上的文件类 errno（5 EIO、19 ENODEV、21 EISDIR、32 EPIPE、Linux 和 Android 的 39 ENOTEMPTY、123 ENOMEDIUM），否则对端的 `Input/output error (os error 5)` 会按本机查成没有访问权限；它们按对端查不到，是 `other`。实现（`ft_reason.rs` `unknown_side`）不假定本机是 Windows：两端不同时，以非 Windows 那端（都不是时以对端）的原句判断。原因：上传时本机读出错，被控端会把同一句原文原样发回来，"从远程回来的"不一定是远程设备的错误。
 - 没认出的同一段正文只在日志里写一次，和 C3 共用截断和去重。
 - FT2 是纯函数，不依赖任务状态；M7b 在 `io_loop.rs` 加 FT3~FT5 挂钩时调同一个函数。
 
 **Rust 的做法和约束**
-- `leapgate_ft_remove_link`（10 §4.2）：远程时由 Rust 从会话自己的对端信息取平台，不由 Dart 传。Windows 对端、目录链接 → 发 `FileRemoveDir { id: act_id, path, recursive: false }`（被控端只调 `std::fs::remove_dir`，只删链接或联接本身，各版本对端都认）；其余（文件链接，Linux、macOS 对端的目录链接）→ 发 `FileRemoveFile { id: act_id, path, file_num: 0 }`。本机：Windows 上按链接自身的属性（`symlink_metadata` 带目录属性 0x10）调 `std::fs::remove_dir`，不看 `is_dir_link`（目标已不存在的目录链接上游列成文件链接），其余调 `std::fs::remove_file`，结果照本机删文件那样推 `job_done` / `job_error`。上游删文件夹的导出（固定递归）不改。
+- `leapgate_ft_remove_link`：远程时由 Rust 从会话自己的对端信息取平台，不由 Dart 传。Windows 对端、目录链接 → 发 `FileRemoveDir { id: act_id, path, recursive: false }`（被控端只调 `std::fs::remove_dir`，只删链接或联接本身，各版本对端都认）；其余（文件链接，Linux、macOS 对端的目录链接）→ 发 `FileRemoveFile { id: act_id, path, file_num: 0 }`。本机：Windows 上按链接自身的属性（`symlink_metadata` 带目录属性 0x10）调 `std::fs::remove_dir`，不看 `is_dir_link`（目标已不存在的目录链接上游列成文件链接），其余调 `std::fs::remove_file`，结果照本机删文件那样推 `job_done` / `job_error`。上游删文件夹的导出（固定递归）不改。
 - `leapgate_ft_read_local_dir` 直接调 `fs::read_dir(&fs::get_path(&path), show_hidden)` 和 `crate::common::make_fd_to_json`，失败时把错误原文交给 FT2 的归类。
-- 上游文件只改 `src/common.rs` 一处；其余都在 `libs/leapgate` 和 `src/leapgate_*`。2026-11-06 验收后加第二处：`src/client/io_loop.rs` 的 `sync_jobs_status_to_local` 开头，不是文件传输会话就返回（`// leapgate:` 注释、3 行）。上游每个会话结束时都把自己的未完成任务写进这台设备的配置，远程桌面会话没有任务、写的是空表；同一标签里两个视图同时断开时谁后退出谁说了算，未完成的传输有一半概率被冲掉（验收里断线较久后续传卡住、重开后任务消失就是这个，A 的日志能对上；上游旧界面同样会冲掉）。
+- 上游文件只改两处，其余都在 `libs/leapgate` 和 `src/leapgate_*`：`src/common.rs` 一处（FT1）；`src/client/io_loop.rs` 的 `sync_jobs_status_to_local` 开头，不是文件传输会话就返回（`// leapgate:` 注释、3 行）。上游每个会话结束时都把自己的未完成任务写进这台设备的配置，远程桌面会话没有任务、写的是空表；同一标签里两个视图同时断开时谁后退出谁说了算，未完成的传输有一半概率被冲掉（表现是断线较久后续传卡住、重开后任务消失；上游旧界面同样会冲掉）。
 
-**core 的接口**（第 0 步已写，`core/lib/leapgate/file_transfer/`；A 实现，B、C 只认它们）
-- `file_transfer_api.dart`：`FileTransferApi`（`reason`、`readLocalDir`、`removeLink`）、全局 `fileTransferApi`、`RustFileTransferApi`（见上，整合时换）。
+**core 的接口**（`core/lib/leapgate/file_transfer/`；A 实现，B、C 只认它们）
+- `file_transfer_api.dart`：`FileTransferApi`（`reason`、`readLocalDir`、`removeLink`）、全局 `fileTransferApi`、`RustFileTransferApi`（调块 2 导出）。
 - `errors.dart`：`FtReason`（14 个码加 `timeout`；`code` 是 JSON 值，认不出的当 `other`）、`FtSide`、`FtError {reason, args, text}`（`fromJson`、`timeout()`）。文案由 app 映射成 02 §2.5 的句子：C 管栏顶横幅、路径框下和列表区，B 管队列行和对话框。"本机 / 远程设备的磁盘空间不足"这类按方向定：空间不足、文件过大、名称无效、路径过长、目标路径含符号链接只会发生在目标那一侧（上传是远程设备，下载是本机）。
 - `pane.dart`：
   - `FilePane`（一栏，`Listenable`，下面每项变了都通知）：`isLocal`；`isWindows`（这一侧的路径规则，"此电脑"是 `/`）；`path`（还没打开过任何文件夹时为空）；`entries`（已按 `sort` 排好、带完整路径，"显示隐藏的项目"关着时不含隐藏项）；`isThisPc`；`canGoBack`、`canGoUp`；`reading`（在读的路径和开始时间，页面约 0.5 秒后才显示"正在读取…"，读的不是当前文件夹时旧内容变暗）；`openError`（打开失败的路径和原因：`path` 为空时显示在列表区、带"转到主文件夹""重试"，否则是栏顶横幅）和 `dismissOpenError()`；`openDirectory(path, showError:)`（返回失败原因；路径输入框传 `showError: false`，错误写在框下、不出横幅）；`goBack()`、`goUp()`、`goHome()`、`refresh()`（保留选择）；`drives()`（根下拉的盘符）；`showHidden` / `setShowHidden`；`sort` / `setSort`（`FileSort` 是列加方向，A 按两栏分别记在本机）；`selection` / `select`（打开别的文件夹时清空，盘符不进选择）；`canRename`（远程栏要求对端版本不低于 1.3.0）；`transfer(items, to:)`（每个顶层项目一个任务，传到另一栏当前文件夹，或放下的那个文件夹或盘符行）；`newFolder()`、`rename(entry)`、`delete(items)`。新建、重命名、删除和传输里的替换确认都由 A 在调用里经 `appCore.prompter` 提问，页面只调方法。
   - `FileTransferModel`（一个文件传输会话）：`local`、`remote`、`jobs`、`uploadPaths(paths, to:)`（从资源管理器拖进来的本机路径，上传到远程栏当前文件夹或放下的那个文件夹行）。
-  - `fileTransferOf(FFI)`：A 合入后返回 `session.fileModel`。
+  - `fileTransferOf(FFI)`：返回 `session.fileModel`。
   - `Entry.isLink`（扩展：`entry_type` 2 或 5）；`Entry.isHidden` 在复制件里。
 - `jobs.dart`：`FileJobs`（`Listenable`）：`rows`（加入的顺序）；`summary`（`active` 含正在统计、进行中、正在删除，以及 `queued`、`waitingConfirm`、`failed`、`paused`、`interrupted`、`finished`（已完成、已跳过、已取消，"清除已完成"看它）、`progress`（进行中和排队里已知大小的合计 0~1，没有时为空））；`unfinished`（排队中、正在统计、进行中、等待确认，02 §3.1 那句的 ‹N›；已暂停、已中断不算）；`cancel`、`resume`、`resumeAll`、`remove`、`clearFinished`。`FileJobRow`：方向（上传、下载、删除）、名称、源、目标、`FileJobStatus`（排队中、正在统计、进行中、等待确认、正在删除、已暂停、已中断、已完成、已跳过、已取消、失败）、已传和总字节、第几个和共几个文件、只含空文件夹时建了几个文件夹、速度、剩余时间、`FtError`、附注（`EmptyFoldersNotCreated`、`ResumeUnsupported`）。
 - `prompts.dart` 里 `Ft` 开头的提问（A 问，B 画；对话框都只遮这个会话标签）：
-  - `FtOverwritePrompt`：`name`（文件名，标题用）、`folder`（目标文件夹，正文用）、`kind`（`existing`、`identical`（多一行、默认焦点"跳过"）、`tempOnly`、`existingOrTemp`（判断不了时合并的那句），M7a-5）；回 `OverwriteAnswer`（沿用：替换 / 跳过 / 取消传输，加"对此次传输中的其他冲突执行相同操作"），关掉不答等于"取消传输"。几个冲突由 A 排队，一次只问一个。
+  - `FtOverwritePrompt`：`name`（文件名，标题用）、`folder`（目标文件夹，正文用）、`kind`（`existing`、`identical`（多一行、默认焦点"跳过"）、`tempOnly`、`existingOrTemp`（判断不了时合并的那句））；回 `OverwriteAnswer`（沿用：替换 / 跳过 / 取消传输，加"对此次传输中的其他冲突执行相同操作"），关掉不答等于"取消传输"。几个冲突由 A 排队，一次只问一个。
   - `FtDeletePrompt`：`isRemote`（"远程设备 / 本机"）、`state`（`ValueListenable<FtDeleteState>`：`FtDeleteCounting`；`FtDeleteReady`（`kind` 文件、空文件夹、文件夹或几项、链接，名称、项数、文件数、字节数）；`FtDeleteCountFailed`（文件夹名、原因）；`FtDeleteOverLimit`（文件夹名、上限、文件数））、`retry`。回 true 才删；关掉、"取消"、"关闭"都是空。对话框跟着 `state` 变：A 有文件夹要统计时先以 `FtDeleteCounting` 问，统计完再改 `state`；统计途中被取消，A 停下（远程的 `ReadAllFiles` 收不回，只是丢掉结果）。
   - `FtNewFolderPrompt`、`FtRenamePrompt`：`isWindows`（"名称不能包含下列字符："按目标系统写）、`check`（输入时就调，返回 `FtNameError`：非法字符、已有同名）、`submit`（点按钮时调，等 Rust 回结果：空是成功，对话框关掉并回名字；非空时对话框写"无法新建文件夹。‹原因›。"/"无法重命名。‹原因›。"、不关）。重命名另有 `name`、`isDirectory`（文件选中扩展名之前的部分），名字没变时"重命名"不可点。"新建"预填的"新建文件夹"是文案，由 B 填。
   - `FtDisconnectPrompt(unfinished)`：回 true 才断开。
@@ -2571,64 +1488,64 @@ tester 原先的推断是"跳过以后接着传时目标不对"。主会话查 A
   )
   ```
 
-- `FileView` 只是一个组件（C），不 import `shell/`。C 画视图标题栏（用 designer 的组件，把 `viewSwitch`、`route`、"断开"放进去）、两栏和分隔线；把 `ConnectionPanel(ffi:, active:, lastView:)` 盖在两栏和队列上（`ModalBarrier` 加面板，照 `session_page.dart` 末尾）；把 B 的 `FileQueuePanel(jobs: model.jobs)` 放在底部、占满宽度。
+- `FileView` 只是一个组件（C），不 import `shell/`。C 画视图标题栏（用组件块的组件，把 `viewSwitch`、`route`、"断开"放进去）、两栏和分隔线；把 `ConnectionPanel(ffi:, active:, lastView:)` 盖在两栏和队列上（`ModalBarrier` 加面板，照 `session_page.dart` 末尾）；把 B 的 `FileQueuePanel(jobs: model.jobs)` 放在底部、占满宽度。
 - 键盘：只有当前视图拿键盘。文件视图的快捷键（02 §2.2"键盘"）只在 `active` 时生效，不发给远程设备；标签切换和"关闭标签"（`TabShortcuts`）照常。
 - 标签（B）：状态标记取几个视图里最差的连接方式；悬停每个视图一行；未读来自远程桌面视图；`LgSessionTab.progress` 取文件视图的 `jobs.summary.progress`（没有文件视图、没有进行中和排队的任务时为空），`alert` 是 `summary.waitingConfirm > 0`（画提醒标记、不画进度环）。
 - 确认（B，02 §3.1、01 §3.2 区块 G）：标签 × 和右键"关闭"同一套：一个视图时直接关（只有文件视图、而且有未完成传输时和视图的"断开"同样确认）；几个视图时"断开与此设备的 ‹N› 个会话？"，有未完成传输时多"‹N› 个传输尚未完成，下次打开文件传输时可继续。"；"关闭其他标签"只在有未完成传输时确认一次；关窗确认加传输那一句，勾过"不再提示"以后有未完成传输仍问（只含传输那句，标题"关闭窗口？"，按钮"关闭""取消"）。传输那句的 ‹N› 是有关标签 `jobs.unfinished` 的合计。
 - 入口（B）：`PeerAction.fileTransfer`（设备"⋯"菜单和连接按钮下拉，位置照 01 §3.1 区块 E、F）、标签右键"打开文件传输"、远程桌面工具栏的视图切换，都调 `mainNavigation.openFileTransfer`；已有标签时切到那个标签、显示文件视图；已有远程桌面时 `SessionRegistry.open` 复用连接令牌（现成）。
-- `ConnectionPanel.lastView`：第 0 步只加了参数；为假时按钮写"关闭文件传输"、只关这个视图（B）。
+- `ConnectionPanel.lastView`：为假时按钮写"关闭文件传输"、只关这个视图（B）。
 
-**组件（designer）**：规则同 10.8"组件约定"（只管画、文字由调用方传、带语义标签、两套主题和两套尺寸、画廊里每种状态一项、有行为测试），加 10.8 新加的"合并语义的容器里不放带浮层的组件"。要做的和画框见 10 §2.5：视图标题栏和视图切换里带进度的一行、小进度环和提醒标记（标签、视图切换按钮、菜单行三处）、栏外框和栏头、导航行、面包屑和路径输入态、根下拉、操作行和栏内搜索框、文件列表的列头和行、状态行、列表空态和错误态（最多两个按钮）、"正在读取"时旧内容变暗、队列面板和各状态的行（"查看详情"展开是 M7b 用的，可以一起做）、拖放的高亮和提示、删除确认"正在统计"那一态。栏顶横幅先试 `LgBanner`；连接方式详情、菜单、表单对话框、断开确认用现成组件。外观检查后给现成组件补了三处（默认参数下画廊 2944 张逐字节不变）：`LgConfirmDialog.leading`（左下的前置按钮，接法同 `LgFormDialog.leading`）；`LgFormDialog.icon` 可以不传（不画标题前的图标块）；`LgMenuItem` 勾选时带勾选语义，读屏能读出。
+**组件**：规则同 10.8"组件约定"（只管画、文字由调用方传、带语义标签、两套主题和两套尺寸、画廊里每种状态一项、有行为测试），加 10.8 的"合并语义的容器里不放带浮层的组件"。要做的：视图标题栏和视图切换里带进度的一行、小进度环和提醒标记（标签、视图切换按钮、菜单行三处）、栏外框和栏头、导航行、面包屑和路径输入态、根下拉、操作行和栏内搜索框、文件列表的列头和行、状态行、列表空态和错误态（最多两个按钮）、"正在读取"时旧内容变暗、队列面板和各状态的行（"查看详情"展开是 M7b 用的，可以一起做）、拖放的高亮和提示、删除确认"正在统计"那一态。栏顶横幅先试 `LgBanner`；连接方式详情、菜单、表单对话框、断开确认用现成组件。现成组件补了三处（默认参数下画廊导出逐字节不变）：`LgConfirmDialog.leading`（左下的前置按钮，接法同 `LgFormDialog.leading`）；`LgFormDialog.icon` 可以不传（不画标题前的图标块）；`LgMenuItem` 勾选时带勾选语义，读屏能读出。
 
 **几处约定**
-- 远程读文件夹没有编号（10 §4.4）：A 让远程栏同一时刻只发一个读取，后来的排队；`drives()` 用最近一次读"此电脑"的结果，没有时等当前读取结束。远程读文件夹、删除前统计、读空文件夹的超时都是 30 秒，超时是 `FtError.timeout()`。
+- 远程读文件夹没有编号：A 让远程栏同一时刻只发一个读取，后来的排队；`drives()` 用最近一次读"此电脑"的结果，没有时等当前读取结束。远程读文件夹、删除前统计、读空文件夹的超时都是 30 秒，超时是 `FtError.timeout()`。
 - 新建、重命名、删除的请求编号由 A 生成、记下，Rust 回 `job_done` / `job_error` 用同一个编号，不改 Rust；新建、重命名等结果再关对话框，失败写在对话框里（`submit` 的返回值）。
-- 错误来自哪一侧（10 §4.3）：Dart 知道是哪一栏的（新建、重命名、删除、统计、读文件夹）直接传 `side`；传输任务传 `unknown`，由 Rust 消歧。`job_error` 的 `cancel` 由 A 先挡掉（行变已取消），`skipped` 当已跳过，都不调 FT2。
-- 替换确认的判法（M7a-5，只在 Dart，`io_loop.rs` 不加挂钩）：事件里"两个文件相同"为真 → `identical`；下载（目标在本机）：目标文件在 → `existing`，不在而旁边有 `‹名字›.download` 或 `.digest` → `tempOnly`；上传：目标文件夹正好是远程栏当前打开的文件夹时按已读到的列表同样判，否则 `existingOrTemp`。事件里的路径下载时是本机目标文件的完整路径，上传时是本机源文件的路径；上传的远程目标和正文里的"目标文件夹"由任务的目标文件夹加文件的相对路径拼（10 §4.5）。
-- 删除（R2-Q23、M7a-3）：选中项里有文件夹（不算链接）时先统计（可取消）、问一次、逐个删、删完再删空文件夹；链接（`isLink`）不统计、不递归，调 `removeLink`。
+- 错误来自哪一侧：Dart 知道是哪一栏的（新建、重命名、删除、统计、读文件夹）直接传 `side`；传输任务传 `unknown`，由 Rust 消歧。`job_error` 的 `cancel` 由 A 先挡掉（行变已取消），`skipped` 当已跳过，都不调 FT2。
+- 替换确认的判法（只在 Dart，`io_loop.rs` 不加挂钩）：事件里"两个文件相同"为真 → `identical`；下载（目标在本机）：目标文件在 → `existing`，不在而旁边有 `‹名字›.download` 或 `.digest` → `tempOnly`；上传：目标文件夹正好是远程栏当前打开的文件夹时按已读到的列表同样判，否则 `existingOrTemp`。事件里的路径下载时是本机目标文件的完整路径，上传时是本机源文件的路径；上传的远程目标和正文里的"目标文件夹"由任务的目标文件夹加文件的相对路径拼。
+- 删除（R2-Q23）：选中项里有文件夹（不算链接）时先统计（可取消）、问一次、逐个删、删完再删空文件夹；链接（`isLink`）不统计、不递归，调 `removeLink`。
 - 传文件夹总带隐藏项（R2-Q22）；"此电脑"不能作目标（页面灰显按钮、拖放不接受，A 在 `transfer`、`newFolder` 里再拒一次）；上次打开的文件夹每次打开成功就存。
 - 排序方式、列宽、两栏分隔线的位置、队列面板高度存 LocalConfig 的新键，以 `leapgate-ft-` 开头，键名写在 `consts.dart` 各自那一节。
 - 日期用 app 已有的 `win32` 调系统的短日期和时间格式（跟着用户在系统里改过的格式），不是 Windows 时退回 `intl`。
-- 拖放用 `desktop_drop` 0.4.4（和上游同版本；第 0 步已加进 `app/pubspec.yaml` 并用同一个 `PUB_CACHE` 重新生成了 lock；插件注册由 `flutter pub get` 生成进被忽略的 `windows/flutter/generated_plugins.cmake`，不用手改任何文件）；整个窗口一个拖放目标，落在哪栏哪行由 C 按坐标判断；栏间拖放用 Flutter 自带的 `Draggable` / `DragTarget`。从资源管理器拖进来的按本机路径交给 `uploadPaths`（上游方向反了、文件夹被当成文件，10 §4.6，按 02 区块 G 重写）。
+- 拖放用 `desktop_drop` 0.4.4（和上游同版本；加在 `app/pubspec.yaml`，用同一个 `PUB_CACHE` 重新生成 lock；插件注册由 `flutter pub get` 生成进被忽略的 `windows/flutter/generated_plugins.cmake`，不用手改任何文件）；整个窗口一个拖放目标，落在哪栏哪行由 C 按坐标判断；栏间拖放用 Flutter 自带的 `Draggable` / `DragTarget`。从资源管理器拖进来的按本机路径交给 `uploadPaths`（上游方向反了、文件夹被当成文件，按 02 区块 G 重写）。
 - 右键"关闭"和 × 同一套确认；"关闭其他标签"只在有未完成的传输时确认一次。
 - 大小三位有效数字的新格式只用在文件视图（C 的 `formats.dart`）；`core/lib/common.dart` 的 `readableFileSize` 不改（连接管理小窗的文件记录在用）。
 - 复制件里还调 `translate` 的 `JobState.display`、`JobProgress.display` 和写死英文的 "files"，界面不调，留着不改。
 - 文件视图不用会话通知横条：复制件 `JobController.jobError` 里单向传输的会话通知照旧发出、没人画，单向传输由 FT2 的 `one_way` 在行里显示。
-- 关闭的确认（审查后定，B）：标签 ×、右键"关闭"、快捷键"关闭标签"共用 `closeSessionTab`；"关闭窗口前确认断开会话"关掉以后，多视图的标签直接关，有未完成传输时仍问，只含传输那一句（标题"关闭标签？"、按钮"关闭""取消"，新文案）。关窗确认的"断开全部 ‹N› 个会话"数的是会话（视图），不是标签。勾过"不再提示"、只因未完成传输而弹的关窗确认：安装版只有传输那一句；便携版记住了"退出"又有出口在跑时，M5-11 本来就要确认，合成一个框，正文是传输那句加"‹N› 个出口将停止"。标签里还有文件视图时，远程桌面出错后连接过程面板的按钮写"关闭远程桌面"（`SessionPage.lastView`，新文案），只关这个视图。全屏时关掉远程桌面视图、标签里剩下文件视图，先退出全屏。
+- 关闭的确认（B）：标签 ×、右键"关闭"、快捷键"关闭标签"共用 `closeSessionTab`；"关闭窗口前确认断开会话"关掉以后，多视图的标签直接关，有未完成传输时仍问，只含传输那一句（标题"关闭标签？"、按钮"关闭""取消"，新文案）。关窗确认的"断开全部 ‹N› 个会话"数的是会话（视图），不是标签。勾过"不再提示"、只因未完成传输而弹的关窗确认：安装版只有传输那一句；便携版记住了"退出"又有出口在跑时，按 §10.12 的关窗规则本来就要确认，合成一个框，正文是传输那句加"‹N› 个出口将停止"。标签里还有文件视图时，远程桌面出错后连接过程面板的按钮写"关闭远程桌面"（`SessionPage.lastView`，新文案），只关这个视图。全屏时关掉远程桌面视图、标签里剩下文件视图，先退出全屏。
 - 断线时正在删的删除行记成失败、原因 `FtReason.disconnected`（"连接已中断"，Dart 才有），重新连上也不再接着删（02"删除任务不保存、不续传"）。
 
 **已知限制**
-- 拖入时做不出"不接受"的系统光标（插件不设置拖放效果），只在应用里画提示；超过 260 个字符的路径被插件截断（读码推断，验收时实测一次）（M7a-8）。
-- 传输任务收到过 `job_error`（`cancel`、`skipped` 除外）以后，行一直显示"失败：‹第一次的原因›"，随后的 `job_done` 不再把它改成已完成（`jobs.dart` 按任务编号记下第一次的错误，清除行时一起清；M7a 验收问题 4：上传到没有写权限的文件夹，上游先报错、再报完成）。所以文件夹任务里一个文件出错，即使其余文件传完了，整行也显示失败；M7b 的 FT5 再细分（M7a-8）。
+- 拖入时做不出"不接受"的系统光标（插件不设置拖放效果），只在应用里画提示；超过 260 个字符的路径被插件截断（读码推断，未实测）。
+- 传输任务收到过 `job_error`（`cancel`、`skipped` 除外）以后，行一直显示"失败：‹第一次的原因›"，随后的 `job_done` 不再把它改成已完成（`jobs.dart` 按任务编号记下第一次的错误，清除行时一起清；例如上传到没有写权限的文件夹，上游先报错、再报完成）。所以文件夹任务里一个文件出错，即使其余文件传完了，整行也显示失败；M7b 的 FT5 再细分（§10.17）。
 - 文件视图里的提问照旧按设备遮整个标签，替换确认开着时远程桌面视图也拿不到键盘（和 02"只遮这个会话标签"一致）。
 - 打开文件传输时这台设备的远程桌面还在连接、还没拿到令牌，文件传输会再问一次密码（上游同样）。
 - 远程读文件夹串行：慢的网络盘上快速连点两层文件夹，后一个要等前一个（排着的读取轮到时已经不是要打开的文件夹，就不发，所以最多多等一次）。
 - 远程读文件夹超时（30 秒）以后，迟到的结果会算到下一个读取头上（远程读取的编号是 0、失败不带路径）：横幅写的是下一个文件夹，下一个是"主文件夹"时迟到的成功结果可能被当成主文件夹显示。重试一次恢复。
-- 远程读空文件夹失败时被控端什么都不回，只能等到超时，附注写"空文件夹未创建：未能读取。"（M7a-7；两种情况都拿不到个数，附注不带数字）。
-- 删除文件夹时中途有文件删不掉，最后一个 `job_done` 会把行改回"已完成"（和上游一致；M7b 已处理，行显示"‹N› 个项目未删除"、可重试，见 §10.17 和 §10.5"M7b"）；本机删空文件夹时 Rust 不回结果，删完直接标完成，删失败也显示完成。
+- 远程读空文件夹失败时被控端什么都不回，只能等到超时，附注写"空文件夹未创建：未能读取。"（两种情况都拿不到个数，附注不带数字）。
+- 删除文件夹时中途有文件删不掉，最后一个 `job_done` 会把行改回"已完成"（和上游一致；M7b 改成显示"‹N› 个项目未删除"、可重试，见 §10.17）；本机删空文件夹时 Rust 不回结果，删完直接标完成，删失败也显示完成。
 - 删除任务里取消一个单文件删除行，如果 Rust 的结果随后才到，行会从"已取消"变成"已完成"（文件确实已经删掉了）。
 - 连接断开、不会自动重试时，进行中的传输行派生成"已暂停"，但任务表里还是进行中，点"继续"不起作用；所以没连上时队列不画"继续""全部继续"（`FileQueuePanel(connection:)`）。
-- 重新打开文件传输时列出的上次没传完的任务（`load_last_job`）只写"已暂停"、不画进度条：保存的任务不带字节数（`fs.rs` `TransferJobMeta` 只有编号、路径、第几个文件），点"继续"以后才有进度（M7a 验收问题 3）。
-- 上传覆盖被控端上被独占打开的文件时，上游什么错误都不报，行显示"完成"，被控端原文件不变、只留下 `‹名字›.download`（02 §4.3 第 22 条的顺带发现，10 §4.8）；M7b 的 FT5 实测时再看 Leapgate 被控端能不能报出来（2026-11-08：M7b 没有专门处理，验收也没复测这一项，仍按上游）。
+- 重新打开文件传输时列出的上次没传完的任务（`load_last_job`）只写"已暂停"、不画进度条：保存的任务不带字节数（`fs.rs` `TransferJobMeta` 只有编号、路径、第几个文件），点"继续"以后才有进度。
+- 上传覆盖被控端上被独占打开的文件时，上游什么错误都不报，行显示"完成"，被控端原文件不变、只留下 `‹名字›.download`（02 §4.3 第 22 条的顺带发现）；M7b 没有专门处理，仍按上游，Leapgate 被控端能不能报出来没有复测。
 - 双击在第二次按下时判定：单击一行后 300 毫秒内马上按住拖，会先当成双击（修要加新标记）。
-- 队列行的失败短句比 02 §2.5 少半句（"失败：没有访问权限"，02 是"无法读取 / 写入“‹名称›”：……"，FT2 分不出读还是写），文件夹任务里用的是任务的顶层名、不是出错的那个文件；M7b 做"查看详情"时再按文件给完整句。
+- 队列行的失败短句比 02 §2.5 少半句（"失败：没有访问权限"，02 是"无法读取 / 写入“‹名称›”：……"，FT2 分不出读还是写），文件夹任务里用的是任务的顶层名、不是出错的那个文件；按文件给完整句归 M7b 的"查看详情"（§10.17）。
 - Linux 被控端的系统文字被翻译成本地语言时，`unknown` 的消歧会退化：撞号时可能归错，查不到时显示原文。
 - 远程 Windows 上目标已不存在的目录链接或目录联接删不掉，报没有访问权限：上游把它列成文件链接（`entry_type` 5），`leapgate_ft_remove_link` 只能发 `FileRemoveFile`。本机这一侧按链接自身的目录属性选 `remove_dir`，不受影响。
-- FAT32 上超过 4 GB 的文件显示"磁盘空间不足"（112），下载最后改名时目标正被占用显示"没有访问权限"（5）：验收第二段在测试虚拟机上实测如此（10 §4.8）。错误码和真的盘满、真的没权限一样，只认错误码就分不出来，表不改。
-- Windows 安装版远程设备停在登录界面时打不开文件传输，显示上游的英文原文"No active console user logged on, please connect and logon first."（C3 不认识这句；中文文案在 `待调.md`）。
+- FAT32 上超过 4 GB 的文件显示"磁盘空间不足"（112），下载最后改名时目标正被占用显示"没有访问权限"（5）：在 Windows 上实测如此。错误码和真的盘满、真的没权限一样，只认错误码就分不出来，表不改。
+- Windows 安装版远程设备停在登录界面时打不开文件传输，显示上游的英文原文"No active console user logged on, please connect and logon first."（C3 不认识这句，还没有中文文案）。
 
 **测试**
 - R：FT2 每条上游原文一个单测（注明源码位置，照 C3），每个码在 Windows、Linux、macOS 各一条，撞号消歧，截断；FT1 的 JSON 带 `is_hidden`；`leapgate_ft_read_local_dir` 的成功和失败；`leapgate_ft_remove_link` 在本机对目录符号链接、目录联接、文件链接只删链接、目标完好（Windows 上建一次性数据测）。
 - A：队列行的状态派生（排队中、进行中、正在统计、已中断）、速度和剩余时间、`unfinished`；排序（文件夹和盘符在前、盘符不丢）；删除流程（统计、一次确认、取消、链接不递归，用 `FakeFileTransferApi`）；错误按请求编号交回；远程读取串行；超时；替换确认四态的判法。
 - B：外壳的多视图（切换、键盘归属、远程桌面不在前台时 V1）、各种确认（标签 ×、右键关闭、关闭其他标签、关窗、视图断开）、标签上的进度环和提醒标记、各个入口；队列面板各状态和对话框各态，用 `FakeFileJobs` 和假的提问。
 - C：02 §2.2"P7 桌面要画的状态"里两栏那几组每组一个行为测试，用 `FakeFileTransferModel`；拖放按坐标判断落点。
-- 合入前：`git diff main -- flutter/` 为空；core `flutter analyze --no-fatal-infos` 在 3.44.9 下不超出 92 条 info 的基线，app 0 条；复制件不跑格式化；改已有文件时不对整个文件跑 `dart format`，只格式化新文件。远程桌面的冒烟照跑（改的是它每天都走的外壳，10 §4.1）。
+- 合入前：`git diff main -- flutter/` 为空；core `flutter analyze --no-fatal-infos` 在 3.44.9 下不超出 92 条 info 的基线，app 0 条；复制件不跑格式化；改已有文件时不对整个文件跑 `dart format`，只格式化新文件。远程桌面的冒烟照跑（改的是它每天都走的外壳）。
 
 ### 10.16 M8 的分工约定
 
-依据：总仓库 `docs/新界面/11-M8拆法.md`（下称"11"；维护者 2026-11-06 把 M8-1~M8-10 全部按推荐定）。提示卡的行为以 01 P1 区块 B 为准（已回写），文案按 01 §7.6。
+M8 是切换：主页的"安装""升级"卡、便携包和发布构建、链接打开文件传输。提示卡的行为以 01 P1 区块 B 为准，文案按 01 §7.6。
 
-**分支**：只有一个 coder，直接在 `ui/m8`（从 main `7c8490a1e` 切）上做，整合 worktree 是 `.wt/ui-m4`（块 2 的桥和 pub 缓存在它里面）。`git add` 只加自己改的文件（`libs/hbb_common` 在这个 worktree 里有换行符造成的假改动，不要提交它）。writer 同时改总仓库里的文档，不碰这个仓库。
+**分支**：直接在 `ui/m8` 上做。
 
 **Rust 导出（块 2，`src/leapgate_ffi.rs` 加 `src/leapgate_hooks/` 新文件 `install.rs`）**
 
@@ -2638,49 +1555,47 @@ tester 原先的推断是"跳过以后接着传时目标不对"。主会话查 A
 
 - `install`：路径传空串（`install_me` 用 `get_default_install_info()` 的默认路径，`src/platform/windows.rs:1641-1647`），选项是默认的开始菜单和桌面快捷方式、**不装打印机**（构建里没带驱动）。选项照上游安装页的写法：不是 JSON，是空格分隔的词（`install_page.dart:286-288` 拼成 `startmenu desktopicon printer` 的子集，`install_me` 用 `contains` 认），所以"安装"传 `startmenu desktopicon`（`leapgate::install::INSTALL_OPTIONS`）。
 - `upgrade`：路径 `ui_interface::install_path()`，选项由 `platform::get_install_options()`（`:1377`，注册表值的 JSON `STARTMENUSHORTCUTS`、`DESKTOPSHORTCUTS`、`PRINTER`）照安装页的读法换成上面的词（`leapgate::install::upgrade_options`：快捷方式没记 `"0"` 就要，打印机记了 `"1"` 才要；安装页另外会实查打印机装没装，这里不查）。
-- **在子进程里装**（验收后改，`fb1acefa2`；原来在界面进程里直接调 `install_me`）：界面进程起 `leapgate.exe --leapgate-install ‹kind›`（stdout 接管道），等它退出。子进程在 `core_main` 里被一行 `leapgate:` 挂钩（`leapgate_hooks::install::child`）接走：算路径和选项、调 `install_me(…, silent = false, …)`，成功退出 0，失败把上面的 JSON 写进管道、退出 1。界面进程见 0 就退出，否则把管道里的内容原样交回卡片（空的时候是 `failed`，原文写退出码）。
-  - 管道不留给孙进程（审查必须改，`4e6d0a3ed`）：子进程一开头就把管道句柄设成不可继承，并把自己的标准输出换成空句柄，失败时经留下的句柄写结果。原先 `run_after_run_cmds` 起的 `cmd /c … & ‹exe›` 和 `--tray` 都把这条管道当标准输出继承下去，托盘之后用 `run_me` 开的界面也一样。便携版被结束后管道只剩写端，这些进程里一执行 `println!` 就报 os error 232 而 panic，release 是 `panic = 'abort'`，整个进程中止。触发路径之一：断开最后一个会话 → `ContextSend::enable(false)` → `libs/clipboard/src/platform/windows.rs` 的 `println!("Succeeded to uninit cliprdr")`。测试虚拟机上用 `fb1acefa2` 复现了：结束原界面、从托盘打开一个新界面（父进程是托盘），用链接连本机 ID、在输入密码处点"取消"，日志 `clipboard context for file transfer destroyed.` 之后界面进程就没了。由 `cmd /c` 起的那个原界面同样操作没有中止（推断：经 cmd 起的图形程序没拿到这条管道，没有查证）。
-  - 根因：便携版的界面进程持有主 IPC（`\\.\pipe\Leapgate\query`）。脚本 `sc start` 之后，新服务起的 `--server`（SYSTEM，用户会话里）拿不到这个管道，就走 `server.rs` `stop_main_window_process` → `platform::try_kill_rustdesk_main_window_process`，用 `NtTerminateProcess(…, 1)` 结束"同名、命令行只有一个参数、用户不同"的进程，也就是正在等脚本的界面进程。这时脚本还剩 `reg add …SoftwareSASGeneration` 和 `--uninstall-remote-printer` 两步，`run_cmds` 没返回，`run_after_run_cmds` 起安装版和托盘的那几行就没机会跑。测试虚拟机上用 WMI 进程跟踪（`Win32_ProcessStartTrace` / `StopTrace`）和服务的 `log\server\` 对上了：`--server` 起来约 50 ms 后记 `ipc is occupied by another process, try kill it`、`terminate process ‹便携版 PID› success`，便携版退出码 1，此后没有任何由它起的进程。`8769ee3ce` 那次能起来，是这场竞速碰巧赢了（两个提交的 Rust 完全一样）。
+- **在子进程里装**（不在界面进程里直接调 `install_me`，原因见下面"根因"）：界面进程起 `leapgate.exe --leapgate-install ‹kind›`（stdout 接管道），等它退出。子进程在 `core_main` 里被一行 `leapgate:` 挂钩（`leapgate_hooks::install::child`）接走：算路径和选项、调 `install_me(…, silent = false, …)`，成功退出 0，失败把上面的 JSON 写进管道、退出 1。界面进程见 0 就退出，否则把管道里的内容原样交回卡片（空的时候是 `failed`，原文写退出码）。
+  - 管道不留给孙进程：子进程一开头就把管道句柄设成不可继承，并把自己的标准输出换成空句柄，失败时经留下的句柄写结果。不这样做时，`run_after_run_cmds` 起的 `cmd /c … & ‹exe›` 和 `--tray` 都把这条管道当标准输出继承下去，托盘之后用 `run_me` 开的界面也一样。便携版被结束后管道只剩写端，这些进程里一执行 `println!` 就报 os error 232 而 panic，release 是 `panic = 'abort'`，整个进程中止。触发路径之一：断开最后一个会话 → `ContextSend::enable(false)` → `libs/clipboard/src/platform/windows.rs` 的 `println!("Succeeded to uninit cliprdr")`。实测从托盘打开的界面会这样中止（日志 `clipboard context for file transfer destroyed.` 之后进程就没了）；由 `cmd /c` 起的界面同样操作没有中止（推断：经 cmd 起的图形程序没拿到这条管道，没有查证）。
+  - 根因：便携版的界面进程持有主 IPC（`\\.\pipe\Leapgate\query`）。脚本 `sc start` 之后，新服务起的 `--server`（SYSTEM，用户会话里）拿不到这个管道，就走 `server.rs` `stop_main_window_process` → `platform::try_kill_rustdesk_main_window_process`，用 `NtTerminateProcess(…, 1)` 结束"同名、命令行只有一个参数、用户不同"的进程，也就是正在等脚本的界面进程。这时脚本还剩 `reg add …SoftwareSASGeneration` 和 `--uninstall-remote-printer` 两步，`run_cmds` 没返回，`run_after_run_cmds` 起安装版和托盘的那几行就没机会跑。用 WMI 进程跟踪（`Win32_ProcessStartTrace` / `StopTrace`）对照服务的 `log\server\` 可以看到：`--server` 起来约 50 ms 后记 `ipc is occupied by another process, try kill it`、`terminate process ‹便携版 PID› success`，便携版退出码 1，此后没有任何由它起的进程。这是一场竞速，偶尔界面进程能活过去、安装版照常起来。
   - 子进程没有主 IPC，命令行也不止一个参数，`--server` 的那一步放过它（上游的安装页 `--install` 也是这样躲开的）。脚本开头的 `taskkill`（`get_uninstall(false, …)`，`:1837-1858`）按 PID 只放过子进程，界面进程在卸载那一步就被结束：点了以后便携版窗口先消失，几秒后安装版起来。
   - 失败回卡片：提权被取消、`install_me` 在提权前报的错（MSI、路径校验）都发生在脚本开跑之前，界面进程还在，照旧回到卡片。脚本已开跑后才失败（少见）的回不到卡片，界面已被 `taskkill` 结束；改之前这种情况界面也会被 `--server` 结束，一样回不来。
-- `silent` 传 `false`：`run_after_run_cmds`（`:3976-3989`）起 `--tray` 和安装版。安装版本该等 2 秒（`cmd /c timeout /t 2 & ‹exe›`），实测 `timeout.exe` 当场退出 1（继承来的标准输入不是控制台），安装版和托盘同时起来。那时便携版界面已被 `taskkill` 结束，安装版找不到它的窗口，不会把自己交过去（11 §4.1 担心的情况）。
+- `silent` 传 `false`：`run_after_run_cmds`（`:3976-3989`）起 `--tray` 和安装版。安装版本该等 2 秒（`cmd /c timeout /t 2 & ‹exe›`），实测 `timeout.exe` 当场退出 1（继承来的标准输入不是控制台），安装版和托盘同时起来。那时便携版界面已被 `taskkill` 结束，安装版找不到它的窗口，不会把自己交过去。
 - `uac_denied`：提权被取消。`installer_shell.rs` `run_elevated_and_wait` 的 `ShellExecuteExW` 返回 `ERROR_CANCELLED`（1223），windows-rs 的错误文字是"‹系统语言的说明› (0x800704C7)"，`installer_handoff.rs` `run_cmds` 把它格式化进新错误（原错误链丢了，没法 downcast），所以按文字里的 `0x800704C7` 判（`leapgate::install::failure`）；其余一律 `failed`，带原文（`{e:#}`）。MSI 装过的机器上 `install_me` 直接报错（`:1636-1639`），也是 `failed`。
-- 配置：安装脚本建服务时带 `--import-config ‹当前用户的配置文件›`（`get_import_config`，`:3938-3950`），读码看便携版的 ID、固定密码、服务器会带进安装版；验收实测（11 §5.3）。
+- 配置：安装脚本建服务时带 `--import-config ‹当前用户的配置文件›`（`get_import_config`，`:3938-3950`），读码看便携版的 ID、固定密码、服务器会带进安装版。
 - 单测：原因码映射；`upgrade` 取路径和选项的那层（不真的装）。
 
-**上游文件**：`install_me` 里版本号的两处（`:1652` 拆主次版本号、`:1806` 的 DisplayVersion）改用 Leapgate 的版本（`leapgate::ui::VERSION`，0.4.0），各一行，带 `leapgate:` 注释（M8-5；11 原写"一行"，读码后是同一函数里的两行）。`update_me`（`:3452` 起）不改：官方更新已关，Leapgate 不走它。`src/core_main.rs` Windows 参数分派的开头加一行 `leapgate:` 挂钩，把 `--leapgate-install` 交给 `leapgate_hooks::install::child`（见上"在子进程里装"）。
+**上游文件**：`install_me` 里版本号的两处（`:1652` 拆主次版本号、`:1806` 的 DisplayVersion）改用 Leapgate 的版本（`leapgate::ui::VERSION`，0.4.0），各一行，带 `leapgate:` 注释。`update_me`（`:3452` 起）不改：官方更新已关，Leapgate 不走它。`src/core_main.rs` Windows 参数分派的开头加一行 `leapgate:` 挂钩，把 `--leapgate-install` 交给 `leapgate_hooks::install::child`（见上"在子进程里装"）。
 
 **Dart**
 
 - 提示卡（`app/lib/pages/home/home_page.dart` 的本机区，`LgLocalNotice` 带按钮）：
-  - 条件：系统错误优先；否则便携版（`!bind.mainIsInstalled()`）显示"安装"卡；否则 `is_installed_lower_version`（现有绑定，coder 找对应的 `bind.main…`）为真时显示"升级"卡。一次一张。状态放 core 的本机状态 model（`leapgate/local_status.dart`），页面只画。
+  - 条件：系统错误优先；否则便携版（`!bind.mainIsInstalled()`）显示"安装"卡；否则 `is_installed_lower_version`（现有绑定）为真时显示"升级"卡。一次一张。状态放 core 的本机状态 model（`leapgate/local_status.dart`），页面只画。
   - 点了：按钮变进行中（`LgButton` 的 busy），卡片其余不变；`Future` 回来（只会是失败）时卡片下写一行原因，按钮恢复。`uac_denied` 写"未获得管理员权限，未安装。"（升级卡写"……未升级。"），`failed` 写"安装失败：‹原文›"（升级卡"升级失败：‹原文›"）。原文为空时只写"安装失败。"。实现：`LgLocalNotice` 加了 `actionBusy`（按钮文字换成"正在安装…""正在升级…"）和 `actionError`（按钮下一行红字，在卡片里，和"启动服务"失败的写法一样）。
-  - 便携版连着别人或有出口在跑时点"安装"：不另加确认（上游也不问；安装会断开所有会话，写进已知限制）。
+  - 便携版连着别人或有出口在跑时点"安装"：不另加确认（上游也不问；安装会断开所有会话，见已知限制）。
 - 链接（`app/lib/shell/links.dart`）：`file-transfer`（`--file-transfer` 和 `leapgate://file-transfer/…`）接到 `navigation.dart` 的 `openFileTransfer`，参数和 `connection/new` 的密码、中继一样带过去；`port-forward`、`rdp`、`view-camera`、`terminal`、`terminal-admin` 发全局轻提示（`appCore.toasts`），文案"暂不支持打开‹端口转发 / RDP / 摄像头 / 终端›会话。"，日志照旧。`links_test.dart` 跟着改。
 - 标题栏（`app/lib/widgets/lg_title_bar.dart:335-344`）：占位方块换成应用图标，从 `app/windows/runner/resources/app_icon.ico` 导出 32×32 的 PNG 放 `app/assets/`，按 16 逻辑像素画；读屏不读它（装饰）。
 - ARB：新键以 `homeInstall`、`homeUpgrade`、`linkUnsupported` 开头。
 
 **构建脚本（`scripts/windows/build-client.ps1`、`setup-toolchain.ps1`，总仓库）**
 
-- 这几项在总仓库：coder 在总仓库的 worktree `.wt/leapgate-m8`（分支 `ui/m8`）里改、提交，不碰总仓库主检出，主会话合。
+- 这几项在总仓库。
 - `-Ui` 默认值改成 `leapgate`；`-Ui upstream` 保留（旧界面便携版）。
-- 新界面加便携打包：第 3 步之后调 `client/libs/portable/generate.py`（参数照 `build.py:969-997`），包名 `leapgate-‹libs/leapgate 版本›-x86_64.exe`，放在产物目录旁边；产物核对加上它；同时打一个发布目录的 zip（M8-3）。dpiAware 那一行先不删，验收看高 DPI 下的表现再定。
+- 新界面加便携打包：第 3 步之后调 `client/libs/portable/generate.py`（参数照 `build.py:969-997`），包名 `leapgate-‹libs/leapgate 版本›-x86_64.exe`，放在产物目录旁边；产物核对加上它；同时打一个发布目录的 zip。dpiAware 那一行没删。
 - `setup-toolchain.ps1` 装 brotli（`generate.py` 要它）；`build-client.ps1` 开头检查有没有，没有就报错并提示跑 setup。
-- 构建前强制刷新构建时间（`BUILD_DATE`，"升级"卡比的就是它，11 §4.4）：根 crate 的 `build.rs` 只声明了 `rerun-if-changed`（`build.rs`、`Cargo.toml`、`windows.cc`），没有可借的环境变量，所以脚本在 cargo 之前把 `build.rs` 的修改时间改成现在（内容不动，git 看不出改动），两种界面都这样。
-- 默认服务器不注入（M8-4）：脚本开头打印 `LEAPGATE_RENDEZVOUS_SERVER` 等几个变量是否设了，空着就写"未注入默认服务器"。
-- 发布 worktree（M8-9）由主会话建，脚本里不写死路径。
+- 构建前强制刷新构建时间（`BUILD_DATE`，"升级"卡比的就是它）：根 crate 的 `build.rs` 只声明了 `rerun-if-changed`（`build.rs`、`Cargo.toml`、`windows.cc`），没有可借的环境变量，所以脚本在 cargo 之前把 `build.rs` 的修改时间改成现在（内容不动，git 看不出改动），两种界面都这样。
+- 默认服务器不注入：脚本开头打印 `LEAPGATE_RENDEZVOUS_SERVER` 等几个变量是否设了，空着就写"未注入默认服务器"。
+- 脚本里不写死发布 worktree 的路径。
 
 **已知限制**
-- `--install`（exe 或便携包名以 `install.exe` 结尾、手动带参数）在第三轮安装页之前仍是写日志后退出（M8-2）。
-- 切换后保留的旧界面便携版如果构建时间晚于装着的新界面，会显示"升级"卡，点了会装回旧界面（11 §4.4，不改旧界面）。
+- `--install`（exe 或便携包名以 `install.exe` 结尾、手动带参数）写日志后退出（§10.4）。
+- 切换后保留的旧界面便携版如果构建时间晚于装着的新界面，会显示"升级"卡，点了会装回旧界面（不改旧界面）。
 - 便携版点"安装"会断开所有会话和出口（安装脚本停服务、杀进程）；装的过程中便携版窗口先消失，安装版几秒后起来。
-- 默认窗口（约 1280×800）下有安装卡时，左栏的导航原来要滚一下才看得到（卡片文字在左栏里折成 7~8 行）。维护者定缩短文案（`82bbe721b`），提示卡改成图标在文字第一行行首（`5dc677b02`）以后，安装卡、升级卡都不用滚（安装卡正好放满，没有余量）；安装失败、最小窗口仍要滚，左栏没有常显的滚动条。
-- 便携版没在运行时用 `--connect` 冷启动：会话照常连，但这个进程不起服务（`src/core_main.rs` 带参数时不走 `start_server`），主页本机区一直是"正在生成…"和"无法连接服务器，正在自动重试。请检查网络连接。"，这台也连不进来。上游这时只有远程窗口、没有主页，所以不暴露。只有便携版从命令行冷启动才会碰到：安装版有服务，链接只有安装版注册。文案有误导，修要加状态，按罕见情况不修（2026-11-07）。
-- 第三轮链接（端口转发、RDP、摄像头、终端）的"暂不支持打开……会话。"轻提示和其他全局轻提示一样带成功图标：`Toasts` 没有分语气，失败类的轻提示（网络设置导入失败、Wayland 重置失败等）从 M2b 起就是这样。记进 `docs/新界面/待调.md`。
+- 默认窗口（约 1280×800）下有安装卡、升级卡时，左栏导航不用滚就能看到（文案已缩短、提示卡的图标在文字第一行行首；安装卡正好放满，没有余量）；安装失败、最小窗口仍要滚，左栏没有常显的滚动条。
+- 便携版没在运行时用 `--connect` 冷启动：会话照常连，但这个进程不起服务（`src/core_main.rs` 带参数时不走 `start_server`），主页本机区一直是"正在生成…"和"无法连接服务器，正在自动重试。请检查网络连接。"，这台也连不进来。上游这时只有远程窗口、没有主页，所以不暴露。只有便携版从命令行冷启动才会碰到：安装版有服务，链接只有安装版注册。文案有误导，修要加状态，按罕见情况不修。
+- 第三轮链接（端口转发、RDP、摄像头、终端）的"暂不支持打开……会话。"轻提示和其他全局轻提示一样带成功图标：`Toasts` 没有分语气，失败类的轻提示（网络设置导入失败、Wayland 重置失败等）都是这样。
 
-**左栏"滚不动"的核查（便携版 tester 报，2026-11-06）**：报告是左栏导航被挤出栏底、"设置"和"登录"叠在一起、滚轮滚不动。核查下来左栏是能滚的，代码就是 01 §2.1 的写法：账号区固定在底部，其余部分在一个 `SingleChildScrollView` 里。
-- 真机（测试虚拟机，`fb1acefa2` 便携版，窗口 1168×685，有安装卡）：把真实光标放到左栏上发滚轮，"设备""出口""设置"三项都滚到"登录"上面、完整可见。光标停在右侧内容区、只往视图投递带左栏坐标的滚轮消息时，左栏不动：Flutter 的 Windows 嵌入层按真实光标的位置分派滚轮，不看消息里的坐标。投递消息的自动化脚本因此滚不动左栏；"叠在一起"是 UI Automation 报的未滚动前视口外的节点位置。
-- 组件测试（真实字体，浅色、深色，1280×760 和 960×560 两种主页尺寸，安装卡、升级卡、安装失败三种状态）滚动前后的截图在 `C:\leapgate-e2e\evidence\m8-1106\left-column\`，滚动后三项都在账号区上方。
+**左栏的滚动**：账号区固定在底部，其余部分在一个 `SingleChildScrollView` 里（01 §2.1），光标在左栏上时能用滚轮滚。Flutter 的 Windows 嵌入层按真实光标的位置分派滚轮、不看消息里的坐标，所以光标停在别处、只往视图投递带左栏坐标的滚轮消息时左栏不动；按坐标投递输入的自动化脚本滚不动左栏，UI Automation 报的是未滚动时视口外节点的位置。
 - 回归测试：`app/test/home_page_test.dart`"the mouse wheel brings the navigation into view"，两种尺寸各一条：有安装卡时滚轮把三项导航滚进视口、在"登录"上方，点"出口"能切过去。
 
 **测试**
@@ -2690,21 +1605,21 @@ tester 原先的推断是"跳过以后接着传时目标不对"。主会话查 A
 
 ### 10.17 M7b 的分工约定
 
-依据：总仓库 `docs/新界面/12-M7b拆法.md`（下称"12"；维护者 2026-11-07 把 M7b-1~M7b-9 全部按推荐定）。界面行为以 02 §2.2 区块 H、§2.4.5~§2.4.7、§3.1 为准（M7b 的决定已回写）；样稿 `A-P7-文件传输-菜单与其他状态.html` 的队列展开画框。12 §6 列的不做：修上游的传输缺陷、扩展协议、恢复行的字节数、手机端、符号链接附注。
+M7b 是文件传输的暂停、失败保留和重试、个别文件跳过和"查看详情"。界面行为以 02 §2.2 区块 H、§2.4.5~§2.4.7、§3.1 为准；样稿 `A-P7-文件传输-菜单与其他状态.html` 的队列展开画框。不做：修上游的传输缺陷、扩展协议、恢复行的字节数、手机端、符号链接附注。
 
-**先后**（12 §3）：第一段 Rust 只做总开关、事件流和两个方向的暂停（FT3）；tester 用开发构建实测 12 §5.1 第 2、3 条，成立以后 Rust 再做失败保留和跳过（FT4、FT5）。Dart 一次做完，全部对着假实现写。
+**先后**：第一段 Rust 只做总开关、事件流和两个方向的暂停（FT3）；两种暂停实测成立以后，第二段再做失败保留和跳过（FT4、FT5）。Dart 一次做完，全部对着假实现写。
 
-**分支和文件边界**（都从 `ui/m7b` 切，做完合回 `ui/m7b`；整合 worktree 是 `.wt/ui-m4`，块 2 的桥和 pub 缓存在它里面）
+**分支和文件边界**（都从 `ui/m7b` 切，做完合回 `ui/m7b`）
 
-| 分支 | 谁 | 只改这些 |
+| 分支 | 块 | 只改这些 |
 |---|---|---|
-| `ui/rust-m7b` | Rust coder | 新文件 `libs/leapgate/src/ft*.rs`（总开关、失败去重、上传读循环、按原因码分"跳过 / 整任务停"、续传起点、4 GiB 规则，纯逻辑带单测）、`libs/leapgate/src/lib.rs`（加 mod）；`src/leapgate_hooks/file_transfer.rs`（和会话、`Remote`、`fs` 打交道的部分）；`src/leapgate_ffi.rs`（末尾追加 M7b 一段）；上游只下面"具名例外"列的八处；本节的 Rust 部分 |
-| `ui/m7b-dart` | Dart coder | core `leapgate/file_transfer/` 的 `jobs.dart`、`file_model.dart`、`file_transfer_api.dart`；`leapgate/session.dart`（事件分发）、`leapgate/session_registry.dart`（加按会话 ID 查找）、应用启动时订阅事件流的那一处；app `pages/files/queue_panel.dart`；`gallery_m7.dart`（只把"部分未传输"行的按钮改成"重试未传输的文件"）；ARB（新键以 `queue` 开头，加在末尾，中英同加，改完 `flutter gen-l10n`）；core、app 的 `test/file_transfer_fakes.dart`（两份同步改、内容相同）；测试。复制件 `core/lib/models/file_model.dart` 不改（只删界面调用那一档），只用它现成的 `updateJobStatus`、`resumeJob`、`cancelJob`、`JobID.next()` |
+| `ui/rust-m7b` | Rust | 新文件 `libs/leapgate/src/ft*.rs`（总开关、失败去重、上传读循环、按原因码分"跳过 / 整任务停"、续传起点、4 GiB 规则，纯逻辑带单测）、`libs/leapgate/src/lib.rs`（加 mod）；`src/leapgate_hooks/file_transfer.rs`（和会话、`Remote`、`fs` 打交道的部分）；`src/leapgate_ffi.rs`（末尾追加 M7b 一段）；上游只下面"具名例外"列的八处；本节的 Rust 部分 |
+| `ui/m7b-dart` | Dart | core `leapgate/file_transfer/` 的 `jobs.dart`、`file_model.dart`、`file_transfer_api.dart`；`leapgate/session.dart`（事件分发）、`leapgate/session_registry.dart`（加按会话 ID 查找）、应用启动时订阅事件流的那一处；app `pages/files/queue_panel.dart`；`gallery_m7.dart`（只把"部分未传输"行的按钮改成"重试未传输的文件"）；ARB（新键以 `queue` 开头，加在末尾，中英同加，改完 `flutter gen-l10n`）；core、app 的 `test/file_transfer_fakes.dart`（两份同步改、内容相同）；测试。复制件 `core/lib/models/file_model.dart` 不改（只删界面调用那一档），只用它现成的 `updateJobStatus`、`resumeJob`、`cancelJob`、`JobID.next()` |
 
-- 块 2 的新导出在 Rust 合入、重新生成桥之前不存在：`RustFileTransferApi` 的新方法先抛 `UnimplementedError`（`TODO(M7b 整合)`），整合时由主会话换成真实调用；Dart 的测试一律用 `FakeFileTransferApi`。
-- 组件不动（12 §2.1）；画廊和组件测试里已有的状态够用。真要动组件先报主会话。
+- `RustFileTransferApi` 的新方法调块 2 的真实导出；Dart 的测试一律用 `FakeFileTransferApi`。
+- 组件不动；画廊和组件测试里已有的状态够用。
 
-**上游文件的具名例外**（03 §7.5 定 FT3~FT5 在 `io_loop.rs` 只占三处，M7b 实际要五处，按 12 §1.2 列在这里；验收第 6 条又加了 `io_loop.rs` 第 6 处和 `download.rs` 的追加；每处带 `// leapgate:` 注释，`io_loop.rs` 里只调 `crate::leapgate_hooks::file_transfer::…`）
+**上游文件的具名例外**（03 §7.5 原定 FT3~FT5 在 `io_loop.rs` 只占三处，实际是下表列的六处，另有 `download.rs` 的追加；每处带 `// leapgate:` 注释，`io_loop.rs` 里只调 `crate::leapgate_hooks::file_transfer::…`）
 
 | 文件 | 位置 | 做什么 | 行数上限 |
 |---|---|---|---|
@@ -2714,7 +1629,7 @@ tester 原先的推断是"跳过以后接着传时目标不对"。主会话查 A
 | `src/client/io_loop.rs` | 下载 digest 出错、取消任务之前（约 `:1965`） | 挂钩认领了就 `return true`（回"跳过"给对端，或停下接着传）（实际 2 行） | 2 |
 | `src/client/io_loop.rs` | 写数据块之前（约 `:1981`、`:1990`） | 先存下 `block.file_num`，写失败时交给挂钩，认领了就 `return true`、不走取消（实际 2 行） | 3 |
 | `src/client/io_loop.rs` | 收到 `FileTransferError`、删任务之前（约 `:2052`） | 挂钩认领了就 `return true`（单文件错误、对端拒绝、整任务失败分开处理）（实际 2 行） | 2 |
-| `src/client/io_loop.rs` | 收到对端文件列表时的 `job.set_files(entries)`（约 `:1817`） | 改调 `file_transfer::set_files`：开关关着照旧调上游 `set_files`，开着调下面的 `leapgate_set_download_files`（验收第 6 条：Mac 对端的 `a:b.txt` 让整张列表被拒、整个任务失败）（实际改 1 行） | 1 |
+| `src/client/io_loop.rs` | 收到对端文件列表时的 `job.set_files(entries)`（约 `:1817`） | 改调 `file_transfer::set_files`：开关关着照旧调上游 `set_files`，开着调下面的 `leapgate_set_download_files`（例如 macOS 对端的 `a:b.txt` 会让上游整张列表被拒、整个任务失败）（实际改 1 行） | 1 |
 | `libs/base/src/fs/download.rs` | 文件末尾追加 | `TransferJob::leapgate_set_download_files` 和判据函数，上游的 `set_files` 和各校验函数不动。非改上游不可：`files` 是私有字段，只能在 `fs` 模块里设，而上游 `set_files` 对两类名字整张拒收（以盘符形式开头，如 `a:b.txt`；目标文件夹已存在时含 `?*<>|"` 等，`symlink_metadata` 报 os error 123，接着传、暂停后继续、重试都会撞上） | 追加约 40 行 |
 
 开关关着时每个挂钩都不认领，走上游原来的路（旧界面便携版因此不受影响）；取消路径（`cancel_transfer_job`）不动。
@@ -2737,20 +1652,20 @@ tester 原先的推断是"跳过以后接着传时目标不对"。主会话查 A
 |---|---|---|
 | `paused` | `new_id`、`soft`（bool）、`resume_from`（下一次从第几个文件开始，0 起）、`restart_file`（bool） | 暂停生效。下载：Rust 已删掉原任务、放好一个 `new_id` 的等待任务（关闭视图时照常保存）；上传：`soft` 为真、`new_id == id`，任务原地等待。界面把行改成已暂停、行对应的任务 ID 换成 `new_id` |
 | `kept` | `resume_from`、`err`（原文）、`side`（`local` / `remote`）、`restart_file` | 整任务出错停下（磁盘满、写失败等），Rust 里已经没有这个任务、也不保存；临时文件留着。界面显示失败，"重试"时用 `JobID.next()` 取新 ID，`sessionAddJob(…, fileNum: resume_from)` 加 `sessionResumeJob` |
-| `continue_from` | `resume_from`、`restart_file` | 单个文件出错、任务停下（下载时对端读失败、本机写数据阶段失败），要从 `resume_from` 接着传；前面必有这个文件的 `file_failed`。界面立刻用新 ID 重新发起，同一行；同一行连续 20 次就不再接着传、整行显示失败（12 M7b-3，计数在 Dart） |
+| `continue_from` | `resume_from`、`restart_file` | 单个文件出错、任务停下（下载时对端读失败、本机写数据阶段失败），要从 `resume_from` 接着传；前面必有这个文件的 `file_failed`。界面立刻用新 ID 重新发起，同一行；同一行连续 20 次就不再接着传、整行显示失败（计数在 Dart） |
 | `file_failed` | `file_num`（出错文件在任务里的序号，0 起）、`name`（相对任务根的路径，分隔符 `/`）、`err`、`side` | 记一个没传的文件。任务没停的（下载 digest 阶段回了"跳过"、上传本机读失败、上传对端写失败）后面照常有进度和 `job_done` |
 
-- `restart_file`：下载接着传之前，本机临时文件已超过 4 GiB 的已被删掉，这个文件从头传（12 M7b-5），行上加一条附注。
+- `restart_file`：下载接着传之前，本机临时文件已超过 4 GiB 的已被删掉，这个文件从头传，行上加一条附注。
 - 一个任务结束时照旧收到上游的 `job_done` / `job_error`。认领过的错误不再发上游的 `job_error`（避免一行同时收到两种失败）。
 - 原文经 `leapgate_ft_reason` 归类，`side` 照传。
 
-**第一段的实现**（`ui/rust-m7b`）
+**第一段的实现**
 - 开关、命令、`paused` 事件的字段、"刚改名的文件"判断和 4 GiB 规则在 `libs/leapgate/src/ft.rs`；sink、命令处理、推事件（`ui_handler` downcast 成 `FlutterHandler` 后调 `push_event`，载荷放在 `value` 里）在 `src/leapgate_hooks/file_transfer.rs`。`io_loop.rs` 第一段只用了 `handle_msg_from_ui` 那一处，上传读循环那一处（约 `:322`）留到第二段。
 - 下载暂停：找到运行中（不是等待中）的普通下载任务才动；续传起点是任务当前的 `file_num`，这个文件已经改名、没有 `.download`、大小和列表一致、修改时间和列表差 2 秒以内（FAT32 只有 2 秒精度）时加一；新任务照 `AddJob` 用 `new_write` 建、`is_last_job`、文件列表为空（继续时对端重发列表）；先丢掉旧任务（关掉临时文件）再看起点那个文件的 `.download` 是否超过 `u32::MAX`，超过就删 `.download`、`.digest`。然后给对端发取消、推 `paused`。
 - 上传暂停：运行中的读任务标 `is_last_job`，`resume_from` 是读方当前的 `file_num`。暂停期间进度事件照常每秒一条（速度 0）。`leapgate_ft_resume` 只是把 `is_last_job` 改回来，不核对这个任务是不是软暂停的（关闭视图后恢复、还没 `ResumeJob` 的等待任务不要调它）。
 - 下载暂停时对端可能已经发出旧 ID 的 `Done` 或错误（取消还没到），上游收到不认识 ID 的 `Done`、`FileTransferError` 也照发旧 ID 的 `job_done` / `job_error`。这时旧任务已删、最后一个文件可能没写完，新任务照常等继续。`paused` 和它们在同一条流上，界面一定先收到 `paused`，按下面第一条规则忽略这些旧 ID 的事件。
 
-**第二段的实现**（`ui/rust-m7b`）
+**第二段的实现**
 - 挂钩模块 `src/leapgate_hooks/file_transfer.rs` 改成不带 flutter 也编（只有 M7a 的几个函数、sink 和推事件那几行带 flutter 的 `cfg`），`io_loop.rs` 的挂钩因此都不带 `cfg`；不带 flutter 时开关永远关着。各挂钩的判断在 `on_*` 函数里，只记下要发给对端的消息和要推的事件，外层再发、再推（先发后推）。
 - 怎么归类（`leapgate::ft::fault`，按 FT2 原因码）：`skipped`、单向传输、文件数超限、Android 范围外走上游原路；磁盘满整任务停（`kept`）；其余算单个文件出错。**只有一个文件的任务**（单文件任务，或文件夹里只有一个文件）单个文件出错一律走上游原路（`job_error`，下载照上游删临时文件），磁盘满照样 `kept`。所以 `file_failed` 只出现在多文件任务里，`name` 不会是空串。
 - 下载 digest 出错：digest 检查先给上一个文件改名。上一个文件（任务当前的 `file_num`，不是这个 digest 的文件）还有 `.download` 就算改名失败：记它 `file_failed`、停下、从这个 digest 的文件 `continue_from`。否则是这个文件的名字或路径写不了：给对端回 `Skip`，记 `file_failed`，任务接着跑。
@@ -2765,32 +1680,32 @@ tester 原先的推断是"跳过以后接着传时目标不对"。主会话查 A
   - 对端在任务结束时也会发完成：下载时对端读失败、本机已经停掉任务，对端（不经 CM 的那种）随后发来的旧 ID `Done` 照上游发 `job_done`；`continue_from` 之后界面已经换了 ID、会忽略，最后一个文件出错时界面会收到两次 `job_done`。`kept` 之后同样可能收到旧 ID 的 `job_done`（取消还没到对端时它已经发完），界面收到 `kept` 后这一行就不该再认这个 ID。
   - 判断"改名失败"靠上一个文件还有没有 `.download`：上一个文件在别的会话留下过 `.download`、这次又被用户跳过时会认错成改名失败，结果只是多从这个文件重新发起一次。
   - 上传时对端写失败、读方已经过了这个文件，对端已经写进去的部分留成 `.download`（`Skip` 让对端丢掉它的流，不删文件）。
-- 已知限制（审查后定为不修）：
+- 已知限制（不修）：
   - 改名成功、但改名之后的步骤失败（删 `.digest`、设修改时间）：错误会被算到下一个文件头上，原因原文也挂在错的文件上。不写坏数据，可以重试。
   - "已处理过的错误"记录表（`ft.rs` 的 `HANDLED`）从不清理，每个处理过的任务留一项，量很小。
   - 下载时对端取修改时间失败、没跳到下一个文件：会白白接着传，直到 Dart 的 20 次上限。上游在这种情况下也是整任务停下。
   - 上传时对端 CM 写失败，还在路上的数据块仍可能写坏文件，或者把截短的文件改成正式名（上游原有的空档，宽度和上游一样）。
   - 名字里带控制字符（如 `c\x01d`）不算"在 Windows 上无效"：目标文件夹不存在时能一路过 `validated_target`，到写数据时才失败，走 `write_failed`（`file_failed` 后从下一个文件 `continue_from`），不写坏东西；目标文件夹已存在时照上游整张拒收。
-  - Windows 保留设备名（本机 Windows 11 实测 `NUL`；Windows 10 上大概还有 `CON`、`AUX`、`COMn`、`LPTn`，带不带扩展名都算）仍按上游整张拒收：`validate_component` 不拒它们，加进判据的话会一路通过 `validated_target`。
+  - Windows 保留设备名（Windows 11 上实测 `NUL`；Windows 10 上大概还有 `CON`、`AUX`、`COMn`、`LPTn`，带不带扩展名都算）仍按上游整张拒收：`validate_component` 不拒它们，加进判据的话会一路通过 `validated_target`。
   - 不发摘要的老对端碰上连续超过 20 个无效名时，每个都走 `write_failed` → `continue_from`，撞上 Dart 的 20 次上限，这一行整体失败。
-  - 以"字母 + 冒号"开头的名字（`a:b.txt`）跳过时，原文是上游的 `absolute path detected in file name`，归成 `invalid_name`，详情显示"名称无效"，不是 02 §2.4.5 那句"在 Windows 上无效"；`x?y.txt`、`ab:c.txt` 显示后者。两种都不能重试，结果一样（主会话定不加特例）。
-  - 最后一个文件出错后界面会收到两次 `job_done`（Rust 发一次，不经 CM 的对端随后再发一次），Dart 已经处理（`ui/m7b-dart` `e02bd198b` 有测试）。
-- 验收时留意：断线重连时带"自动开始"的恢复沿用旧 ID，`HANDLED` 是按 ID 记的、进程里一直在。读码判断不会吞掉重连后的真实错误：只有上传会按文件去重，记下的是对端报过的文件 f；那时读方已经跳过 f 或早已过了 f，断线时保存的 `file_num` 至少是 f+1，重连后只会传 f 之后的文件，它们的序号都大于记下的值。被停掉的任务（`kept`、`continue_from`）已经从任务表删掉，不会保存，也就不会带旧 ID 恢复。验收时如果看到重连后某个文件出错却没有 `file_failed`，先查这一条。
+  - 以"字母 + 冒号"开头的名字（`a:b.txt`）跳过时，原文是上游的 `absolute path detected in file name`，归成 `invalid_name`，详情显示"名称无效"，不是 02 §2.4.5 那句"在 Windows 上无效"；`x?y.txt`、`ab:c.txt` 显示后者。两种都不能重试，结果一样（不加特例）。
+  - 最后一个文件出错后界面会收到两次 `job_done`（Rust 发一次，不经 CM 的对端随后再发一次），Dart 已经处理（有测试）。
+- 断线重连时带"自动开始"的恢复沿用旧 ID，`HANDLED` 是按 ID 记的、进程里一直在。读码判断不会吞掉重连后的真实错误：只有上传会按文件去重，记下的是对端报过的文件 f；那时读方已经跳过 f 或早已过了 f，断线时保存的 `file_num` 至少是 f+1，重连后只会传 f 之后的文件，它们的序号都大于记下的值。被停掉的任务（`kept`、`continue_from`）已经从任务表删掉，不会保存，也就不会带旧 ID 恢复（读码判断，未实测）。重连后某个文件出错却没有 `file_failed` 时，先查这一条。
 
-**Dart 侧的规则**（12 §4）
+**Dart 侧的规则**
 - 行不变、Rust 任务 ID 会变：`FileTransferJobs` 维护"行 → 当前任务 ID"。进度只认当前 ID；`job_done`、`job_error`、`override_file_confirm` 只认当前 ID，旧 ID 一律忽略；已暂停的行不认进度事件（软暂停的上传暂停期间每秒仍有一条速度为 0 的进度）。
-- 断线重连时，本次会话里用户暂停过的任务 ID（含 `paused` 的 `new_id`；收到 `paused` 事件时才记，点了暂停、事件没回来就断线的照常自动继续）收到带 `auto_start` 的 `load_last_job` 时照不自动开始处理（12 §4.1）。旧 ID 不另设集合：换 ID 后表里已经没有它，上游的处理函数按 ID 查不到，本来就丢掉。
-- 恢复后的排队序号：行记一个序号，下载"继续"、重试、接着传时取当前最大值加一（对端把恢复的下载排到队尾，重试和接着传都是新任务）；上传"继续"序号不变（Rust 把任务留在读任务列表的原位置，读循环取第一个没在等待的，第二段的 Leapgate 版上传读循环要保留这个语义）；同一方向上序号最小、还没结束的是进行中（12 §4.4）。
-- 替换确认发给 Rust 的"记住选择"一律传否，界面按勾选自己逐个回答，用户选"跳过"的计入已跳过（12 §4.5）。
-- "重试未传输的文件"：为每个原因能重试的未传输文件各建一个单文件任务，挂在原来那一行，行回到进行中，进度合计，全部结束后重新判定（12 §4.3）。
-- 详情最多 50 个文件，后面一行"另有 ‹k› 个文件"（12 §4.6）；"已完成，部分未传输"的行"清除已完成"不清（M7b-7）；全是用户跳过的写"已跳过"、不画重试（M7b-8）；失败行不加详情（M7b-9）。
+- 断线重连时，本次会话里用户暂停过的任务 ID（含 `paused` 的 `new_id`；收到 `paused` 事件时才记，点了暂停、事件没回来就断线的照常自动继续）收到带 `auto_start` 的 `load_last_job` 时照不自动开始处理。旧 ID 不另设集合：换 ID 后表里已经没有它，上游的处理函数按 ID 查不到，本来就丢掉。
+- 恢复后的排队序号：行记一个序号，下载"继续"、重试、接着传时取当前最大值加一（对端把恢复的下载排到队尾，重试和接着传都是新任务）；上传"继续"序号不变（Rust 把任务留在读任务列表的原位置，读循环取第一个没在等待的，第二段的 Leapgate 版上传读循环要保留这个语义）；同一方向上序号最小、还没结束的是进行中。
+- 替换确认发给 Rust 的"记住选择"一律传否，界面按勾选自己逐个回答，用户选"跳过"的计入已跳过。
+- "重试未传输的文件"：为每个原因能重试的未传输文件各建一个单文件任务，挂在原来那一行，行回到进行中，进度合计，全部结束后重新判定。
+- 详情最多 50 个文件，后面一行"另有 ‹k› 个文件"；"已完成，部分未传输"的行"清除已完成"不清；全是用户跳过的写"已跳过"、不画重试；失败行不加详情。
 - 删除的部分失败和重试只在 Dart（02 §2.4.7）；重试时文件或文件夹已经不在的算完成。
 - 远程设备低于 1.4.2 时不画"暂停"（02）。
 - 用户在替换确认里跳过的文件，详情里用附注样式（不带错误色）。
-- 下载暂停时替换确认框正开着：`FtOverwritePrompt` 的 `withdrawn`（`core/lib/leapgate/prompts.dart`）置真，`app/lib/pages/files/file_dialogs.dart` 不带回答关掉。这两处不在上表 Dart coder 的文件范围里，审查后保留。
+- 下载暂停时替换确认框正开着：`FtOverwritePrompt` 的 `withdrawn`（`core/lib/leapgate/prompts.dart`）置真，`app/lib/pages/files/file_dialogs.dart` 不带回答关掉。这两处不在上表 Dart 块的文件范围里，是保留的例外。
 - 已知限制：两批传输同时勾了"对此次传输中的其他冲突执行相同操作"，先勾的那批会再被问一次（复制件只记一批的选择，按批次记要加状态）。不会发出错误的回答。
-- 整体审查后补的规则：已取消的行不处理迟到的 `paused`、`kept`、`continue_from`（`paused` 顺手取消 Rust 放下的等待任务）；上游原路过来的 `job_error` 原因能重试时也记续传起点（单文件从 0，多文件从这一行最近一次进度所在的文件），和 `kept` 一样带"重试"——上传最后一个文件在对端写失败（Rust 读任务已删、走上游原路）也靠这一条，显示成失败而不是"已完成，部分未传输"；4 GB 附注只挂在已暂停和失败的行上；断线重连时从上次会话恢复成已暂停、又被 Rust 带 `auto_start` 开始的行改成进行中；`kept` 时撤回替换确认框；全是用户跳过的行算已完成、会被"清除已完成"清掉。
-- 已知限制（整体审查后定为不修）：
+- 另外几条规则：已取消的行不处理迟到的 `paused`、`kept`、`continue_from`（`paused` 顺手取消 Rust 放下的等待任务）；上游原路过来的 `job_error` 原因能重试时也记续传起点（单文件从 0，多文件从这一行最近一次进度所在的文件），和 `kept` 一样带"重试"——上传最后一个文件在对端写失败（Rust 读任务已删、走上游原路）也靠这一条，显示成失败而不是"已完成，部分未传输"；4 GB 附注只挂在已暂停和失败的行上；断线重连时从上次会话恢复成已暂停、又被 Rust 带 `auto_start` 开始的行改成进行中；`kept` 时撤回替换确认框；全是用户跳过的行算已完成、会被"清除已完成"清掉。
+- 已知限制（不修）：
   - "重试未传输的文件"进行中时，行上没有"暂停"，也不写剩余时间。
   - `continue_from` 正好撞上断线时，那一行卡在进行中（新 ID 的发起落进已断开的循环，新 ID 也不在保存的任务里）。
   - `continue_from` 接着传以后，进度把失败的那个文件也算成已传（上游续传按序号累加）。
@@ -2798,50 +1713,50 @@ tester 原先的推断是"跳过以后接着传时目标不对"。主会话查 A
 
 **测试**
 - Rust：开关关着时每个挂钩都不认领；下载续传起点（"上一个刚改名、下一个还没开始"的空档）；上传读方序号；按原因码分跳过和整任务停；4 GiB 规则。`cargo test -p leapgate` 和根 crate 的 `leapgate_hooks` 测试照跑。
-- Dart：12 §5.2 列的各条。
+- Dart：上面"Dart 侧的规则"各条。
 - 合入前：`git diff main -- flutter/` 为空；core analyze 不超出 91 条 info 的基线，app 0 条；新界面和旧界面都要能编（Rust 改了 `io_loop.rs`）。
 
 ### 10.18 M9 的分工约定
 
-依据：总仓库 `docs/新界面/14-M9拆法.md`（下称"14"；维护者 2026-11-09 把 M9-1~M9-8 全部按推荐定）。界面行为以 `13-第三轮内容与逻辑说明.md`（下称"13"，R3-Q1~R3-Q24 和 14 §1.2 的更正已回写）为准；样稿 `A-P8-隧道.html`、`A-P9-终端.html`、`A-P10-摄像头.html`、`A-P11-安装.html`，菜单和本机提示卡看 `A-P1.html`，终端的连接面板看 `A-P2.html#c-terminal`。14 §7 列的不做：手机终端页和摄像头页（随 M11）、"不安装直接运行"、隧道登录失败的冷却、修改一条转发、驱动改名、终端内容的逐行读屏。
+M9 是第三轮：安装页（M9a）、终端和摄像头（M9b）、TCP 隧道和 RDP（M9c）。界面行为以 `docs/新界面/13-第三轮内容与逻辑说明.md`（下称"13"）为准；样稿 `A-P8-隧道.html`、`A-P9-终端.html`、`A-P10-摄像头.html`、`A-P11-安装.html`，菜单和本机提示卡看 `A-P1.html`，终端的连接面板看 `A-P2.html#c-terminal`。不做：手机终端页和摄像头页、"不安装直接运行"、隧道登录失败的冷却、修改一条转发、驱动改名、终端内容的逐行读屏。
 
 **三段和分支**
 
-M9 分三段，各自审查、验收、外观检查、合 main（M9-1）。和前几个里程碑不同，本节和第 0 步的挂载点先单独合进 main（分支 `ui/m9-0`），各路都从 main 切分支。
+M9 分三段，各段各自合进 main。本节的约定和第 0 步的挂载点先单独合进 main（分支 `ui/m9-0`），各段都从 main 切分支。
 
-| 分支 | 谁 | 段 | 合到 |
+| 分支 | 块 | 段 | 合到 |
 |---|---|---|---|
-| `ui/rust-m9` | coder R | 三段共用 | 各段的整合分支只合自己要的提交（顺序见"Rust 的做法"末条） |
-| `ui/m9-ds` | designer | 共用 → M9a → M9b → M9c，每段的组件单独提交 | 同上 |
-| `ui/m9a` | coder I | M9a | 本身就是 M9a 的整合分支 |
-| `ui/m9b-views` | coder A | M9b | `ui/m9b`（A、B 都做完后由主会话从 main 切出、合入两路） |
-| `ui/m9b-term` | coder B | M9b | `ui/m9b` |
-| `ui/m9c` | coder T | M9c，M9a 合入 main 后从 main 切 | 本身就是 M9c 的整合分支 |
+| `ui/rust-m9` | R（Rust） | 三段共用 | 各段的整合分支只合自己要的提交（顺序见"Rust 的做法"末条） |
+| `ui/m9-ds` | 组件 | 共用 → M9a → M9b → M9c，每段的组件单独提交 | 同上 |
+| `ui/m9a` | I（安装页） | M9a | 本身就是 M9a 的整合分支 |
+| `ui/m9b-views` | A（视图框架、摄像头） | M9b | `ui/m9b`（A、B 都做完后从 main 切出、合入两路） |
+| `ui/m9b-term` | B（终端） | M9b | `ui/m9b` |
+| `ui/m9c` | T（隧道） | M9c，M9a 合入 main 后从 main 切 | 本身就是 M9c 的整合分支 |
 
-- 块 2 的桥在 Rust 合进整合分支后由主会话重新生成。整合 worktree 一次只给一段用（`.wt/ui-m4` 里有桥和 pub 缓存）。
-- 合 main 的大致顺序是 M9a → M9b → M9c；后合的段先把 main 合进来再验收。
+- 块 2 的桥在 Rust 合进整合分支后重新生成。
+- 合 main 的顺序是 M9a → M9b → M9c；后合的段先把 main 合进来。
 
 **文件边界**
 
-| 谁 | 只改这些 |
+| 块 | 只改这些 |
 |---|---|
 | R | `libs/leapgate/src/reason.rs`（9 个码）、`install.rs`（选项拼法）、新文件 `tunnel.rs`（事件 JSON、登录结局到下一步的纯函数、通道被拒原文的分类）、名称截断的纯函数（`libs/leapgate` 里，文件自定）、`lib.rs`；`src/leapgate_hooks/` 下新文件 `tunnel.rs`，`exit.rs`（抽出建会话的共用函数、几处改 `pub(super)`、监听换成共用的独占监听函数；出口行为和现有测试不变），`install.rs`（子进程参数）；`src/leapgate_hooks.rs`（`mod tunnel`）；`src/leapgate_ffi.rs`（原地改 `leapgate_install` 的签名，其余在末尾追加 M9 一段）；上游只一处，见"挂钩" |
-| designer | `app/lib/widgets/`（新组件；`lg_exit_card.dart` 的私有部件拆成公共部件、`LgExitCard` 改用它们拼，对外参数和外观不变；`LgViewBar`、`LgBanner`、`LgLocalNotice`、`LgExitPage`、`LgExitSection`、`LgConnectionPanel` 这类现成组件只加参数、默认值不变）、`app/lib/icons/`（重跑 `tools/gen_icons.dart`）、`app/lib/pages/home/home_page.dart` 里只动 `_NavItem` 这一个类、画廊 `gallery_m9a.dart`、`gallery_m9b.dart`、`gallery_m9c.dart`（第 0 步已登记）、组件的测试 |
-| I | core 新文件 `leapgate/install_page.dart`（`InstallPageModel`、四项位置检查）、`leapgate/local_status.dart` 的 `install`；app 新文件 `pages/home/install_dialog.dart`、`home_page.dart` 里本机提示卡的 `_InstallNotice` 类和它的构造处（打开对话框要的 `overlays` 从构造处传进去；卡片不再显示进行中和失败；"升级"卡带盾牌；`_NavItem` 归 designer）、`pages/settings/sections/remote_printing.dart`、`main.dart` 的 `--install` 分支（只改注释和日志文字）；`consts.dart` 只在"M9a"下追加；ARB `install` 前缀；测试；总仓库 `scripts/windows/build-client.ps1` 的打印机驱动一步（见"打印机驱动"） |
+| 组件 | `app/lib/widgets/`（新组件；`lg_exit_card.dart` 的私有部件拆成公共部件、`LgExitCard` 改用它们拼，对外参数和外观不变；`LgViewBar`、`LgBanner`、`LgLocalNotice`、`LgExitPage`、`LgExitSection`、`LgConnectionPanel` 这类现成组件只加参数、默认值不变）、`app/lib/icons/`（重跑 `tools/gen_icons.dart`）、`app/lib/pages/home/home_page.dart` 里只动 `_NavItem` 这一个类、画廊 `gallery_m9a.dart`、`gallery_m9b.dart`、`gallery_m9c.dart`（第 0 步已登记）、组件的测试 |
+| I | core 新文件 `leapgate/install_page.dart`（`InstallPageModel`、四项位置检查）、`leapgate/local_status.dart` 的 `install`；app 新文件 `pages/home/install_dialog.dart`、`home_page.dart` 里本机提示卡的 `_InstallNotice` 类和它的构造处（打开对话框要的 `overlays` 从构造处传进去；卡片不再显示进行中和失败；"升级"卡带盾牌；`_NavItem` 归组件块）、`pages/settings/sections/remote_printing.dart`、`main.dart` 的 `--install` 分支（只改注释和日志文字）；`consts.dart` 只在"M9a"下追加；ARB `install` 前缀；测试；总仓库 `scripts/windows/build-client.ps1` 的打印机驱动一步（见"打印机驱动"） |
 | A | `app/lib/shell/` 的 `main_window.dart`（含 `openView` 的实现，第 0 步已按文件传输那条路写好，A 按需要改）、`session_views.dart`、`tab_menu.dart`、`links.dart` 的终端、管理员终端、摄像头三支；`app/lib/pages/session/` 全部（连接面板、原因文案、会话页、工具栏、通知、画面提示、录制、聊天）；core 的 `session_requests.dart`、摄像头名称的取值函数（新文件）；`peer_views.dart`、`devices_page.dart` 里终端、终端（管理员）、摄像头三支菜单项，以及照 `openFileTransferPeer` 写的带地址簿共享密码的打开函数；`consts.dart` 只在"M9b views"下追加；ARB `cam`、`view`、`tabMenu`、`connClose`、`connReason`、`link` 前缀；测试 |
 | B | core `models/terminal_*.dart`、`models/rustdesk_terminal.dart`（复制件）、`leapgate/terminal/`（`terminals.dart` 里第 0 步写好的 `TerminalOpen`、`terminalOpenState` 不改，`TerminalTabs` 空壳由 B 写满）、`leapgate/session.dart`、`session_registry.dart`、`ffi_model.dart` 的终端部分；app `pages/terminal/`（`terminal_view.dart` 换掉占位，`disconnectTerminalView` 加确认）；`consts.dart` 只在"M9b terminal"下追加；ARB `term` 前缀；测试 |
-| T | core 新文件 `leapgate/tunnels.dart`、`tunnel_card.dart`、`card_login.dart`（从 `exit_card.dart` 抽出），`exit_card.dart`、`exit_nodes.dart`（端口互查）、`exit_api.dart`（只改令牌那一行）、`tunnel_api.dart` 分隔线以下、`app_core.dart`（`tunnels` 和三个后台 getter 加上隧道）；app `pages/home/exit/`（`exit_page.dart` 加插槽、`open_tunnel.dart` 写实现、新文件 `tunnel_section.dart`、隧道卡片、RDP 设置对话框）、`shell/window_close.dart`、`links.dart` 的 TCP 隧道和 RDP 两支、`peer_views.dart` 和 `devices_page.dart` 里 TCP 隧道、RDP 两支和 RDP 行的编辑按钮；`consts.dart` 只在"M9c"下追加；ARB `tunnel` 前缀和关窗新句子的 `closing` 前缀，另改 14 §2.5 列的几个值和 `exitHomeLabel`、`exitHomeLabelAttention`（主页标签读屏名，14 §1.2）；测试 |
+| T | core 新文件 `leapgate/tunnels.dart`、`tunnel_card.dart`、`card_login.dart`（从 `exit_card.dart` 抽出），`exit_card.dart`、`exit_nodes.dart`（端口互查）、`exit_api.dart`（只改令牌那一行）、`tunnel_api.dart` 分隔线以下、`app_core.dart`（`tunnels` 和三个后台 getter 加上隧道）；app `pages/home/exit/`（`exit_page.dart` 加插槽、`open_tunnel.dart` 写实现、新文件 `tunnel_section.dart`、隧道卡片、RDP 设置对话框）、`shell/window_close.dart`、`links.dart` 的 TCP 隧道和 RDP 两支、`peer_views.dart` 和 `devices_page.dart` 里 TCP 隧道、RDP 两支和 RDP 行的编辑按钮；`consts.dart` 只在"M9c"下追加；ARB `tunnel` 前缀和关窗新句子的 `closing` 前缀，另改几个已有出口文案的值和 `exitHomeLabel`、`exitHomeLabelAttention`（主页标签读屏名）；测试 |
 
-- 第 0 步写好的接口（下一小节）谁都不改，确实要改先报主会话。
+- 第 0 步写好的接口（下一小节）各块都不改。
 - ARB 加在两个 ARB 文件末尾，中英同时加，文案照 13 逐字照抄，英文照 13 的英文表，没有的新写并列进提交说明；改完跑 `flutter gen-l10n`。合并时只会有追加冲突。
-- coder 先用现成组件和占位把逻辑写通，整合时换成 designer 的组件；行为测试按文字和语义标签找控件。
-- 块 2 的新导出在 R 合入、桥重新生成之前不存在：调用它们的 Rust 实现一律抛 `UnimplementedError`（`TODO(M9 整合)`），由主会话整合时换成真实调用；测试一律用假实现。改了签名的 `leapgate_install` 例外：I 保留现在的 `lgBind.leapgateInstall(kind:)` 调用，位置和三个选项先只存在 `InstallPageModel` 和 `LocalStatusModel.install` 的参数里（`TODO(M9 整合)`）；桥重新生成后，`core/lib/leapgate/local_status.dart` 的调用和 `core/test/fakes.dart` 里 `FakeLeapgate` 的重写由主会话一起改。
+- 各块先用现成组件和占位把逻辑写通，整合时换成组件块的组件；行为测试按文字和语义标签找控件。
+- 块 2 的新导出在桥重新生成后接上真实调用，在那之前调用它们的 Rust 实现抛 `UnimplementedError`（`TODO(M9 整合)`）；测试一律用假实现。改了签名的 `leapgate_install`：位置和三个选项经 `InstallPageModel` 和 `LocalStatusModel.install` 的参数传给它，`core/test/fakes.dart` 里 `FakeLeapgate` 的重写跟着改。
 - B 可以 import `app/lib/shell/tab_shortcuts.dart` 用 `matchShortcut`（终端区先拦会话快捷键，拦到的自己执行、返回 `skipRemainingHandlers`：返回 `ignored` 时 xterm 会接着把它认得的组合键（例如 Ctrl+→）发给远程终端，B 的测试证实过）；只剩终端一个视图时"关闭标签"的 `onCloseTab` 归 A 放开。
 - core analyze 的基线是 91 条 info（第 0 步合入时），app 0 条。
 
-**第 0 步放好的**（分支 `ui/m9-0`，合 main 后各路照用）
+**第 0 步放好的**（分支 `ui/m9-0`，各段照用）
 
-- **设备菜单**：`PeerAction` 加 `terminal`、`terminalAdmin`、`camera`、`tcpTunnel`、`rdp`。`peerMenu` 的 `bool peerWindows` 换成 `String peerPlatform = ''`（`kPeerPlatform*` 之一，空串是未知）。连接组照样稿 `A-P1.html` 的顺序列全，平台已知不支持的不列、未知照列（R3-Q12，01 §3.1 区块 F）：终端、TCP 隧道在对端不是 Android 时列；终端（管理员）只在对端已知是 Windows 时列（13 §2.1.1）；摄像头在对端不是 macOS、Android 时列；RDP 在本机是 Windows、对端不是已知的非 Windows 时列（13 §1.1.2）；用作出口照旧（对端不是已知的非 Windows；app 另要求 ID 能当出口，`isExitId`）。连接组的规则在私有的 `_connectGroup` 里，`peerMenu` 和 `connectMenu` 共用。连接按钮下拉和"连接到 ‹输入›"的"⋯"改成按 core 新函数 `connectMenu(String peerPlatform, {bool? windows})` 列（`windows` 是本机平台，不传按本机，给测试用）：样稿 `p1-cb-menu` 的八项（远程桌面、文件传输、终端、摄像头、TCP 隧道、用作出口、RDP、经中继），不列终端（管理员）（14 §1.2）。
+- **设备菜单**：`PeerAction` 加 `terminal`、`terminalAdmin`、`camera`、`tcpTunnel`、`rdp`。`peerMenu` 的 `bool peerWindows` 换成 `String peerPlatform = ''`（`kPeerPlatform*` 之一，空串是未知）。连接组照样稿 `A-P1.html` 的顺序列全，平台已知不支持的不列、未知照列（R3-Q12，01 §3.1 区块 F）：终端、TCP 隧道在对端不是 Android 时列；终端（管理员）只在对端已知是 Windows 时列（13 §2.1.1）；摄像头在对端不是 macOS、Android 时列；RDP 在本机是 Windows、对端不是已知的非 Windows 时列（13 §1.1.2）；用作出口照旧（对端不是已知的非 Windows；app 另要求 ID 能当出口，`isExitId`）。连接组的规则在私有的 `_connectGroup` 里，`peerMenu` 和 `connectMenu` 共用。连接按钮下拉和"连接到 ‹输入›"的"⋯"改成按 core 新函数 `connectMenu(String peerPlatform, {bool? windows})` 列（`windows` 是本机平台，不传按本机，给测试用）：样稿 `p1-cb-menu` 的八项（远程桌面、文件传输、终端、摄像头、TCP 隧道、用作出口、RDP、经中继），不列终端（管理员）。
 - app 里按 `PeerAction` 建菜单项的地方（`peer_views.dart`、`devices_page.dart` 两处下拉），五个新值第 0 步不建（跳过，`TODO(M9b)` / `TODO(M9c)`），A、T 各填各的。
 - **链接**：`ConnectLink` 的 `bool fileTransfer` 换成 `LinkKind kind`（`remoteDesktop`、`fileTransfer`、`terminal`、`terminalAdmin`、`camera`、`tcpTunnel`、`rdp`），第三轮的五种也取 ID 和 `--password`、`--relay`；`_open` 按种类分派，五种新的照旧出轻提示，A、T 各换各的。
 - **打开视图**：`MainNavigation.openView(String id, ConnType kind, {bool terminalAdmin = false, String password = '', bool isSharedPassword = false, bool forceRelay = false})`；`openFileTransfer` 留着、转调它（M7a 的调用和测试不动）。主窗口的实现和 `openFileTransfer` 同一条路（`SessionRegistry.open(id, kind, terminalAdmin:)`、切标签、显示那个视图）；视图容器里终端一支挂 `TerminalViewPage`，摄像头一支挂 `SessionPage`。菜单不列、链接不开，所以第 0 步里走不到。
@@ -2878,7 +1793,7 @@ M9 分三段，各自审查、验收、外观检查、合 main（M9-1）。和�
   ```
 
   出口占位的两个常量（目标 `leapgate-exit.invalid:65536`）从 `cm_core.dart` 挪到 `consts.dart`，CM 和 `savedForwards` 共用；解析存下的转发是公开的纯函数 `parseSavedForwards`（`tunnel_api.dart`）。
-- **依赖**：core `xterm: 4.0.0`（钉死，和上游同版本）、app `xterm: any`，用同一个 `PUB_CACHE` 重新生成两份 lock（14 §2.4）。
+- **依赖**：core `xterm: 4.0.0`（钉死，和上游同版本）、app `xterm: any`，用同一个 `PUB_CACHE` 重新生成两份 lock。
 - **画廊和常量**：`gallery_m9a.dart`、`gallery_m9b.dart`、`gallery_m9c.dart` 登记进 `gallery_main.dart`；`consts.dart` 加"M9a""M9b views""M9b terminal""M9c"四个锚点。
 
 **Rust 导出（块 2）**
@@ -2899,7 +1814,7 @@ M9 分三段，各自审查、验收、外观检查、合 main（M9-1）。和�
 |---|---|---|---|
 | `connecting` | 行 | — | 首次登录、重试或懒重连正在进行；要输入什么看会话事件流 |
 | `in_use` | 行 | `"transport"`：`direct` / `relay` | 这一行自己的连接方式（按行记，不读会话共用的 `lc.direct`） |
-| `interrupted` | 行 | `"cause"`：`tunnel_ended` / `login_failed`；`login_failed` 时带 `"reason"`（C3 的原因对象）；`reason` 是 `other` 时另带 `"text"`（截到 200 个字符，2026-11-09 定，`stopped` 同） | 监听还开着，下一条本地连接进来就懒重连；没有冷却 |
+| `interrupted` | 行 | `"cause"`：`tunnel_ended` / `login_failed`；`login_failed` 时带 `"reason"`（C3 的原因对象）；`reason` 是 `other` 时另带 `"text"`（截到 200 个字符，`stopped` 同） | 监听还开着，下一条本地连接进来就懒重连；没有冷却 |
 | `stopped` | 行 | 有原因时带 `"reason"` | 监听已关，等重试或删除。原因：`peer_too_old`（`feature: port_forward`）、`insecure_declined`、被控端拒绝登录的 C3 分类（`no_permission`、`too_many_attempts`、`not_allowed`、`blocked`……）；会再问的（例如重新输入密码）不算结局 |
 | `port_in_use` | 行 | — | 本机端口被占用（见"独占监听"） |
 | `notice` | 行 | `"reason"`；`other` 时另带 `"text"`（截到 200 个字符） | 不改变行状态：被控端拒绝打开一条通道（13 §1.3 区块 E），上游已按原文 10 秒去重 |
@@ -2924,7 +1839,7 @@ M9 分三段，各自审查、验收、外观检查、合 main（M9-1）。和�
 
 `No permission of IP tunneling` 沿用已有的 `no_permission`（`port_forward`）；`Port forward target not authorized` 是 `other`。
 
-**挂钩**（上游唯一一处，03 §7.5 具名例外，M9-2）：`src/ui_session_interface.rs` `io_loop` 端口转发分支里，`handler.lc.write().unwrap().port_forward_mux = crate::port_forward::mux_enabled();` 之后、RDP 判断之前：
+**挂钩**（上游唯一一处，03 §7.5 具名例外）：`src/ui_session_interface.rs` `io_loop` 端口转发分支里，`handler.lc.write().unwrap().port_forward_mux = crate::port_forward::mux_enabled();` 之后、RDP 判断之前：
 
 ```rust
         // leapgate: a new UI tunnel card runs its own loop (LEAPGATE.md §10.18)
@@ -2933,26 +1848,26 @@ M9 分三段，各自审查、验收、外观检查、合 main（M9-1）。和�
 
 所有端口转发会话都经过这一行，所以 `take` 必须精确认出登记时的那个会话：登记表的键是（设备 ID，种类），值里存登记时的会话 ID，`take` 只在 `handler` 的会话 ID 和它相同时才取走，对不上一律返回 `None`（同一台设备的出口卡片会话、登记后没 `sessionStart` 就关掉又重开的会话都不会被认领）。不需要总开关；旧界面从不登记，照走上游原路。出口卡片的会话不登记进隧道表，照旧走三参数分支和出口挂钩。合并上游时核对这个分支的结构（`sender`、`port_forward_mux` 先设好）和 `Data::{AddPortForward, RemovePortForward, NewRDP, Close}`。
 
-**Rust 的做法**（14 §2.2、§4.2、§4.3）
-- R 的实现补充（2026-11-09 主会话确认，审查后修订）：`take` 认会话的办法是登记时把会话的 `lc` 以 `Weak` 存进登记表，`take` 和 `handler.lc` 比是不是同一个（`Session<T>` 没有会话 ID 字段），效果等于按会话 ID 认，也不依赖会话表还在；懒登录一律不打开远程桌面连接（含监听开好后的第一次 `in_use` 若是由本地连接触发的），只有卡片刚打开、从"已停止"重试成功、`NewRDP`（正在连接时也打开，mstsc 的连接在 backlog 里等登录完）这三种打开，从"已中断"重新连接成功不打开（用户原来的窗口自己会重连）；删一行后、`removed` 推出来之前，同一端口的 `AddPortForward` 被忽略，界面要等到 `removed` 再加；查监听表只在 Windows 上做，RDP（本机端口 0）不做。正在关闭的卡片（已 `sessionClose`）不算 `already`，同出口：同一台设备可以马上再加，新卡片替换旧卡片后旧卡片剩下的事件（含它的 `closed`）都被丢掉，界面不要等旧卡片的 `closed`。
+**Rust 的做法**
+- 实现补充：`take` 认会话的办法是登记时把会话的 `lc` 以 `Weak` 存进登记表，`take` 和 `handler.lc` 比是不是同一个（`Session<T>` 没有会话 ID 字段），效果等于按会话 ID 认，也不依赖会话表还在；懒登录一律不打开远程桌面连接（含监听开好后的第一次 `in_use` 若是由本地连接触发的），只有卡片刚打开、从"已停止"重试成功、`NewRDP`（正在连接时也打开，mstsc 的连接在 backlog 里等登录完）这三种打开，从"已中断"重新连接成功不打开（用户原来的窗口自己会重连）；删一行后、`removed` 推出来之前，同一端口的 `AddPortForward` 被忽略，界面要等到 `removed` 再加；查监听表只在 Windows 上做，RDP（本机端口 0）不做。正在关闭的卡片（已 `sessionClose`）不算 `already`，同出口：同一台设备可以马上再加，新卡片替换旧卡片后旧卡片剩下的事件（含它的 `closed`）都被丢掉，界面不要等旧卡片的 `closed`。
 - 卡片循环 `run`：TCP 卡片读 `handler.lc.port_forwards`，跳过出口占位和本机或远程端口 ≤ 0 的（同上游，界面的 `savedForwards` 用同一条规则），每条起一行；RDP 卡片端口照上游取 `rdp_port`（解析不了用 3389），起一行（本机端口 0）。收到 `AddPortForward` 起一行（已有同端口的忽略）、`RemovePortForward` 关那一行后推 `removed`、`NewRDP` 打开远程桌面连接、`Close` 或发送端没了就把关闭发给每一行、等全部收尾（照 `login_or_close`）、推 `closed` 再返回；其余 `Data`（登录、二次验证、不安全连接的回答）照上游广播给每一行。登记表照 `exit::cards`，键是（设备 ID，种类），和出口的表分开。
 - 单条转发照 `exit::cards::run_card` 另写一份，原函数不改。差别：登录目标是这一行的目标（RDP 是空主机加 RDP 端口、`is_rdp`）；不做 SOCKS 握手；结局不看出口能力（对端支持多路复用就用，不支持停在 `peer_too_old`）；登录失败不冷却；不安全连接被拒记 `insecure_declined`；没有改端口。占位连接、`login_or_close`、K0 守卫的三种结局、隧道结束后的懒重连照搬。
 - 按行的 `Interface` 包装 `RowUi`：只有提问类转给会话（要密码、重新输入密码、二次验证、等待对方接受、不安全连接，界面靠它们画提问区）；**报错类一律拦下**，不进会话流：`on_establish_connection_error`、`on_error`（含 `PEER_TOO_OLD`）、`msgbox` 里类型是 error 的（含 `handle_login_error` 转出的登录失败），原文记进这一行，行停下或中断时按 C3 分类当原因。`update_direct` 同时记进这一行。隧道在用时被控端拒绝打开通道（`on_frame` 来的，被控端有四种原文）一律推这一行的 `notice`：认得的三种按下表分类，其余是 `other` 带原文。所以界面不用处理会话流上的错误框（T 照此写 `CardLogin` 的隧道用法）。
-- **独占监听**（M9-3，14 §4.1 的实测）：不复用地址绑 `127.0.0.1:P`；绑定报地址占用（`AddrInUse`）或拒绝访问（`PermissionDenied`，对方独占绑定、系统保留端口段都报这个）算端口被占用。绑上以后，在 Windows 上查 IPv4、IPv6 两张 TCP 监听表（`GetExtendedTcpTable`），`0.0.0.0:P` 或 `[::]:P` 上有 LISTEN 也算被占用：关掉刚开的监听、推 `port_in_use`。不用试绑 `0.0.0.0:P`：本机有一条源端口是 P 的出站连接时试绑也报占用，会凭空误报（2026-11-09 Rust 审查实测，本机动态端口 1024~15000 里约 1/27 的端口当时被出站连接占着）。出口卡片和旧界面的出口代理换用同一个函数（出口回归一次）。
-- RDP：一行进 `in_use` 时，如果是这次监听开好后的第一次（卡片刚打开或从"已停止"重试成功），打开一次远程桌面连接；懒重连成功不打开；`NewRDP` 随时打开。照上游 `run_rdp` 在 `tunnel.rs` 另写，用户名密码从本会话的选项取（会话开始时读进来的那份），不读也不写进程环境变量；`cmdkey`、`mstsc` 放 `spawn_blocking`；窗口标题用上游的 `set_rdp_window_title`。日志写一行 RDP 的本机端口（验收要用）。
+- **独占监听**：不复用地址绑 `127.0.0.1:P`；绑定报地址占用（`AddrInUse`）或拒绝访问（`PermissionDenied`，对方独占绑定、系统保留端口段都报这个）算端口被占用。绑上以后，在 Windows 上查 IPv4、IPv6 两张 TCP 监听表（`GetExtendedTcpTable`），`0.0.0.0:P` 或 `[::]:P` 上有 LISTEN 也算被占用：关掉刚开的监听、推 `port_in_use`。不用试绑 `0.0.0.0:P`：本机有一条源端口是 P 的出站连接时试绑也报占用，会凭空误报（在 Windows 上实测，动态端口 1024~15000 里某一时刻约 1/27 的端口被出站连接占着）。出口卡片和旧界面的出口代理换用同一个函数（出口回归一次）。
+- RDP：一行进 `in_use` 时，如果是这次监听开好后的第一次（卡片刚打开或从"已停止"重试成功），打开一次远程桌面连接；懒重连成功不打开；`NewRDP` 随时打开。照上游 `run_rdp` 在 `tunnel.rs` 另写，用户名密码从本会话的选项取（会话开始时读进来的那份），不读也不写进程环境变量；`cmdkey`、`mstsc` 放 `spawn_blocking`；窗口标题用上游的 `set_rdp_window_title`。日志写一行 RDP 的本机端口。
 - 连接令牌 Rust 不改：两种卡片的导出都收 `conn_token`，界面传 `SessionRegistry.tokenOf` 的值（R3-Q7）。
 - 不对隧道会话调 `sessionReconnect`（同出口，会另起一个 `io_loop`）。
 - 提交顺序：M9a 的 `leapgate_install` → M9b 的原因码和 `leapgate_session_display_names` → 隧道登记表和导出骨架（事件格式按本节定死，T 对着假实现写）→ 单条转发和 `RowUi` → RDP → 独占监听和出口回归。每个提交单独能编、单测全过；各段的整合分支合到自己那一步为止。
 
-**各段的要点**（细节在 14 §2.3~§2.5，这里只列接口性的）
-- M9a：`LocalStatusModel.install(card, {String? path, InstallOptions? options})`，本机提示卡"安装"改成打开对话框，卡片自己不再显示进行中和失败；对话框用 `overlays.show(null, …)`（只遮主页标签），读 `LocalStatusModel` 已有的 `installing`、`installFailure`。四项位置检查在 core，纯函数加一层取系统信息的薄壳，可注入。"修改"从当前位置的上一级开始（14 §1.2）。有会话时那一行看 `appCore.sessions`、`appCore.backgroundCount`、`LocalStatusModel.incoming`，不复用 `serviceAsksFirst`。runner 的 `--install` 分支留着。
-- M9b 视图框架（A）：`session_views.dart` 里按 `ConnType` 的 `switch`，另加 `hasImage`、`usesViewBar`，不建类层次；13 §5.4 的各处加 14 §1.2 补的 5 处。终端（B）：`FFI.start` 在 `sessionAddSync` 之前按 `terminalAdmin` 设 `IS_TERMINAL_ADMIN`，`terminal` 类型登记 `terminal_response`，`close()` 清终端，`ffi_model.dart` 补 `onReady` 的终端一支；终端区给 `TerminalMouseInteraction` 传 Leapgate 的快捷键表（去掉 Ctrl+A、加 Ctrl+Shift+A），会话快捷键在终端区 `onKeyEvent` 里用 `matchShortcut` 先拦；写进终端的提示行经 core 可注入的 `terminalNoteText`。复制件 `terminal_mouse_handler.dart` 的 `TerminalMouseInteraction` 加一个 `theme` 参数传给 `TerminalView`（上游没有这个参数，终端配色接不进去），这个文件因此从原样档改成改写档，来源行注明这一处（2026-11-09 主会话定）。R3-Q15 的"断开终端？"由终端视图自己画在视图上（`TerminalTabs.askDisconnect`），不经 prompter；从没选中的标签点 × 时，A 的 `closeSessionTab` 只在 `terminals.needsDisconnectConfirm` 为真时先切到那个标签再调 `disconnectTerminalView`，不问时直接关、不切标签（2026-11-09 主会话定）。只剩一个终端时 Ctrl+Shift+W 照 13 不起作用（吞掉，不发给远程）。管理员账户的连接面板输入归 A，B 只调 `conn.login`；面板的键用 `viewAdmin` 前缀（属 A 的 `view`）。摄像头（A）：名称在对端信息到了以后取一次，没有时只写编号；"全部摄像头"先做，验收不能用就去掉。
-- M9c（T）：`TunnelsModel` 另起，和出口只共享后台计数、本机端口占用表、抽出的 `CardLogin`（不安全连接按参数分"自动拒绝"（出口）和"问用户"（隧道），抽完先跑出口现有测试）；提问区在没有任何一行还在 `connecting` 时才收起；冲突要等出口卡片移除才解除（14 §1.2、§4.4）。
+**各段的要点**（只列接口性的）
+- M9a：`LocalStatusModel.install(card, {String? path, InstallOptions? options})`，本机提示卡"安装"改成打开对话框，卡片自己不再显示进行中和失败；对话框用 `overlays.show(null, …)`（只遮主页标签），读 `LocalStatusModel` 已有的 `installing`、`installFailure`。四项位置检查在 core，纯函数加一层取系统信息的薄壳，可注入。"修改"从当前位置的上一级开始。有会话时那一行看 `appCore.sessions`、`appCore.backgroundCount`、`LocalStatusModel.incoming`，不复用 `serviceAsksFirst`。runner 的 `--install` 分支留着。
+- M9b 视图框架（A）：`session_views.dart` 里按 `ConnType` 的 `switch`，另加 `hasImage`、`usesViewBar`，不建类层次；用在 13 §5.4 列的各处和另外补的 5 处。终端（B）：`FFI.start` 在 `sessionAddSync` 之前按 `terminalAdmin` 设 `IS_TERMINAL_ADMIN`，`terminal` 类型登记 `terminal_response`，`close()` 清终端，`ffi_model.dart` 补 `onReady` 的终端一支；终端区给 `TerminalMouseInteraction` 传 Leapgate 的快捷键表（去掉 Ctrl+A、加 Ctrl+Shift+A），会话快捷键在终端区 `onKeyEvent` 里用 `matchShortcut` 先拦；写进终端的提示行经 core 可注入的 `terminalNoteText`。复制件 `terminal_mouse_handler.dart` 的 `TerminalMouseInteraction` 加一个 `theme` 参数传给 `TerminalView`（上游没有这个参数，终端配色接不进去），这个文件因此从原样档改成改写档，来源行注明这一处。R3-Q15 的"断开终端？"由终端视图自己画在视图上（`TerminalTabs.askDisconnect`），不经 prompter；从没选中的标签点 × 时，A 的 `closeSessionTab` 只在 `terminals.needsDisconnectConfirm` 为真时先切到那个标签再调 `disconnectTerminalView`，不问时直接关、不切标签。只剩一个终端时 Ctrl+Shift+W 照 13 不起作用（吞掉，不发给远程）。管理员账户的连接面板输入归 A，B 只调 `conn.login`；面板的键用 `viewAdmin` 前缀（属 A 的 `view`）。摄像头（A）：名称在对端信息到了以后取一次，没有时只写编号；"全部摄像头"实测可用时才保留。
+- M9c（T）：`TunnelsModel` 另起，和出口只共享后台计数、本机端口占用表、抽出的 `CardLogin`（不安全连接按参数分"自动拒绝"（出口）和"问用户"（隧道），抽完先跑出口现有测试）；提问区在没有任何一行还在 `connecting` 时才收起；冲突要等出口卡片移除才解除。
 
-**打印机驱动**（M9-4）：`build-client.ps1` 照上游 CI（`.github/workflows/flutter-build.yml` 打印机驱动那一步）下载驱动和适配器两个 zip、按 sha256 核对、解到程序旁的 `drivers/`。I 写好这一步，但不跑下载：第一次带这一步构建之前，主会话把文件名、来源和大小告诉维护者，等点头（2026-11-09 维护者同意，三个文件 34.8 KB、534.6 KB、291 B）。第一次下载后主会话把脚本打印的两个 zip 的 sha256 填进 `scripts/windows/env.ps1` 的 `$LeapgatePins`（`PrinterDriverSha256`、`PrinterAdapterSha256`），之后以它为准，上游换了文件就中止构建。
-- 安装页"修改"的选择框起始位置是已知限制：`file_picker` 5.5.0 在 Windows 上不处理 `initialDirectory`（插件里设置起始文件夹那段是注释掉的 TODO），选择框打开在系统记住的上次位置；第二次打开时系统回到上次选的文件夹（就是上一级）。界面照传 `initialDirectory`、加 `lockParentWindow: true`。13 §4.2 区块 A 已注明（2026-11-09 按 M9a 整体审查定，不自写选择框）。
+**打印机驱动**：`build-client.ps1` 照上游 CI（`.github/workflows/flutter-build.yml` 打印机驱动那一步）下载驱动和适配器两个 zip、按 sha256 核对、解到程序旁的 `drivers/`。两个 zip 的 sha256 钉在 `scripts/windows/env.ps1` 的 `$LeapgatePins`（`PrinterDriverSha256`、`PrinterAdapterSha256`），上游换了文件就中止构建。
+- 安装页"修改"的选择框起始位置是已知限制：`file_picker` 5.5.0 在 Windows 上不处理 `initialDirectory`（插件里设置起始文件夹那段是注释掉的 TODO），选择框打开在系统记住的上次位置；第二次打开时系统回到上次选的文件夹（就是上一级）。界面照传 `initialDirectory`、加 `lockParentWindow: true`。13 §4.2 区块 A 已注明；不自写选择框。
 
-**已知限制**（写进各段验收记录前先照这里）
+**已知限制**
 1. 停止一张走 KCP、隧道在用的卡片，被控端约 20 秒后才关（每条隧道各自 20 秒，并行），同出口（§10.12）。
 2. 停在不安全连接提示时取消或点"断开"，被控端约 30 秒后关，同出口。
 3. 刚停止又马上为同一台设备打开，旧监听可能还没关，新行先报"端口被占用"，再"重试"一次就好。
@@ -2961,4 +1876,4 @@ M9 分三段，各自审查、验收、外观检查、合 main（M9-1）。和�
 6. 查监听表和真正开始监听之间有一个很短的空档，别的程序在这期间开始监听通配地址时认不出来（下次打开卡片时才报）。
 7. `cmdkey /generic:localhost` 全机一个名字（13 §1.7 第 6 条）。
 
-**测试**：14 §5.2 列的各条。合入前：`git diff main -- flutter/` 为空；core analyze 不超出 91 条 info 的基线，app 0 条；复制件不跑格式化，改已有文件不对整个文件跑 `dart format`；新旧界面都要能编（Rust 改了上游 `ui_session_interface.rs` 和出口监听），旧界面的五项冒烟和出口 B15 冒烟照跑。
+**测试**：合入前：`git diff main -- flutter/` 为空；core analyze 不超出 91 条 info 的基线，app 0 条；复制件不跑格式化，改已有文件不对整个文件跑 `dart format`；新旧界面都要能编（Rust 改了上游 `ui_session_interface.rs` 和出口监听），旧界面的五项冒烟和出口 B15 冒烟照跑。
