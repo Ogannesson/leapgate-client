@@ -1,7 +1,9 @@
 import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/bridge.dart';
 import 'package:flutter_hbb/leapgate/session.dart' show ConnType;
+import 'package:flutter_hbb/leapgate/tunnel_api.dart' show TunnelKind;
 
+import '../pages/home/exit/open_tunnel.dart';
 import 'navigation.dart';
 
 // Links and `--connect`: `leapgate.exe --connect <ID>` (with `--password`, `--relay`) and
@@ -9,8 +11,8 @@ import 'navigation.dart';
 // as a `leapgate://` link (`src/core_main.rs` `core_main_invoke_new_connection`, W1); a launch
 // that finds no main window keeps them on its own command line. The parsing follows upstream
 // `flutter/lib/common.dart:2256-2523` (`handleUriLink`, `urlLinkToCmdArgs`). A remote desktop, a
-// file transfer (M8-7), a terminal and a camera view (M9b) open; the TCP tunnel and RDP are
-// logged and say so in a toast.
+// file transfer (M8-7), a terminal and a camera view (M9b) open; the TCP tunnel and RDP open
+// their card (M9c).
 
 /// What a link or `--<kind>` asks to open (`LEAPGATE.md` §10.18).
 enum LinkKind {
@@ -147,8 +149,8 @@ bool handleLaunchArgs(List<String> args, String uriPrefix) {
   return _open(linkArgs);
 }
 
-/// A link that a later launch handed to this window: a view opens, the TCP tunnel and RDP get a
-/// toast. A link that is not a connection is only logged, by
+/// A link that a later launch handed to this window: a view or a tunnel card opens. A link that
+/// is not a connection is only logged, by
 /// scheme and host: the path or the query may hold a password.
 bool handleLink(Uri uri) {
   final args = linkToArgs(uri);
@@ -188,23 +190,15 @@ bool _open(List<String>? args) {
     case LinkKind.camera:
       mainNavigation.openView(link.id, ConnType.viewCamera,
           password: link.password, forceRelay: link.forceRelay);
-    // Until their segment builds them (`LEAPGATE.md` §10.18), these are logged and say so in a
-    // toast.
-    // TODO(M9c): the TCP tunnel and RDP.
+    // The card on the exit page (13 §1.1.2).
     case LinkKind.tcpTunnel || LinkKind.rdp:
-      return _unsupported(link.kind);
+      openTunnel(
+        link.id,
+        link.kind == LinkKind.rdp ? TunnelKind.rdp : TunnelKind.tcp,
+        password: link.password,
+        forceRelay: link.forceRelay,
+      );
   }
   appCore.window.bringToFront();
   return true;
-}
-
-bool _unsupported(LinkKind kind) {
-  lgBind.leapgateLog(
-      level: 3, msg: 'leapgate ui: link not handled: ${kind.name}');
-  appCore.toasts.show(switch (kind) {
-    LinkKind.rdp => 'linkUnsupportedRdp',
-    _ => 'linkUnsupportedPortForward',
-  });
-  appCore.window.bringToFront();
-  return false;
 }

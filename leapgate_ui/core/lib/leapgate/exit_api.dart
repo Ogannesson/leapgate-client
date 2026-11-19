@@ -5,6 +5,7 @@ import 'dart:convert';
 
 import '../common.dart';
 import '../models/platform_model.dart';
+import 'app_core.dart';
 import 'bridge.dart';
 
 /// Why `leapgate_exit_session_add` did not add the session: `already` (the device has an exit or
@@ -112,7 +113,8 @@ class RustExitApi implements ExitApi {
         port: port,
         password: password,
         isSharedPassword: isSharedPassword,
-        connToken: null,
+        // The device's session tab, when it has one, logs the card in (R3-Q7).
+        connToken: appCore.sessions.tokenOf(id),
         forceRelay: false,
       ));
 

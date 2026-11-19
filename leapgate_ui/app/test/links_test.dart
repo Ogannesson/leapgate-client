@@ -111,19 +111,6 @@ void main() {
     expect(navigation.views, isEmpty);
   });
 
-  test('the TCP tunnel and RDP open nothing and say so in a toast', () {
-    for (final (kind, toast) in [
-      ('port-forward', 'linkUnsupportedPortForward'),
-      ('rdp', 'linkUnsupportedRdp'),
-    ]) {
-      expect(handleLink(Uri.parse('leapgate://$kind/100200300')), false);
-      expect(appCore.toasts.current?.key, toast);
-    }
-    expect(navigation.connected, isEmpty);
-    expect(navigation.fileTransfers, isEmpty);
-    expect(navigation.views, isEmpty);
-  });
-
   test('the terminals and the camera open their views with the password and the relay '
       '(13 §2.1.1, §3.1.1)', () {
     expect(handleLink(Uri.parse('leapgate://terminal/100200300')), true);

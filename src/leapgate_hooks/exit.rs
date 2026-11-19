@@ -55,7 +55,7 @@ pub(crate) async fn run<T: InvokeUiSession>(
         return cards::run_card(handler, gen, port, receiver, ctl, key, token).await;
     }
     // A10: loopback only, no SO_REUSEADDR, no other port when this one is taken.
-    let listener = match tcp::new_listener(format!("127.0.0.1:{}", port), false).await {
+    let listener = match listen_local(port).await {
         Ok(listener) => listener,
         Err(err) => {
             handler.on_error(&format!("Failed to listen on {}: {}", port, err));
@@ -92,6 +92,36 @@ pub(crate) async fn run<T: InvokeUiSession>(
             },
         }
     }
+}
+
+/// A10, and M9-3 for exits and tunnels alike: a listener on 127.0.0.1:`port` without
+/// SO_REUSEADDR; a bind refused as access denied (another program's exclusive bind, a reserved
+/// range) is the port taken as well. On Windows that bind succeeds while another program listens
+/// on 0.0.0.0:`port` or [::]:`port`, and local connections would then come here, so such a
+/// listener counts as the port taken too (`leapgate::tunnel::listened_on_all_addresses`; our own
+/// listeners are on 127.0.0.1 only). Elsewhere the specific and the wildcard bind conflict and the
+/// bind alone tells. Port 0 is the system's pick.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub(super) async fn listen_local(port: i32) -> hbb_common::ResultType<tokio::net::TcpListener> {
+    let listener = tcp::new_listener(format!("127.0.0.1:{}", port), false).await?;
+    #[cfg(windows)]
+    if port != 0 {
+        // The bind above took `port`, so it is in range.
+        let port = port as u16;
+        let taken = tokio::task::spawn_blocking(move || {
+            leapgate::tunnel::listened_on_all_addresses(port)
+        })
+        .await
+        .unwrap_or(false);
+        if taken {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AddrInUse,
+                format!("another program listens on port {} for all addresses", port),
+            )
+            .into());
+        }
+    }
+    Ok(listener)
 }
 
 /// One handshaken local connection. Establishing the tunnel is awaited right here, as upstream's
@@ -291,13 +321,48 @@ pub(crate) mod cards {
         conn_token: Option<String>,
         force_relay: bool,
     ) -> String {
-        use crate::flutter::{get_adapter_luid, sessions, FlutterHandler};
         use hbb_common::{rendezvous_proto::ConnType, serde_json::json};
-        use std::sync::{atomic::AtomicUsize, Arc, RwLock};
         if !(1..=65535).contains(&port) {
             return json!({ "error": "invalid_port" }).to_string();
         }
-        if sessions::get_session_by_peer_id(id.to_owned(), ConnType::PORT_FORWARD).is_some() {
+        add_session(
+            session_id,
+            id,
+            ConnType::PORT_FORWARD,
+            vec![
+                port.to_string(),
+                exit::SENTINEL_HOST.to_owned(),
+                exit::SENTINEL_PORT.to_string(),
+            ],
+            password,
+            is_shared_password,
+            conn_token,
+            force_relay,
+            |_| register(id, session_id.to_string()),
+        )
+    }
+
+    /// A card's session, the exit's or a tunnel's (M9c): upstream's `session_add` with `args`
+    /// as given and without `LocalConfig::set_remote_id`. `register` registers the card, given the
+    /// session, once it is known to be good and before it goes into the session table. `{}`, or
+    /// the export's error: `already` (the device has a session of `conn_type`), `invalid_id`,
+    /// `other`.
+    #[cfg(feature = "flutter")]
+    pub(in crate::leapgate_hooks) fn add_session(
+        session_id: &crate::flutter_ffi::SessionID,
+        id: &str,
+        conn_type: hbb_common::rendezvous_proto::ConnType,
+        args: Vec<String>,
+        password: String,
+        is_shared_password: bool,
+        conn_token: Option<String>,
+        force_relay: bool,
+        register: impl FnOnce(&Session<crate::flutter::FlutterHandler>),
+    ) -> String {
+        use crate::flutter::{get_adapter_luid, sessions, FlutterHandler};
+        use hbb_common::serde_json::json;
+        use std::sync::{atomic::AtomicUsize, Arc, RwLock};
+        if sessions::get_session_by_peer_id(id.to_owned(), conn_type).is_some() {
             return json!({ "error": "already" }).to_string();
         }
         if sessions::get_session_by_session_id(session_id).is_some() {
@@ -310,11 +375,7 @@ pub(crate) mod cards {
         };
         let session: Session<FlutterHandler> = Session {
             password: preset_password,
-            args: vec![
-                port.to_string(),
-                exit::SENTINEL_HOST.to_owned(),
-                exit::SENTINEL_PORT.to_string(),
-            ],
+            args,
             server_keyboard_enabled: Arc::new(RwLock::new(true)),
             server_file_transfer_enabled: Arc::new(RwLock::new(true)),
             server_clipboard_enabled: Arc::new(RwLock::new(true)),
@@ -323,7 +384,7 @@ pub(crate) mod cards {
         };
         session.lc.write().unwrap().initialize(
             id.to_owned(),
-            ConnType::PORT_FORWARD,
+            conn_type,
             None,
             force_relay,
             get_adapter_luid(),
@@ -335,8 +396,8 @@ pub(crate) mod cards {
         if session.get_id() != id {
             return json!({ "error": "invalid_id" }).to_string();
         }
-        register(id, session_id.to_string());
-        sessions::insert_session(*session_id, ConnType::PORT_FORWARD, Arc::new(session));
+        register(&session);
+        sessions::insert_session(*session_id, conn_type, Arc::new(session));
         "{}".to_owned()
     }
 
@@ -482,8 +543,11 @@ pub(crate) mod cards {
             let mut waiting = None;
             if !login_now {
                 tokio::select! {
-                    Ok(socket) = accept(&listener) => {
-                        handshake(socket, ready_tx.clone());
+                    accepted = accept(&listener) => {
+                        match accepted {
+                            Ok(socket) => handshake(socket, ready_tx.clone()),
+                            Err(err) => throttled_log!(LOG_INTERVAL, info, "leapgate exit: accept failed: {}", err),
+                        }
                         continue;
                     }
                     Some((mut socket, req)) = ready.recv() => match tunnel.claim() {
@@ -580,7 +644,9 @@ pub(crate) mod cards {
                     let Ok(Some(o)) = res else { continue };
                     let direct = session.get_lch().read().unwrap().direct == Some(true);
                     session.tunnel_up(direct);
-                    log::info!(
+                    throttled_log!(
+                        LOG_INTERVAL,
+                        info,
                         "leapgate exit: card tunnel up ({})",
                         if direct { "direct" } else { "relayed" }
                     );
@@ -676,7 +742,7 @@ pub(crate) mod cards {
 
     /// A10, as `run`.
     async fn listen(port: i32) -> Option<TcpListener> {
-        match tcp::new_listener(format!("127.0.0.1:{}", port), false).await {
+        match listen_local(port).await {
             Ok(listener) => {
                 log::info!("leapgate exit: card listening on 127.0.0.1:{}", port);
                 Some(listener)
@@ -688,7 +754,9 @@ pub(crate) mod cards {
         }
     }
 
-    async fn accept(listener: &Option<TcpListener>) -> std::io::Result<TcpStream> {
+    pub(in crate::leapgate_hooks) async fn accept(
+        listener: &Option<TcpListener>,
+    ) -> std::io::Result<TcpStream> {
         match listener {
             Some(listener) => listener.accept().await.map(|(socket, _)| socket),
             None => std::future::pending().await,
@@ -712,7 +780,8 @@ pub(crate) mod cards {
         });
     }
 
-    async fn loopback_pair() -> std::io::Result<(TcpStream, TcpStream)> {
+    pub(in crate::leapgate_hooks) async fn loopback_pair() -> std::io::Result<(TcpStream, TcpStream)>
+    {
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let ours = TcpStream::connect(listener.local_addr()?).await?;
         let (theirs, _) = listener.accept().await?;

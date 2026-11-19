@@ -108,7 +108,7 @@ void main() {
     await tester.tap(find.text('启动服务').last);
     await _turns(tester);
     expect(find.text('启动服务？'), findsOneWidget);
-    expect(find.text('Leapgate 将关闭并重新打开，所有会话和正在使用的出口都将断开。'), findsOneWidget);
+    expect(find.text('Leapgate 将关闭并重新打开，所有会话和正在使用的出口、隧道都将断开。'), findsOneWidget);
     await tester.tap(find.text('取消'));
     await _turns(tester);
     expect(bind.calls.where((c) => c.memberName == #mainSetOption), isEmpty);

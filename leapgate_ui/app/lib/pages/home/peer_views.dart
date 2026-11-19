@@ -9,6 +9,7 @@ import 'package:flutter_hbb/leapgate/peer_tabs.dart';
 import 'package:flutter_hbb/leapgate/recent_peers.dart';
 import 'package:flutter_hbb/leapgate/session.dart' show ConnType;
 import 'package:flutter_hbb/leapgate/terminal/terminals.dart';
+import 'package:flutter_hbb/leapgate/tunnel_api.dart' show TunnelKind;
 import 'package:flutter_hbb/models/peer_model.dart';
 
 import '../../l10n/app_localizations.dart';
@@ -20,6 +21,8 @@ import '../../widgets/lg_menu.dart';
 import '../../widgets/lg_menu_items.dart';
 import '../peer_platform.dart';
 import 'address_book/address_book.dart';
+import 'exit/open_tunnel.dart';
+import 'exit/rdp_settings_dialog.dart';
 import 'home_dialogs.dart';
 
 // The device cards, the list view rows and the "⋯" menu of the devices page (01 P1 block F).
@@ -269,12 +272,8 @@ List<Widget> peerMenuItems(
     ab: appCore.addressBook.menuFlags(category),
     peerPlatform: item.peer.platform,
   );
-  // The TCP tunnel and RDP items are left out until their segment builds them (`LEAPGATE.md`
-  // §10.18). "用作出口" also needs an ID it can use ([isExitId]; [peerMenu] only looks at the
-  // platform).
+  // "用作出口" also needs an ID it can use ([isExitId]; [peerMenu] only looks at the platform).
   bool built(PeerAction action) => switch (action) {
-    // TODO(M9c): the TCP tunnel and RDP items.
-    PeerAction.tcpTunnel || PeerAction.rdp => false,
     PeerAction.useAsExit => isExitId(id),
     _ => true,
   };
@@ -413,9 +412,25 @@ List<Widget> peerMenuItems(
       onPressed: () =>
           openViewPeer(id, ConnType.viewCamera, category: item.category),
     ),
-    // Left out by [built].
-    // TODO(M9c): the TCP tunnel and RDP items.
-    PeerAction.tcpTunnel || PeerAction.rdp => const SizedBox.shrink(),
+    // The cards on the exit page (13 §1.1.2); the pencil only opens the RDP settings.
+    PeerAction.tcpTunnel => LgMenuItem(
+      label: l10n.tunnelKindTcp,
+      onPressed: () => openTunnel(id, TunnelKind.tcp,
+          name: name == formatPeerId(id) ? null : name,
+          platform: item.peer.platform,
+          category: item.category),
+    ),
+    PeerAction.rdp => LgMenuItem(
+      label: 'RDP',
+      onPressed: () => openTunnel(id, TunnelKind.rdp,
+          name: name == formatPeerId(id) ? null : name,
+          platform: item.peer.platform,
+          category: item.category),
+      trailing: LgMenuRowButton(
+        label: l10n.tunnelRdpSettings,
+        onPressed: () => showRdpSettings(overlays, id, name: name),
+      ),
+    ),
   };
   return [
     for (final group in groups) ...[

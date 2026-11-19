@@ -29,7 +29,7 @@ Future<void> _settle(WidgetTester tester) async {
 
 Future<void> _openExitPage(WidgetTester tester) async {
   await pumpMainWindow(tester);
-  await tester.tap(find.text('出口'));
+  await tester.tap(find.text('出口与隧道'));
   await _settle(tester);
 }
 
@@ -104,9 +104,9 @@ void main() {
         find.textContaining('正在连接 100 200 300…', findRichText: true),
         findsOneWidget,
       );
-      expect(find.bySemanticsLabel('出口，1 个正在使用'), findsOneWidget);
+      expect(find.bySemanticsLabel('出口与隧道，1 个正在使用'), findsOneWidget);
       expect(tester.widget<LgTitleBar>(find.byType(LgTitleBar)).homeBadge, 1);
-      expect(find.bySemanticsLabel('主页，1 个出口正在使用'), findsOneWidget);
+      expect(find.bySemanticsLabel('主页，1 个出口或隧道正在使用'), findsOneWidget);
 
       // Asked for after the user's "Use": the password field takes the keyboard.
       await session(tester, msgbox('input-password', 'Password Required', ''));
@@ -162,13 +162,13 @@ void main() {
       await tester.enterText(_cardField().first, '21181');
       await tester.tap(find.text('确定'));
       await tester.pump();
-      expect(find.text('此端口已被另一个出口使用'), findsOneWidget);
+      expect(find.text('此端口已被另一个出口或隧道使用'), findsOneWidget);
       expect(api.callsTo('setPort'), isEmpty);
       // Esc closes the edit and gives the focus back to "Change port".
       await tester.pump();
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await _settle(tester);
-      expect(find.text('此端口已被另一个出口使用'), findsNothing);
+      expect(find.text('此端口已被另一个出口或隧道使用'), findsNothing);
       expect(
         tester
             .widget<LgButton>(find.widgetWithText(LgButton, '修改端口'))
@@ -183,7 +183,7 @@ void main() {
       await _settle(tester);
       expect(api.callsTo('close'), hasLength(2));
       expect(find.text('暂无正在使用的出口'), findsOneWidget);
-      expect(find.bySemanticsLabel('出口，1 个正在使用'), findsNothing);
+      expect(find.bySemanticsLabel('出口与隧道，1 个正在使用'), findsNothing);
     },
   );
 
@@ -194,11 +194,11 @@ void main() {
     appCore.exitNodes.use(_id);
     await _settle(tester);
     await session(tester, msgbox('wait-remote-accept-nook', '', ''));
-    expect(find.bySemanticsLabel('出口，1 个正在使用，需要处理'), findsOneWidget);
+    expect(find.bySemanticsLabel('出口与隧道，1 个正在使用，需要处理'), findsOneWidget);
 
-    await tester.tap(find.text('出口'));
+    await tester.tap(find.text('出口与隧道'));
     await _settle(tester);
-    expect(find.bySemanticsLabel('出口，1 个正在使用'), findsOneWidget);
+    expect(find.bySemanticsLabel('出口与隧道，1 个正在使用'), findsOneWidget);
     expect(
       find.textContaining('正在等待对方接受…', findRichText: true),
       findsOneWidget,
@@ -245,7 +245,7 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('重试'), findsNothing);
-    expect(find.bySemanticsLabel(RegExp('^出口，')), findsNothing);
+    expect(find.bySemanticsLabel(RegExp('^出口与隧道，')), findsNothing);
 
     await e2(tester, 'port_in_use', {'port': 21180});
     expect(

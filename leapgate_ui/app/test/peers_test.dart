@@ -232,12 +232,16 @@ void main() {
   testWidgets('delete asks first, on the home tab', (tester) async {
     await pumpPeers(tester, recent: [_shufang]);
     await openMenu(tester);
+    // The connection group grew with the third round's kinds (M9) and pushes it below the 600 px
+    // surface.
+    await tester.ensureVisible(find.text('删除').last);
     await tapText(tester, '删除');
     expect(find.text('删除“书房台式机”？'), findsOneWidget);
     await tapText(tester, '取消');
     expect(bind.callsTo(#mainRemovePeer), isEmpty);
 
     await openMenu(tester);
+    await tester.ensureVisible(find.text('删除').last);
     await tapText(tester, '删除');
     await tapText(tester, '删除');
     expect(

@@ -6,6 +6,7 @@ import 'dart:convert';
 import '../common.dart';
 import '../consts.dart';
 import '../models/platform_model.dart';
+import 'bridge.dart';
 
 /// A tunnel card's kind: the TCP tunnel with a device's port forwards, or RDP.
 enum TunnelKind { tcp, rdp }
@@ -50,6 +51,10 @@ abstract interface class TunnelApi {
   /// Block 1 mainGetPeerSync's port_forwards, without the exit sentinel and ports ≤ 0.
   List<TunnelForward> savedForwards(String id);
 
+  /// The local ports of all of the device's port_forwards, the exit sentinel's too: upstream
+  /// `add_port_forward` ignores a port it keeps already (M9c review, 13 §1.3 block B).
+  Set<int> savedLocalPorts(String id);
+
   /// rdp_port, rdp_username, rdp_password with mainGetPeerOption / mainSetPeerOption.
   RdpSettings rdpSettings(String id);
   Future<void> setRdpSettings(String id, RdpSettings settings);
@@ -59,29 +64,42 @@ abstract interface class TunnelApi {
 TunnelApi tunnelApi = const RustTunnelApi();
 
 // ---------------------------------------------------------------------------------------------
-// Above: the interface (step 0, unchanged by the lanes). Below: coder T's; block 2's calls are
-// put in when M9c is integrated.
+// Above: the interface (step 0, unchanged by the lanes). Below: coder T's.
 
-/// Blocks 1 and 2. Block 2's exports come with the Rust lane; until the bridge is generated
-/// again they throw.
+/// Blocks 1 and 2.
 class RustTunnelApi implements TunnelApi {
   const RustTunnelApi();
 
+  /// `{}` is null; otherwise the error code and Rust's text.
   @override
   TunnelAddError? sessionAdd(SessionID sessionId, String id, TunnelKind kind,
-          {String password = '',
-          bool isSharedPassword = false,
-          String? connToken,
-          bool forceRelay = false}) =>
-      throw UnimplementedError('TODO(M9 整合)');
+      {String password = '',
+      bool isSharedPassword = false,
+      String? connToken,
+      bool forceRelay = false}) {
+    final m = jsonDecode(lgBind.leapgateTunnelSessionAdd(
+      sessionId: sessionId,
+      id: id,
+      rdp: kind == TunnelKind.rdp,
+      password: password,
+      isSharedPassword: isSharedPassword,
+      connToken: connToken,
+      forceRelay: forceRelay,
+    )) as Map<String, dynamic>;
+    final code = m['error'];
+    return code == null
+        ? null
+        : TunnelAddError(code as String, (m['text'] as String?) ?? '');
+  }
 
   @override
-  Stream<Map<String, dynamic>> events() =>
-      throw UnimplementedError('TODO(M9 整合)');
+  Stream<Map<String, dynamic>> events() => lgBind
+      .leapgateTunnelEvents()
+      .map((e) => jsonDecode(e) as Map<String, dynamic>);
 
   @override
   bool retry(SessionID sessionId, int port) =>
-      throw UnimplementedError('TODO(M9 整合)');
+      lgBind.leapgateTunnelRetry(sessionId: sessionId, port: port);
 
   @override
   Future<void> addForward(
@@ -107,6 +125,10 @@ class RustTunnelApi implements TunnelApi {
   @override
   List<TunnelForward> savedForwards(String id) =>
       parseSavedForwards(bind.mainGetPeerSync(id: id));
+
+  @override
+  Set<int> savedLocalPorts(String id) =>
+      parseSavedLocalPorts(bind.mainGetPeerSync(id: id));
 
   @override
   RdpSettings rdpSettings(String id) => (
@@ -158,5 +180,22 @@ List<TunnelForward> parseSavedForwards(String json) {
     return const [];
   } on TypeError {
     return const [];
+  }
+}
+
+/// The local port of every entry of `mainGetPeerSync`'s `port_forwards`, as upstream
+/// `add_port_forward` compares them: the exit mapping and ports ≤ 0 included. Empty when the JSON
+/// is not of that shape.
+Set<int> parseSavedLocalPorts(String json) {
+  try {
+    final config = jsonDecode(json) as Map<String, dynamic>;
+    return {
+      for (final e in config['port_forwards'] as List? ?? const [])
+        if (e is List && e.isNotEmpty && e[0] is int) e[0] as int,
+    };
+  } on FormatException {
+    return const {};
+  } on TypeError {
+    return const {};
   }
 }

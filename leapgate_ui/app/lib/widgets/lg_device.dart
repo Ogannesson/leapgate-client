@@ -42,10 +42,15 @@ class LgDeviceAvatar extends StatelessWidget {
     required this.platform,
     this.size = 44,
     this.tile = true,
+    this.icon,
   });
 
   final String id;
   final LgPlatform platform;
+
+  /// Another icon on the same tile (the RDP settings dialog's `i-rdp`); the
+  /// platform's by default.
+  final LgIcons? icon;
 
   /// Edge of the tile; with [tile] false the size of the icon.
   final double size;
@@ -56,8 +61,8 @@ class LgDeviceAvatar extends StatelessWidget {
     final identity = LgTokens.of(
       context,
     ).colors.identity[identityGroup(id.replaceAll(' ', ''))];
-    final icon = lgPlatformIcon(platform);
-    if (!tile) return LgIcon(icon, size: size, color: identity.ink);
+    final shown = icon ?? lgPlatformIcon(platform);
+    if (!tile) return LgIcon(shown, size: size, color: identity.ink);
     return Container(
       width: size,
       height: size,
@@ -68,7 +73,7 @@ class LgDeviceAvatar extends StatelessWidget {
           size >= 40 ? LgRadius.r12 : LgRadius.r10,
         ),
       ),
-      child: LgIcon(icon, size: size >= 40 ? 24 : 20, color: identity.ink),
+      child: LgIcon(shown, size: size >= 40 ? 24 : 20, color: identity.ink),
     );
   }
 }

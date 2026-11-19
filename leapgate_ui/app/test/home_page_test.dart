@@ -218,9 +218,9 @@ void main() {
     await pumpHome(tester, id: '135792468');
     // "设备" is both the selected nav item and the page title.
     expect(find.text('设备'), findsNWidgets(2));
-    await tester.tap(find.text('出口'));
+    await tester.tap(find.text('出口与隧道'));
     await tester.pump();
-    expect(find.text('出口'), findsNWidgets(2));
+    expect(find.text('出口与隧道'), findsNWidgets(2));
     expect(find.text('设备'), findsOneWidget);
     await unmount(tester);
   });
@@ -301,7 +301,7 @@ void main() {
         await tester.pump();
         final viewport = tester.getRect(column);
         final login = tester.getRect(find.text('登录'));
-        for (final label in ['设备', '出口', '设置']) {
+        for (final label in ['设备', '出口与隧道', '设置']) {
           final item = tester.getRect(
             find.descendant(of: column, matching: find.text(label)),
           );
@@ -309,9 +309,9 @@ void main() {
           expect(viewport.contains(item.bottomRight), isTrue, reason: label);
           expect(item.bottom, lessThanOrEqualTo(login.top), reason: label);
         }
-        await tester.tap(find.text('出口'));
+        await tester.tap(find.text('出口与隧道'));
         await tester.pump();
-        expect(find.text('出口'), findsNWidgets(2));
+        expect(find.text('出口与隧道'), findsNWidgets(2));
         await unmount(tester);
       });
     }

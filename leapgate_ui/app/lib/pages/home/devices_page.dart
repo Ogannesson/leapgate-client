@@ -13,6 +13,7 @@ import 'package:flutter_hbb/leapgate/peer_list.dart';
 import 'package:flutter_hbb/leapgate/peer_tabs.dart';
 import 'package:flutter_hbb/leapgate/recent_peers.dart';
 import 'package:flutter_hbb/leapgate/session.dart' show ConnType;
+import 'package:flutter_hbb/leapgate/tunnel_api.dart' show TunnelKind;
 import 'package:flutter_hbb/leapgate/ui_mode.dart';
 import 'package:flutter_hbb/models/peer_model.dart';
 import 'package:window_manager/window_manager.dart';
@@ -32,6 +33,7 @@ import '../../widgets/lg_menu_items.dart';
 import '../../widgets/lg_selection.dart';
 import 'account_category.dart';
 import 'address_book/address_book.dart';
+import 'exit/open_tunnel.dart';
 import 'group/group.dart';
 import 'home_dialogs.dart';
 import 'peer_views.dart';
@@ -295,6 +297,21 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
         : null;
   }
 
+  /// What "TCP 隧道" and "RDP" in the "Connect" menu open: the current row, as [_runCurrent]
+  /// (13 §1.1.2); null without one.
+  ({String id, PeerCategory? category})? _target() {
+    final found = _search;
+    final search = found?.search;
+    final row = _currentRow(search);
+    if (row == null) return null;
+    if (search == null) {
+      return (id: _rowIds(null)[row], category: _tabs.current);
+    }
+    if (row == 0) return (id: _input, category: null);
+    final id = search.matches[row - 1].id;
+    return (id: id, category: found!.sources[id]);
+  }
+
   /// The platform of the current row's device, for the "Connect" menu ([connectMenu]); empty
   /// for typed text and without a row.
   String _currentPlatform() {
@@ -456,9 +473,19 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
                 checked: false,
                 onPressed: () => _runCurrent(view: ConnType.viewCamera),
               ),
-              // TODO(M9c): TCP tunnel, RDP (`LEAPGATE.md` §10.18).
-              PeerAction.tcpTunnel => null,
-              PeerAction.rdp => null,
+              PeerAction.tcpTunnel || PeerAction.rdp => switch (_target()) {
+                final target? => LgMenuItem(
+                  label: action == PeerAction.rdp ? 'RDP' : l10n.tunnelKindTcp,
+                  checked: false,
+                  onPressed: () => openTunnel(
+                    target.id,
+                    action == PeerAction.rdp ? TunnelKind.rdp : TunnelKind.tcp,
+                    platform: _currentPlatform(),
+                    category: target.category,
+                  ),
+                ),
+                null => null,
+              },
               _ => null,
             },
         ],
@@ -779,9 +806,14 @@ class _DevicesPageState extends State<DevicesPage> with WindowListener {
                       onPressed: () =>
                           _connect(_input, view: ConnType.viewCamera),
                     ),
-                    // TODO(M9c): TCP tunnel, RDP (`LEAPGATE.md` §10.18).
-                    PeerAction.tcpTunnel => null,
-                    PeerAction.rdp => null,
+                    PeerAction.tcpTunnel => LgMenuItem(
+                      label: l10n.tunnelKindTcp,
+                      onPressed: () => openTunnel(_input, TunnelKind.tcp),
+                    ),
+                    PeerAction.rdp => LgMenuItem(
+                      label: 'RDP',
+                      onPressed: () => openTunnel(_input, TunnelKind.rdp),
+                    ),
                     _ => null,
                   },
               ],

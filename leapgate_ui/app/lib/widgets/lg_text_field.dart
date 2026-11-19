@@ -68,6 +68,7 @@ class LgTextField extends StatefulWidget {
     this.inputFormatters = const [],
     this.showErrorText = true,
     this.quiet = false,
+    this.bodyText = false,
   });
 
   final TextEditingController? controller;
@@ -110,6 +111,10 @@ class LgTextField extends StatefulWidget {
   /// rest it is a tint of the window's ground with no frame; focused or with an error it is the
   /// ordinary field; its corners are 10 where the ordinary field's are 12. Best with [dense].
   final bool quiet;
+
+  /// With [dense]: the body text (15/22) instead of the medium text (14/20), in a button-high
+  /// field: the three fields of the add row of a tunnel card (`.fl-add .field`).
+  final bool bodyText;
 
   @override
   State<LgTextField> createState() => _LgTextFieldState();
@@ -173,7 +178,7 @@ class _LgTextFieldState extends State<LgTextField> {
       border = Border.all(color: c.borderStrong, width: 1.5);
     }
     final atRest = widget.quiet && !focused && !error;
-    final base = widget.dense ? t.textM : t.text;
+    final base = widget.dense && !widget.bodyText ? t.textM : t.text;
     final form = LgFormFieldInfo.maybeOf(context);
     final named = widget.semanticLabel != null || form != null;
     final flat = !widget.enabled && LgDialogFields.of(context);

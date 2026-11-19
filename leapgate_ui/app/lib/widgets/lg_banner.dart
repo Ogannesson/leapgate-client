@@ -42,6 +42,7 @@ class LgBanner extends StatelessWidget {
     this.slim = false,
     this.dense = false,
     this.medium = false,
+    this.compact = false,
     this.actionLabel,
     this.onAction,
     this.actionIcon,
@@ -73,8 +74,12 @@ class LgBanner extends StatelessWidget {
   final bool dense;
 
   /// The medium text (14/20) without [dense]'s tighter padding: the banners inside the install
-  /// dialog (`.ibody .bnr`, `A-P11-安装.html`) and under a tunnel's forward (`.fl-n .bnr`).
+  /// dialog (`.ibody .bnr`, `A-P11-安装.html`).
   final bool medium;
+
+  /// The note under one forward of a tunnel card (`.fl-n .bnr`, `A-P8-隧道.html`): 8 px above and
+  /// under, 12 at the sides, a 20 px icon and the body text, with [slim].
+  final bool compact;
 
   /// The button at the end ("重试"); [actionIcon] goes before its label.
   final String? actionLabel;
@@ -102,8 +107,8 @@ class LgBanner extends StatelessWidget {
       child: Container(
         padding: slim
             ? EdgeInsets.symmetric(
-                horizontal: LgSpace.s4,
-                vertical: dense ? LgSpace.s2 : LgSpace.s3,
+                horizontal: compact ? LgSpace.s3 : LgSpace.s4,
+                vertical: dense || compact ? LgSpace.s2 : LgSpace.s3,
               )
             : const EdgeInsets.all(LgSpace.s4),
         decoration: BoxDecoration(
@@ -119,7 +124,7 @@ class LgBanner extends StatelessWidget {
               padding: EdgeInsets.only(top: slim ? 0 : 1),
               child: LgIcon(
                 icon ?? lgToneIcon(tone),
-                size: 22,
+                size: compact ? 20 : 22,
                 color: lgToneColor(c, tone),
               ),
             ),

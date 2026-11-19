@@ -15,6 +15,8 @@ import 'prompts.dart';
 import 'recent_peers.dart';
 import 'session_events.dart';
 import 'session_registry.dart';
+import 'tunnel_api.dart';
+import 'tunnels.dart';
 
 /// What exists once per process (03 §3.3 item 2). Upstream built the global models inside
 /// every session object (`models/model.dart:4068-4097`), timers included; here the app holds
@@ -58,16 +60,20 @@ class AppCore {
   late final exitDirectory = ExitDirectoryModel(exitApi);
   late final exitNodes = ExitNodesModel(exitApi);
 
+  /// The tunnel cards of the same page (M9c, `LEAPGATE.md` §10.18).
+  late final tunnels = TunnelsModel(tunnelApi);
+
   /// What runs on the home tab's exit page (M9, `LEAPGATE.md` §10.18): the number in the
-  /// navigation and on the home tab, the close and service confirmations. Only the exit nodes
-  /// until M9c adds the tunnels.
-  int get backgroundCount => exitNodes.runningCount;
+  /// navigation and on the home tab, the close and service confirmations; exit and tunnel cards.
+  int get backgroundCount => exitNodes.runningCount + tunnels.runningCount;
 
   /// One of them waits for the user.
-  bool get backgroundAttention => exitNodes.needsAttention;
+  bool get backgroundAttention =>
+      exitNodes.needsAttention || tunnels.needsAttention;
 
   /// Notifies when [backgroundCount] or [backgroundAttention] may have changed.
-  Listenable get backgroundListenable => exitNodes;
+  late final Listenable backgroundListenable =
+      Listenable.merge([exitNodes, tunnels]);
 
   /// The global event stream's table. The connection manager (M3) and the address book (M4)
   /// register their events here, not on a session's.
