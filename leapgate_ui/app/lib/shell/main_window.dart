@@ -139,13 +139,18 @@ class _MainWindowState extends State<MainWindow>
     _current.removeWhere((d, _) => !devices.contains(d));
     _devices = devices;
     _keepDisplayOn();
-    // The remote desktop in full screen closed and its tab now shows the file view, which has
-    // no way out of full screen.
+    // Full screen belongs to the view it was entered in, the one the tab showed: once that
+    // view closed, full screen ends whatever the tab shows now (13 §2.2.2 block I).
     if (selected != null &&
         selected == _selected &&
         stateGlobal.fullscreen.isTrue &&
-        isFileView(_currentOf(selected))) {
+        _current[selected] != null &&
+        !appCore.sessions.sessionsOf(selected).contains(_current[selected])) {
       stateGlobal.setFullscreen(false);
+    }
+    // A tab whose view closed shows its first one, and that is the view it shows from now on.
+    for (final d in devices) {
+      _current[d] = _currentOf(d);
     }
     _select(selected);
   }
@@ -182,8 +187,8 @@ class _MainWindowState extends State<MainWindow>
   }
 
   /// Shows [view] in its tab and selects the tab: a view just opened, or one picked in the view
-  /// switch. Full screen belongs to the remote desktop view, and an IME composition to the view
-  /// being left, as for a tab ([_select]).
+  /// switch. Full screen belongs to the view it was entered in, and an IME composition to the
+  /// view being left, as for a tab ([_select]).
   void _show(FFI view) {
     if (_selected == view.id && _currentOf(view.id) != view) {
       if (stateGlobal.fullscreen.isTrue) stateGlobal.setFullscreen(false);
@@ -299,8 +304,8 @@ class _MainWindowState extends State<MainWindow>
   /// The tab's status mark and hover content (01 §2.1, P2 block A), over the tab's [views]: the
   /// worst of them shows, an error first, then "connecting", then the connection method
   /// (unencrypted worst, relayed next); the hover has a line per view with its method. Unread
-  /// messages are the remote desktop's; the ring and the reminder mark are the file transfer's
-  /// (02 §3.2).
+  /// messages are the remote desktop's and the camera's together (R3-Q17); the ring and the
+  /// reminder mark are the file transfer's (02 §3.2).
   LgSessionTab _tabOf(List<FFI> views, AppLocalizations l10n) {
     final s = views.first;
     final name = deviceName(s);
@@ -346,7 +351,7 @@ class _MainWindowState extends State<MainWindow>
           routed.every((v) => v.connection.secure != false),
           worstOnly: true);
     }
-    final remote = views.where((v) => !isFileView(v)).firstOrNull;
+    final unread = views.where(hasImage).fold(0, (n, v) => n + tabUnread(v));
     final files = views.where(isFileView).firstOrNull;
     final summary =
         files == null ? null : fileTransferFor(files).jobs.summary;
@@ -354,7 +359,7 @@ class _MainWindowState extends State<MainWindow>
       name: name,
       identity: identityGroup(s.id),
       status: status,
-      unread: remote == null ? 0 : tabUnread(remote),
+      unread: unread,
       disconnected: disconnected,
       progress: summary?.progress,
       alert: (summary?.waitingConfirm ?? 0) > 0,
@@ -365,7 +370,7 @@ class _MainWindowState extends State<MainWindow>
         views: [
           for (final v in routed)
             (
-              viewName(l10n, v.connType),
+              viewName(l10n, v.connType, terminalAdmin: v.terminalAdmin),
               mark(v.connection.direct!, v.connection.secure != false)
             ),
         ],
@@ -481,9 +486,9 @@ class _MainWindowState extends State<MainWindow>
     return TabShortcuts(
       onNext: () => _selectBy(1),
       onPrevious: () => _selectBy(-1),
-      // The file transfer view has no session shortcuts of its own; the remote desktop's
-      // "关闭标签" is its session's (`toolbar/session_shortcuts.dart`).
-      onCloseTab: selected != null && isFileView(_currentOf(selected))
+      // The file transfer and terminal views have no session shortcuts of their own; the image
+      // views' "关闭标签" is their session's (`toolbar/session_shortcuts.dart`).
+      onCloseTab: selected != null && usesViewBar(_currentOf(selected))
           ? () => _closeTab(selected)
           : null,
       child: Scaffold(

@@ -28,8 +28,10 @@ const kNoticeDuration = Duration(seconds: 5);
 final _logged = <String>{};
 
 /// The text of a notice: 01 P2 block E's where it has one, otherwise upstream's text through
-/// Rust's translation, logged once per key so the missing copy shows up.
-String noticeText(AppLocalizations l10n, SessionNotice notice) {
+/// Rust's translation, logged once per key so the missing copy shows up. In a camera view
+/// ([camera]) the monitors of the screenshot notice are cameras (13 §3.2 block E).
+String noticeText(AppLocalizations l10n, SessionNotice notice,
+    {bool camera = false}) {
   switch (notice.args['type']) {
     case 'on-uac':
       return l10n.sessionNoticeUac;
@@ -42,7 +44,7 @@ String noticeText(AppLocalizations l10n, SessionNotice notice) {
   }
   if (notice.tag == kNoticeTagScreenshotFailed) {
     return notice.key == 'screenshot-merged-screen-not-supported-tip'
-        ? l10n.noticeScreenshotAllMonitors
+        ? (camera ? l10n.camScreenshotAll : l10n.noticeScreenshotAllMonitors)
         : l10n.noticeScreenshotFailed(translate(notice.key));
   }
   if (notice.key == kNoticePermissionRevoked) {
@@ -297,7 +299,8 @@ class _SessionNoticesViewState extends State<SessionNoticesView> {
         for (final n in items)
           LgNotice(
             id: '${identityHashCode(n)}',
-            text: noticeText(l10n, n),
+            text: noticeText(l10n, n,
+                camera: widget.ffi.connType == ConnType.viewCamera),
             tone: _toneOf(n),
             icon: (n.tag ?? '').startsWith(kNoticeTagPrinterPrefix)
                 ? LgIcons.printer

@@ -396,6 +396,8 @@ class FfiModel with ChangeNotifier {
     }
     if (connType == ConnType.fileTransfer) {
       parent.target?.fileModel.onReady();
+    } else if (connType == ConnType.terminal) {
+      parent.target?.terminals?.onReady();
     } else if (connType == ConnType.defaultConn ||
         connType == ConnType.viewCamera) {
       List<Display> newDisplays = [];

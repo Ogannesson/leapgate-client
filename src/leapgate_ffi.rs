@@ -444,3 +444,20 @@ pub fn leapgate_install(
     let options = leapgate::install::options(start_menu, desktop_shortcut, printer);
     crate::leapgate_hooks::install::install(&kind, &path, &options)
 }
+
+// ---- M9 ----
+// `LEAPGATE.md` §10.18.
+
+/// M9b: the names of the peer's displays (its cameras in a camera session), in display order, as
+/// a JSON array of strings; `[]` without the session or before its login. Read once the peer info
+/// has come.
+pub fn leapgate_session_display_names(session_id: SessionID) -> SyncReturn<String> {
+    let names = crate::flutter::sessions::get_session_by_session_id(&session_id).and_then(|s| {
+        let lc = s.lc.read().unwrap();
+        let pi = lc.peer_info.as_ref()?;
+        Some(leapgate::session::display_names(
+            pi.displays.iter().map(|d| d.name.as_str()),
+        ))
+    });
+    SyncReturn(names.unwrap_or_else(|| "[]".to_owned()))
+}

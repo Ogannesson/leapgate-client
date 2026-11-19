@@ -13,6 +13,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_hbb/leapgate/identity_color.dart';
+import 'package:xterm/xterm.dart' as xterm;
 
 import 'icons/lg_icon.dart';
 import 'theme/lg_theme.dart';
@@ -71,6 +72,9 @@ import 'widgets/lg_status.dart';
 import 'widgets/lg_tab_tip.dart';
 import 'widgets/lg_tag_chips.dart';
 import 'widgets/lg_tag_color_dialog.dart';
+import 'widgets/lg_term_tabs.dart';
+import 'widgets/lg_terminal_parts.dart';
+import 'widgets/lg_terminal_theme.dart';
 import 'widgets/lg_text_field.dart';
 import 'widgets/lg_title_bar.dart';
 import 'widgets/lg_tooltip.dart';

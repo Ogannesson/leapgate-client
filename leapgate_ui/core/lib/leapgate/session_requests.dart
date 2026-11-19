@@ -40,6 +40,10 @@ const kRevocablePermissions = [
   'privacy_mode',
 ];
 
+/// The ones of a camera session: the remote device's CM gives it only these two, and withholds
+/// the keyboard only after the login, which is no revocation (13 §3.2 block H, §3.7 item 1).
+const kCameraRevocablePermissions = ['audio', 'recording'];
+
 /// Upstream's screenshot cool-down (`common/widgets/toolbar.dart:769`).
 const kScreenshotCooldown = Duration(seconds: 30);
 
@@ -214,7 +218,9 @@ class SessionRequests {
     final now = Map.of(_ffi.ffiModel.permissions);
     final stage = _ffi.connection.stage;
     if (stage == ConnStage.waitingForImage || stage == ConnStage.connected) {
-      for (final p in kRevocablePermissions) {
+      for (final p in _ffi.connType == ConnType.viewCamera
+          ? kCameraRevocablePermissions
+          : kRevocablePermissions) {
         if (_permissions[p] != false && now[p] == false) {
           _notices.add(SessionNotice(kNoticePermissionRevoked,
               args: {'permission': p}, tag: '$kNoticeTagPermissionPrefix$p'));

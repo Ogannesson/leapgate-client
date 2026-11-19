@@ -2,6 +2,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/leapgate/local_status.dart';
+import 'package:flutter_hbb/leapgate/session.dart' show ConnType;
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:leapgate_ui/shell/navigation.dart';
@@ -352,6 +353,24 @@ void main() {
       await tester.tap(find.text('经中继连接'));
       await tester.pump();
       expect(nav.connects, [(id: '246813579', forceRelay: true)]);
+      await unmount(tester);
+    }, variant: _windows);
+
+    testWidgets('the terminal and the camera in the menu (13 §2.1.1, §3.1.1)', (
+      tester,
+    ) async {
+      await pumpDevices(tester);
+      await type(tester, '246813579');
+      for (final label in ['终端', '摄像头']) {
+        await tester.tap(find.bySemanticsLabel('连接方式'));
+        await tester.pump();
+        await tester.tap(find.text(label));
+        await tester.pump();
+      }
+      expect(nav.views, [
+        (id: '246813579', kind: ConnType.terminal, terminalAdmin: false),
+        (id: '246813579', kind: ConnType.viewCamera, terminalAdmin: false),
+      ]);
       await unmount(tester);
     }, variant: _windows);
 

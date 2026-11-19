@@ -82,6 +82,7 @@ class LgToolbarButton extends StatelessWidget {
     this.danger = false,
     this.dim = false,
     this.semanticLabel,
+    this.recordingText,
   });
 
   final LgIcons icon;
@@ -93,19 +94,32 @@ class LgToolbarButton extends StatelessWidget {
   final bool dim;
   final String? semanticLabel;
 
+  /// The button of a recording that is on (`.ti.rec` of `A-P10-摄像头.html`): the ground in the
+  /// error colour's tint, the icon in the error colour, and this text after it in bold: the
+  /// time recorded so far ("00:42"), so that the state is not told by colour alone. [label] is
+  /// still the name and the tooltip ("停止录制") and [semanticLabel] may add the time.
+  final String? recordingText;
+
   @override
   Widget build(BuildContext context) {
     final t = LgTokens.of(context);
     final c = t.colors;
     final on = toggled == true;
+    final recording = recordingText != null;
     final button = LgPressable(
       onPressed: onPressed,
       semanticLabel: semanticLabel ?? label,
       toggled: toggled,
       builder: (context, states) {
         final overlay = lgStateOverlay(c, states);
-        final base = on ? c.active : null;
-        final fg = on
+        final base = recording
+            ? c.errorBg
+            : on
+            ? c.active
+            : null;
+        final fg = recording
+            ? c.error
+            : on
             ? c.accent
             : danger
             ? c.error
@@ -121,7 +135,7 @@ class LgToolbarButton extends StatelessWidget {
             child: Container(
               height: t.sizes.tool,
               constraints: BoxConstraints(minWidth: t.sizes.tool),
-              padding: showText
+              padding: showText || recording
                   ? EdgeInsets.symmetric(horizontal: t.sizes.toolPad)
                   : null,
               alignment: Alignment.center,
@@ -136,15 +150,18 @@ class LgToolbarButton extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     LgIcon(icon, size: t.sizes.icon, color: fg),
-                    if (showText) ...[
-                      SizedBox(width: t.sizes.toolGap),
+                    if (showText || recording) ...[
+                      // `.ti.rec{gap:4px}`
+                      SizedBox(width: recording ? LgSpace.s1 : t.sizes.toolGap),
                       Text(
-                        label,
+                        recordingText ?? label,
                         maxLines: 1,
                         softWrap: false,
                         style: t.text.copyWith(
                           color: fg,
-                          fontWeight: on ? FontWeight.w700 : FontWeight.w400,
+                          fontWeight: on || recording
+                              ? FontWeight.w700
+                              : FontWeight.w400,
                         ),
                       ),
                     ],
@@ -169,22 +186,47 @@ class LgToolbarTextButton extends StatelessWidget {
     required this.onPressed,
     required this.semanticLabel,
     this.selected = false,
-  });
+    this.tooltip,
+    this.tooltipNote,
+  }) : assert(tooltipNote == null || tooltip != null);
 
   final String label;
   final VoidCallback? onPressed;
 
-  /// Its name for a screen reader ("显示器 2").
+  /// Its name for a screen reader ("显示器 2"; "摄像头 1，Integrated Camera").
   final String semanticLabel;
   final bool selected;
+
+  /// What the pointer shows, when that is not [semanticLabel]. Without it the hover text is
+  /// [semanticLabel], one plain line, as it was. With it the hover text is [tooltip] in bold
+  /// ("摄像头 1", `.tip b` of `p10-cam-tiles`) and, only when [tooltipNote] is given, a second
+  /// line under it in small second-colour text (the camera's name). The reader still gets
+  /// [semanticLabel] alone.
+  final String? tooltip;
+  final String? tooltipNote;
 
   @override
   Widget build(BuildContext context) {
     final t = LgTokens.of(context);
     final c = t.colors;
     final radius = BorderRadius.circular(LgRadius.r12);
+    final hover = tooltip == null
+        ? null
+        : Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                tooltip!,
+                style: t.text.copyWith(fontWeight: FontWeight.w700),
+              ),
+              if (tooltipNote != null)
+                Text(tooltipNote!, style: TextStyle(color: c.text2)),
+            ],
+          );
     return LgTooltip(
-      message: semanticLabel,
+      message: hover == null ? semanticLabel : null,
+      content: hover,
       child: LgPressable(
         onPressed: onPressed,
         semanticLabel: semanticLabel,

@@ -3,6 +3,7 @@ import 'package:flutter_hbb/leapgate/app_core.dart';
 import 'package:flutter_hbb/leapgate/connection.dart';
 import 'package:flutter_hbb/leapgate/file_transfer/jobs.dart';
 import 'package:flutter_hbb/leapgate/file_transfer/pane.dart';
+import 'package:flutter_hbb/leapgate/peer_list.dart' show PeerAction, connectMenu;
 import 'package:flutter_hbb/leapgate/prompts.dart';
 import 'package:flutter_hbb/leapgate/session.dart';
 
@@ -19,16 +20,58 @@ import '../widgets/lg_menu.dart';
 import '../widgets/lg_session_toolbar.dart';
 import '../widgets/lg_status.dart';
 import 'navigation.dart';
+import 'tab_menu.dart';
 import 'tab_overlays.dart';
 
 // The views of one session tab (01 §2.1 "会话标签的内容", §3.2 block A; `LEAPGATE.md` §10.15
-// "外壳和文件视图的接口"): the remote desktop and the file transfer of one device, one shown at a
-// time. M7a opens these two kinds; the terminal and the camera are round 3.
+// "外壳和文件视图的接口", §10.18): the remote desktop, file transfer, terminal and camera of one
+// device, one shown at a time (13 §0.4 ②).
 
 /// The file transfer model of a `ConnType.fileTransfer` view; tests set fakes.
 FileTransferModel Function(FFI view) fileTransferFor = fileTransferOf;
 
 bool isFileView(FFI view) => view.connType == ConnType.fileTransfer;
+
+/// A view whose content is the remote image: the floating toolbar, full screen and a chat of its
+/// own (13 §0.4 ③). The remote desktop and the camera.
+bool hasImage(FFI view) => switch (view.connType) {
+  ConnType.defaultConn || ConnType.viewCamera => true,
+  _ => false,
+};
+
+/// A view with the view title bar (`LgViewBar`): the file transfer and the terminal.
+bool usesViewBar(FFI view) => switch (view.connType) {
+  ConnType.fileTransfer || ConnType.terminal => true,
+  _ => false,
+};
+
+/// The kinds of view the tab of device [id] offers, in the view switch's order: the terminal
+/// and the camera only where the remote platform is not known to lack them (R3-Q12, the device
+/// menu's rule); the platform is known once a view of the tab has its peer info. A view that is
+/// open stays listed.
+List<ConnType> viewKinds(String id) {
+  final views = appCore.sessions.sessionsOf(id);
+  final platform = views
+      .map((v) => v.ffiModel.pi.platform)
+      .firstWhere((p) => p.isNotEmpty, orElse: () => '');
+  final offered = connectMenu(platform);
+  bool open(ConnType kind) => views.any((v) => v.connType == kind);
+  return [
+    ConnType.defaultConn,
+    ConnType.fileTransfer,
+    if (offered.contains(PeerAction.terminal) || open(ConnType.terminal))
+      ConnType.terminal,
+    if (offered.contains(PeerAction.camera) || open(ConnType.viewCamera))
+      ConnType.viewCamera,
+  ];
+}
+
+LgIcons viewIcon(ConnType type) => switch (type) {
+  ConnType.fileTransfer => LgIcons.files,
+  ConnType.terminal => LgIcons.terminal,
+  ConnType.viewCamera => LgIcons.camera,
+  _ => LgIcons.monitor,
+};
 
 /// Queued, counting, in progress and waiting for confirmation, over the file transfer views of
 /// [views]: the "‹N› 个传输尚未完成" of the close confirmations (02 §3.1).
@@ -36,11 +79,19 @@ int unfinishedTransfers(Iterable<FFI> views) => views
     .where(isFileView)
     .fold(0, (n, v) => n + fileTransferFor(v).jobs.unfinished);
 
-/// The name of a view in the view switch and the tab's hover.
-String viewName(AppLocalizations l10n, ConnType type) =>
-    type == ConnType.fileTransfer
-    ? l10n.ftFileTransfer
-    : l10n.toolbarRemoteDesktop;
+/// The name of a view in the view switch and the tab's hover; [terminalAdmin] names the
+/// administrator terminal (13 §2.2.2 block A).
+String viewName(
+  AppLocalizations l10n,
+  ConnType type, {
+  bool terminalAdmin = false,
+}) => switch (type) {
+  ConnType.fileTransfer => l10n.ftFileTransfer,
+  ConnType.terminal =>
+    terminalAdmin ? l10n.viewTerminalAdmin : l10n.viewTerminal,
+  ConnType.viewCamera => l10n.viewCamera,
+  _ => l10n.toolbarRemoteDesktop,
+};
 
 /// What the transfer ring or the reminder mark of [summary] means to a screen reader ("文件传输
 /// 45%", "有替换确认等待处理"), on the tab and the view switch; null when neither shows.
@@ -90,31 +141,33 @@ class SessionTabView extends StatelessWidget {
 
   Widget _view(FFI view) {
     final active = selected && view == current;
-    // M9 (`LEAPGATE.md` §10.18); nothing opens a terminal view before M9b. The camera view is a
-    // `SessionPage`, as the remote desktop.
-    if (view.connType == ConnType.terminal) {
-      return ListenableBuilder(
-        listenable: overlays,
-        builder: (context, _) => TerminalViewPage(
+    switch (view.connType) {
+      // The terminal view's connection mark and its details are the file transfer's (13 §2.2.2
+      // block A item 2); it keeps the keyboard off under a dialog as the file view does.
+      case ConnType.terminal:
+        return ListenableBuilder(
+          listenable: overlays,
+          builder: (context, _) => TerminalViewPage(
+            ffi: view,
+            active: active &&
+                !overlays.isOpen(view.id) &&
+                !overlays.isOpen(kWindowScope),
+            lastView: views.length == 1,
+            viewSwitch: SessionViewSwitch(ffi: view),
+            route: FileRouteMark(ffi: view),
+            onDisconnect: () => disconnectTerminalView(view),
+          ),
+        );
+      case ConnType.fileTransfer:
+        break;
+      // The remote desktop, and the camera on the same page (R3-Q16).
+      default:
+        return SessionPage(
           ffi: view,
-          active: active &&
-              !overlays.isOpen(view.id) &&
-              !overlays.isOpen(kWindowScope),
+          active: active,
+          overlays: overlays,
           lastView: views.length == 1,
-          viewSwitch: SessionViewSwitch(ffi: view),
-          // TODO(M9b views): the terminal's connection method mark.
-          route: const SizedBox.shrink(),
-          onDisconnect: () => disconnectTerminalView(view),
-        ),
-      );
-    }
-    if (!isFileView(view)) {
-      return SessionPage(
-        ffi: view,
-        active: active,
-        overlays: overlays,
-        lastView: views.length == 1,
-      );
+        );
     }
     // Not under a dialog of the tab or the window either: the file view would put the keyboard
     // on its list behind it (Enter there would transfer again); closed, the list gets it back.
@@ -152,16 +205,16 @@ class SessionTabView extends StatelessWidget {
 }
 
 /// The view switch (01 §2.1, P2 block B item 2; 02 §2.2 block A item 1), the same control on the
-/// remote desktop toolbar and the file transfer view's title bar: every kind of view, the one
-/// shown ([ffi]'s) checked, an open one with its connection method, the file transfer with its
-/// progress (02 §3.2), one not open "未打开". Picking one shows it, opening it first when needed.
+/// image views' toolbar and the title bar of the file transfer and terminal views: every kind of
+/// view the tab offers ([viewKinds]), the one shown ([ffi]'s) checked, an open one with its
+/// connection method, the file transfer with its progress (02 §3.2), the remote desktop and the
+/// camera with their unread messages (R3-Q17), one not open "未打开". Picking one shows it,
+/// opening it first when needed.
 class SessionViewSwitch extends StatelessWidget {
   const SessionViewSwitch({super.key, required this.ffi});
 
   /// The view it is shown in.
   final FFI ffi;
-
-  static const _kinds = [ConnType.defaultConn, ConnType.fileTransfer];
 
   /// The connection method of an open view, or the state it is in.
   Widget _state(AppLocalizations l10n, FFI view) {
@@ -203,10 +256,12 @@ class SessionViewSwitch extends StatelessWidget {
             alert: alert,
             status: _state(l10n, view),
           );
+    final unread = view != null && hasImage(view) ? tabUnread(view) : 0;
     return LgMenuItem(
-      label: viewName(l10n, kind),
+      label: viewName(l10n, kind, terminalAdmin: view?.terminalAdmin ?? false),
       checked: kind == ffi.connType,
       hint: view == null ? l10n.ftViewNotOpen : null,
+      badge: unread > 0 ? unread : null,
       // The reminder mark is an icon: the row says what it means.
       trailing: alert
           ? Semantics(label: l10n.ftMarkAttention, child: tail)
@@ -215,11 +270,17 @@ class SessionViewSwitch extends StatelessWidget {
     );
   }
 
+  /// "终端" goes to the terminal view that is open, the administrator's too (R3-Q9).
   void _show(ConnType kind) {
     if (kind == ffi.connType) return;
-    kind == ConnType.fileTransfer
-        ? mainNavigation.openFileTransfer(ffi.id)
-        : mainNavigation.connect(ffi.id);
+    switch (kind) {
+      case ConnType.fileTransfer:
+        mainNavigation.openFileTransfer(ffi.id);
+      case ConnType.defaultConn:
+        mainNavigation.connect(ffi.id);
+      default:
+        mainNavigation.openView(ffi.id, kind);
+    }
   }
 
   @override
@@ -233,7 +294,10 @@ class SessionViewSwitch extends StatelessWidget {
           listenable: Listenable.merge([
             for (final v in views) ...[
               v.connection,
+              // The platform ([viewKinds]) comes with the peer info.
+              v.ffiModel,
               if (isFileView(v)) fileTransferFor(v).jobs,
+              if (hasImage(v)) v.chatModel,
             ],
           ]),
           builder: (context, _) {
@@ -243,7 +307,8 @@ class SessionViewSwitch extends StatelessWidget {
                 ? null
                 : fileTransferFor(files).jobs.summary;
             final alert = (summary?.waitingConfirm ?? 0) > 0;
-            final name = viewName(l10n, ffi.connType);
+            final name = viewName(l10n, ffi.connType,
+                terminalAdmin: ffi.terminalAdmin);
             // On the file view's own bar the name already says "文件传输": "文件传输，45%".
             final mark = summary == null
                 ? null
@@ -252,17 +317,17 @@ class SessionViewSwitch extends StatelessWidget {
                 : transferMarkLabel(l10n, summary);
             return LgToolbarMenuButton(
               label: name,
-              icon: isFileView(ffi) ? LgIcons.files : LgIcons.monitor,
-              // The file view's title bar names the view it shows (`.vt .ti.on`); the remote
-              // desktop toolbar stays as it was.
-              highlighted: isFileView(ffi),
+              icon: viewIcon(ffi.connType),
+              // A view title bar names the view it shows (`.vt .ti.on`); the image views'
+              // toolbar stays as it was.
+              highlighted: usesViewBar(ffi),
               progress: summary?.progress,
               alert: alert,
               semanticLabel: mark == null
                   ? null
                   : l10n.ftViewSwitchLabel(name, mark),
               items: [
-                for (final kind in _kinds)
+                for (final kind in viewKinds(ffi.id))
                   _item(
                     l10n,
                     kind,

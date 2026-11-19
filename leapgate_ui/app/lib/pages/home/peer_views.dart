@@ -7,6 +7,8 @@ import 'package:flutter_hbb/leapgate/exit_nodes.dart' show isExitId;
 import 'package:flutter_hbb/leapgate/peer_list.dart';
 import 'package:flutter_hbb/leapgate/peer_tabs.dart';
 import 'package:flutter_hbb/leapgate/recent_peers.dart';
+import 'package:flutter_hbb/leapgate/session.dart' show ConnType;
+import 'package:flutter_hbb/leapgate/terminal/terminals.dart';
 import 'package:flutter_hbb/models/peer_model.dart';
 
 import '../../l10n/app_localizations.dart';
@@ -44,6 +46,22 @@ void openFileTransferPeer(String id, {PeerCategory? category}) {
       : null;
   mainNavigation.openFileTransfer(
     id,
+    password: shared ?? '',
+    isSharedPassword: shared != null,
+  );
+}
+
+/// "终端", "终端（管理员）" and "摄像头" of a device menu or the connect box (13 §2.1.1,
+/// §3.1.1), as [openFileTransferPeer]; [terminalAdmin] only counts for a new terminal view.
+void openViewPeer(String id, ConnType kind,
+    {PeerCategory? category, bool terminalAdmin = false}) {
+  final shared = category == PeerCategory.addressBook
+      ? appCore.addressBook.sharedPasswordOf(id)
+      : null;
+  mainNavigation.openView(
+    id,
+    kind,
+    terminalAdmin: terminalAdmin,
     password: shared ?? '',
     isSharedPassword: shared != null,
   );
@@ -251,12 +269,10 @@ List<Widget> peerMenuItems(
     ab: appCore.addressBook.menuFlags(category),
     peerPlatform: item.peer.platform,
   );
-  // The terminal, camera, TCP tunnel and RDP items are left out until their segments build them
-  // (`LEAPGATE.md` §10.18). "用作出口" also needs an ID it can use ([isExitId]; [peerMenu] only
-  // looks at the platform).
+  // The TCP tunnel and RDP items are left out until their segment builds them (`LEAPGATE.md`
+  // §10.18). "用作出口" also needs an ID it can use ([isExitId]; [peerMenu] only looks at the
+  // platform).
   bool built(PeerAction action) => switch (action) {
-    // TODO(M9b): the terminal, administrator terminal and camera items.
-    PeerAction.terminal || PeerAction.terminalAdmin || PeerAction.camera => false,
     // TODO(M9c): the TCP tunnel and RDP items.
     PeerAction.tcpTunnel || PeerAction.rdp => false,
     PeerAction.useAsExit => isExitId(id),
@@ -377,11 +393,27 @@ List<Widget> peerMenuItems(
     PeerAction.setSharedPassword ||
     PeerAction.showBooks ||
     PeerAction.deleteFromAb => const SizedBox.shrink(),
+    PeerAction.terminal => LgMenuItem(
+      label: l10n.viewTerminal,
+      onPressed: () =>
+          openViewPeer(id, ConnType.terminal, category: item.category),
+    ),
+    // One terminal view per device (R3-Q9): with the normal one open it is greyed; with the
+    // administrator's open, "终端" goes to it.
+    PeerAction.terminalAdmin => LgMenuItem(
+      label: l10n.viewTerminalAdmin,
+      disabledNote: l10n.viewTerminalOpen,
+      onPressed: terminalOpenState(id) == TerminalOpen.normal
+          ? null
+          : () => openViewPeer(id, ConnType.terminal,
+              category: item.category, terminalAdmin: true),
+    ),
+    PeerAction.camera => LgMenuItem(
+      label: l10n.viewCamera,
+      onPressed: () =>
+          openViewPeer(id, ConnType.viewCamera, category: item.category),
+    ),
     // Left out by [built].
-    // TODO(M9b): the terminal, administrator terminal and camera items.
-    PeerAction.terminal ||
-    PeerAction.terminalAdmin ||
-    PeerAction.camera => const SizedBox.shrink(),
     // TODO(M9c): the TCP tunnel and RDP items.
     PeerAction.tcpTunnel || PeerAction.rdp => const SizedBox.shrink(),
   };

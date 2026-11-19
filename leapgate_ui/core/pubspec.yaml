@@ -46,8 +46,9 @@ dependencies:
       url: https://github.com/rustdesk-org/flutter_custom_cursor
       ref: db63b785c38153603e9fb84b50d3ec46f0d7e05e
   # The terminal models copied from upstream (models/terminal_*.dart); the version upstream's
-  # flutter/pubspec.yaml pins (14-M9拆法.md §2.4).
-  xterm: 4.0.0
+  # flutter/pubspec.yaml pins (14-M9拆法.md §2.4), as a patched copy (third_party/xterm/LEAPGATE.md).
+  xterm:
+    path: ../third_party/xterm
 
 dev_dependencies:
   flutter_test:

@@ -505,11 +505,112 @@ abstract final class LgFixed {
   ];
 }
 
+/// The terminal's colours (`--lg-term-*` of `A-P9-终端.html`; 13 R3-Q14). The terminal area is
+/// dark in both themes, so there is one set. The ANSI names follow xterm's `TerminalTheme`;
+/// [fg2] is the colour of the notes the application writes into the terminal ("无法打开终端…"),
+/// [selFg] the text of a selection, [track] and [thumb] the scroll bar of the area (the dark
+/// theme's `--lg-track` and `--lg-thumb`, also in the light theme).
+///
+/// The search hit colours are not in the mockup (there is no search); they are the yellow and the
+/// green of the palette with the terminal background as the text on them.
+@immutable
+class LgTermColors {
+  const LgTermColors({
+    required this.bg,
+    required this.fg,
+    required this.fg2,
+    required this.cursor,
+    required this.sel,
+    required this.selFg,
+    required this.ansi,
+    required this.brightAnsi,
+    required this.track,
+    required this.thumb,
+  });
+
+  final Color bg;
+  final Color fg;
+  final Color fg2;
+  final Color cursor;
+  final Color sel;
+  final Color selFg;
+
+  /// black, red, green, yellow, blue, magenta, cyan, white.
+  final List<Color> ansi;
+
+  /// The same eight, bright.
+  final List<Color> brightAnsi;
+  final Color track;
+  final Color thumb;
+
+  Color get black => ansi[0];
+  Color get red => ansi[1];
+  Color get green => ansi[2];
+  Color get yellow => ansi[3];
+  Color get blue => ansi[4];
+  Color get magenta => ansi[5];
+  Color get cyan => ansi[6];
+  Color get white => ansi[7];
+  Color get brightBlack => brightAnsi[0];
+  Color get brightRed => brightAnsi[1];
+  Color get brightGreen => brightAnsi[2];
+  Color get brightYellow => brightAnsi[3];
+  Color get brightBlue => brightAnsi[4];
+  Color get brightMagenta => brightAnsi[5];
+  Color get brightCyan => brightAnsi[6];
+  Color get brightWhite => brightAnsi[7];
+
+  static const standard = LgTermColors(
+    bg: Color(0xFF0D1A1D),
+    fg: Color(0xFFD8E4E4),
+    fg2: Color(0xFF8FA6A9),
+    cursor: Color(0xFF86C9D4),
+    sel: Color(0xFF337483),
+    selFg: Color(0xFFFFFFFF),
+    ansi: [
+      Color(0xFF33474B),
+      Color(0xFFF2837A),
+      Color(0xFF5FD38D),
+      Color(0xFFE5B94E),
+      Color(0xFF6FA9E8),
+      Color(0xFFD68FC3),
+      Color(0xFF5CC6D2),
+      Color(0xFFC9D6D6),
+    ],
+    brightAnsi: [
+      Color(0xFF718789),
+      Color(0xFFFFA59D),
+      Color(0xFF8BEBAD),
+      Color(0xFFF6D37F),
+      Color(0xFF9CC8F6),
+      Color(0xFFEDAEDC),
+      Color(0xFF92E1EA),
+      Color(0xFFF3FAFA),
+    ],
+    track: Color.fromRGBO(230, 239, 239, .22),
+    thumb: Color.fromRGBO(230, 239, 239, .42),
+  );
+
+  /// `ESC [ 38;2;r;g;b m`: the colour of [fg2] for text written into the terminal (a note line),
+  /// and `ESC [ 0 m` to end it.
+  String get noteStart =>
+      '\u001b[38;2;${(fg2.r * 255).round()};${(fg2.g * 255).round()};'
+      '${(fg2.b * 255).round()}m';
+  static const String reset = '\u001b[0m';
+}
+
 class LgTokens extends ThemeExtension<LgTokens> {
-  const LgTokens({required this.colors, required this.mode});
+  const LgTokens({
+    required this.colors,
+    required this.mode,
+    this.term = LgTermColors.standard,
+  });
 
   final LgColors colors;
   final LgMode mode;
+
+  /// The terminal area's colours; the same in both themes.
+  final LgTermColors term;
 
   LgSizes get sizes => mode == LgMode.detail ? LgSizes.detail : LgSizes.compact;
   bool get detail => mode == LgMode.detail;
